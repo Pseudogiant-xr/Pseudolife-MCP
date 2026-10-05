@@ -112,6 +112,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import MEMS_HEADER  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -458,6 +459,9 @@ def cmd_replay(args) -> int:
             "question_ts": _parse_date(q["question_date"]).timestamp(),
             "search_time": search_time,
             "turns_stored": turns,
+            # Every vector in this dump (bands + query_emb) is this
+            # embedder's; rebuild and evidence read it back from here.
+            "embedder": embedder_stamp.describe(svc),
             "query_emb": [round(float(x), 7) for x in q_emb.tolist()],
             "bands": bands_out,
             "live_replay_rag": [e.get("text", "") for e in live],
@@ -834,6 +838,10 @@ def cmd_rebuild(args) -> int:
                 contexts["hybrid"] = (facts_block + MEMS_HEADER
                                       + "\n\n".join(sel[:HYBRID_TOP_K]))
                 new["contexts"] = contexts
+                # rag + hybrid raw blocks are now the replay's ranking over
+                # vectors its embedder wrote into the dump.
+                embedder_stamp.record_stage(new, "band_ablation",
+                                            dump.get("embedder"))
                 new["ablation"] = {"policy": policy, "mode": tag_mode(mode),
                                    "source_tag": args.src_tag,
                                    "band_preset": args.band_preset,
@@ -977,6 +985,7 @@ def cmd_evidence(args) -> int:
             sys.exit(f"missing dump dir {d} — run replay first")
 
     questions = []
+    stamps = []
     a_rates, b_rates, a_drop_ev, b_drop_ev = [], [], [], []
     for p in sorted(a_dir.glob("*.json.gz")):
         qid = p.name[: -len(".json.gz")]
@@ -1005,6 +1014,8 @@ def cmd_evidence(args) -> int:
         fa = len(da_drop & evidence) / max(1, len(da_drop))
         fb = len(db_drop & evidence) / max(1, len(db_drop))
         a_rates.append(ra); b_rates.append(rb)
+        stamps.append({"embedder": {"a": da.get("embedder"),
+                                    "b": db.get("embedder")}})
         a_drop_ev.append(fa); b_drop_ev.append(fb)
         questions.append({
             "question_id": qid, "n_evidence": len(evidence),
@@ -1044,6 +1055,10 @@ def cmd_evidence(args) -> int:
             _paired_permutation_p(drop_deltas),
         "questions": questions,
     }
+    # The dumps' embedders; omitted when every dump predates stamping.
+    embedder = embedder_stamp.merge_rows(stamps)
+    if embedder_stamp.labels(embedder):
+        out["embedder"] = embedder
     stem = "-".join(p for p in (args.dataset, args.extractor,
                                 args.src_tag) if p)
     dst = RESULTS_DIR / (f"longmemeval-ku-{stem}-evict-policy-"

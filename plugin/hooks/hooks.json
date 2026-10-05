@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory discipline + end-of-session episode close",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + Stop hook that wakes an idle session on board mail that clears its declared need (on by default) and asks it to park + PreToolUse guard that lets a Claude Code subagent only read the board its parent session owns + SubagentStart/SubagentStop hooks that list a session's running subagents on its board row",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,6 +7,17 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event UserPromptSubmit",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/coordination-prompt.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event CoordinationPrompt",
             "timeout": 5
           }
         ]
@@ -18,7 +29,28 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionStart",
             "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\" memory-policy",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event MemoryPolicy",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/coordination-start.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event CoordinationStart",
+            "timeout": 10
           }
         ]
       }
@@ -29,7 +61,71 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "w=$PSEUDOLIFE_AGENT_WAKE_HOOK; [ -z \"$w\" ] || w=$(printf %s \"$w\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); case \"$w\" in 0|false|no|off) exit 0 ;; esac; c=$PSEUDOLIFE_AGENT_COORDINATION; [ -z \"$c\" ] || c=$(printf %s \"$c\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); case \"$c\" in ''|1|true|yes|on) ;; *) exit 0 ;; esac; bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event Stop",
+            "async": true,
+            "asyncRewake": true,
+            "timeout": 1209600
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" start",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStart",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" subagent-stop",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentStop",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" stop",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStop",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__.+__memory_(agents|message)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardGuard",
+            "timeout": 5
           }
         ]
       }

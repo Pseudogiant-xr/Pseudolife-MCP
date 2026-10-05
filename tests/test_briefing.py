@@ -1,4 +1,11 @@
-from pseudolife_memory.memory.briefing import select_lessons, format_briefing
+import ctypes
+import re
+import threading
+
+import pytest
+
+from pseudolife_memory.memory.briefing import (select_lessons, format_briefing,
+                                               format_bounded_briefing)
 
 
 def test_select_lessons_prioritizes_avoid_then_recent():
@@ -29,6 +36,23 @@ def test_format_briefing_renders_both_sections_ascii():
     assert md.isascii()
 
 
+def test_fmt_lesson_labels_by_polarity_not_outcome():
+    # The synthesis prompt writes a correction (and usually a failure) as
+    # polarity "+", phrased as the now-correct behaviour to follow. Labelling
+    # by outcome printed "avoid: <the thing to do>" for 303 of the 1,618
+    # current lessons on the live bank (2026-09-23). The label is polarity
+    # only; outcome still drives select_lessons' ordering.
+    from pseudolife_memory.memory.briefing import _fmt_lesson
+    assert _fmt_lesson({"lesson": "pin the version", "polarity": "+",
+                        "outcome": "correction"}) == "- prefer: pin the version"
+    assert _fmt_lesson({"lesson": "retry with backoff", "polarity": "+",
+                        "outcome": "failure"}) == "- prefer: retry with backoff"
+    assert _fmt_lesson({"lesson": "avoid down -v", "polarity": "-",
+                        "outcome": "success"}) == "- avoid: avoid down -v"
+    assert _fmt_lesson({"lesson": "avoid down -v", "polarity": "-",
+                        "outcome": "failure"}) == "- avoid: avoid down -v"
+
+
 def test_format_briefing_empty_when_nothing():
     assert format_briefing([], [], []) == ""
 
@@ -43,6 +67,69 @@ def test_session_briefing_cold_bank_is_unavailable(tmp_path):
     assert out["lessons"] == []
 
 
+def test_session_briefing_can_skip_coordination_without_losing_memory(tmp_path):
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=True))
+    svc.graph_digest = lambda: {"available": False}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+
+    def broken_awareness(**kw):
+        raise RuntimeError("coordination unavailable")
+    svc.coordination_awareness = broken_awareness
+    out = svc.session_briefing(include_coordination=False)
+    assert "keep the lesson" in out["markdown"]
+    assert "coordination" not in out
+    svc.coordination_awareness = lambda **kw: {"peers": [], "available": True}
+    full = svc.session_briefing()
+    assert full["coordination"] == {"peers": [], "available": True}
+    assert "keep the lesson" in full["markdown"]
+
+
+def test_session_start_hook_leaves_out_the_unsure_section(tmp_path):
+    """The SessionStart hook no longer serves "What your memory is unsure
+    about" (graph bridges and contested slots): every session paid for it,
+    it carried probe slots and a LAN-address slot into transcripts, and the
+    Console Insight view keeps it (2026-09-23 review, maintainer decision
+    2026-09-25). GET /api/briefing and `pseudolife-mcp briefing` still
+    carry it."""
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.web.session_hook import session_start_context
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=False))
+    svc.stats = lambda: {"total_memories": 5}
+    svc.graph_digest = lambda: {"available": True, "digest": {
+        "surprises": [{"src": "probe-slot-a", "dst": "lan-host", "why": "bridge"}],
+        "questions": [{"question": "Which value of `primary` is correct?"}]}}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+
+    served = session_start_context(svc, True)
+    assert "keep the lesson" in served
+    assert "What your memory is unsure about" not in served
+    assert "probe-slot-a" not in served and "Which value of" not in served
+    assert "omitted" not in served     # left out on purpose, not for room
+
+    full = svc.session_briefing()["markdown"]
+    assert "## What your memory is unsure about" in full
+    assert "probe-slot-a" in full and "Which value of" in full
+
+    # Nothing asked for, nothing read: the digest is not fetched to be dropped.
+    def unread():
+        raise AssertionError("graph_digest read for max_unsure=0")
+    svc.graph_digest = unread
+    assert "keep the lesson" in svc.session_briefing(max_unsure=0)["markdown"]
+
+
 def test_fetch_markdown_parses_api_response(monkeypatch):
     from pseudolife_memory import briefing_cli as bc
 
@@ -52,10 +139,44 @@ def test_fetch_markdown_parses_api_response(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda req, timeout=5: _Resp('{"markdown": "## hi\\n- x", "available": true}'))
+    class _Opener:
+        def open(self, req, timeout=5):
+            return _Resp('{"markdown": "## hi\\n- x", "available": true}')
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener())
     assert bc._fetch_markdown("http://x", None, 3, 3, 3) == "## hi\n- x"
+
+
+def test_fetch_markdown_refuses_redirects(monkeypatch):
+    """urllib's default redirect handler copies the Authorization header to
+    the redirect target, so the briefing fetch must use the shim's
+    no-redirect opener, as the shim's own episode calls do."""
+    from pseudolife_memory import briefing_cli as bc
+    from pseudolife_memory.shim import _NoRedirectHandler
+    seen = {}
+
+    class _Resp:
+        def read(self): return b'{"markdown": "## hi"}'
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def open(self, req, timeout=None):
+            seen["auth"], seen["timeout"] = req.get_header("Authorization"), timeout
+            return _Resp()
+
+    def _build_opener(*handlers):
+        seen["handlers"] = handlers
+        return _Opener()
+
+    def _plain_urlopen(*a, **k):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setattr("urllib.request.build_opener", _build_opener)
+    monkeypatch.setattr("urllib.request.urlopen", _plain_urlopen)
+    assert bc._fetch_markdown("http://x", "tok", 3, 3, 3) == "## hi"
+    assert seen == {"handlers": (_NoRedirectHandler,), "auth": "Bearer tok",
+                    "timeout": 5}
 
 
 def test_world_block_renders_fresh_facts():
@@ -102,6 +223,90 @@ def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+def _serve_briefing_endpoints(monkeypatch, requests, fail=None):
+    """Answer the CLI's two daemon reads the way the daemon does: the hook
+    endpoint as plain text, /api/briefing as JSON. Records each request with
+    the handlers of the opener it went through; ``fail`` raises instead."""
+    class _Resp:
+        def __init__(self, body): self._b = body.encode("utf-8")
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def __init__(self, handlers): self.handlers = handlers
+
+        def open(self, req, timeout=5):
+            requests.append((req, self.handlers))
+            if fail:
+                raise fail(req)
+            if "/api/hook/session-start" in req.full_url:
+                return _Resp("## Memory at session start\nUse the shared bank.\n\n"
+                             "## Lessons from past work\n- prefer: x")
+            return _Resp('{"markdown": "## Lessons from past work\\n- prefer: x"}')
+
+    def _plain_urlopen(*a, **k):
+        raise AssertionError("plain urlopen follows redirects with the bearer")
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765")
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: {"status": "ok"})
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener(handlers))
+    monkeypatch.setattr("urllib.request.urlopen", _plain_urlopen)
+
+
+def test_hook_json_serves_the_session_start_core_not_the_bare_briefing(monkeypatch, capsys):
+    """The installer's settings.json hook (Claude Code without the plugin,
+    and the older Codex hook) runs `briefing --hook-json`. It must carry the
+    same memory core the plugin hook gets from /api/hook/session-start, not
+    only the live briefing (2026-09-25 review; maintainer's decision). Like
+    every bearer-carrying read here, it must refuse redirects."""
+    import json
+    import sys
+    from pseudolife_memory import briefing_cli as bc
+    from pseudolife_memory.shim import _NoRedirectHandler
+    requests = []
+    _serve_briefing_endpoints(monkeypatch, requests)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "tok")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    bc.run_briefing()
+    payload = json.loads(capsys.readouterr().out)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert context.startswith("## Memory at session start")
+    assert "## Lessons from past work" in context
+    assert [r.full_url.split("?")[0] for r, _ in requests] == ["http://127.0.0.1:8765/api/hook/session-start"]
+    assert requests[0][0].get_header("Authorization") == "Bearer tok"
+    assert requests[0][1] == (_NoRedirectHandler,)
+
+
+def test_hook_json_prints_nothing_when_the_endpoint_fails(monkeypatch, capsys):
+    """A refused or failing session-start read must never break the session."""
+    import sys
+    import urllib.error
+    from pseudolife_memory import briefing_cli as bc
+    requests = []
+    _serve_briefing_endpoints(
+        monkeypatch, requests,
+        fail=lambda req: urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None))
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    bc.run_briefing()
+    assert len(requests) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_plain_briefing_still_prints_the_full_api_briefing(monkeypatch, capsys):
+    import sys
+    from pseudolife_memory import briefing_cli as bc
+    requests = []
+    _serve_briefing_endpoints(monkeypatch, requests)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing"])
+    bc.run_briefing()
+    assert capsys.readouterr().out.strip() == "## Lessons from past work\n- prefer: x"
+    assert [r.full_url.split("?")[0] for r, _ in requests] == ["http://127.0.0.1:8765/api/briefing"]
+    assert requests[0][0].get_header("Authorization") is None
+
+
 def test_hook_json_wraps_markdown_as_sessionstart_context():
     import json
     from pseudolife_memory import briefing_cli as bc
@@ -122,3 +327,424 @@ def test_fmt_lesson_re_verify_suffix():
     assert "re-verify" not in _fmt_lesson(base)
     out = _fmt_lesson({**base, "re_verify": True})
     assert out.endswith("re-verify (facts changed since)")
+
+
+def test_bounded_briefing_keeps_lessons_and_recap_ahead_of_giant_uncertainty():
+    md = format_briefing(
+        [{"src": "a", "dst": "b", "why": "x" * 10000}], [],
+        [{"lesson": "Keep the useful lesson", "polarity": "+"}],
+        recap={"title": "Last useful session", "entry_count": 2})
+    out = format_bounded_briefing(md, 450)
+    assert len(out.encode("utf-8")) <= 450
+    assert "Keep the useful lesson" in out
+    assert "Last useful session" in out
+    assert "x" * 100 not in out
+    assert "omitted" in out and "pseudolife-mcp briefing" in out
+
+
+def test_bounded_briefing_omits_whole_items_and_accounts_for_utf8_bytes():
+    md = format_briefing([], [], [
+        {"lesson": "é" * 150, "polarity": "+"},
+        {"lesson": "second lesson", "polarity": "+"},
+    ])
+    out = format_bounded_briefing(md, 200)
+    assert len(out.encode("utf-8")) <= 200
+    assert "second lesson" in out
+    assert "é" not in out
+    assert "omitted" in out
+
+
+def test_bounded_briefing_tiny_budget_never_slices_an_item():
+    md = format_briefing([], [], [{"lesson": "long lesson", "polarity": "+"}])
+    assert format_bounded_briefing(md, 2) == ""
+    assert format_bounded_briefing(md, 20) in ("", "Briefing omitted.")
+
+
+def test_bounded_briefing_keeps_multiline_lesson_as_one_item():
+    md = format_briefing([], [], [
+        {"lesson": "A" * 10000 + "\n- orphan continuation", "polarity": "+"},
+        {"lesson": "useful second lesson", "polarity": "+"},
+    ])
+    out = format_bounded_briefing(md, 450)
+    assert "useful second lesson" in out
+    assert "orphan continuation" not in out
+    assert "A" * 100 not in out
+    assert "briefing item(s) omitted" in out
+
+
+_OMITTED_MARKER = re.compile(
+    r"(\d+) briefing item\(s\) omitted\. Full briefing: "
+    r"`pseudolife-mcp briefing` or GET /api/briefing\.\Z")
+
+
+class _Abandoned(Exception):
+    pass
+
+
+def _within(timeout, fn, *args):
+    """Run ``fn`` on a worker thread and fail, rather than hang, if it does not
+    return. format_bounded_briefing runs on every SessionStart hook call, and
+    before 2026-09-25 it could loop forever on some budgets."""
+    box = {}
+
+    def target():
+        try:
+            box["value"] = fn(*args)
+        except BaseException as exc:  # noqa: BLE001 — re-raised below
+            box["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        # A daemon thread left spinning holds the GIL for the rest of the
+        # run and slows every later test to a crawl; interrupt its loop.
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(worker.ident), ctypes.py_object(_Abandoned))
+        worker.join(5)
+        pytest.fail(f"{fn.__name__}{args[1:]!r} did not terminate within {timeout}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _audit_shape():
+    # The 2026-09-25 audit repro: one long lesson ahead of ten short ones.
+    # Greedy packing selects 1 item at one cap and 10 at a slightly smaller
+    # one, so the omitted count flips between 10 and 1 digit-widths.
+    return ("## Lessons from past work\n- " + "L" * 198 + "\n"
+            + "\n".join(["- ttttttt"] * 10))
+
+
+def _production_shape(why, questions, lessons, world, summary):
+    """A 13-item briefing shaped like the served one: 3 uncertainties, 3 open
+    questions, 3 lessons, 3 world facts and a recap with a digest summary."""
+    return format_briefing(
+        surprises=[{"src": f"node-{i}", "dst": "pseudolife-daemon",
+                    "relation": "part-of", "why": "w" * n}
+                   for i, n in enumerate(why)],
+        questions=[{"question": "q" * n} for n in questions],
+        lessons=[{"lesson": "l" * n, "polarity": "+"} for n in lessons],
+        world=[{"entity": f"world-{i}", "attribute": "fact", "value": "v" * n,
+                "source_url": "https://example.com/p"} for i, n in enumerate(world)],
+        recap={"title": "Last session", "entry_count": 3, "summary": "s" * summary},
+    )
+
+
+def _production_cycles_at_620():
+    return _production_shape([10, 180, 20], [30, 260, 280], [70, 90, 310],
+                             [120, 140, 60], 110)
+
+
+def _production_cycles_at_1849():
+    return _production_shape([70, 160, 220], [200, 350, 40], [1230, 480, 830],
+                             [690, 560, 650], 1110)
+
+
+def _marker_room_shape():
+    # One 160-byte lesson, then three 11-byte ones. Before 2026-09-25 the
+    # loop settled on the selection packed WITHOUT room for its marker and
+    # fell back to "Briefing omitted." at 210-221 bytes, although the three
+    # short lessons plus the marker fit.
+    return ("## Lessons from past work\n- " + "A" * 158
+            + "\n- bbbbbbbbb\n- ccccccccc\n- ddddddddd")
+
+
+@pytest.mark.parametrize("md_factory, max_bytes", [
+    (_audit_shape, 318),
+    (_production_cycles_at_620, 620),
+    (_production_cycles_at_1849, 1849),
+])
+def test_bounded_briefing_terminates_where_greedy_repacking_cycled(md_factory, max_bytes):
+    from pseudolife_memory.memory.briefing import _briefing_items
+    md = md_factory()
+    out = _within(10, format_bounded_briefing, md, max_bytes)
+    assert len(out.encode("utf-8")) <= max_bytes
+    match = _OMITTED_MARKER.search(out)
+    assert match, out
+    shown = out[:match.start()].rstrip("\n")
+    assert len(_briefing_items(shown)) + int(match.group(1)) == len(_briefing_items(md))
+
+
+@pytest.mark.parametrize("max_bytes", range(210, 222))
+def test_bounded_briefing_final_selection_leaves_room_for_its_marker(max_bytes):
+    out = _within(10, format_bounded_briefing, _marker_room_shape(), max_bytes)
+    assert out == ("## Lessons from past work\n- bbbbbbbbb\n- ccccccccc\n- ddddddddd\n\n"
+                   "1 briefing item(s) omitted. Full briefing: "
+                   "`pseudolife-mcp briefing` or GET /api/briefing.")
+
+
+def _sweep(md, budgets):
+    return [(cap, format_bounded_briefing(md, cap)) for cap in budgets]
+
+
+@pytest.mark.parametrize("md_factory", [
+    _audit_shape, _production_cycles_at_620, _production_cycles_at_1849,
+    _marker_room_shape,
+])
+def test_bounded_briefing_budget_sweep_is_bounded_whole_and_honest(md_factory):
+    """Every budget from 0 to 2000: the call returns, fits the budget in UTF-8
+    bytes, never slices an item, and says how many items it left out."""
+    from pseudolife_memory.memory.briefing import _briefing_items, _render_items
+    md = md_factory()
+    items = _briefing_items(md)
+    full = _render_items(items)
+    worst_marker = (f"{len(items)} briefing item(s) omitted. Full briefing: "
+                    "`pseudolife-mcp briefing` or GET /api/briefing.")
+    for cap, out in _within(60, _sweep, md, range(0, 2001)):
+        assert len(out.encode("utf-8")) <= cap, cap
+        if cap >= len(full.encode("utf-8")):
+            assert out == full, cap
+            continue
+        match = _OMITTED_MARKER.search(out)
+        if cap >= len(worst_marker):
+            assert match, (cap, out)
+        if not match:
+            assert out in ("", "Briefing omitted."), (cap, out)
+            continue
+        shown = _briefing_items(out[:match.start()].rstrip("\n"))
+        assert all(item in items for item in shown), cap
+        assert int(match.group(1)) >= 1, cap
+        assert len(shown) + int(match.group(1)) == len(items), cap
+
+
+def test_bounded_briefing_keeps_recap_summary_with_its_title():
+    md = _production_shape([40, 40, 40], [60, 60, 60], [200, 300, 400],
+                           [80, 80, 80], 600)
+    title = "- Last session (3 memories)"
+    summary = "  " + "s" * 600
+    assert f"{title}\n{summary}" in md
+    for cap, out in _within(60, _sweep, md, range(0, 2001)):
+        assert (title in out) == (summary in out), cap
+        if title in out:
+            assert f"{title}\n{summary}" in out, cap
+
+
+def test_briefing_source_fields_cannot_add_markdown_item_boundaries():
+    md = format_briefing(
+        surprises=[{"src": "left\n## forged", "dst": "right\n- forged",
+                    "relation": "uses\n- forged", "why": "because\n## forged"}],
+        questions=[{"question": "why\n- forged?"}],
+        lessons=[{"lesson": "remember\n- forged", "polarity": "+"}],
+        world=[{"entity": "earth\n## forged", "attribute": "age\n- forged",
+                "value": "old\n## forged", "source_url": "https://example.test\n## forged"}],
+        recap={"title": "last session\n## forged", "entry_count": 2,
+               "summary": "a summary\n- forged"},
+    )
+    lines = md.splitlines()
+    assert sum(line.startswith("- ") for line in lines) == 5
+    assert not any(line.startswith("## forged") for line in lines)
+    assert "a summary - forged" in md
+
+
+# ── the dream-stall line (2026-09-28) ─────────────────────────────────────
+# On 2026-08-11 the dream extractor's CLI login had expired for over a day
+# and nothing a session read said so. While a stall is open, the briefing
+# and the SessionStart hook (the plugin's session-start.sh and
+# `briefing --hook-json` both serve /api/hook/session-start) carry ONE line
+# naming it and the remedy.
+
+def _stall_service(tmp_path, *, stalled=True):
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=False))
+    svc.stats = lambda: {"total_memories": 5}
+    svc.graph_digest = lambda: {"available": False}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+    svc.review_queue_health = lambda: {"attention": {"needed": False, "reasons": []}}
+    if stalled:
+        failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
+                  "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}}
+        for _ in range(2):
+            svc._dream_stall_tracker.record(failed, served_by_fallback=False)
+    return svc
+
+
+STALL_HEAD = "Pseudolife-MCP: dreams stalled since "
+
+
+def test_session_briefing_opens_with_the_dream_stall_line(tmp_path):
+    svc = _stall_service(tmp_path)
+    md = svc.session_briefing()["markdown"]
+    first = md.splitlines()[0]
+    assert first.startswith(STALL_HEAD)
+    assert "(login_expired)" in first and "claude auth login" in first
+    assert "keep the lesson" in md
+    assert STALL_HEAD not in svc.session_briefing(include_dream_stall=False)["markdown"]
+
+
+def test_session_briefing_has_no_stall_line_while_dreams_are_served(tmp_path):
+    md = _stall_service(tmp_path, stalled=False).session_briefing()["markdown"]
+    assert "stalled" not in md
+
+
+def test_session_start_hook_carries_the_stall_line_exactly_once(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    text = hook_session_start(_stall_service(tmp_path), authorized=True)
+    assert text.startswith(STALL_HEAD)
+    assert text.count("dreams stalled") == 1
+    assert text.index(STALL_HEAD) < text.index("## Memory at session start")
+    assert "keep the lesson" in text
+
+
+def test_session_start_stall_line_is_for_authorized_callers(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    assert "stalled" not in hook_session_start(_stall_service(tmp_path), authorized=False)
+
+
+def test_session_start_stall_line_rides_resumed_sessions_too(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    text = hook_session_start(_stall_service(tmp_path), source="resume", authorized=True)
+    assert text.startswith(STALL_HEAD) and text.count("dreams stalled") == 1
+
+
+def test_session_start_stall_line_fits_the_hook_budget(tmp_path):
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    hook_session_start)
+
+    svc = _stall_service(tmp_path)
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": f"lesson {i} " + "x" * 400, "polarity": "+"} for i in range(60)]}
+    text = hook_session_start(svc, authorized=True)
+    assert text.startswith(STALL_HEAD)
+    assert len(text.encode("utf-8")) <= HOOK_CONTEXT_MAX_CHARS
+    line = text.splitlines()[0]
+    assert len(line) <= 240
+
+
+def test_session_start_is_unchanged_without_a_stall(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    assert "stalled" not in hook_session_start(_stall_service(tmp_path, stalled=False),
+                                               authorized=True)
+
+
+# ── the review-queue line (2026-09-30) ────────────────────────────────────
+# 2026-09-11..09-29 the merge judge sat in shadow and 1,016 merge proposals
+# piled up unseen. While dream_status's review_queue block says attention is
+# needed, the briefing and a fresh session start carry ONE line saying so.
+
+def _rq_block(*, needed=True, merge=1016, age=18.2, mode="shadow",
+              judges_enabled=True):
+    reasons = ["1016 merge proposals pending"] if needed else []
+    return {"pending": {"merge": merge, "junk": 4, "link": 2},
+            "oldest_merge_age_days": age,
+            "judges": {"judges_enabled": judges_enabled, "judge_mode": mode,
+                       "link_judge_mode": "shadow", "junk_judge_mode": "shadow",
+                       "curation_judge_mode": "shadow",
+                       "candidate_judge_mode": "off"},
+            "attention": {"needed": needed, "reasons": reasons}}
+
+
+RQ_HEAD = "Pseudolife-MCP: review queue has "
+
+
+def test_review_queue_line_names_count_age_judge_and_remedy():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    line = review_queue_line(_rq_block())
+    assert line.startswith(RQ_HEAD)
+    assert "1,016 merge proposals pending" in line
+    assert "oldest 18 days" in line
+    assert "merge judge in shadow" in line
+    assert "/dream" in line and "judge modes" in line
+    assert "\n" not in line and len(line) <= 240
+    assert line.isascii()
+
+
+def test_review_queue_line_variants_and_silence():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    assert review_queue_line(_rq_block(needed=False)) == ""
+    assert review_queue_line(None) == ""
+    assert review_queue_line({"error": "RuntimeError: x"}) == ""
+    assert "merge judges disabled" in review_queue_line(
+        _rq_block(mode="auto", judges_enabled=False))
+    assert "merge judge in auto-reject" in review_queue_line(
+        _rq_block(mode="auto-reject"))
+    one = review_queue_line(_rq_block(merge=1, age=None))
+    assert "1 merge proposal pending" in one and "oldest" not in one
+    assert "oldest under a day" in review_queue_line(_rq_block(age=0.4))
+    assert "oldest 1 day;" in review_queue_line(_rq_block(age=1.2))
+
+
+def test_review_queue_line_remedy_follows_the_merge_judge_mode():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    # A judge that applies nothing: the modes are the lever.
+    for mode in ("shadow", "off"):
+        line = review_queue_line(_rq_block(mode=mode))
+        assert "check the deep_dream judge modes" in line, line
+    assert "check the deep_dream judge modes" in review_queue_line(
+        _rq_block(mode="auto", judges_enabled=False))
+    # A judge configured to drain that is not keeping up: its endpoint is.
+    for mode in ("auto-reject", "auto"):
+        line = review_queue_line(_rq_block(mode=mode))
+        assert "is not clearing it" in line and "judge endpoint" in line, line
+
+
+def _rq_service(tmp_path, block):
+    svc = _stall_service(tmp_path, stalled=False)
+    svc.review_queue_health = lambda: block
+    return svc
+
+
+def test_session_briefing_carries_the_review_queue_line(tmp_path):
+    svc = _rq_service(tmp_path, _rq_block())
+    md = svc.session_briefing()["markdown"]
+    assert md.splitlines()[0].startswith(RQ_HEAD)
+    assert md.count(RQ_HEAD) == 1
+    assert "keep the lesson" in md
+    assert RQ_HEAD not in svc.session_briefing(include_review_queue=False)["markdown"]
+
+
+def test_session_briefing_is_silent_on_a_healthy_or_failing_queue(tmp_path):
+    assert RQ_HEAD not in _rq_service(
+        tmp_path, _rq_block(needed=False)).session_briefing()["markdown"]
+    svc = _stall_service(tmp_path, stalled=False)
+
+    def boom():
+        raise RuntimeError("down")
+    svc.review_queue_health = boom
+    md = svc.session_briefing()["markdown"]
+    assert RQ_HEAD not in md and "keep the lesson" in md
+
+
+def test_session_briefing_puts_a_stall_before_the_review_queue(tmp_path):
+    svc = _stall_service(tmp_path)
+    svc.review_queue_health = lambda: _rq_block()
+    lines = [ln for ln in svc.session_briefing()["markdown"].splitlines() if ln]
+    assert lines[0].startswith(STALL_HEAD) and lines[1].startswith(RQ_HEAD)
+
+
+def test_session_start_hook_carries_the_review_queue_line_once(tmp_path):
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    hook_session_start)
+
+    svc = _rq_service(tmp_path, _rq_block())
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": f"lesson {i} " + "x" * 400, "polarity": "+"} for i in range(60)]}
+    text = hook_session_start(svc, authorized=True)
+    assert text.startswith(RQ_HEAD)
+    assert text.count(RQ_HEAD) == 1
+    assert len(text.encode("utf-8")) <= HOOK_CONTEXT_MAX_CHARS
+
+
+def test_session_start_review_queue_line_is_authorized_fresh_starts_only(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    svc = _rq_service(tmp_path, _rq_block())
+    assert RQ_HEAD not in hook_session_start(svc, authorized=False)
+    # A resumed or compacted session keeps drift notices only.
+    for source in ("resume", "compact"):
+        assert RQ_HEAD not in hook_session_start(svc, source=source, authorized=True)
+    assert RQ_HEAD not in hook_session_start(
+        _rq_service(tmp_path, _rq_block(needed=False)), authorized=True)

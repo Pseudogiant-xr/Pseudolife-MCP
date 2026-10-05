@@ -512,10 +512,10 @@ def test_a_prompt_file_reaches_the_extractor_with_the_hints_appended(
     ``_make_extractor`` the bench builds its extractor with."""
     import io
     import sys
-    import urllib.request
     from pathlib import Path
 
     from pseudolife_memory.memory.dream import _facts_hint, _vocab_hint
+    from pseudolife_memory.utils import no_redirect
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     import longmemeval_bench as B
 
@@ -535,7 +535,7 @@ def test_a_prompt_file_reaches_the_extractor_with_the_hints_appended(
         sent.append(json.loads(req.data.decode()))
         return _Resp(chat_payload([]).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(no_redirect, "urlopen", _fake_urlopen)
     ex = B._make_extractor("http://127.0.0.1:0", str(path))
     ex.extract(["note one"], ["vocab-term"], known_facts=[("e", "a", "v")])
 

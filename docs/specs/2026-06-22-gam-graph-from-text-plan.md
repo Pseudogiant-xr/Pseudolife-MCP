@@ -1,5 +1,10 @@
 # GAM #2 graph-from-text — Implementation Plan
 
+> Historical API note (2026-09-11): numeric dream cursor commits in this plan
+> have been replaced by exact-batch `commit_token` acknowledgement. Use the
+> [current dreaming guide](../guide/dreaming.md) for manual calls and retry semantics.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Teach the dream to extract `(src, relation, dst)` triples from recent memory text and write them into the `GraphStore`-backed graph, so `memory_graph` works on ingested free text.

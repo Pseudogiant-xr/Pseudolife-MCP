@@ -36,7 +36,8 @@ def captured():
         bodies.append(json.loads(req.data.decode()))
         return _Resp()
 
-    with mock.patch("urllib.request.urlopen", fake_urlopen):
+    with mock.patch("pseudolife_memory.utils.no_redirect.urlopen",
+                    fake_urlopen):
         yield bodies
 
 

@@ -113,6 +113,57 @@ def test_health_omits_extractor_when_config_is_unreachable() -> None:
 
     payload = _build_health_payload(_Bare(), token_present=False)
     assert "extractor" not in payload
+    assert "stall" not in payload
+
+
+def _stalled(reason: str):
+    from pseudolife_memory.service_dream import DreamStallTracker
+
+    svc = _Svc(_config(base_url="http://127.0.0.1:8082/v1", model="extractor",
+                       fallback_base_url="http://127.0.0.1:8081/v1",
+                       fallback_model="extractor"))
+    tracker = DreamStallTracker(clock=lambda: 1_000_000.0)
+    failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
+              "extractor_error": {"reason": reason, "error": "HTTP 500"}}
+    for _ in range(2):
+        if reason == "served_by_fallback":
+            tracker.record({"pulled": 3, "claims": 1}, served_by_fallback=True)
+        else:
+            tracker.record(failed, served_by_fallback=False)
+    svc._dream_stall_tracker = tracker
+    return svc
+
+
+def test_health_reports_a_stalled_extractor_without_leaving_ok() -> None:
+    """A stall is a dream-only degradation: status stays ok (a non-ok
+    payload is the 503 the Docker healthcheck and ops/update.* treat as
+    fatal), and the probe is unauthenticated, so the sub-object carries
+    the reason and times, not the error text."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    payload = _build_health_payload(_stalled("login_expired"), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["extractor"] == "stalled"
+    assert payload["stall"] == {"since": 1_000_000.0, "reason": "login_expired",
+                                "consecutive_failures": 2, "last_success_at": None}
+
+
+def test_health_shows_fallback_serving_as_a_warning_not_a_stall() -> None:
+    from pseudolife_memory.daemon import _build_health_payload
+
+    payload = _build_health_payload(_stalled("served_by_fallback"), token_present=False)
+    assert payload["extractor"] == "configured"
+    assert payload["stall"]["reason"] == "served_by_fallback"
+
+
+def test_health_carries_no_stall_while_dreams_are_served() -> None:
+    from pseudolife_memory.daemon import _build_health_payload
+    from pseudolife_memory.service_dream import DreamStallTracker
+
+    svc = _Svc(_config(base_url="http://127.0.0.1:8080/v1", model="gemma-4-e4b"))
+    svc._dream_stall_tracker = DreamStallTracker()
+    payload = _build_health_payload(svc, token_present=False)
+    assert payload["extractor"] == "configured" and "stall" not in payload
 
 
 # ── the shim: one honest line where the user can read it ──────────────────

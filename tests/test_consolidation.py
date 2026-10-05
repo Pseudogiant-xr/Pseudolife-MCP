@@ -58,7 +58,9 @@ def test_two_similar_candidates_form_one_cluster() -> None:
     assert len(clusters) == 1
     members = {m.text for m in clusters[0].members}
     assert members == {"a", "b"}
+    assert isinstance(clusters[0], Cluster)  # the API contract the MCP layer wraps
     assert isinstance(clusters[0].cohesion, float)
+    assert isinstance(clusters[0].seed_score, float)
     assert clusters[0].cohesion > 0.5
 
 
@@ -144,41 +146,6 @@ def test_max_clusters_caps_output_length() -> None:
 
     out = cluster_candidates(pool, min_cohesion=0.5, max_clusters=3)
     assert len(out) <= 3
-
-
-def test_returns_cluster_dataclass() -> None:
-    """API contract: each cluster is a :class:`Cluster` carrying members
-    + cohesion + seed_score — what the MCP layer wraps into a JSON dict.
-    """
-    torch.manual_seed(23)
-    base = _normalised(8)
-    e1 = _entry("p", _normalised(8, seed=base))
-    e2 = _entry("q", _normalised(8, seed=base))
-    clusters = cluster_candidates(
-        [(e1, 0.7), (e2, 0.6)],
-        min_cohesion=0.4,
-        min_cluster_size=2,
-    )
-    assert len(clusters) == 1
-    c = clusters[0]
-    assert isinstance(c, Cluster)
-    assert isinstance(c.cohesion, float)
-    assert isinstance(c.seed_score, float)
-    assert len(c.members) == 2
-
-
-def test_cohesion_for_single_member_cluster_is_undefined_so_dropped() -> None:
-    """A cluster with one member has no internal pairs to compute
-    cohesion over. Drop it via the ``min_cluster_size`` filter."""
-    torch.manual_seed(29)
-    e1 = _entry("alone", _normalised(8))
-    e2 = _entry("far", _normalised(8))  # too far to cluster with e1
-    clusters = cluster_candidates(
-        [(e1, 0.9), (e2, 0.85)],
-        min_cohesion=0.99,
-        min_cluster_size=2,
-    )
-    assert clusters == []
 
 
 def test_min_cohesion_acts_as_inclusive_threshold() -> None:

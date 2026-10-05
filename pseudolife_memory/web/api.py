@@ -19,6 +19,7 @@ stall the event loop (and the concurrent ``/mcp`` traffic).
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import mimetypes
@@ -27,12 +28,70 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
-from pseudolife_memory.web.session_hook import hook_session_end, hook_session_start
+from pseudolife_memory.web.session_hook import (
+    hook_memory_changes, hook_memory_policy, hook_session_end, hook_session_start)
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
 STATIC_DIR = Path(__file__).parent / "static"
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+# Control patches and graph actions are small JSON objects. Text-bearing
+# writes need room for whole documents; coordination keeps its own 32 KiB
+# contract. These are wire-byte limits, including JSON escaping/metadata.
+_CONTROL_BODY_LIMIT = 256 * 1024
+_TEXT_BODY_LIMIT = 4 * 1024 * 1024
+_SESSION_END_BODY_LIMIT = 16 * 1024
+# A pairing body is {"code": 14 chars, "token_sha256": 64 hex}: ~100 bytes.
+_PAIR_BODY_LIMIT = 1024
+_TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
+# Routes that reconfigure the daemon or speak as it: an invited (stored)
+# principal is refused them (spec 2026-10-02, "What an invited principal
+# can do"); environment principals keep them.
+_OPERATOR_POST_PATHS = frozenset({"/api/config", "/api/daemon-notice"})
+
+
+# v54 (addendum 2026-10-04-board-roles-passkey.md, section 3): script in the
+# Console's origin could request its own maintainer challenge at the moment
+# the maintainer expects a passkey prompt, so every /ui/ response forbids
+# inline and foreign script, plugins, <base> rewrites, framing and foreign
+# form targets. ``style-src 'unsafe-inline'`` stays: Svelte and the vendored
+# 3D engine set style attributes; script is the attack this blocks.
+CONSOLE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+               "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
+               "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+               "form-action 'self'")
+CONSOLE_SECURITY_HEADERS = (
+    (b"content-security-policy", CONSOLE_CSP.encode("ascii")),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+    # Served types are meant: never sniff one as HTML or script (security
+    # review, 2026-10-04). JSON answers send it too (``_send_json``).
+    (b"x-content-type-options", b"nosniff"),
+)
+_MAINTAINER_PREFIX = "/api/maintainer"
+
+
+def _is_maintainer_path(path: str) -> bool:
+    return path == _MAINTAINER_PREFIX or path.startswith(_MAINTAINER_PREFIX + "/")
+
+
+def _maintainer_error(exc: Exception) -> tuple[int, dict]:
+    """A maintainer route's refusal: its public code and status, never the
+    text of an unexpected exception. A plain ``ValueError`` whose text is a
+    known code (the Console's fixture service raises those) maps the same."""
+    from pseudolife_memory.storage.maintainer import MaintainerError
+    code = getattr(exc, "code", None) if isinstance(exc, MaintainerError) else str(exc)
+    if code not in MaintainerError.STATUS:
+        code = "invalid_request" if isinstance(exc, ValueError) else "coordination_unavailable"
+    public = exc.public if isinstance(exc, MaintainerError) and exc.public else {}
+    return MaintainerError.STATUS[code], {**public, "error": code}
+
+
+def _body_limit(path: str) -> int:
+    if path.startswith("/api/coordination/"):
+        return 32768
+    return _TEXT_BODY_LIMIT if path in _TEXT_BODY_PATHS else _CONTROL_BODY_LIMIT
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("application/json", ".json")
@@ -47,34 +106,88 @@ async def _send_json(send, status: int, payload: Any) -> None:
         "status": status,
         "headers": [(b"content-type", b"application/json; charset=utf-8"),
                     (b"content-length", str(len(body)).encode()),
-                    (b"cache-control", b"no-store")],
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff")],
     })
     await send({"type": "http.response.body", "body": body})
 
 
 async def _send_bytes(send, status: int, body: bytes, content_type: str,
-                      cache: str = "no-cache") -> None:
+                      cache: str = "no-cache", extra_headers=()) -> None:
     await send({
         "type": "http.response.start",
         "status": status,
         "headers": [(b"content-type", content_type.encode()),
                     (b"content-length", str(len(body)).encode()),
-                    (b"cache-control", cache.encode())],
+                    (b"cache-control", cache.encode()), *extra_headers],
     })
     await send({"type": "http.response.body", "body": body})
 
 
-async def _read_body(receive) -> bytes:
+async def _read_body(receive, max_bytes: int | None = None) -> bytes:
     chunks = []
+    size = 0
     while True:
         message = await receive()
         if message["type"] == "http.request":
-            chunks.append(message.get("body", b"") or b"")
+            chunk = message.get("body", b"") or b""
+            size += len(chunk)
+            if max_bytes is not None and size > max_bytes:
+                raise ValueError("request_too_large")
+            chunks.append(chunk)
             if not message.get("more_body"):
                 break
         elif message["type"] == "http.disconnect":
             break
     return b"".join(chunks)
+
+
+async def _wait_while_connected(operation, receive):
+    """Cancel a long mailbox request when its HTTP client disconnects."""
+    async def disconnected():
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            # ASGI normally blocks after the body. Tolerate a repeated request
+            # event without starving the handler (also used by simple drivers).
+            await asyncio.sleep(0)
+
+    work = asyncio.create_task(operation)
+    gone = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait({work, gone}, return_when=asyncio.FIRST_COMPLETED)
+        if gone in done:
+            return False, None
+        return True, work.result()
+    finally:
+        for task in (work, gone):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(work, gone, return_exceptions=True)
+
+
+async def _send_coordination_error(send, exc):
+    from pseudolife_memory.coordination import public_detail, public_error
+    code = public_error(exc)
+    detail = public_detail(exc)
+    status = (401 if code in {"unauthorized", "authentication_required",
+                             "instance_authentication_required"}
+              else 403 if code in {"principal_not_allowed", "invalid_credential",
+                                   "child_send_refused"}
+              else 404 if code == "instance_not_found"
+              else 409 if code == "bank_identity_mismatch"
+              else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full",
+                                   "lease_queue_full"}
+              else 500 if code in {"coordination_unavailable", "invalid_bank_identity"}
+              else 503 if code == "principals_unavailable"
+              else 400)
+    if status == 500:
+        # Database errors can include complete rows. Neither exception messages
+        # nor tracebacks are appropriate diagnostics for private mail failures.
+        logger.error("coordination handler failed (%s)", type(exc).__name__)
+    await _send_json(send, status, {"error": code} if detail is None
+                     else {"error": code, "detail": detail})
 
 
 def _parse_query(scope) -> dict[str, str]:
@@ -126,20 +239,49 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
-    from pseudolife_memory.principals import resolve_principal
+    from pseudolife_memory.principal_store import FailureLimiter, RedemptionGate
+    from pseudolife_memory.principals import (
+        DEFAULT_PRINCIPAL, SOURCE_STORE, PrincipalsUnavailable, installed_store,
+        resolve_principal_detailed)
 
     token = token or None
     token_map = dict(token_map or {})
     auth_configured = token is not None or bool(token_map)
     routes = ConsoleRoutes(service)
+    from pseudolife_memory.web.coordination import CoordinationHub
+    coordination = CoordinationHub(service)
+    pairing_failures = FailureLimiter()
+    pairing_gate = RedemptionGate()
+
+    def _resolve_detailed(scope) -> tuple[str | None, str | None]:
+        """``(principal, source)``: ``(None, None)`` when unauthorized;
+        raises ``PrincipalsUnavailable`` when the bearer may be a stored one
+        the daemon cannot check right now (principals.resolve_principal)."""
+        if not auth_configured:
+            return DEFAULT_PRINCIPAL, None
+        # latin-1 like every other header read here: it cannot fail, and
+        # resolve_principal compares the bytes the client sent.
+        headers = {k.decode().lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        return resolve_principal_detailed(
+            headers.get("authorization"), token_map, token, installed_store())
+
+    def _resolve(scope) -> str | None:
+        return _resolve_detailed(scope)[0]
+
+    def _principal(scope) -> str | None:
+        """:func:`_resolve` for the always-200 hooks: a principal that
+        cannot be checked now is treated as unauthorized."""
+        try:
+            return _resolve(scope)
+        except PrincipalsUnavailable:
+            return None
 
     def _authorized(scope) -> bool:
-        if not auth_configured:
-            return True
-        headers = {k.decode().lower(): v.decode()
-                   for k, v in scope.get("headers", [])}
-        return resolve_principal(
-            headers.get("authorization"), token_map, token) is not None
+        return _principal(scope) is not None
+
+    async def _principals_unavailable(send) -> None:
+        await _send_json(send, 503, {"error": "principals_unavailable"})
 
     def _hdr(scope, name: bytes) -> str | None:
         for k, v in scope.get("headers", []):
@@ -177,6 +319,88 @@ def build_console_app(
             return "forbidden_host"
         return None
 
+    async def _pair(scope, receive, send, method: str) -> None:
+        """``POST /api/pair``: redeem a pairing code for the SHA-256 of a
+        token the client minted. Every refusal is the same ``400
+        pairing_refused`` (no oracle for which codes exist) and counts
+        against a global budget of failed redemptions; past it, ``429``
+        without consulting the store. Nothing from the body or an exception
+        is ever logged or returned."""
+        if method != "POST":
+            await _send_json(send, 405, {"error": "method_not_allowed"})
+            return
+        # No browser page may reach this: every browser fetch or form post
+        # from a page carries Origin.
+        if _hdr(scope, b"origin") is not None:
+            await _send_json(send, 403, {"error": "forbidden_origin"})
+            return
+        ctype = (_hdr(scope, b"content-type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            await _send_json(send, 415, {"error": "content_type_must_be_application_json"})
+            return
+        # The attempt is counted before anything else can happen to it, so
+        # concurrent bad codes cannot all pass a check made before any of
+        # them failed; a success gives it back.
+        attempt = pairing_failures.reserve()
+        if attempt is None:
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+
+        async def refused() -> None:
+            await _send_json(send, 400, {"error": "pairing_refused"})
+
+        try:
+            raw = await _read_body(receive, max_bytes=_PAIR_BODY_LIMIT)
+        except ValueError:
+            await _send_json(send, 413, {"error": "request_too_large"})
+            return
+        from pseudolife_memory import principal_store
+        from pseudolife_memory.principals import (
+            is_sha256_hex, normalize_pairing_code, secret_sha256)
+        store = installed_store()
+        dsn = getattr(service, "_db_url", None)
+        try:
+            # Any parse or validation failure, including a nesting deep
+            # enough for RecursionError, is the same refusal.
+            body = json.loads(raw.decode("utf-8"))
+            if not (isinstance(body, dict) and set(body) == {"code", "token_sha256"}):
+                raise ValueError
+            code = normalize_pairing_code(body["code"])
+            token_hash = body["token_sha256"]
+            if code is None or not is_sha256_hex(token_hash):
+                raise ValueError
+        except Exception:  # noqa: BLE001 - never echoed, never logged
+            await refused()
+            return
+        if not auth_configured or store is None or not dsn:
+            await refused()
+            return
+        if not pairing_gate.try_enter():
+            # Never reached the store: not a failed redemption.
+            pairing_failures.refund(attempt)
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+        try:
+            paired = await asyncio.get_running_loop().run_in_executor(
+                pairing_gate.executor,
+                functools.partial(principal_store.redeem, dsn, secret_sha256(code), token_hash,
+                                  excluded=store.excluded_names))
+        except Exception as exc:  # noqa: BLE001 - the outcome is unknown; the type only
+            logger.error("pairing redemption failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "pairing_unavailable"})
+            return
+        finally:
+            pairing_gate.leave()
+        if paired is None:
+            await refused()
+            return
+        pairing_failures.refund(attempt)
+        # Usable at once: the snapshot keeps this entry until a refresh
+        # that started after it, and drops the principal's previous hash.
+        store.add(paired)
+        await _send_json(send, 200, {"principal": paired.principal, "tier": paired.tier,
+                                     "bank": store.bank})
+
     async def app(scope, receive, send):
         if scope["type"] != "http":
             await mcp_app(scope, receive, send)
@@ -204,7 +428,7 @@ def build_console_app(
         # 2) root -> console
         if path == "/":
             await send({"type": "http.response.start", "status": 307,
-                        "headers": [(b"location", b"/ui/")]})
+                        "headers": [(b"location", b"/ui/"), *CONSOLE_SECURITY_HEADERS]})
             await send({"type": "http.response.body", "body": b""})
             return
 
@@ -217,13 +441,16 @@ def build_console_app(
                 # never be cached so updates are picked up without a hard reload.
                 cache = ("max-age=86400" if ctype.startswith(("font/", "image/"))
                          else "no-store")
-                await _send_bytes(send, status, body, ctype, cache)
+                await _send_bytes(send, status, body, ctype, cache,
+                                  extra_headers=CONSOLE_SECURITY_HEADERS)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("static serve error for %s: %s", path, exc)
-                await _send_bytes(send, 500, b"static error", "text/plain")
+                await _send_bytes(send, 500, b"static error", "text/plain",
+                                  extra_headers=CONSOLE_SECURITY_HEADERS)
             return
 
-        # 4) plugin SessionStart hook context (plain text, 200 always). The
+        # 4) plugin SessionStart hook context (plain text, 200 always; also
+        # read by `pseudolife-mcp briefing --hook-json`). The
         # instructions half is public repo content, so an unauthorized
         # request (token set, no bearer) still gets it — but never the
         # briefing, which is memory content. Loopback gating as for /api.
@@ -242,13 +469,82 @@ def build_console_app(
             if method != "GET":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
-            authorized = _authorized(scope)
+            principal = _principal(scope)
+            authorized = principal is not None
             params = _parse_query(scope)
             session_id = params.get("session_id") if authorized else None
             source = params.get("source") if authorized else None
+            # The version comparison touches no memory content, so an
+            # unauthorized hook still learns it is out of date; the value
+            # is shape-checked before it can reach the model's context.
+            plugin_version = params.get("plugin_version")
+            plugin_hooks_digest = params.get("plugin_hooks_digest")
+            launcher = params.get("launcher")   # shape-checked by session_hook.launcher_command
+
+            def start_hook():
+                # Bind the request headers so the briefing's awareness
+                # section can resolve the caller's principal the same way
+                # /api/agents and /api/briefing do.
+                from pseudolife_memory.writer_context import (
+                    bind_request_headers, unbind_request_headers)
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                binding = bind_request_headers(headers, principal=principal)
+                try:
+                    return hook_session_start(service, session_id, source, authorized,
+                                              plugin_version=plugin_version,
+                                              plugin_hooks_digest=plugin_hooks_digest,
+                                              launcher=launcher)
+                finally:
+                    unbind_request_headers(binding)
+            text = await asyncio.get_running_loop().run_in_executor(None, start_hook)
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4a) plugin memory-policy SessionStart hook: the full memory-loop
+        # block when the session's configured variant is full_separate_hook,
+        # else an empty body (the hook then adds nothing). Its own hook
+        # output, so the block never shares the briefing's budget. Public
+        # repo text, 200 always; session_id only picks an online A/B arm,
+        # source=resume|compact serves nothing, and both are honoured only
+        # when authorized, as on session-start.
+        if path == "/api/hook/memory-policy":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            params = _parse_query(scope) if _authorized(scope) else {}
             text = await asyncio.get_running_loop().run_in_executor(
-                None, hook_session_start, service, session_id, source,
-                authorized)
+                None, hook_memory_policy, service, params.get("session_id"),
+                params.get("source"))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4a') plugin UserPromptSubmit hook: the per-turn memory-change note.
+        # Line 1 is the next cursor, then a note only when memory changed
+        # since the hook's ?since= (see hook_memory_changes). Status notes
+        # and lessons are memory content, so an unauthorized caller gets an
+        # empty body: the hook then prints nothing and keeps its cursor.
+        # 200 always.
+        if path == "/api/hook/memory-changes":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, hook_memory_changes, service, params.get("session_id"),
+                    params.get("since"))
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
@@ -267,12 +563,21 @@ def build_console_app(
             if method != "POST":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
-            if not _authorized(scope):
+            try:
+                ended_by = _resolve(scope)
+            except PrincipalsUnavailable:
+                await _principals_unavailable(send)
+                return
+            if ended_by is None:
                 await _send_json(send, 401, {
                     "error": "unauthorized",
                     "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
                 return
-            raw = await _read_body(receive)
+            try:
+                raw = await _read_body(receive, max_bytes=_SESSION_END_BODY_LIMIT)
+            except ValueError:
+                await _send_json(send, 413, {"error": "request_too_large"})
+                return
             body: dict = {}
             if raw:
                 try:
@@ -286,6 +591,118 @@ def build_console_app(
             await _send_json(send, 200, result)
             return
 
+        # 4c) plugin coordination SessionStart hook: the board check-in as
+        # plain text, or an empty body when this bearer cannot use the board
+        # (disabled, no or unknown bearer, unlisted principal, file mode).
+        # 200 always, like session-start; the check touches no storage.
+        if path == "/api/hook/coordination-start":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            from pseudolife_memory.coordination import CHECKIN_TEXT, unavailable_reason
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            reason = unavailable_reason(service, headers, token_map=token_map, token=token)
+            text = "" if reason else CHECKIN_TEXT + "\n"
+            # X-PL-Board names why the board is off, so the installer and
+            # doctor report the daemon's reason instead of guessing one.
+            # The codes reveal no more than /api's own 401 already does.
+            state = f"off; reason={reason}" if reason else "on"
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store",
+                              [(b"x-pl-board", state.encode("ascii"))])
+            return
+
+        # 4d) plugin Stop hook: the park gate (v49). "allow" or "block" plus
+        # the message, for the address the hook names; an empty body for a
+        # bearer that cannot use the board, which the hook reads as allow.
+        # 200 always; the daemon call is the hook's one request.
+        if path == "/api/hook/park-gate":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import park_gate
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(park_gate, service, headers,
+                                            agent=params.get("agent"), since=params.get("since"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4e) plugin Stop hook: the woke marker. After a wake fires the hook
+        # posts that the address's turn is starting; the daemon logs a
+        # ``woke`` audit event for it. A write, so POST only; "ok" when
+        # recorded, an empty body otherwise. 200 always: the hook does not
+        # read the answer.
+        if path == "/api/hook/woke":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import woke
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(woke, service, headers, agent=params.get("agent"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4f) plugin SubagentStart / SubagentStop hooks (v50): list or unlist
+        # a Claude Code subagent among its session's children. A write, so
+        # POST only; "ok" when recorded, an empty body otherwise. 200
+        # always: the hook does not read the answer.
+        if path == "/api/hook/subagent":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import subagent
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(subagent, service, headers, agent=params.get("agent"),
+                                            event=params.get("event"), child=params.get("child"),
+                                            kind=params.get("type"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4g) pairing-code redemption (`pseudolife-mcp pair`, spec
+        # 2026-10-02): unauthenticated by design, so it is routed before the
+        # bearer gate and refuses everything a browser could send.
+        if path == "/api/pair":
+            await _pair(scope, receive, send, method)
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)
@@ -295,7 +712,12 @@ def build_console_app(
                     "hint": "tokenless /api serves loopback browsers only; "
                             "set PSEUDOLIFE_MCP_TOKEN for remote access"})
                 return
-            if not _authorized(scope):
+            try:
+                principal, source = _resolve_detailed(scope)
+            except PrincipalsUnavailable:
+                await _principals_unavailable(send)
+                return
+            if principal is None:
                 await _send_json(send, 401, {
                     "error": "unauthorized",
                     "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
@@ -303,10 +725,27 @@ def build_console_app(
             if method not in ("GET", "POST"):
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
+            # An invited machine reads and writes the bank and the board, but
+            # does not reconfigure the daemon or speak as it.
+            if (method == "POST" and path in _OPERATOR_POST_PATHS
+                    and source == SOURCE_STORE):
+                await _send_json(send, 403, {"error": "operator_principal_required"})
+                return
             params = _parse_query(scope)
             body: dict = {}
+            coordination_path = path.startswith("/api/coordination/")
+            coordination_errors = coordination_path or (
+                path == "/api/agents" and params.get("view") == "coordination")
+            maintainer_path = _is_maintainer_path(path)
+            if coordination_path and method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
             if method == "POST":
-                raw = await _read_body(receive)
+                try:
+                    raw = await _read_body(receive, max_bytes=_body_limit(path))
+                except ValueError:
+                    await _send_json(send, 413, {"error": "request_too_large"})
+                    return
                 if raw:
                     # A cross-site form/fetch can send text/plain or
                     # urlencoded WITHOUT a CORS preflight; application/json
@@ -320,6 +759,11 @@ def build_console_app(
                         return
                     try:
                         body = json.loads(raw.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        if not coordination_path:
+                            raise
+                        await _send_json(send, 400, {"error": "invalid_json"})
+                        return
                     except json.JSONDecodeError:
                         await _send_json(send, 400, {"error": "invalid_json"})
                         return
@@ -327,28 +771,118 @@ def build_console_app(
                         await _send_json(send, 400, {"error": "body_must_be_object"})
                         return
             try:
+                if coordination_path:
+                    from pseudolife_memory.coordination import authenticated_principal
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    principal = authenticated_principal(headers, token_map=token_map, token=token)
+                    action = path.removeprefix("/api/coordination/")
+                    wait = body.get("wait_seconds", 0)
+                    operation = coordination.handle(action, body, headers, principal)
+                    if action == "receive" and type(wait) in (int, float) and wait > 0:
+                        connected, result = await _wait_while_connected(operation, receive)
+                        if not connected:
+                            return
+                    else:
+                        result = await operation
+                    await _send_json(send, 200, result)
+                    return
+                def dispatch():
+                    # run_in_executor does not propagate contextvars: bind in
+                    # the worker for every route and always restore its context.
+                    from pseudolife_memory.writer_context import (
+                        bind_request_headers, unbind_request_headers)
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    if coordination_errors or maintainer_path:
+                        # The board requires a configured bearer even on an
+                        # otherwise open loopback Console installation, and
+                        # so do the maintainer routes (v54): a tokenless
+                        # daemon refuses them outright.
+                        from pseudolife_memory.coordination import authenticated_principal
+                        authenticated_principal(headers, token_map=token_map, token=token)
+                    # Bind the transport-validated principal, restoring the
+                    # prior worker context after every handler result.
+                    binding = bind_request_headers(headers, principal=principal)
+                    try:
+                        return routes.dispatch(method, path, params, body)
+                    finally:
+                        unbind_request_headers(binding)
                 result = await asyncio.get_running_loop().run_in_executor(
-                    None, routes.dispatch, method, path, params, body)
+                    None, dispatch)
                 await _send_json(send, 200, result)
-            except KeyError:
+            except KeyError as exc:
+                if coordination_path:
+                    await _send_coordination_error(send, exc)
+                    return
+                if maintainer_path and routes.has(path):
+                    # A KeyError out of a known maintainer route is a bug or
+                    # a missing body field; never echo it.
+                    logger.error("maintainer route failed (KeyError)")
+                    await _send_json(send, 400, {"error": "invalid_request"})
+                    return
                 # unknown path, or a wrong-verb hit on a known path
                 status = 405 if routes.has(path) else 404
                 await _send_json(send, status, {
                     "error": "not_found" if status == 404 else "method_not_allowed",
                     "path": path})
             except ValueError as exc:
-                await _send_json(send, 400, {"error": str(exc)})
+                if maintainer_path:
+                    await _send_json(send, *_maintainer_error(exc))
+                elif coordination_errors:
+                    await _send_coordination_error(send, exc)
+                else:
+                    await _send_json(send, 400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001
-                logger.exception("api handler error: %s %s", method, path)
-                await _send_json(send, 500, {"error": str(exc)})
+                if maintainer_path:
+                    logger.error("maintainer route failed (%s)", type(exc).__name__)
+                    await _send_json(send, *_maintainer_error(exc))
+                elif coordination_errors:
+                    await _send_coordination_error(send, exc)
+                else:
+                    logger.exception("api handler error: %s %s", method, path)
+                    await _send_json(send, 500, {"error": str(exc)})
             return
 
         # 6) everything else -> the MCP app (token gate preserved)
-        if not _authorized(scope):
+        try:
+            caller = _resolve(scope)
+        except PrincipalsUnavailable:
+            await _principals_unavailable(send)
+            return
+        if caller is None:
             await _send_json(send, 401, {
                 "error": "unauthorized",
                 "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
             return
+        if path == "/mcp" or path.startswith("/mcp/"):
+            from pseudolife_memory.coordination import (
+                authenticated_principal, bound_identity,
+                dispatch as coordination_dispatch, enforce_bound_identity,
+            )
+            headers = {k.decode().lower(): v.decode("latin-1")
+                       for k, v in scope.get("headers", [])}
+            try:
+                binding = bound_identity(headers)
+                if binding is not None:
+                    # Fail closed on an open install: open loopback resolves
+                    # everyone to "default", which the board admits by
+                    # default, and a binding must never reach the store
+                    # without a bearer.
+                    principal = authenticated_principal(
+                        headers, token_map=token_map, token=token)
+
+                    def validate_binding():
+                        context = coordination_dispatch(
+                            service, "context", {}, headers=headers,
+                            principal=principal)
+                        enforce_bound_identity(binding, context)
+
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, validate_binding)
+            except Exception as exc:  # noqa: BLE001
+                await _send_coordination_error(send, exc)
+                return
         await mcp_app(scope, receive, send)
 
     return app

@@ -959,7 +959,10 @@ def test_set_writes_survive_pg_hydration_through_the_service(svc, pg_url):  # no
     from pseudolife_memory.service import MemoryService
 
     def _fresh():
-        """A brand-new service on the same database (own file dir)."""
+        """A brand-new service on the same database (own file dir). ``svc``
+        hands the bank over first (one writer per bank) and takes it back
+        when its storage reconnects on its next call."""
+        svc._storage.close()
         d = _tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         return d, MemoryService(data_dir=d.name, database_url=pg_url)
 

@@ -16,6 +16,11 @@
 #                                            # backup.ps1 state tar. Opt-in:
 #                                            # a DB-only restore must not
 #                                            # clobber current state.
+#   ops\restore.ps1 -Apply -NoStart ...      # REAL RESTORE, but leave the
+#                                            # daemon stopped afterwards
+#                                            # (pseudolife-mcp move checks
+#                                            # the restored bank before its
+#                                            # first start).
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope (2026-07-02 review P2: the only
@@ -27,18 +32,46 @@ param(
     [string]$DaemonContainer = "pseudolife-mcp-daemon",
     [string]$Db = "pseudolife_memory",
     [string]$User = "pseudolife",
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
+if ($NoStart -and -not $Apply) {
+    throw "-NoStart applies to a real restore (-Apply); a rehearsal never starts or stops the daemon"
+}
 $repo = Split-Path -Parent $PSScriptRoot
 
-# 1. Resolve + validate the backup artifact.
+# 1. Resolve + validate the backup artifact. With no file named, take the
+# newest dump the row-count gate did not hold: ops\backup.ps1 marks a dump
+# whose entries, facts or lessons fell sharply "held" in its manifest, and
+# after a wipe that is exactly the newest one (restoring it puts the wipe
+# back, and the rehearsal passes because both sides are wiped). Naming the
+# file is the override; a dump with no manifest (older than the gate) is
+# taken as before.
 if (-not $BackupFile) {
-    $newest = Get-ChildItem (Join-Path $repo "data\backups") -Filter "pseudolife_memory-*.sql.gz" |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $newest) { throw "no backups found under data\backups" }
-    $BackupFile = $newest.FullName
+    $dumps = @(Get-ChildItem (Join-Path $repo "data" "backups") -Filter "pseudolife_memory-*.sql.gz" |
+        Sort-Object LastWriteTime -Descending)
+    if (-not $dumps) { throw "no backups found under data\backups" }
+    foreach ($d in $dumps) {
+        $manifest = Join-Path $d.DirectoryName `
+            ($d.Name -replace '^pseudolife_memory-(.*)\.sql\.gz$', 'pseudolife_manifest-$1.json')
+        $rotation = $null
+        if (Test-Path -LiteralPath $manifest) {
+            try { $rotation = (Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).rotation } catch { }
+        }
+        if ($rotation -eq "held") {
+            Write-Host ("==> Skipping $($d.Name): the row-count gate held it (its entries, " +
+                "facts or lessons fell sharply). Pass -BackupFile to restore it anyway.")
+            continue
+        }
+        $BackupFile = $d.FullName
+        break
+    }
+    if (-not $BackupFile) {
+        throw ("every backup under data\backups is held by the row-count gate; " +
+               "pass -BackupFile <path> to restore one anyway")
+    }
 }
 if (-not (Test-Path $BackupFile) -or (Get-Item $BackupFile).Length -eq 0) {
     throw "backup artifact missing or empty: $BackupFile"
@@ -81,6 +114,15 @@ try {
         Write-Host "==> Rehearsal: restoring into scratch db '$scratch' (live bank untouched)"
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch"
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $scratch"
+        # The scratch copy holds the whole bank and a plain CREATE DATABASE
+        # is open to PUBLIC: close it before the replay, as a real restore
+        # closes the bank, or the test login (`pseudolife-mcp test-login
+        # create`) could read it while the rehearsal runs.
+        docker exec $Container psql -q -U $User -d postgres -c "REVOKE CONNECT ON DATABASE $scratch FROM PUBLIC"
+        if ($LASTEXITCODE -ne 0) {
+            docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch" *> $null
+            throw "could not revoke CONNECT on the scratch db from PUBLIC; not restoring the bank into a database any login could open"
+        }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $scratch > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "restore into scratch db FAILED - the backup may be unusable" }
 
@@ -153,7 +195,8 @@ try {
         # ── REAL RESTORE ─────────────────────────────────────────────────
         Write-Warning "REAL RESTORE: this REPLACES the live bank '$Db' with $BackupFile"
         Write-Host "==> Safety-dumping the current bank first..."
-        & (Join-Path $PSScriptRoot "backup.ps1")
+        & (Join-Path $PSScriptRoot "backup.ps1") -Container $Container -Db $Db -User $User `
+            -DaemonContainer $DaemonContainer
 
         Write-Host "==> Stopping the daemon..."
         docker stop $DaemonContainer | Out-Null
@@ -175,6 +218,16 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "CREATE DATABASE $Db failed after the drop - the bank no longer exists in Postgres. Re-run this restore (the dump is still at $BackupFile) before starting the daemon."
         }
+        # A plain dump carries no database ACL, so the new database is open to
+        # PUBLIC again: close it before the replay, as `pseudolife-mcp
+        # test-login create` does, so the test login cannot open it. The
+        # daemon connects as the owner, who keeps CONNECT. A failure only
+        # warns: the replay matters more, and re-running `test-login create`
+        # closes it.
+        docker exec $Container psql -q -U $User -d postgres -c "REVOKE CONNECT ON DATABASE $Db FROM PUBLIC"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "could not revoke CONNECT on $Db from PUBLIC; after the restore, run 'pseudolife-mcp test-login create' to close it again."
+        }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $Db > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data\backups." }
 
@@ -192,6 +245,11 @@ try {
                 -v "${dir}:/pl_backup:ro" $img `
                 -c "find /data -mindepth 1 -delete && tar xzf /pl_backup/$name -C /data"
             if ($LASTEXITCODE -ne 0) { throw "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data\backups." }
+        }
+
+        if ($NoStart) {
+            Write-Host "==> Restore complete; the daemon was left stopped (-NoStart). Start it with 'docker start $DaemonContainer' (or ops\update.ps1) once the restored bank has been checked."
+            return
         }
 
         Write-Host "==> Restarting the daemon..."

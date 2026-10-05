@@ -14,7 +14,12 @@ residue: rows whose verdict sat below a gate, a `split` second opinion, a
 such row carries the judge's `judge` / `judge2` blocks — treat them as
 leads, read the evidence, and disagree freely.
 
-1. Call `memory_dream(action="status")` and read three things:
+`memory_dream`, `memory_graph_review` and `memory_forget` need the full
+tool tier: if your client does not list them, call
+`memory_toolset(action="expand")` (one tier per call) until it reports
+`current: "full"`, then rediscover tools.
+
+1. Call `memory_dream(action="status")` and read four things:
    - `deep_dream` — `{recommended, reason, new_entities, days_since}`:
      whether the mechanical pass is due. The tick normally handles this;
      if `recommended` is still true (tick disabled, or the daemon just
@@ -28,6 +33,11 @@ leads, read the evidence, and disagree freely.
      deployment has ANY automatic cortex writer.
    - `backlog` / `would_fire`: whether unconsolidated memories are waiting
      for the next sweep.
+   - `review_queue` — pending merge / junk / link counts, the age of the
+     oldest pending merge, each judge's mode, and `attention: {needed,
+     reasons}`. When `attention.needed` is true, tell the user the reason
+     before triaging: a judge left in `shadow`/`off`, or one configured
+     but not running, keeps refilling the queue this session clears.
 2. ONLY when no extractor endpoint is configured (primary and fallback
    both null) or both are unreachable: you are this deployment's only
    cortex writer — run the manual extraction pass:
@@ -41,8 +51,7 @@ leads, read the evidence, and disagree freely.
      the user maintains (bikes owned, pending tasks), use `memory_set_add`
      / `memory_set_remove` instead — `memory_fact_set` on a set-valued
      slot errors and names the right tool.
-   - `memory_dream(action="commit", cursor=<newest timestamp from the
-     pull>)`.
+   - `memory_dream(action="commit", commit_token=<token from the pull>)`.
    - Surface any `contested` results to the user — those are conflicts to
      settle, not silent overwrites (an add onto a number-led scalar parks
      as a contender by design; `member_capped` means the 100-member cap
@@ -56,7 +65,7 @@ leads, read the evidence, and disagree freely.
      siblings under one parent):
      `memory_graph_review(action="dismiss_pair", src=..., dst=...)` so the pair
      never resurfaces and stops occupying a top-k slot.
-   - **Unsure**: leave it — the pair stays visible for the Console's Atlas
+   - **Unsure**: leave it — the pair stays visible in the Console's Review
      queue. Do not guess.
 4. Triage the returned `merge_proposals` (near-duplicate entities, mostly from
    the write-time dedup detector). Each carries per-side `display`, `etype`,
@@ -81,7 +90,7 @@ leads, read the evidence, and disagree freely.
    - **Distinct things**: `memory_graph_review(action="reject_entity",
      proposal_id=...)` AND `memory_graph_review(action="dismiss_pair",
      src=..., dst=...)` so the pair never re-proposes.
-   - **Unsure**: leave pending for the Atlas queue. Do not guess; scopes that
+   - **Unsure**: leave pending for the Console's **Review** view. Do not guess; scopes that
      don't overlap are a strong distinct signal.
 5. Triage the junk verdict — over-extraction artifacts the analyzer wants
    pruned. The dry-run reports them as `would_junk`
@@ -96,7 +105,7 @@ leads, read the evidence, and disagree freely.
    - **A real thing that merely looks thin** — short, weakly-connected names
      are often legitimate ("Go", "uv"):
      `memory_graph_review(action="reject_entity", proposal_id=...)`.
-   - **Unsure**: leave it pending for the Atlas queue. Junk deletion is the
+   - **Unsure**: leave it pending for the Console's **Review** view. Junk deletion is the
      one irreversible verdict in this flow — the step-1 snapshot is the
      only undo (lesson/world forgets below are reversible; see step 6).
 6. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
@@ -116,7 +125,8 @@ leads, read the evidence, and disagree freely.
    - **Unsure**: leave listed. Do not guess.
 7. Report: what the mechanical pass did (or that the tick already had),
    proposed / dismissed counts, merges you applied or rejected (they appear
-   under "recent merge decisions" in Atlas, beside the accept-rate stat),
+   under "Merge decisions" in the Review view's "Recent decisions" panel,
+   beside the accept-rate stat),
    junk entities deleted or kept, lesson/world pairs settled, contested
    facts if step 2 ran, and the snapshot filename. Link proposals still
-   need a human verdict (`accept_link` / `reject_link` or Atlas).
+   need a human verdict (`accept_link` / `reject_link` or the Review view).

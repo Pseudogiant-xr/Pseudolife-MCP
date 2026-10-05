@@ -423,6 +423,44 @@ def test_default_reranks_after_the_cut():
     assert res.params["candidate_pool"]["rerank_position"] == "after_cut"
 
 
+
+@pytest.mark.parametrize("top_k,multiplier", [(8, 4), (24, 1)])
+@pytest.mark.parametrize("with_references", [False, True])
+def test_reranker_over_budget_preserves_original_order_and_scores(
+    top_k, multiplier, with_references,
+):
+    """Never mix CE-fused head scores with an unscored tail."""
+    rows = [(f"distinct archived item {i}", 0.95 - i * 0.015)
+            for i in range(24)]
+    stub = _StubReranker()
+    cms = _cms(rows, reranker=stub, candidate_pool_multiplier=multiplier)
+    if with_references:
+        cms.reference = _StubReferenceBank()
+    expected = _serve(cms, top_k=top_k, rerank=False, bm25=False)
+    actual, trace = cms.retrieve_with_trace(
+        _query(), top_k=top_k, query_text=QUERY_TEXT, rerank=True, bm25=False,
+    )
+    assert stub.seen == []
+    assert [e.text for e in actual.entries] == [e.text for e in expected.entries]
+    assert actual.scores == pytest.approx(expected.scores)
+    assert actual.params["reranker"]["skip_reason"] == "candidate_budget_exceeded"
+    assert actual.params["reranker"]["scored_candidates"] == 0
+    assert trace["reranker"]["reason"] == "candidate_budget_exceeded"
+    assert not any(c.get("ce") is not None for c in actual.components)
+
+
+def test_reranker_scores_entire_pool_at_budget_boundary():
+    rows = [(f"distinct archived item {i}", 0.95 - i * 0.015)
+            for i in range(20)]
+    stub = _StubReranker()
+    cms = _cms(rows, reranker=stub, candidate_pool_multiplier=4)
+    actual = _serve(cms, top_k=5, bm25=False)
+    assert len(stub.seen) == 1 and len(stub.seen[0]) == 20
+    assert actual.params["reranker"]["scored_candidates"] == 20
+    assert actual.params["reranker"]["candidate_count"] == 20
+    assert actual.entries[0].text == stub.seen[0][-1]
+
+
 def test_widened_pool_reranks_before_the_cut():
     stub = _StubReranker()
     res = _serve(_cms(FIXTURE, reranker=stub, candidate_pool_multiplier=4),

@@ -1,0 +1,18 @@
+{
+ "tag": "reference-bank-lazy",
+ "note": "this commit's lazy reference bank",
+ "n": 50,
+ "git_sha": "d94fb54078f9d79377967782a2d02e52540b5810",
+ "tracked_changes": [],
+ "first_start_s": 0.5166,
+ "mean_start_s": 0.0024,
+ "threads_before": 34,
+ "threads_after": 34,
+ "private_mb_after": 1329,
+ "memory_kind": "private",
+ "host": {
+  "platform": "Windows-10-10.0.26200-SP0",
+  "cpus": 16,
+  "python": "3.11.9"
+ }
+}

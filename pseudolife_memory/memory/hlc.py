@@ -15,6 +15,7 @@ under ``occ``. See docs/specs/2026-06-21-writer-aware-temporal-memory-design.md.
 """
 from __future__ import annotations
 
+import threading
 import time
 
 
@@ -23,26 +24,34 @@ def _wall_ms() -> int:
 
 
 class HybridLogicalClock:
-    """Injectable wall-ms source keeps it deterministic in tests."""
+    """Injectable wall-ms source keeps it deterministic in tests.
+
+    Thread-safe: memory writes tick under the service lock, but coordination
+    ``send`` ticks from its own lock (it must never wait on the service
+    lock), so the two-field update is guarded here rather than by callers.
+    """
 
     def __init__(self, now_ms=_wall_ms) -> None:
         self._now = now_ms
         self._phys = 0
         self._logical = 0
+        self._guard = threading.Lock()
 
     def tick(self) -> tuple[int, int]:
         """Stamp the next event. Monotonic regardless of wall-clock direction."""
-        now = self._now()
-        if now > self._phys:
-            self._phys, self._logical = now, 0
-        else:
-            self._logical += 1            # same-or-backwards ms -> bump counter
-        return (self._phys, self._logical)
+        with self._guard:
+            now = self._now()
+            if now > self._phys:
+                self._phys, self._logical = now, 0
+            else:
+                self._logical += 1            # same-or-backwards ms -> bump counter
+            return (self._phys, self._logical)
 
     def observe(self, phys: int, logical: int) -> None:
         """Receive rule (Phase 2 / write_mode='occ'): on reading a remote stamp,
         advance the local clock past it so the next local tick outranks it."""
-        if phys > self._phys:
-            self._phys, self._logical = phys, logical
-        elif phys == self._phys:
-            self._logical = max(self._logical, logical)
+        with self._guard:
+            if phys > self._phys:
+                self._phys, self._logical = phys, logical
+            elif phys == self._phys:
+                self._logical = max(self._logical, logical)

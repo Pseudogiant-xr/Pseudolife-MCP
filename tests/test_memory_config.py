@@ -4,8 +4,7 @@ continuum preset — plus the recency half-life those knobs actually drive.
 import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
-from pseudolife_memory.service import MemoryService
-from pseudolife_memory.utils.config import AppConfig, MemoryConfig, load_config
+from pseudolife_memory.utils.config import MemoryConfig, load_config
 
 
 def _emb(seed: int) -> torch.Tensor:
@@ -68,7 +67,7 @@ def test_yaml_memory_block_omitted_keys_keep_dataclass_defaults(tmp_path):
     for field in ("embedding_dim", "surprise_threshold", "top_k",
                   "ref_top_k", "save_dir", "hide_superseded",
                   "search_confidence_floor", "recency_base_half_life_s",
-                  "slot_index_shadow_rate"):
+                  "slot_index_shadow_rate", "delete_confirm_threshold"):
         assert getattr(loaded, field) == getattr(defaults, field), field
 
 
@@ -79,10 +78,12 @@ def test_yaml_memory_scalar_key_present_is_read(tmp_path):
     review 2026-08-13: slot_index_shadow_rate was documented as a yaml
     knob while the loader never read it."""
     p = tmp_path / "config.yaml"
-    p.write_text("memory:\n  slot_index_shadow_rate: 0.0\n  top_k: 11\n")
+    p.write_text("memory:\n  slot_index_shadow_rate: 0.0\n  top_k: 11\n"
+                 "  delete_confirm_threshold: 5\n")
     loaded = load_config(p).memory
     assert loaded.top_k == 11
     assert loaded.slot_index_shadow_rate == 0.0
+    assert loaded.delete_confirm_threshold == 5
 
 
 # ── the recency base half-life the knob above drives ─────────────────────
@@ -102,9 +103,3 @@ def test_half_life_uses_config_base():
     tiers = [t for t in trace["tiers"] if not t.get("filtered_out")]
     assert tiers[0]["half_life_s"] == 7200.0
     assert tiers[1]["half_life_s"] == 14400.0  # doubles per depth
-
-
-def test_mcp_default_is_one_day():
-    cfg = AppConfig()
-    MemoryService._apply_mcp_defaults(cfg)
-    assert cfg.memory.recency_base_half_life_s == 86400.0

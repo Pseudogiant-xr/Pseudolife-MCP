@@ -33,6 +33,8 @@ import pytest
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.utils.config import EmbeddingConfig
 
+pytestmark = pytest.mark.real_model
+
 
 def test_pipelines_with_the_same_config_share_one_loaded_model() -> None:
     """The optimization itself. Without it every test module pays 2.52 GB."""

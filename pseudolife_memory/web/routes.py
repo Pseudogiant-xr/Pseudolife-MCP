@@ -95,6 +95,17 @@ class ConsoleRoutes:
 
     # -- registration --------------------------------------------------------
 
+    def _agents(self, params):
+        if params.get("view") == "coordination":
+            if getattr(self.svc, "demo_board", False):
+                # The devserver's demo board (web/fixtures.py; devserver.py
+                # turns it on); no bank. Tests of the real snapshot path
+                # use a FixtureService without it.
+                return self.svc.board_snapshot(limit=_i(params, "limit", 50))
+            from pseudolife_memory.coordination import console_snapshot
+            return console_snapshot(self.svc, limit=_i(params, "limit", 50))
+        return self.svc.coordination_awareness(limit=_i(params, "limit", 5))
+
     def _register(self) -> None:
         g = lambda p, h: self.table.__setitem__(("GET", p), h)   # noqa: E731
         p = lambda p_, h: self.table.__setitem__(("POST", p_), h)  # noqa: E731
@@ -144,6 +155,7 @@ class ConsoleRoutes:
         g("/api/briefing", lambda q, b: svc.session_briefing(
             max_unsure=_i(q, "max_unsure", 3), max_lessons=_i(q, "max_lessons", 3),
             max_world=_i(q, "max_world", 3)))
+        g("/api/agents", lambda q, b: self._agents(q))
 
         # ---- episodes ----
         # The write endpoints (start/end/prune/rename/merge) are deliberately
@@ -202,6 +214,10 @@ class ConsoleRoutes:
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
+        g("/api/graph/proposal-evidence", lambda q, b: svc.merge_proposal_evidence(
+            offset=_i(q, "offset", 0), limit=_i(q, "limit", 25)))
+        p("/api/graph/rejudge", lambda q, b: svc.review_rejudge(
+            b.get("queue", "all"), limit=b.get("limit", 32)))
         g("/api/wiki", lambda q, b: svc.wiki_page(_s(q, "entity")))
         g("/api/graph/entity-provenance", lambda q, b: svc.entity_provenance(
             _s(q, "entity"), limit=_i(q, "limit", 20)))
@@ -243,13 +259,31 @@ class ConsoleRoutes:
             sources=_list(q, "source"), tags=_list(q, "tag"),
             top_k=_i(q, "top_k", 20), min_cohesion=_f(q, "min_cohesion", 0.6)))
         p("/api/consolidate", lambda q, b: svc.consolidate(
-            replaces=b["replaces"], new_text=b["new_text"],
+            replaces=b.get("replaces"), entry_ids=b.get("entry_ids"), new_text=b["new_text"],
             source=b.get("source"), tags=b.get("tags")))
 
         # ---- hygiene / corrections ----
         p("/api/delete", lambda q, b: self._delete(b))
         p("/api/supersede", lambda q, b: svc.supersede(
-            old_text=b["old_text"], new_text=b["new_text"]))
+            old_text=b.get("old_text"), entry_id=b.get("entry_id"), new_text=b["new_text"]))
+
+        # ---- the daemon's own board notice (the unattended updater) ----
+        p("/api/daemon-notice", lambda q, b: self._daemon_notice(b))
+
+        # ---- maintainer messages and Board roles, proven by a passkey ----
+        # (v54; spec 2026-10-02-maintainer-wake-design.md and its 2026-10-04
+        # addendum). One service method each; the service gates them and
+        # raises MaintainerError, whose status the ASGI layer answers.
+        g("/api/maintainer", lambda q, b: svc.maintainer_status())
+        p("/api/maintainer/challenge", lambda q, b: svc.maintainer_challenge(b))
+        p("/api/maintainer/enrol", lambda q, b: svc.maintainer_enrol(b))
+        p("/api/maintainer/send", lambda q, b: svc.maintainer_send(b))
+        p("/api/maintainer/role", lambda q, b: svc.maintainer_role(b))
+        p("/api/maintainer/cancel", lambda q, b: svc.maintainer_cancel(b))
+        p("/api/maintainer/revoke", lambda q, b: svc.maintainer_revoke(b))
+        p("/api/maintainer/repudiate", lambda q, b: svc.maintainer_repudiate(b))
+        g("/api/maintainer/sent", lambda q, b: svc.maintainer_sent(_i(q, "limit", 50)))
+        g("/api/maintainer/inbox", lambda q, b: svc.maintainer_inbox(_i(q, "limit", 50)))
 
         # ---- config ----
         g("/api/config", lambda q, b: config_io.read_config(svc))
@@ -257,6 +291,43 @@ class ConsoleRoutes:
             svc, b.get("patch") or b))
 
     # -- composed / guarded handlers ----------------------------------------
+
+    def _daemon_notice(self, body: dict) -> dict:
+        """Post ``text`` to the sessions active on the board as the daemon's
+        reserved principal (``coordination.daemon_notice``): what the
+        unattended updater says when it updated or held off. The reserved
+        sender is otherwise unforgeable, so the caller's bearer principal
+        must be listed in ``coordination.daemon_notice_principals``, which
+        is empty by default: ``allowed_principals`` admits ``default``,
+        the principal every ordinary session uses, and a notice that reads
+        as the daemon's must not be something any session can send. A
+        tokenless daemon has no principal and refuses; the reserved name
+        itself is never a caller; and the notice carries a provenance line
+        naming the principal. ``recipients`` is ``None`` when the board
+        cannot carry it (off, no Postgres), which the caller reports as
+        not said."""
+        from pseudolife_memory import coordination
+        from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
+        resolve = getattr(self.svc, "_request_principal", None)
+        principal = resolve() if resolve else None
+        listed = self.svc.config.coordination.daemon_notice_principals
+        if principal is None or principal == DAEMON_PRINCIPAL or principal not in listed:
+            raise ValueError("principal_not_allowed: a daemon notice needs a bearer whose principal is listed in "
+                             "coordination.daemon_notice_principals (empty by default). Give the scheduled run "
+                             "its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the daemon, "
+                             "<name> in coordination.daemon_notice_principals (and in allowed_principals, so the "
+                             "run can read the board), and that token as the scheduled run's bearer")
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text is required")
+        text = text.strip()
+        if len(text.encode("utf-8")) > 4000 or any(
+                (ord(ch) < 32 and ch not in "\n\t") or 127 <= ord(ch) < 160 for ch in text):
+            raise ValueError("text must be at most 4000 bytes of printable text")
+        result = coordination.daemon_notice(self.svc, f"{text}\n(posted by the unattended updater, principal {principal})")
+        if result is None:
+            return {"recipients": None, "reason": "board_unavailable"}
+        return {"recipients": result.get("recipients", 0)}
 
     def _health(self) -> dict:
         from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
@@ -318,11 +389,15 @@ class ConsoleRoutes:
             limit=int(limit) if limit not in (None, "") else None)
 
     def _delete(self, b: dict) -> dict:
+        """POST /api/delete — filters narrow (AND across kinds); a match
+        over ``memory.delete_confirm_threshold`` is refused with
+        ``would_delete`` unless the body carries ``confirm_bulk: true``."""
         if not any(b.get(k) for k in ("text", "substring", "source", "episode", "tag")):
             raise ValueError("delete requires at least one filter")
         return self.svc.delete(
             text=b.get("text"), substring=b.get("substring"),
-            source=b.get("source"), episode=b.get("episode"), tag=b.get("tag"))
+            source=b.get("source"), episode=b.get("episode"), tag=b.get("tag"),
+            confirm_bulk=_tribool(b, "confirm_bulk") is True)
 
     def _overview(self) -> dict:
         """One round-trip dashboard summary: counts per layer + dream backlog."""

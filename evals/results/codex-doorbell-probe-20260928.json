@@ -1,0 +1,35 @@
+{
+  "harness": "evals/codex_doorbell_probe.py",
+  "record_version": 1,
+  "recorded_at": "2026-09-27T17:28:40+00:00",
+  "window_start": 1790530043.034,
+  "recipient": "fde56e14",
+  "versions": {
+    "pseudolife-mcp": "0.15.0",
+    "codex": "codex-cli 0.156.1"
+  },
+  "bells": [
+    1790530059.0
+  ],
+  "timeline": {
+    "sent_at": 1790530043.034,
+    "bell_at": 1790530059.0,
+    "first_event_after_bell": {
+      "at": 1790530069.876,
+      "event": "read"
+    },
+    "read_at": 1790530069.876,
+    "ack_at": 1790530073.838,
+    "send_to_bell_s": 15.966,
+    "bell_to_first_event_s": 10.876,
+    "bell_to_ack_s": 14.838,
+    "counts": {
+      "sends": 1,
+      "bells": 1,
+      "reads": 1,
+      "acks": 1,
+      "events_by_recipient_after_bell": 2
+    },
+    "outcome": "rung, turn taken, acknowledged"
+  }
+}

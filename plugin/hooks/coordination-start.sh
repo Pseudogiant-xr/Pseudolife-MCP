@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+# Session-local digest handoff, then the board check-in when the daemon
+# serves one for this credential (one bounded request).
+INPUT=$(cat 2>/dev/null || true)
+SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+[ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# Coordination digest key (see coordination-prompt.sh for the file layout).
+# Claude Code keeps an MCP server's CLAUDE_CODE_SESSION_ID for the life of
+# the process, while /clear and /resume give hooks a new session id
+# (env-vars docs, 2026-09-23). The shim writes its digest under its launch
+# id, so the hooks keep one record per Claude Code process, named by the
+# CLAUDE_PID Claude Code exports to hooks (not to MCP servers): line 1 the
+# shim's key, line 2 the key of the session the record is confirmed for,
+# line 3 the sha256 of this process's creation identity (below), measured
+# here, where SessionStart has seconds, so that session-end.sh only reads it
+# inside the 1.5 s Claude Code gives a plugin SessionEnd hook, and line 4
+# until when line 3 holds (identity_expiry). Past that, and for records from
+# before 2026-09-28 (two lines), session-end.sh measures.
+# The prompt hook follows line 1 only while line 2 names its own session.
+# A launch writes the session's own key. /clear and /resume carry the record
+# forward only through the handoff session-end.sh has just left
+# (claude-$CLAUDE_PID.switch: time, the creation identity of the process
+# that wrote it, the key of the session that ended), checked against a fresh
+# measurement here, never against the record; compaction only when the
+# record is already confirmed for this session. Anything unproven is
+# replaced by the session's own key, so a record a dead process left behind
+# is never followed, even when its PID comes back. The env id equals the
+# stdin id only in a hook Claude Code started for this session: a host run
+# from a Claude Bash command inherits both variables and must leave the
+# record alone. --continue can still launch the shim with a startup id no
+# hook ever sees; the record cannot name that one.
+valid_key() {  # $1 = a line; prints it when it is a 64-hex key
+    # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+    # a range by locale collation, where a-f takes upper case and 0-9 takes
+    # digits such as the superscript two (tests/test_hook_glob_ranges.py).
+    case "$1" in ''|*[!0123456789abcdef]*) return 0 ;; esac
+    [ "${#1}" -eq 64 ] && printf '%s' "$1"
+}
+sha256_of() {  # $1 = text
+    printf '%s' "$1" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
+}
+write_lines() {  # $1 = path, then its lines; atomic replace, best effort
+    local path="$1"
+    shift
+    printf '%s\n' "$@" 2>/dev/null > "$path.$$" && mv -f "$path.$$" "$path" 2>/dev/null ||
+        rm -f "$path.$$" 2>/dev/null
+}
+# The creation identity of process $1, which a later process reusing the PID
+# does not share; empty where the host offers none, and callers then fail
+# closed. Its text can change while the process runs (identity_expiry says
+# until when it holds), so a cached one is compared only inside that window.
+process_identity() {
+    local stat boot="" fields line=""
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            # Git Bash's own /proc lists MSYS processes, not Windows PIDs.
+            line=$(ps -W 2>/dev/null |
+                awk -v p="$1" '$4 == p || ($1 ~ /^[A-Za-z]$/ && $5 == p) { print; exit }')
+            ;;
+        linux*)
+            if IFS= read -r stat 2>/dev/null < "/proc/$1/stat"; then
+                IFS= read -r boot 2>/dev/null < /proc/sys/kernel/random/boot_id
+                read -r -a fields <<< "${stat##*) }"
+                [ -n "${fields[19]:-}" ] && line="$boot ${fields[19]}"  # field 22, start time
+            fi
+            ;;
+        *)
+            line=$(ps -o lstart= -p "$1" 2>/dev/null)
+            ;;
+    esac
+    [ -n "$line" ] && printf '%s' "$line"
+}
+# The record's line 4 for identity line $1: until when (epoch seconds) that
+# text holds, then the UTC offset it was read under ("-" where it does not
+# depend on one); 0 for no end. Git Bash's `ps -W` prints the start as
+# HH:MM:SS for a process's first 24 hours and as "Mon DD" after
+# (msys2-runtime winsup/utils/ps.cc), both in local time, and macOS's
+# lstart is local time: a DST change or the 24-hour mark changes the text.
+# Linux's boot id and start ticks never change.
+identity_expiry() {  # $1 = an identity line from process_identity
+    local now zone start fields stime
+    case "${OSTYPE:-}" in linux*) printf '0 -'; return 0 ;; esac
+    now=$(date '+%s %z' 2>/dev/null) || return 1
+    zone=${now#* }
+    now=${now%% *}
+    case "$now" in ''|*[!0123456789]*) return 1 ;; esac
+    case "$zone" in [+-][0123456789][0123456789][0123456789][0123456789]) ;; *) return 1 ;; esac
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            read -r -a fields <<< "$1"
+            case "${fields[0]:-}" in
+                [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]) stime=${fields[7]:-} ;;  # a leading status flag
+                *) stime=${fields[6]:-} ;;
+            esac
+            case "$stime" in
+                [012][0123456789]:[012345][0123456789]:[012345][0123456789])
+                    start=$(date -d "$stime" +%s 2>/dev/null) || return 1
+                    case "$start" in ''|*[!0123456789]*) return 1 ;; esac
+                    [ "$start" -le "$now" ] || start=$((start - 86400))
+                    # The 24-hour mark, less an hour (a DST change since the
+                    # start misplaces it by that much) and two minutes (the
+                    # handoff's window after SessionEnd reads it).
+                    printf '%s %s' "$((start + 86400 - 3720))" "$zone"
+                    return 0 ;;
+            esac ;;
+    esac
+    printf '0 %s' "$zone"
+}
+# Sets IDENT to the sha256 of this process's creation identity ('' where
+# the host offers none) and IDENT_UNTIL to its expiry line, measuring at
+# most once per run.
+IDENT="" IDENT_UNTIL="" IDENT_MEASURED=""
+measure_identity() {
+    local identity
+    [ -z "$IDENT_MEASURED" ] || return 0
+    IDENT_MEASURED=1
+    identity=$(process_identity "$CLAUDE_PID")
+    [ -n "$identity" ] || return 0
+    IDENT=$(sha256_of "$identity")
+    IDENT_UNTIL=$(identity_expiry "$identity") || IDENT_UNTIL=""
+}
+write_record() {  # $1 = the shim's key, $2 = the key it is confirmed for
+    measure_identity
+    if [ -n "$IDENT" ] && [ -n "$IDENT_UNTIL" ]; then
+        write_lines "$RECORD" "$1" "$2" "$IDENT" "$IDENT_UNTIL"
+    else
+        write_lines "$RECORD" "$1" "$2"
+    fi
+}
+DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
+    KEY=$(sha256_of "$SID")
+    case "${CLAUDE_PID:-}" in
+        ''|*[!0123456789]*) ;;
+        *)
+            if [ -n "$KEY" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+                RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
+                SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
+                LINE1="" LINE2="" SHIM="" FOR="" CARRY=""
+                if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
+                    { IFS= read -r LINE1; IFS= read -r LINE2; } 2>/dev/null < "$RECORD"
+                    SHIM=$(valid_key "$LINE1")
+                    FOR=$(valid_key "$LINE2")
+                fi
+                case "$SRC" in
+                    compact)
+                        [ -n "$SHIM" ] && [ "$FOR" = "$KEY" ] && CARRY=1
+                        ;;
+                    clear|resume)
+                        STAMP="" WHO="" FROM=""
+                        if [ -n "$SHIM" ] && [ -n "$FOR" ] && [ -f "$SWITCH" ] && [ ! -L "$SWITCH" ]; then
+                            { IFS= read -r STAMP; IFS= read -r WHO; IFS= read -r FROM; } 2>/dev/null < "$SWITCH"
+                        fi
+                        NOW=$(date +%s 2>/dev/null)
+                        # Validated before any arithmetic: bash aborts the
+                        # whole script on a malformed number such as 08.
+                        case "$STAMP" in ''|0*|*[!0123456789]*) STAMP="" ;; esac
+                        case "$NOW" in ''|0*|*[!0123456789]*) STAMP="" ;; esac
+                        if [ -n "$STAMP" ] && [ "$FROM" = "$FOR" ] &&
+                                [ "${#STAMP}" -le 12 ] && [ "${#NOW}" -le 12 ] &&
+                                [ $((NOW - STAMP)) -ge 0 ] && [ $((NOW - STAMP)) -le 60 ]; then
+                            measure_identity
+                            [ -n "$IDENT" ] && [ "$IDENT" = "$WHO" ] && CARRY=1
+                        fi
+                        ;;
+                esac
+                if [ -n "$CARRY" ]; then
+                    # Refreshed as well, so the sweep keeps a live record.
+                    write_record "$SHIM" "$KEY"
+                    KEY="$SHIM"
+                else
+                    write_record "$KEY" "$KEY"
+                fi
+                rm -f "$SWITCH" 2>/dev/null
+                if [ "$SRC" = startup ]; then
+                    # Records of long-gone processes, and temp files a killed
+                    # hook left behind. A live one is rewritten on every
+                    # launch, /clear, compaction and resume.
+                    find "$DIGEST_DIR" -maxdepth 1 -type f \( -name 'claude-*.host*' -o -name 'claude-*.switch*' \) \
+                        -mtime +30 -delete 2>/dev/null
+                fi
+            fi
+            ;;
+    esac
+    # A resumed, compacted or cleared conversation lost the coordination
+    # digest it saw. The .reprint flag asks the next prompt hook to print
+    # the current one again unless something showed it since; it names the
+    # .seen marker found here. .seen itself stays: the Stop hook, wait-mail
+    # and the shim's ring retry read it, and without it a ring for mail
+    # already shown would wake the session on later plain mail.
+    case "$SRC" in
+        resume|compact|clear)
+            if [ -n "$KEY" ]; then
+                SEEN_AT=$(tr -d '\r\n ' 2>/dev/null < "$DIGEST_DIR/$KEY.seen")
+                case "$SEEN_AT" in ''|*[!0123456789]*) SEEN_AT=0 ;; esac
+                printf '%s\n' "$SEEN_AT" > "$DIGEST_DIR/$KEY.reprint.$$" 2>/dev/null &&
+                    mv -f "$DIGEST_DIR/$KEY.reprint.$$" "$DIGEST_DIR/$KEY.reprint" 2>/dev/null ||
+                    rm -f "$DIGEST_DIR/$KEY.reprint.$$" 2>/dev/null
+            fi
+            ;;
+    esac
+fi
+# The board check-in, only when this credential can use the board now. The
+# daemon serves the text, or an empty body when coordination is off, the
+# bearer is missing or unknown, or its principal is not allowed; a client
+# that set PSEUDOLIFE_AGENT_COORDINATION to anything but a yes asks for
+# nothing. One request, no retry: at most about 2 s on top of the record
+# work above, inside the 10 s budget in hooks.json; the record work runs
+# `ps -W` on Windows, 1.6-3.5 s a call on a loaded host (2026-09-23), and a
+# hook killed at its budget loses this output. A daemon that does not
+# answer adds nothing; the shim's initialization instructions still carry a
+# compact check-in when its adapter is up. Connection and credential
+# checks: the same as session-start.sh.
+if [ -n "${PSEUDOLIFE_AGENT_COORDINATION:-}" ]; then
+    case "$(printf '%s' "$PSEUDOLIFE_AGENT_COORDINATION" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) ;;
+        *) exit 0 ;;
+    esac
+fi
+private_regular() {
+    local path="$1" maximum="$2" current parent meta
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        path=$(cygpath -u "$path") || return 1 ;;
+    esac
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    current=$(dirname "$path")
+    while [ "$current" != "." ] && [ "$current" != "/" ]; do
+        [ ! -L "$current" ] || return 1
+        parent=$(dirname "$current")
+        [ "$parent" != "$current" ] || break
+        current="$parent"
+    done
+    meta=$(stat -c '%u %a %h' "$path" 2>/dev/null ||
+           stat -f '%u %Lp %l' "$path" 2>/dev/null) || return 1
+    set -- $meta
+    # Git Bash modes do not describe an NTFS DACL. Keep the regular-file,
+    # single-link and size checks, then apply lifecycle.ps1's native ACL rules.
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        [ "${3:-0}" = 1 ] || return 1
+        [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        # Three Windows runs (2026-09-28), including Git Bash launch:
+        # 0.344-0.375 s each; native ACL parity justifies this cost.
+        PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
+            $ErrorActionPreference = "Stop"
+            try {
+                # Git Bash can hide this module by converting PSModulePath.
+                Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1"
+                $item = Get-Item -LiteralPath $env:PSEUDOLIFE_PRIVATE_FILE -Force
+                if ($item.PSIsContainer -or $item.Length -lt 1 -or
+                    ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 }
+                $parent = $item.Directory
+                while ($parent) {
+                    if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }
+                    $parent = $parent.Parent
+                }
+                $acl = Get-Acl -LiteralPath $item.FullName
+                $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate(
+                    [Security.Principal.SecurityIdentifier]).Value
+                $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                $allowed = @($acl.Access | Where-Object AccessControlType -eq Allow)
+                if (-not $acl.AreAccessRulesProtected -or $owner -ne $current -or -not $allowed) { exit 1 }
+                foreach ($rule in $allowed) {
+                    $sid = $rule.IdentityReference.Translate(
+                        [Security.Principal.SecurityIdentifier]).Value
+                    if ($sid -notin $owner, "S-1-3-4") { exit 1 }
+                }
+                exit 0
+            } catch { exit 1 }
+        ' </dev/null >/dev/null 2>&1
+        return $?
+        ;;
+    esac
+    case "${2:-}" in *00) ;; *) return 1 ;; esac
+    [ "${1:-x}" = "$(id -u)" ] && [ "${3:-0}" = 1 ] || return 1
+    [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
+}
+decode_connection_value() {
+    if value=$(printf '%s' "$1" | base64 --decode 2>/dev/null); then
+        printf '%s' "$value"
+    else
+        printf '%s' "$1" | base64 -D 2>/dev/null
+    fi
+}
+
+CONNECTION_HOME="${CODEX_HOME:-${HOME}/.codex}"
+CONNECTION="${CONNECTION_HOME}/pseudolife/connection.json"
+MANAGED_URL=""
+MANAGED_TOKEN_FILE=""
+MANAGED_CONNECTION=""
+CONNECTION_ERROR=""
+CODEX_HOOK_CONTEXT=""
+if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
+        { [ -n "${PLUGIN_ROOT:-}" ] &&
+          [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
+    CODEX_HOOK_CONTEXT=1
+fi
+if [ -n "$CODEX_HOOK_CONTEXT" ] && [ -e "$CONNECTION" ]; then
+    if ! private_regular "$CONNECTION" 16384; then
+        CONNECTION_ERROR=1
+    else
+        [ "$(wc -l < "$CONNECTION")" -eq 5 ] &&
+            [ "$(sed -n '1p' "$CONNECTION")" = '{' ] &&
+            [ "$(sed -n '2p' "$CONNECTION")" = '  "version": 1,' ] &&
+            [ "$(sed -n '5p' "$CONNECTION")" = '}' ] || CONNECTION_ERROR=1
+        URL_B64=$(sed -n '3s/^  "daemon_url": "\([A-Za-z0-9+\/=]*\)",$/\1/p' "$CONNECTION")
+        TOKEN_FILE_B64=$(sed -n '4s/^  "token_file": "\([A-Za-z0-9+\/=]*\)"$/\1/p' "$CONNECTION")
+        MANAGED_URL=$(decode_connection_value "$URL_B64")
+        MANAGED_TOKEN_FILE=$(decode_connection_value "$TOKEN_FILE_B64")
+        [ -n "$MANAGED_URL" ] || CONNECTION_ERROR=1
+        [ -n "$CONNECTION_ERROR" ] || MANAGED_CONNECTION=1
+    fi
+fi
+
+MANAGED_TOKENLESS=""
+if [ -n "$MANAGED_CONNECTION" ] && [ -z "$MANAGED_TOKEN_FILE" ]; then
+    MANAGED_TOKENLESS=1
+    EXPLICIT_URL=""
+    TOKEN_FILE=""
+else
+    EXPLICIT_URL="${PSEUDOLIFE_MCP_DAEMON_URL:-}"
+    TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-$MANAGED_TOKEN_FILE}"
+fi
+if [ -n "$EXPLICIT_URL" ] && [ -n "$MANAGED_URL" ] &&
+        [ "${EXPLICIT_URL%/}" != "${MANAGED_URL%/}" ]; then
+    CONNECTION_ERROR=1
+fi
+if [ -z "$MANAGED_TOKENLESS" ] && [ -n "$MANAGED_URL" ] &&
+        [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ] &&
+        { [ -z "$EXPLICIT_URL" ] ||
+          [ "${EXPLICIT_URL%/}" != "${MANAGED_URL%/}" ]; }; then
+    CONNECTION_ERROR=1
+fi
+URL="${EXPLICIT_URL:-${MANAGED_URL:-http://127.0.0.1:8765}}"
+URL="${URL%/}"
+case "$URL" in
+    http://*|https://*) ;;
+    *) CONNECTION_ERROR=1 ;;
+esac
+AUTHORITY="${URL#*://}"; AUTHORITY="${AUTHORITY%%/*}"
+case "$AUTHORITY" in ""|*@*) CONNECTION_ERROR=1 ;; esac
+case "$URL" in *\?*|*\#*) CONNECTION_ERROR=1 ;; esac
+URL_REST="${URL#*://}"
+case "$URL_REST" in */*) CONNECTION_ERROR=1 ;; esac
+
+TOKEN=""
+if [ -z "$MANAGED_TOKENLESS" ]; then TOKEN="${PSEUDOLIFE_MCP_TOKEN:-}"; fi
+if [ -n "$TOKEN_FILE" ]; then
+    TOKEN=""
+    if ! private_regular "$TOKEN_FILE" 4096; then
+        # A rejected fresh connection may not have a shim digest yet.
+        mkdir -p "$DIGEST_DIR" 2>/dev/null
+        REJECTED_KEY="${KEY:-$(sha256_of "$SID")}"
+        printf '%s\ttoken\t%s\t0\t0\trejected\n' "$(date +%s)" "${REJECTED_KEY:0:8}" \
+            2>/dev/null >> "$DIGEST_DIR/ledger.log"
+        CONNECTION_ERROR=1
+    else
+        TOKEN=$(cat "$TOKEN_FILE")
+        if [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
+            CONNECTION_ERROR=1
+        fi
+    fi
+fi
+
+AUTH=()
+if [ -z "$CONNECTION_ERROR" ] && [ -n "$TOKEN" ]; then
+    AUTH=(-H "Authorization: Bearer $TOKEN")
+fi
+[ -z "$CONNECTION_ERROR" ] || exit 0
+curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
+    "${AUTH[@]}" "${URL}/api/hook/coordination-start" 2>/dev/null
+exit 0

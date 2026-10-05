@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-05 — upstream v0.17.0 integration)
+- Integrate upstream v0.17.0 and its v55 schema while retaining the independent
+  `v34-rehub` proof tables, immutable artifacts and evidence-linked claims.
+- Port the read-only RE Evidence dashboard into the Svelte Console and ship
+  its compiled assets with the wheel.
+- Keep archive I/O on a proof-only auxiliary connection compatible with the
+  canonical store's writer lease, retaining project/build transaction locks
+  and atomic restores.
+
 ### Changed (2026-09-08 — upstream integration)
 - Merge upstream updates while preserving the namespaced RE evidence store,
   strict artifact validation, cached builds, and the fork's explicit Graph replay.
@@ -92,6 +101,7093 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   search and status filters, immutable hashes, structured addresses, source
   paths, and evidence links without copying proof records into ordinary
   memory, cortex, the graph, or dream consolidation.
+## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
+
+### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)
+- Installs from 0.16.1 and earlier recorded the Claude Code plugin
+  marketplace as a `github` source (the `Pseudogiant-xr/Pseudolife-MCP`
+  shorthand), which Claude Code refreshes over SSH. On a host with no
+  GitHub SSH key the plugin stops updating. The 2026-10-04 fix changed new
+  installs only and left existing ones to a manual edit, which held the
+  0.17.0 release.
+- The plugin step of `pseudolife-mcp update` (release and checkout modes,
+  `--clients-only`, `ops/update_clients.py`) now moves that source to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` before it
+  refreshes the plugin, whether or not the refresh is failing yet. The
+  installers do the same on a rerun, through the new
+  `ops/plugin_marketplace.py`, before their plugin step; `--claude-plugin
+  skip` / `-ClaudePlugin skip` leaves it alone.
+- How it moves: it copies `settings.json`, `known_marketplaces.json` and
+  `installed_plugins.json` to `plugins/backup-<time>-marketplace-https/`.
+  It changes only the `pseudolife-mcp` entry's source under
+  `extraKnownMarketplaces` in `settings.json`, in one rename, keeping every
+  other key. Then it runs `claude plugin marketplace add <https url>`, and
+  reads `known_marketplaces.json` back to check the record moved.
+  Claude Code refuses that add while settings declares the old source. The
+  add rewrites the entry as just its source, dropping keys such as
+  `autoUpdate`, so those are put back. The plugin record stays as it was
+  (all measured on Claude Code 2.1.287 in a throwaway `CLAUDE_CONFIG_DIR`).
+- A refused add (for example, managed settings still declaring the old
+  source), or a record that did not move, puts this marketplace's
+  `settings.json` entry back as it was (the add writes that declaration
+  itself), keeping anything else written to the file meanwhile, and fails
+  the step with the CLI's line. The refresh still runs after a failed
+  move, since it changed nothing and SSH works on some hosts. A file that
+  cannot be backed up or written is a `failed` line, not a crash. A
+  symlinked `settings.json` is edited at its target, and the file keeps its
+  permission bits. An add that moved the record and then failed or timed
+  out (it is bounded at 300 s, with git's credential prompt off) leaves
+  `settings.json` on HTTPS to match the record. A `settings.json` that is
+  not valid JSON fails the step only where a move needs it, not on a host
+  already on HTTPS. An HTTPS source is left untouched
+  and reported current in one line. A fork, a local directory or a pinned
+  ref is somebody's choice and is left as it is, as is every other
+  marketplace. It never runs `marketplace remove`, which uninstalls the
+  plugin.
+- With `CLAUDE_CONFIG_DIR` set, the client update now reads Claude Code's
+  settings and plugins directory there, as Claude Code does; before, the
+  plugin step read `~/.claude/plugins` regardless.
+
+### Fixed (2026-10-05 — two served texts named the wrong fix or delivery path)
+- The shim's "MCP SDK predates v2" message told the user to run `pip install
+  -U "mcp>=2.1,<3"`, which can install an SDK the package's own pin
+  (`mcp>=2.1,<2.2`) refuses. It now prints `"mcp>=2.1,<2.2"`, as the README
+  does.
+- The standing memory-loop block (`MEMORY_LOOP_BLOCK`, and
+  `examples/CLAUDE.memory.md` beside it) said "this briefing arrives via a
+  hook, not MCP", although the block also reaches agents as a standing file.
+  It now says "these instructions arrive via a hook or a standing file, not
+  MCP".
+
+### Changed (2026-10-05 — suite runs clean up the test copies and environments earlier runs left)
+- The WSL and second-machine full-suite runners (`ops/wsl-suite.sh`, behind
+  `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`) kept a test copy (~600 MB)
+  and a uv environment (~220 MB) per checkout and never removed them: on
+  2026-10-05 the second machine's disk went from 62% to 88% in one day (13
+  copies, 7.8 GB, plus 2.9 GB of environments; it had filled on
+  2026-10-04), and WSL on the maintainer's host held 18 copies (11 GB) and
+  3.3 GB. Each run now prunes them before it clones: copies and
+  environments unused for `PSEUDOLIFE_SUITE_PRUNE_DAYS` days (default 3),
+  then the least recently used past `PSEUDOLIFE_SUITE_KEEP` of each
+  (default 8), and lock files whose directory is gone once they are as old,
+  and prints one line saying what went and how much it freed.
+  `PSEUDOLIFE_SUITE_PRUNE=off` (or `0`, `false`, `no`) turns it off; `ops/remote-suite.ps1`
+  forwards all three to the second machine. It removes a copy or
+  environment only while holding its lock (taken without waiting, so one a
+  run is using stays), never the run's own, never one a process works in
+  or runs from (its working directory or argv[0] inside), and an
+  environment only while also holding its copy's lock (which runs of older
+  commits still take). It removes only real directories directly inside
+  the two roots it owns, checked after resolving them, prunes nothing while
+  a root is itself a symlink, and renames each out of the way before deleting it, so an
+  interrupted prune leaves nothing a later run would reuse half-deleted.
+  Mirrors are left alone. A run now holds a shared lock on its environment
+  (`<env>.lock` beside it) for its whole length, and reopens a lock file
+  the pruner removed while it waited. Pruning never fails a run.
+
+### Fixed (2026-10-05 — refusals that look like successes now say why, and bad numbers are refused up front)
+- Several tools answered a refusal or a no-op as a plain success with only
+  a code, so a model often missed it or retried blind. Each such result now
+  carries a one-sentence `note` saying what happened and what to do, and
+  stays a success: `memory_store` (`empty`, `filtered_meta` — "reads as a
+  statement about the memory system itself. Rephrase as the fact." —
+  `below_surprise_threshold`, `rejected`; the service also reports an
+  exact duplicate as `filtered_meta` when `surprise_threshold` is above 0,
+  and that one's note says it repeats a held memory word for word, with no
+  need to retry); `memory_outcome` without
+  Postgres or with lessons disabled (the outcome is not kept; do not
+  retry); `memory_get` / `memory_reinforce` `faded: true` (a wrong id, a
+  forgotten or evicted entry, or a file-mode bank); `memory_set_add` /
+  `memory_set_remove` (`member_invalid`, `member_capped` with the
+  100-member cap, `member_not_found`, `member_remove_refused`);
+  `memory_graph_review` (`bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live`, also per result in a
+  batch); `memory_forget` matching nothing (`deleted_count: 0` /
+  `removed: 0`); and `memory_world_set` `unsafe_source_url` (http(s)
+  required). The service payloads, and so the Console's REST routes, are
+  unchanged.
+- `memory_supersede` and `memory_consolidate` put their refusal sentence in
+  `error` beside the code in `reason`, the reverse of every other tool. On
+  the MCP surface the sentence is now `note`, with `reason` and
+  `target_errors` unchanged; the REST routes keep `error` for the Console.
+- Out-of-range numbers are refused when the arguments are bound, before
+  the tool runs, as an `invalid_argument` tool error naming the parameter:
+  `memory_search(top_k=-3)` used to fail deep in retrieval with "selected
+  index k out of range". `top_k` on the search tools, `memory_recent` `n`,
+  `memory_dream` `limit` and the `memory_consolidation_candidates` counts
+  must be positive. Zero used to be accepted (`top_k=0`, and
+  `memory_dream(limit=0)`, which meant the default) and is now refused
+  too; `confidence` on
+  `memory_fact_set`, `memory_world_set` and `memory_graph_relate` must be
+  within 0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; and
+  `memory_fact_set` refuses a blank entity, attribute or value, which it
+  used to store. The ranges are also written in the parameter text, since
+  Codex drops `minimum`/`maximum` from the schema it shows the model.
+- `memory_history` `as_of` says it takes an ISO-8601 date or epoch
+  seconds, not relative words, and refuses `"yesterday"` with that message
+  instead of "Invalid isoformat string". `document_ingest`'s not-found
+  error now says, once, that the path was looked up on the server's
+  filesystem, inside the container under Docker.
+
+### Fixed (2026-10-05 — a refused tool call is a tool error that says what to fix)
+- When a tool refused a call, the model got a success-shaped result such as
+  `{"error": "CoordinationRefused", "message": "missing_parameter"}`: a
+  Python class name and no word on which parameter was wrong. Transcripts
+  from 2026-10-04 show every `missing_parameter` retry by Claude and Codex
+  sessions was a guess. A refusal raised in a tool body is now an MCP tool
+  error (`isError: true`) whose text and structured content are one JSON
+  object: `error` (a stable snake_case code, never a class name), `message`
+  (one sentence naming the fix), and, where the refusal knows them,
+  `param`, `accepted`, `action`, and `mutation: "unknown"` when a write
+  tool failed in a way that leaves a write in doubt. A coded `ValueError`
+  keeps its code (`missing_parameter`, `invalid_park`, ...); one in prose is
+  `invalid_argument` with that prose; a missing file is `file_not_found`;
+  anything else is `internal_error`, whose class and text stay in the
+  daemon log. No-ops (a dropped near-duplicate, an empty read, queued mail,
+  a `withheld` or `no_path` wake receipt) stay successes, and success
+  payloads are unchanged. Refusals tools return as `{"error": ...}` dicts
+  (`unknown_action`, `bulk_confirm_required`, ...) are unchanged.
+  `invalid_argument` carries no `mutation` field, so it is meant for raises
+  that come before any write; `coordination_unavailable`, which the board
+  reports for an unexpected failure inside its call, says
+  `mutation: "unknown"` on a write tool.
+- Arguments refused before the tool runs (a wrong type, a value outside an
+  enum, a missing required argument, an unknown argument name) come back in
+  the same shape. Before, the client got pydantic's text: `1 validation
+  error for memory_searchArguments`, the value passed (`input_value=...`)
+  and a pydantic docs link. Now it is `invalid_argument` with `param` (the
+  first refused argument) and a message naming each refused argument and
+  what was wrong with it (`top_k: Input should be a valid integer, ...`),
+  never the value. An unknown argument name is `unknown_parameter`, with
+  the same sentence as before (`unknown parameter 'limit' for
+  memory_search; did you mean 'top_k'?`) and `accepted` listing the tool's
+  parameters.
+- The board names what was wrong: `missing_parameter` says what the action
+  needs (`send needs request_id`), `unexpected_parameter` names the
+  parameter, what the action takes and which action takes it instead, and
+  `unknown_coordination_action` lists the actions. `invalid_park` says which
+  of its five causes applied (an unknown `park_reason`, with the six
+  accepted ones; a park field over its length; a bad or more than 7 days
+  ahead `park_expires`; park fields with no park to refine), `invalid_text`
+  which rule the body broke (blank, NUL, over 8,192 UTF-8 bytes with its
+  size, not UTF-8), and `secret_like_body` which field looked like a
+  credential, never its text. The codes are unchanged, so callers keyed on
+  them keep working; the REST API carries the new sentences in its existing
+  `detail` field.
+
+### Changed (2026-10-05 — each memory tool says which sibling fits instead, and marks tools your tier hides)
+- A model reading one tool's description now learns when another tool is
+  the right call. `memory_fact_set` sends a narrative, decision or
+  observation to `memory_store` and many concurrent values to
+  `memory_set_add`, and says it errors on a set-valued slot;
+  `memory_fact_get` sends open questions to `memory_search`;
+  `memory_supersede` sends test junk or a never-true entry to
+  `memory_forget` and a canonical slot to `memory_fact_set`. The standing
+  instructions (`examples/CLAUDE.memory.md`, served as the session-start
+  block) teach `memory_supersede` for a stored entry that is now wrong,
+  marked full tier, with "expand via `memory_toolset` until full" (a
+  minimal-tier session needs two expands to reach it); the guard that kept full-tier tools out of those
+  instructions now admits one only when every mention says "(full tier".
+- A description that names a tool the reader's tier hides now says which
+  tier shows it, in the form `memory_fact_resolve (core)` already used by
+  `memory_search`: on `memory_fact_get` (`memory_fact_resolve`,
+  `memory_history`), `memory_fact_set` and `memory_set_add`
+  (`memory_fact_resolve`) and `memory_graph_relate`
+  (`memory_relation_define`). The 2026-10-04 review counted five "No such
+  tool" errors and about ten abandoned searches for hidden tools; every
+  session that expanded found them. A test now fails when a lower-tier
+  description names a higher-tier tool without its tier, and another when
+  `memory_toolset(action="status")`'s hand-written tier summary drifts
+  from the registry.
+- The `/dream` and `/memory-status` plugin commands say their full-tier
+  tools need `memory_toolset(action="expand")`, one tier per call, until it
+  reports `current: "full"`; the daemon's compose default is core.
+- `memory_recall` no longer quotes its current output caps as numbers
+  (they drift); it says the lists are capped.
+- The `minimal` tier grows from 9 to 10 tools by maintainer decision:
+  `memory_lesson_search` moves there from `core`. The session-start rule
+  says to recall with `memory_search` and `memory_lesson_search`, and
+  `memory_outcome` (minimal) writes the lessons, but a minimal-tier session
+  could not read them back without expanding. Measured cost on minimal:
+  tool descriptions 5,748 to 6,345 characters, parameter descriptions
+  2,742 to 2,879, and the `tools/list` manifest about 16.8 KB to 18.2 KB
+  (compact JSON). `memory_search` and `memory_toolset` no longer list it
+  under core, and the README, configuration guide, System Atlas,
+  `ops/.env.example` and the compose file give the new count.
+
+### Changed (2026-10-05 — a Claude Code session stays reachable while it is open; the Console shows whether the delegate is)
+- A maintainer message to an idle Claude Code session rang only during the
+  hour after its last turn: the plugin's Stop-hook watcher stopped at 59
+  minutes, and the documented fix, a background `wait-mail --timeout
+  14400`, never ran that long because Claude Code stops a background Bash
+  task at the tool's own timeout (30 minutes by default, 2 hours at most;
+  read in the Claude Code 2.1.286 and 2.1.287 bundles). The watcher now
+  listens for 14 days after each turn end, twice the longest delegate
+  lease, so a session is reachable for as long as it stays open without
+  arming anything. Claude Code takes a hook's `timeout` as is (no ceiling)
+  into a Node timer, so the value stays under its 24.8-day limit. After the
+  first hour the watcher polls every 30 s instead of every 5 s, checks on
+  Windows that Claude Code still runs every five minutes instead of every
+  minute, and reads the clock without spawning `date` (bash 4.2 and later),
+  so a session idle for days spawns about 0.07 processes a second (a
+  `sleep` and an `mv` every 30 s, plus `ps -W` and `awk` every five minutes
+  on Windows); a ring then fires up to 30 s after it is decided. **Codex users approve the
+  plugin's hooks once more**: the Stop entry's `timeout` changed (3600 to
+  1209600), and Codex hashes it for the Stop event.
+- Granting or extending a role (Console or `pseudolife-mcp lease
+  delegate`) now says whether the grantee has a live wake path
+  (`reachable`, and the no-path `reason`), and warns when maintainer mail
+  to it would wait for its next turn: the Console shows the warning beside
+  the success toast, the CLI prints it on stderr. The maintainer status's
+  `roles` carry the same two fields per holder, and the Roles band shows
+  "Reachable now" or "No live wake listener" under the delegate and the
+  coordinator.
+- The Console's message thread says why a maintainer message was not rung
+  (for example "no live listener (its listener lapsed)") and no longer
+  calls a nightly cap hourly.
+- The park prompt (Stop-hook gate) and the no-path fallback text no longer
+  tell Claude Code sessions to arm `wait-mail` for waits over 59 minutes.
+
+### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
+- Nearly every board row read `claude-code` or `codex`: the label is set
+  once at registration, so the maintainer could not tell sessions apart or
+  find one to make delegate. Schema **v55** gives each row a name, kept
+  current from the title the harness already shows: Claude Code's session
+  title (the transcript's latest `custom-title`, else `agent-name`, else
+  `ai-title`; formats re-checked on Claude Code 2.1.287) and Codex's thread
+  name (`session_index.jsonl`; Codex 0.160.0). The shim reads it with
+  bounded reads on its heartbeat and sends it only when it changed, so a
+  rename reaches the board within a heartbeat, with no restart (a `/rename`
+  or a renamed Desktop session appends a new `custom-title` line; a renamed
+  Codex thread a new index line). `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` in the
+  shim's environment turns the title reading off. A name the
+  agent sets (`memory_agents(action="update", name=...)`) outranks it, so a
+  session can correct a stale title (after `/clear` the shim still reads the
+  old transcript); `""` clears it and brings the harness title back. Below
+  both: the session's `memory_session_title`, for the caller's own
+  principal only. An unnamed row
+  reads as its label and the first 8 characters of its id, in
+  `memory_agents` list, the Console, lease holders and lease waiters.
+  Names follow the label rule: one that reads as `maintainer`, `daemon`,
+  `passkey` or `verified` is refused, so such a session falls back to its
+  label and short id.
+- Console Board: the session list is its own pane, sized to end at the
+  bottom of the window, so a long board scrolls inside it and the Roles
+  band stays in view. A search box filters by name, short or full id,
+  task, status and project; the delegate, the coordinator and sessions
+  with unread mail are pinned at the top. Each card shows its 8-character
+  id, which copies the full id on click, and keeps its Make delegate /
+  Make coordinator buttons, so a session found by search can take a role
+  at once. A role card's message thread scrolls in its own pane above the
+  composer, opening on the newest message and following new ones unless
+  you have scrolled up, so a long exchange no longer pushes the composer
+  and the Board down the page.
+- The schema change is additive (three columns added only when missing,
+  plus a partial index on `episode`) and runs on daemon start. The harness
+  names need the new shim, which release-mode `pseudolife-mcp update`
+  installs with the clients; nothing else to do.
+
+### Fixed (2026-10-05 — a contested fact's served correction no longer tells the model to write over it)
+- A cortex fact flagged `contested: true` came back from `memory_search`
+  and `memory_fact_get` with a `correct_with` call to `memory_fact_set`,
+  and the response's `correction_note` said to run it now. The standing
+  memory instructions say the opposite: a contested slot is settled with
+  `memory_fact_resolve` after checking, because re-asserting
+  `memory_fact_set` only contests it further (seen 2026-10-04 on a live
+  recall). A contested fact's `correct_with` now names
+  `memory_fact_get(entity=..., attribute=...)` to read the contenders and
+  `memory_fact_resolve(..., accept=<the human's decision>) (core tier)` for
+  once a human decides; no `accept` value is filled in and no
+  `memory_fact_set` call is served. Contested wins over aged. Aged and
+  stale facts keep their `memory_fact_set` call and the run-it-now norm.
+  The shared `correction_note` now scopes "run its call NOW" to aged facts
+  and adds one sentence for contested ones. World facts are unchanged:
+  the world cortex never parks contenders. The standing block
+  (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
+  same.
+
+### Fixed (2026-10-05 — the standing texts teach what the server actually does)
+- The per-turn memory-change note told sessions to "`memory_store` a status
+  note" without naming the source, so a session following it literally
+  stored progress under the default source `agent`, which other sessions'
+  change notes never report and the dream mines. It now says
+  `memory_store(source="status")`, and `memory_store`'s `source` parameter
+  says that `"status"` marks in-flight progress notes, which peers see and
+  the dream skips.
+- `memory_outcome` states that `used_ids` credits only this session's
+  searches from the last hour in its first lines, instead of at the end of
+  the `used_ids` parameter text, which drops the rule.
+- The Claude Code plugin's subagent board guard now lets a subagent read
+  `memory_message(action="history")`, which is read-only (no ack, delivery
+  or wake); it used to be refused with the board writes. The refusal text,
+  `plugin/README.md` and the configuration guide list it with the allowed
+  reads. A plugin change: it reaches clients through the client update step
+  (`pseudolife-mcp update`, or `--all` / `python ops/update_clients.py` for
+  a checkout deploy); `plugin/hooks/hooks.json` is unchanged, so Codex users
+  approve nothing again.
+- Docs drift: README's `memory_history` row names its `as_of` parameter;
+  the providers guide's September Codex check notes today's tier counts
+  (full 38 tools, core 24); the configuration guide gives the minimal tier's
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens; superseded the
+  same day: about 18 KB for 10 tools once `memory_lesson_search` moved to
+  the minimal tier, above) and the full memory-loop block as about 8 KB (it
+  said 7.5 KB).
+
+### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
+- A memory tool called with an argument name it does not have used to
+  succeed with that argument thrown away: `memory_search(limit=3)` returned
+  the default 8 hits, `memory_outcome(note=...)` recorded no detail, and
+  `episode=` on `memory_world_set` vanished. Transcripts from 2026-10-04
+  showed both Claude and Codex models doing this hundreds of times (`limit`
+  on `memory_search` 140 calls and on `memory_lesson_search` 56). Such a
+  call is now an error result (`isError`) that names the parameter, offers
+  the likely one and lists what the tool accepts, for example
+  `unknown parameter 'limit' for memory_search; did you mean 'top_k'?
+  Accepted: query, top_k, ...`. Suggestions come from a small map of the
+  measured confusions (`limit` to `top_k` or `n`, `content` to `text`,
+  `note`/`notes`/`text` to `detail`) and from close spelling matches.
+  The refusal names the parameter and never echoes its value, since a
+  misnamed argument can carry a secret. Every tool's input schema now says `additionalProperties: false`
+  (29 bytes per tool; the largest schema, `memory_agents`, is 3,488 of its
+  4,000-byte cap). MCP request `_meta` is not an argument and is unaffected,
+  and stringified list arguments are still decoded.
+- The session-start episode line, the startup memory core and the resumed
+  or compacted session note now say to pass the episode to every memory
+  tool that accepts it, instead of "on every memory write": world, set,
+  resolve and graph writes take no `episode` parameter, so a model
+  following the old wording now gets a refusal there. Those writes are
+  still attributed to the session wherever the service stamps one (the
+  shim's per-session header).
+
+### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
+- On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's
+  shell printed "no bank found" and worked only as `docker exec
+  pseudolife-mcp-daemon pseudolife-mcp lease delegate ...`: the bank's
+  database URL lives in the daemon container's environment, not the
+  operator's. The commands that open the bank directly (`lease break` and
+  `lease delegate`, every `maintainer` action except the already guided
+  `setup`, and `board-audit export`, `verify`, `redact` and `stats`) now,
+  when they find no database URL and no lite bank but the
+  `pseudolife-mcp-daemon` container is running on the host, re-run
+  themselves inside it with the same arguments (`docker exec`, honouring
+  `PSEUDOLIFE_DOCKER` as `maintainer setup` does), print one line saying
+  so, and exit with the container's code. A terminal is passed through
+  (`-it`) when stdin and stdout are both terminals, `-i` otherwise, so
+  piped JSON stays byte-clean. `board-audit` keeps the files it names on the
+  host: `export --out` and `stats --out` / `--append` are written here (an
+  export that fails or is interrupted leaves no file, as before), and
+  `stats` sends this host's suite-lock durations file to the container on
+  stdin. The re-run marks itself (`PSEUDOLIFE_DAEMON_EXEC`) and never
+  re-runs again. With no running container the old message stays, now
+  naming the `docker exec` form. The configuration guide no longer tells
+  operators to `docker exec` these commands by hand.
+
+### Fixed (2026-10-05 — the Console shows the passkey prefix the host prints)
+- `pseudolife-mcp maintainer setup` asks the maintainer to check that the
+  Console shows the passkey prefix the host printed. The host printed 12
+  characters (`Ab3dEf6hIj_k`) and the Console 8 (`Ab3dEf6h`), so the check
+  read as a mismatch. The Console now shows 12 everywhere it names a
+  passkey (Settings, Your passkeys; the `maintainer confirm` command it
+  suggests; key-change notices and history; the signing preview). One
+  constant per side (`KEY_PREFIX_LEN` in `storage/maintainer.py` and in
+  `frontend/src/lib/format.ts`), pinned equal by `tests/test_console_build.py`.
+- Setup's browser step sends the maintainer to a new HTTPS address, where
+  the browser has no Console token yet (the Console stores one per
+  address). It now says so up front: click "Set a bearer token" and paste
+  the token the Console uses at its usual address (the daemon's
+  `PSEUDOLIFE_MCP_TOKEN`, which a single-token install also keeps in the
+  client's token file). It never prints the token. The Console's own "did not accept this console's token" panel
+  says the same.
+
+### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
+- Turning on maintainer passkeys took four manual steps on the daemon host:
+  a `tailscale serve` command, a hand edit of the daemon's config file, a
+  restart, and two `pseudolife-mcp maintainer` commands (inside the daemon
+  container on the Docker tier). `pseudolife-mcp maintainer setup` now does
+  all of it, guided. It picks the Console's name: this host's tailnet HTTPS
+  name when Tailscale runs with HTTPS certificates on (and serves it with
+  `tailscale serve --bg --https=8443`), else `http://localhost:<port>`. It
+  writes `coordination.maintainer` into the daemon's config with a backup,
+  restarts the daemon container (`docker restart`), and runs the enrolment.
+  It asks once before any host change (`--yes` for scripts). Only the
+  passkey tap and one y/N question remain for the maintainer: does the
+  Console show the printed prefix and label? N revokes the key. A re-run on
+  a configured host changes nothing, and a valid name is never replaced.
+  Tailscale stopped or without HTTPS certificates is refused rather than
+  guessed. The command reads the daemon's config and the bank in the
+  daemon's own environment, so it needs no bearer.
+- A daemon-host install with a token offers the setup at the end, one
+  question, default no, that names the tailnet exposure (devices on the
+  tailnet can reach the daemon at `https://<this machine>:8443`); an install
+  without a terminal prints one line naming the command,
+  and a re-run where passkeys are in place asks nothing (`maintainer setup
+  --check`: exit 0 set up, 1 not, 2 unreadable).
+- A Docker-tier `pseudolife-mcp update` (release or checkout mode) ends with
+  one line naming `pseudolife-mcp maintainer setup` until passkeys are set
+  up on a bearer-gated daemon. At a terminal it offers to run it (default
+  no). `pseudolife-mcp doctor`'s passkey line and fix name the command too.
+- A checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's
+  host) creates the test suite's own Postgres login (`test-login create`,
+  never `--rotate`) when the account has no `~/.pseudolife-mcp/test-pg.env`
+  and the bundled Postgres container runs on the host, and only when the
+  account's test suite connects to that container: its test server
+  (`PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
+  `~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`) must be the
+  container's published port. A host whose suites use another server, such
+  as a box whose bundled Postgres holds the live bank, is skipped with one
+  line. A match on the suite's default alone (no variable, no env file, as
+  for a deploy run as root) is not taken as the suite's word: a deploy at a
+  terminal asks once, default no, and one without a terminal skips with one
+  line naming `pseudolife-mcp test-login create`. A refusal warns with the
+  fix and leaves the deploy standing;
+  `-NoTestLogin` / `--no-test-login` skips it. A release update never
+  creates it.
+
+### Fixed (2026-10-05 — board roles and maintainer messages: follow-ups to the #569 review)
+- A session that held both a project's delegate and coordinator leases from
+  before v54 could no longer renew its coordinator lease (`already_delegate`),
+  so the lease lapsed under it. The live holder now renews it; a delegate
+  still cannot newly claim or queue for `coordinator:<project>`, so once that
+  old hold lapses or is released the session keeps one role. The upgrade
+  leaves such a pair in place until then; the maintainer can revoke either
+  role from the Console.
+- `memory_message history` returned the full text of a message the
+  maintainer withdrew, without `repudiated_at`, where `receive` shows the
+  withdrawal sentence. History now shows it the same way. A withdrawal also
+  appends a `maintainer_repudiate` event to the board's audit log, so history
+  keeps withholding the text after the live message row is pruned (history
+  keeps bodies for the audit retention, longer than the live row).
+- A grant or assignment signed while the recipient held neither role still
+  broke the other role if the recipient took it before the tap, although the
+  signed preview said `also_breaks: null`. The other role's holder is now
+  signed too (`other_holder`), so such a change answers `409 role_changed`.
+- `coordination.maintainer.origin` with an explicit default port
+  (`https://host:443`, `http://localhost:80`) passed validation, but browsers
+  serialise the origin without it, so every assertion failed while doctor
+  reported passkeys on. That origin is now refused with
+  `409 maintainer_https_required`, naming the default port.
+- Docs: the v54 schema comment and version-history row said spent nonces
+  are kept until their payload expires; they are kept 7 days past it. The
+  row also names `maintainer_bootstrap.failed_attempts`.
+
+### Fixed (2026-10-05 — `test-login create` no longer locks out a daemon it cannot see, and restores close their scratch copy)
+- An independent review of `pseudolife-mcp test-login create` found that its
+  daemon-lockout check ran only when `PSEUDOLIFE_MCP_DATABASE_URL` was in
+  the operator's shell. With `--admin-url` against a server whose daemon
+  reaches the bank only through PUBLIC, the revoke locked that daemon out at
+  its next connection. It now also refuses, before any change and naming
+  the `GRANT CONNECT` to run, when any role connected to a bank now
+  (`pg_stat_activity`) would lose CONNECT, and says "daemon user not
+  checked" when that variable is absent or names no user. A daemon that
+  is down and reaches
+  the bank only through PUBLIC is still not seen: the guides now say so
+  instead of claiming the check unconditionally.
+- `--role` naming the daemon's own database user (from that variable) is
+  refused outright (the check skipped exactly that case).
+- The role changes run as one transaction: a statement failing part way
+  (a bank dropped meanwhile) left the role with a new password no file held,
+  since the staged file was removed.
+- A login file that cannot be written safely (`PrivateStateError`, or an
+  OS error) ends with one `test-login:` line and exit 1, not a traceback.
+  When the file cannot be moved into place after the role change, the
+  message says the role already has the new password and names the staged
+  file that holds it.
+- `ops/restore.*` rehearsals close their scratch copy
+  (`pseudolife_restore_rehearsal`, the whole bank) to PUBLIC before the
+  replay, and stop if they cannot; the test login could read it meanwhile.
+  The REVOKE a real restore runs on the bank (2026-10-04) is unconditional:
+  it runs whether or not a test login exists, so a custom role that reached
+  the bank only through PUBLIC's CONNECT loses it after a restore and needs
+  its own `GRANT CONNECT`.
+- Test infrastructure: the suite's refusal of a per-run database another
+  role owns no longer applies under `PSEUDOLIFE_TEST_DATABASE_URL`, whose
+  contract leaves the database to its caller; the bulk session reaps in
+  `tests/` and `evals/` also require `usename = current_user`, since a
+  non-superuser login cannot terminate another role's session; two
+  `tests/test_pg_defaults.py` tests hide a provisioned machine's login file
+  so they keep exercising `ops/.env`; and the server half of
+  `tests/test_test_login_cli.py` fails, rather than skips, in CI's
+  PostgreSQL job when `PSEUDOLIFE_TEST_LOGIN_ADMIN_URL` is missing.
+
+### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
+- The maintainer could not reach a board session at all, and changing who
+  holds a project's delegate or coordinator role took a shell on the daemon
+  host. Both now work from the Console, each action proven by a passkey tap
+  (WebAuthn, user verification required); a bearer token alone can do
+  neither. Specs: `docs/superpowers/specs/2026-10-02-maintainer-wake-design.md`
+  and its addendum `2026-10-04-board-roles-passkey.md`.
+- Schema v54: `maintainer_passkeys`, `maintainer_bootstrap` and
+  `maintainer_nonces` tables (in the bench reset roster, out of logical
+  exports with the `maintainer_secret_v1` meta key), and
+  `coordination_messages.origin`, `.maintainer_proof` and `.repudiated_at`.
+- Routes `GET /api/maintainer`, `POST /api/maintainer/challenge|enrol|send|role|cancel|revoke|repudiate`,
+  `GET /api/maintainer/sent|inbox`, each calling one `MemoryService.maintainer_*`
+  method. Challenges are stateless (an HMAC'd payload carrying every input
+  that decides the outcome); assertions and registrations are verified
+  strictly (`cryptography` plus a minimal CBOR/COSE decoder: ES256, EdDSA,
+  RS256; exact origin and RP ID; UP and UV; no crossOrigin or topOrigin;
+  sign-count compare-and-set). Every failure answers `assertion_invalid`.
+- `coordination.maintainer.rp_id`, `.origin` (HTTPS, or `http://localhost`
+  for local use) and `.maintainer_per_recipient_per_hour` (30) are
+  config-file only: `POST /api/config` refuses them (`config_protected`).
+- `pseudolife-mcp maintainer enrol-code|confirm|revoke|reset|list` on the
+  daemon host manages the passkeys.
+- Maintainer mail carries `origin: "maintainer"` and `verified` in a
+  `receive` result (with `maintainer_note`), rings any session with a live
+  listener whatever its park, and can be repudiated. Agents reply with
+  `memory_message send reply_to=<id>` and no `to`. `maintainer` is reserved:
+  never a bearer principal, a target, or a label (nor `daemon`, `passkey`,
+  `verified`, in any spelling that normalizes to one).
+- Role changes: grant/revoke the delegate and assign/revoke the coordinator
+  per project, one role per session; the delegate's reopen authority now
+  accepts a grant recorded by the operator or the maintainer. The holder a
+  change replaces or evicts is part of the signed payload: if another
+  session took the role during the tap, the change answers `409
+  role_changed` and does nothing.
+- The Console's Board gains a pinned Roles band per project: the delegate
+  (time left, Message, Extend, Revoke) and the coordinator (Message, Revoke),
+  with Make/Revoke buttons for both roles on every session. Each slot has a
+  composer and the thread with that session. Every change and message shows
+  what will be signed, then asks for the passkey. Settings gains Your passkeys
+  (bootstrap with the host's one-time code, add a key, cancel a quarantined
+  one, revoke). Without HTTPS or an enrolled key, the band still shows who
+  holds each role and says how to set it up.
+- Every `/ui/` response carries a strict Content-Security-Policy,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and
+  `X-Content-Type-Options: nosniff` (JSON API answers carry `nosniff` too);
+  the Console's theme bootstrap moved out of an inline script into
+  `/ui/theme.js`.
+- `pseudolife-mcp lease delegate` now also frees the grantee's
+  `coordinator:<project>` lease (one role per session; the answer names it in
+  `also_broken`). The rule also holds outside the signed routes: the
+  delegate's own claim of its project's coordinator lease is refused
+  `already_delegate`, and a session queued for that lease leaves the queue
+  when it is made the delegate (security review, 2026-10-04).
+- `memory_message` documents replying with `reply_to` and no `to` (how a
+  session answers the maintainer); a receive result that holds maintainer
+  mail carries `maintainer_note`, saying that mail was signed by the maintainer.
+- Every change to the maintainer's passkeys (bootstrap enrolment, host
+  confirm, an added key, cancel, revoke from the Console or the host, reset)
+  is recorded in the board's hash-chained audit log with the path it came by
+  and the key that signed it, and `GET /api/maintainer` lists the newest 30
+  (`key_changes`). Settings shows them; a change from the last 7 days that
+  this browser did not make is a banner there and a notice on the Roles band.
+  Console key changes also post a board notice. The passkey cannot stop
+  someone with the host shell or the database password from replacing the
+  keys, so it makes that loud.
+- A one-time enrolment code burns after 5 wrong attempts
+  (`maintainer_bootstrap.failed_attempts`, v54).
+- `pseudolife-mcp doctor` reports maintainer passkeys: off (information),
+  invalid configuration (a failure, with the fix), or the RP ID, origin and
+  number of active keys. The 409 `maintainer_https_required` answer names the
+  rule the configuration breaks (`config_problem`).
+- Board labels that only look like a reserved name are refused
+  (`invalid_label`): look-alike letters (Cyrillic, Greek, fullwidth, 0 and 1),
+  `maintainer` anywhere in a label or one edit away, `daemon` one edit away,
+  and `passkey` or `verified` exactly. Labels set earlier keep working and
+  the digest shows them as an unnamed peer. A label such as
+  `maintainer-helper`, accepted before, is now refused.
+- One session's replies can no longer fill the maintainer's inbox: the
+  pending-mail cap on the maintainer row counts each sender's own replies.
+- `pseudolife-mcp maintainer confirm|revoke` accept an id prefix that starts
+  with `-`.
+
+### Added (2026-10-04 — the test suite gets its own Postgres login, so agent sessions stop holding the bank owner's password)
+- The bundled Postgres serves the production bank and the test suite's
+  per-run databases under one role, `pseudolife`, the server's superuser,
+  and the suite logged in as it with `ops/.env`'s `POSTGRES_PASSWORD`. The
+  full-run refusal told every session to copy `ops/.env` into its worktree,
+  so any agent that ran tests held the bank owner's password, beside the
+  operator bearer tokens in the same file. New `pseudolife-mcp test-login
+  create`, run once on the daemon host, provisions idempotently a role
+  `pseudolife_test` (LOGIN CREATEDB; no superuser, CREATEROLE, REPLICATION
+  or BYPASSRLS; every role membership revoked), revokes CONNECT on the
+  production database and on `template1` from PUBLIC (the owner keeps it;
+  a session in `template1` would fail every `CREATE DATABASE` that copies
+  it, which needs no CONNECT there), hands leftover per-run test databases
+  an owner run left (the names the suite's prune drops) to the role,
+  installs `vector` in `template1` (pgvector's extension is not trusted, so
+  the login could not create it; `CREATE DATABASE` copies it), and writes
+  the login to an owner-only `~/.pseudolife-mcp/test-pg.env`. It runs
+  `psql` in the Postgres container as that container's superuser (or uses
+  `--admin-url`, which needs no password in it: libpq reads `PGPASSWORD`
+  or `~/.pgpass`, and an error never prints one), sends the server only the
+  password's SCRAM verifier, refuses without a superuser connection or when
+  the daemon's database user (`PSEUDOLIFE_MCP_DATABASE_URL`) would lose
+  CONNECT, prints what it changed and checks the result. A re-run
+  re-applies the file's password; `--rotate` draws a new one, and is
+  required when the role exists but no file here holds its password.
+- The suite logs in with `PSEUDOLIFE_TEST_PG_PASSWORD` (as
+  `PSEUDOLIFE_TEST_PG_USER`, else the owner), then the test login file
+  (`PSEUDOLIFE_TEST_PG_LOGIN_FILE`, else `~/.pseudolife-mcp/test-pg.env`),
+  then `ops/.env`, then the compose default. A run that still logs in as
+  the owner, whatever the source, works and prints one line naming the
+  source and the fix; the fresh-worktree refusal names `test-login create`
+  instead of copying `ops/.env`, and a run whose per-run database another
+  role owns is refused in one line naming the `DROP DATABASE` to run.
+  `ops/wsl-suite.ps1` forwards the login file and stops copying `ops/.env`
+  into WSL when it exists. The installers run the command only on request
+  (`-TestLogin` / `--test-login`, for contributors who run the suite against
+  the bundled server; a failure only warns); `pseudolife-mcp update` never
+  does. `ops/restore.*` revoke CONNECT from PUBLIC again after recreating
+  the bank, since a plain dump carries no database grants.
+- Running the suite as such a login found one more privileged act: the
+  per-test reset reaped autovacuum workers too, which PostgreSQL 18 allows
+  only superusers. The bulk reaps in `tests/` and `evals/` now end client
+  backends only.
+- CI's PostgreSQL job provisions the login (as its own role,
+  `pseudolife_test_ci`) on its service container
+  (`PSEUDOLIFE_TEST_LOGIN_ADMIN_URL`) and runs a slice of the PG-backed
+  suite under it, checking it cannot connect to the production-named
+  database or `template1`. New guide: [running agent sessions under a separate
+  account](docs/guide/agent-isolation.md).
+
+### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
+- `memory_agents` and `memory_message` served 26 parameters with no
+  description and docstrings in compressed shorthand ("Bearer required;
+  list before shared work/resume."). Two reviews of the served surface, one
+  reading it from Claude Code's transcripts and one from inside Codex,
+  converged on the same findings: a model cannot see a cap Codex strips
+  from the schema (`maxLength`, `minimum`, `maximum`), so 63 of Codex's 110
+  model-caused errors in five weeks were `string_too_long` on these fields;
+  a send without `request_id` fails with a bare `missing_parameter` that
+  models retried three or four times; and the wording `""/plain status
+  clears` sent models after the empty-string route (89 malformed calls in
+  17 Claude sessions) when a status update with no park fields already
+  clears a park. Every parameter of both tools now carries a description
+  that names its action, whether it is required there, and its cap; the
+  docstrings lead with purpose, say that a wake receipt describes
+  notification rather than delivery (a `withheld` send is queued, not
+  failed, and must not be resent with `clears` or `urgent` just to ring),
+  and that reusing a `request_id` with changed inputs is a
+  `request_conflict`.
+- `memory_search` opens with what it searches (including ingested
+  documents) and which sibling to call instead (`memory_fact_get`,
+  `memory_recall`, `memory_lesson_search`, `memory_world_search`,
+  `document_search`, with their tier), and says what its filters reach:
+  `sources` / `bands` / `episodes` / `tags` narrow direct neural hits only,
+  not cortex facts, reference documents or contiguity neighbours, and `[]`
+  means no filter. `top_k` says "use top_k, not limit" — both model
+  families sent `limit`, which the server ignored silently (140 calls).
+  The "~4 in 10" figure on `verified: false` moves out of the served text
+  (a ratio without its population or date is not a runtime contract; the
+  measurement stays in the 2026-09-23 review's test comment).
+- `memory_toolset` says what expanding does and does not do: one tier per
+  call, `list_changed_sent` means the notification was sent, not that the
+  client refreshed its tool list (observed from Codex: `status` said
+  `full` while the callable catalog stayed at 24), so rediscover tools
+  after expanding and report a mismatch rather than expanding again. Its
+  `status` ladder now lists the board tools under core and
+  `memory_episode_summary` / `memory_graph_unrelate` under full.
+- The MCP initialization text is 502 characters composed (was 508): the
+  base says "pass episode where accepted" (only the tools with an
+  `episode` parameter can record one; the others ignored it silently),
+  and the shim's check-in suffix says "Subagents never send; all may
+  receive; update/ack need an own board ID" instead of "only read the
+  board", which was wrong for a Codex subagent (its own address does
+  update, receive and ack) and overstated for a Claude Code one (it may
+  receive). Codex prefixes this text to every tool declaration it shows
+  the model, so it is paid 24 times per session. The bench-pinned
+  `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again.
+- The parameter-description budgets move to the measured totals plus a
+  tenth of headroom (3,000 / 8,750 / 12,500); the description budgets and
+  the per-tool client limits (1,600 characters, 4,000 schema bytes) are
+  unchanged and every tool stays under them (largest schema
+  `memory_agents`, 3,459 bytes).
+
+### Fixed (2026-10-04 — `lease delegate --for 7d` works as documented)
+- The `pseudolife-mcp lease` duration arguments (`delegate --for`,
+  `run`/`hold --expect`, `--ttl` and `--timeout`) now accept a `d` suffix
+  for days, so `--for 7d` is 604800 seconds, alongside the bare seconds,
+  `s`, `m` and `h` forms that keep working; each argument's own bounds
+  still apply (`--for` at most a week). 0.16.0 and 0.16.1 refused `7d` with
+  "not a duration" although their CHANGELOG entries show `lease designate
+  PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
+  7d` (0.16.1, and the configuration guide): on those versions use
+  `--for 168h`.
+
+### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
+- A shim runtime installed by `pseudolife-mcp update` run from inside a
+  checkout could record the wrong version in its `runtime.json`. The
+  install asks the new runtime's Python which `pseudolife-mcp` it holds,
+  and `python -c` puts the working directory first on `sys.path`, so a
+  stale `pseudolife_mcp.egg-info` left in the checkout by an earlier
+  in-tree build answered instead (seen on Linux: 0.16.1 installed,
+  0.15.0 recorded). The wrong label made the same-release check miss, so
+  every rerun installed yet another runtime. The probe now runs isolated
+  (`python -I`), reading only the runtime's own packages.
+- A runtime already labelled wrongly is harmless: the launcher picks a
+  runtime by its sequence number, not its label, so it runs the right
+  code. The first update run by a release with this fix installs one
+  correctly labelled runtime, and a later update removes the mislabelled
+  one once nothing runs from it.
+- The probe runs inside the updater doing the install, so an updater
+  without this fix still mislabels the runtime it installs, the fixed
+  release's included. Run `pseudolife-mcp update` from outside a
+  checkout to avoid that.
+
+### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
+- `connect`'s MCP handshake ran its child Python, and the shim that child
+  starts, in the current directory. `python -c` and `-m` put that directory
+  first on `sys.path`, so `connect` run from inside a source checkout
+  validated the checkout's `pseudolife_memory` instead of the installed one.
+  The handshake child now runs from the system temporary directory, and the
+  shim it starts inherits that directory, and a relative token-file path
+  in a registration is resolved against the directory `connect` ran from
+  before the child gets it, as the checks before the handshake already
+  resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
+  which `-I` would ignore.
+
+### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
+- The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
+  plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
+  that shorthand as a `github` source and refreshes it over SSH, so on a host
+  with no GitHub SSH key or known_hosts entry every later
+  `claude plugin marketplace update` failed ("SSH host key is not in your
+  known_hosts file") and the plugin silently stopped updating (seen on a
+  Linux host, 2026-10-04). They now add it by
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`, as do the manual
+  `/plugin marketplace add` commands in the README, the plugin README, the
+  remote-bank guide, the translated READMEs, and the client step's advice
+  when the marketplace clone is missing. `tests/test_plugin_packaging.py`
+  fails while any of them names the shorthand.
+- **Existing installs** keep the `github` source until it is moved.
+  `pseudolife-mcp update` and the installers now move it themselves (the
+  2026-10-05 entry above); the README's Updating section keeps the manual
+  steps as a fallback.
+
+### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
+- The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
+  `ops/update_clients.py`) runs `claude plugin marketplace update
+  pseudolife-mcp` and then compares the marketplace clone with the installed
+  cache. It ignored a failed marketplace update, so a cache matching a clone
+  that could not be refreshed read `current`. On 2026-10-04 the homelab box
+  had no github.com host key for root: Claude Code's SSH clone failed, the
+  clone stayed at 0.16.0's commit, and the box kept 0.16.0's plugin hooks
+  after a 0.16.1 deploy that reported the plugin green.
+- A failed marketplace update (a non-zero exit, or the CLI's `Failed to
+  update marketplace` / `Failed to refresh marketplace` line even with exit
+  0) now makes the step `failed`, which fails the run with the client-step
+  exit code. The detail quotes the CLI's line and the remedy: for a missing
+  host key, add github.com's key to `known_hosts` after checking its
+  fingerprint, or point the marketplace at HTTPS with `claude plugin
+  marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which re-points the existing entry in place (measured on Claude Code
+  2.1.287). It never suggests `marketplace remove`, which uninstalls the
+  plugin. (The detail also named a `settings.json` declaration to change
+  first; since 2026-10-05 the step moves the installers' old source to
+  HTTPS itself, so that advice was retired.) The step
+  still installs a clone that differs from the cache,
+  since that is progress, but it reports `failed` and says the clone may be
+  behind, not `refreshed`. A successful marketplace update behaves as
+  before.
+
+## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
+
+### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
+- The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
+  urllib3 from 2.7.0 to 2.8.0 (#557), which fixes two high-severity issues
+  (an HTTPS proxy's TLS configuration could be ignored or overridden,
+  GHSA-8988-9cw3-xx77; a chunk-size line could be buffered without bound,
+  GHSA-vxq7-64xx-v4gw) and one medium (chunked Deflate streaming could loop
+  forever, GHSA-gh4c-6fx4-qh6g). A deployment that sends the daemon's
+  outbound HTTPS through a forwarding proxy with its own TLS settings
+  should read urllib3 2.8.0's release note on proxy TLS configuration.
+
+### Changed (2026-10-04 — the authority to reopen a done session is the maintainer's delegate, not a coordinator)
+- Two things were both called "coordinator": the open `coordinator:<project>`
+  lease, which any session may claim and which grants nothing, and the
+  operator's grant whose holder's urgent mail reopens done parks. The first
+  version of #549 confused them, and the 0.16.0 wording still invited it.
+  The grant is now the **maintainer's delegate for the project**;
+  "coordinator" means only the open role, which is unchanged.
+- The grant's lease is `delegate:<project>` (was
+  `designated:coordinator:<project>`), granted with
+  `pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` and logged as
+  `lease_delegate` (was `lease_designate`). A session's acquire of any
+  `delegate:` lease is refused `reserved_lease`, and `designated:` stays
+  reserved. `lease designate` still works as a deprecated alias that prints
+  one line naming `lease delegate`; the usage line and `pseudolife-mcp help`
+  name `delegate`. No schema change.
+- The wake receipt and audit reason for the delegate's rings is `delegate`
+  (was `coordinator`) from now on. Wake rows recorded as `coordinator`
+  before the upgrade stay as history: they still count against the sender's
+  `authority_per_sender_per_hour` and a queued reopen is still served.
+- The wording "the project's designated coordinator" is now "the
+  maintainer's delegate for the project" in the done-park receipt's
+  `reopen_by`, the Stop hook's park gate (served text and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks; `hooks.json` is unchanged, so
+  Codex users approve nothing again), the check-in park sentence, the
+  served `memory_message` description, the README and the guides.
+- **Operator step after upgrading:** a grant made under 0.16.0 is not
+  honoured (it lasted at most 7 days), so re-grant any live one with
+  `pseudolife-mcp lease delegate PROJECT AGENT --for 7d` (in the Docker tier,
+  inside the daemon container). Clear a leftover
+  `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
+  or let it expire. Before deploying, run `pseudolife-mcp lease list` and
+  `lease break` any `delegate:` lease: 0.16.0 let any session hold one under
+  that name. Such a hold grants nothing after the upgrade either, since a
+  delegate counts only with the operator's `lease_delegate` audit record for
+  the lease's current fence (coordinator review of #559). The hook fallback
+  wording under `plugin/hooks/` needs the update's client step.
+
+### Fixed (2026-10-04 — `pseudolife-mcp update` no longer deletes the shim runtime it runs from)
+- On Linux and macOS, `pseudolife-mcp update` could never finish its
+  client side. The launcher runs the update from the current shim
+  runtime; the shim step installs the new release as a newer runtime and
+  then removes unused ones, and the update's own process was never
+  counted as using its runtime. That runtime was deleted under the
+  running update, whose next lazy import failed
+  (`ModuleNotFoundError: No module named
+  'pseudolife_memory.tunnel_profiles'`) after the plugin and Codex steps,
+  so their outcome was never reported and the run ended with a traceback
+  and exit 1. Windows was spared only
+  because it refuses to rename a directory a process runs from. The
+  runtime this interpreter runs from is now always kept and reported like
+  a runtime a session still runs; a later update removes it once idle.
+- A rerun of the client side (`pseudolife-mcp update --clients-only`,
+  the retry the update names) installed yet another runtime of the same
+  release every time. When the current runtime was installed from that
+  same pinned release, the shim step now reports `current:<version>` and
+  installs nothing (`--reinstall` installs it again). Checkout sources
+  still install every time, since their code changes under one version.
+- **Workaround for 0.16.0 on Linux/macOS**: the 0.16.0 updater still has
+  the bug, so after `pseudolife-mcp update` on 0.16.0, finish the client
+  side from a checkout at v0.16.0 with `python ops/update_clients.py
+  --repo <checkout> --only plugin,codex`. Updating from 0.16.0 to the
+  fixed release runs 0.16.0's updater once more and hits the same crash
+  after installing the new runtime; run `pseudolife-mcp update
+  --clients-only` once afterwards and the fixed code completes the
+  client side.
+
+## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
+
+### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
+- The served `memory_message` description said a done session reopens
+  only for urgent mail from the "maintainer/coordinator/clearer". Since
+  the change below, the coordinator that counts is the one the operator
+  designated (the live `designated:coordinator:<project>` lease); holding
+  the open `coordinator:<project>` lease, which the `memory_agents`
+  description tells sessions to claim, grants nothing. Read side by side,
+  the two descriptions suggested that claiming the lease let a session's
+  urgent mail reopen done parks. The sentence now says "designated
+  coordinator", pinned by a test. The docstring was reflowed one line
+  shorter to pay for the word; tier description budgets are unchanged.
+
+### Fixed (2026-10-04 — the Stop gate and lease help name the designated coordinator)
+- The Stop hook's park gate told a stopping session that urgent mail from
+  "the project coordinator" still rings a done park. Since the change
+  below, only the operator-designated coordinator does, so the gate text
+  (`PARK_GATE_MESSAGE`, the hook fallbacks in `stop-wake.sh` and
+  `lifecycle.ps1`, the unserved check-in sentence and the configuration
+  guide's quotes) now says "the project's designated coordinator".
+  `hooks.json` is unchanged, so Codex users approve nothing again.
+- `pseudolife-mcp lease --help` now lists `designate` in its usage line,
+  and `pseudolife-mcp help` names `lease designate PROJECT AGENT` beside
+  `lease break` as an operator command.
+
+### Changed (2026-10-03 — only an operator-designated coordinator reopens a done session)
+- The first version below made the holder of the `coordinator:<project>`
+  lease the coordinator, and any session can claim a free one, possibly
+  steered by text it read. Its urgent mail to `all` then rang every done
+  session in the project as `reason: coordinator`, lending it authority it
+  was never given. Passing the lease between one principal's sessions
+  spread the 12-an-hour authority budget over several senders. And the
+  first holder kept the real coordinator out for up to a day (review of
+  #549). Coordinator power is now the lease
+  `designated:coordinator:<project>`, granted to one agent id by the
+  operator with `pseudolife-mcp lease designate PROJECT AGENT [--for
+  DURATION]` (default 1d, at most 7d). Like `lease break`, it opens the
+  bank directly and logs a `lease_designate` with the operator as actor.
+  Revoke it with `lease break`; the designee may release it to resign.
+  Leases named `designated:` are refused to agents (`reserved_lease`), and a
+  freed one is never granted to a queued session (`lease_dequeue`, reason
+  `reserved`). The trust boundary is database access: a session that can
+  reach the bank (lite tier, `ops/.env`, `docker exec`) could designate
+  itself.
+- **Upgrade: no session has coordinator power until one is designated.**
+  In the Docker tier: `docker exec <daemon container> pseudolife-mcp lease
+  designate PROJECT AGENT --for 7d`. Before deploying, check that
+  `pseudolife-mcp lease list` shows no `designated:` lease held or queued
+  (older code let any session claim one; `lease break` it).
+- Holding `coordinator:<project>` now grants nothing: it stays as
+  bookkeeping, its holder's urgency is a peer's under the plain urgent
+  allowance, and it blocks nothing, since the designation is a separate
+  lease. The maintainer and named-clearer paths are unchanged. A principal
+  list was rejected because every session on a host shares a principal
+  today.
+- A `send` audit event whose mail rang (`rung`, a Codex `attention` grant,
+  or `no_path` with the ring queued) carries `wake_reason`, the authority it used, so
+  `board-audit export` shows which ring was a maintainer, coordinator or
+  clearer reopen. No schema change.
+
+### Changed (2026-10-03 — the maintainer and the coordinator can reopen a done session)
+- A session parked `done` was unreachable: on 2026-10-03 a coordinator's
+  urgent review of PR #548, with two required changes, came back
+  `wake: {decision: not_needed, reason: parked_done}`, and the maintainer
+  had to type into the window. `done` now means "I expect no follow-up":
+  `urgent` mail reopens it when the sender is the maintainer (a bearer
+  principal listed in the new `coordination.maintainer_principals`, empty
+  by default; `default` and `daemon` are refused), the holder of the live
+  `coordinator:<project>` lease for the recipient's own project
+  (superseded the same day by an operator designation, above), or the
+  park's named clearer. The ring's reason is `maintainer`, `coordinator`
+  or `clearer`, and the receipt carries `reopened: true`. Plain mail still
+  never rings a done park, and neither does a peer's urgency (`anyone`
+  included); authority is read from the bearer, the lease table and the
+  park, never from message text. Waking grants nothing.
+- Maintainer and coordinator urgency, to any session, spends a new
+  `coordination.wake.authority_per_sender_per_hour` (12) instead of the
+  6-an-hour urgent allowance, so incident relays are not capped halfway;
+  the per-recipient, nightly and stagger caps still apply. `/health` and
+  `pseudolife-mcp doctor` report the new cap.
+- A `no_path` receipt names the client's other ways in: `fallback_paths`
+  is `codex_doorbell` + `maintainer_types` for a Codex thread and
+  `claude_desktop_send_message` + `maintainer_types` for a Claude Code
+  session, with matching `fallback` text. A `withheld` receipt carries
+  `retry` (resend with `urgent`, or `clears` naming the need), and a
+  `parked_done` one `reopen_by`.
+- A Codex thread parked `done` could not be rung even with an armed
+  doorbell: the daemon served it nothing. It is now served only a reopen
+  sent after its current park, with the audit-sequence proof other Codex
+  grants carry; a grant or attention decided before the park stays
+  unserved and unstamped.
+- `coordination_wakes.urgent` (read by `board-audit stats`, which does not
+  use it, and by anything querying the table) now means "counted against the plain urgent allowance": a maintainer or
+  coordinator ring is stored `urgent = false` with reason `maintainer` /
+  `coordinator`, though its send set `urgent`; a named clearer's reopen
+  is stored `urgent = true`.
+- The Codex doorbell serves CLI threads as well as desktop ones;
+  `capabilities.codex` is the optional live-delivery bridge, not the
+  doorbell. The guide now says so, with what a reopen needs from each
+  client and what to do when the board itself is down.
+- The Stop hook's park prompt (served `PARK_GATE_MESSAGE`, and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks), the park check-in sentence,
+  `memory_message`'s description and `examples/hook-instructions.md` say
+  that done stays reachable. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again; the new prompt text reaches a client
+  with its next plugin update. No schema change.
+
+### Fixed (2026-10-03 — a tunnel child launched mid-exec stays recognised)
+- The tunnel supervisor records each child's identity (pid, start time,
+  executable, arguments) right after starting it. On Linux, `Popen`
+  returns before the kernel has published the new program's arguments, so
+  the identity could be recorded with an empty argument list. Every later
+  ownership check then refused the supervisor's own child: a refresh
+  answered "owned tunnel changed before refresh" and left the old child
+  running, cancellation cleanup skipped the child and leaked it,
+  `tunnel stop` reported `stopped` without stopping it, `tunnel status`
+  reported it as not running, and the bridge and `tunnel update` refused
+  the live tunnel. The identity is now read once the arguments appear.
+  If they have not appeared within 5 seconds and the child is still
+  alive, the launch fails and the child is reaped, rather than recording
+  an identity that can never match. A child that has already exited
+  fails the launch as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  launches hit the empty window. Over 1,250 cancellation-test runs under
+  the same load, the unfixed code failed 8 and the fixed code failed none.
+  This was the intermittent `all_reaped` failure (and the 30-second
+  timeout) in `test_refresh_cancellation_reaps_actual_children_and_private_launch`.
+
+### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
+- When Codex runs the plugin's hooks and its approved definitions remain
+  equivalent, the client step (`pseudolife-mcp update`,
+  `ops/update.ps1 -All`, `ops/update.sh --all`, `ops/update_clients.py`)
+  now runs Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
+  and reports `refreshed`, where it used to report `behind` and ask for a
+  click in Codex's plugin manager. Measured on Codex 0.160.0 in a
+  throwaway Codex home: the upgrade fetches the marketplace and replaces
+  its clone and the installed copy, leaves `config.toml` byte-identical,
+  and `hooks/list` reports the same keys and hashes, so approvals carry
+  over. A changed approved definition is not knowingly upgraded automatically
+  and still names the approval steps. If the branch moves between inspection
+  and Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with those approval steps. The marketplace serves its branch,
+  which can carry a `hooks.json` the checkout or the deployed release does
+  not, so the update first reads that branch's `hooks.json` from a private,
+  blob-less clone in a temporary directory (never Codex's own clone) and
+  upgrades only when its normalized definitions match the installed ones.
+  When the upgrade cannot run (no Codex CLI or git found, a failed fetch,
+  the branch changes an approved definition, nothing newer on the branch)
+  the step stays `behind` and says why. Advice to upgrade manually promises
+  approval carryover only when the branch's normalized definitions were
+  checked and matched; otherwise it says that the upgrade may change the
+  definition and need approval. Manual hook
+  copies are refreshed as before.
+- The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
+  Windows desktop app's build folder, or in the standalone package the
+  desktop app keeps under the Codex home
+  (`packages/standalone/current/bin`). A missing or relative configured
+  `PSEUDOLIFE_CODEX_BIN` is reported as a setup error, without falling back
+  to another binary. The git used to inspect the marketplace is resolved
+  only from absolute PATH entries, excluding implicit working-directory
+  lookup, and its `hooks.json` is decoded as UTF-8 on every platform.
+- The Codex hooks check now compares the installed copy Codex runs hooks
+  from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
+  back to the marketplace clone when there is no installed copy. Codex
+  replaces that single copy in place, as its plugin manager does, so there
+  is no older copy kept beside it.
+- The shared plugin's SessionEnd timeout now matches Codex's enforced
+  3-second cap, removing the startup clamp warning. Its bash hook makes
+  one request with a 2-second total and 1-second connection timeout, without
+  retries. A missed close is reaped after 30 minutes of inactivity plus
+  the next sweep (5-minute default); Claude Code's plugin SessionEnd budget
+  is 1.5 seconds regardless of the manifest. Codex builds that hash the
+  clamped timeout keep approval for the 10-to-3-second change; approve only
+  if Codex asks. The updater compares normalized SessionEnd/Interrupt
+  timeouts at each consent check and on read-back, so clamp-only changes
+  refresh automatically. Every other field and timeout remains compared,
+  and malformed or unsupported definitions are not refreshed automatically.
+
+### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
+- Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved
+  native queue notice. Private per-thread reservations survive restart; exact
+  generated notice/nonce arrival at the owning prompt hook is separate evidence
+  from queue acceptance, reading mail or completing work.
+- An unresolved reservation may clear at its originating message's durably
+  recorded expiry, with an explicit `unresolved_expired` availability receipt.
+  Expiry receipts precede release on both polling and replacement paths; a failed
+  receipt write retains the old reservation, and replacement logs the expiry once.
+  Native cancellation remains unknown and the queued item may remain visible.
+  Valid older records without exact expiry get one durable first-seen plus
+  24-hour upper bound; malformed or foreign state stays fail-closed.
+- Capped urgent unparked Codex mail may queue one fixed bell labelled
+  `turn state unknown`. Receipts distinguish pending queue permission from
+  known-busy attention hints; no native desktop steer route is proved.
+  Active and unknown-state notices resume the original authorized task.
+- Current eligible Codex grants remain explicit through the quiet interval and
+  fan-out stagger. Historical grants require retained audit ordering after the
+  unchanged current park; cleared, expired or refined parks withdraw old offers,
+  delayed writes and marker retries without rewriting historical grants or caps.
+- Empty reservation contention remains retryable; definite pre-execution CLI
+  failures release only their own unaccepted reservation, while ambiguous results
+  retain it. Versioned exact notice formats survive wording updates, and prompt
+  receipt recording retries brief real lock contention.
+- New reservations are fully written and flushed in a private temporary file
+  before publication under the per-thread lock. Interrupted or failed writes
+  cannot leave a partial pending record that blocks later notices. A directory
+  sync failure after publication releases only the exact new, unaccepted record
+  under the same lock, allowing ordinary delivery to retry.
+- Ambiguous bridge failure never queues an alternate for that snapshot and restores
+  a guarded listener for later eligible arrivals. Current desktop queued-notice
+  hook emission remains unverified; missing receipts use the recorded expiry
+  fallback. Client hooks must be updated to use the correlation path.
+
+### Fixed (2026-10-03 — a Linux test run no longer leaves a 2.8 GB daemon behind)
+- Every full test run on Linux, WSL or macOS left one test daemon
+  (`python -m pseudolife_memory.cli serve`, about 2.8 GB) running after
+  pytest exited. The shim's autostart test makes the shim start a daemon,
+  which the shim detaches on purpose, and the test's cleanup only acted on
+  Windows. On 2026-10-03 14 had piled up in WSL (28 of its 39 GB), and 5 on
+  the second test machine, each holding its run's systemd scope open, had
+  exhausted its memory and swap, taking the live memory bank and the agent
+  board down for hours. The test now stops what its shim started on every
+  platform, found by the test's own data directory in the process
+  environment, and fails if anything survives.
+- `ops/wsl-suite.sh` (both `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`
+  run it) now runs pytest as a child, tags the run with
+  `PSEUDOLIFE_SUITE_RUN_ID`, and after pytest exits, also on Ctrl+C or a
+  hangup, stops every process still carrying that marker, naming each on
+  stderr (Linux only: it reads `/proc`). Processes the run did not start,
+  such as the live daemon or another run, are never touched; a child
+  started with a scrubbed environment (the Codex doorbell's CLI, the
+  tunnel's runtime) drops the marker and is not swept. pytest runs in a
+  session of its own: an interrupt, hangup or TERM sent to the launcher is
+  passed on to it at once and exactly once (a terminal's Ctrl+C no longer
+  reaches it twice, which aborted its session-finish cleanup), and the
+  launcher then exits 130, 129 or 143; otherwise the exit code is pytest's.
+### Fixed (2026-10-03 — a session started while its daemon is unreachable gets memory back by itself)
+- A shim whose daemon is on another machine waited 15 s for it at startup and
+  then exited, before the MCP handshake. Claude Code and Claude Desktop mark
+  such a stdio server failed ("connection timed out after 30000ms") and never
+  retry it, so a session started during an outage ran without memory tools
+  or the agent board until someone ran `/mcp` → Reconnect. That morning the
+  box's tailscaled was down for minutes and every session started then lost
+  memory for its whole life. The same applied to an external local daemon
+  under `PSEUDOLIFE_MCP_NO_SPAWN`, whose 180 s wait already outlasted both
+  hosts' handshake budgets.
+- Now both wait up to 5 s (inside Codex's 10 s default startup budget) and
+  then start the session without the daemon. The shim answers `initialize`
+  and `tools/list` from the last handshake it saw from that daemon URL,
+  cached in `handshake-cache/` under `PSEUDOLIFE_AGENT_STATE_DIR` (else
+  `~/.pseudolife-mcp/`), or with no tools when it has none. Each tool call retries the daemon, and one that cannot connect
+  says the daemon is unreachable and being retried. A background `/health`
+  probe (or the first call that gets through) sends
+  `notifications/tools/list_changed` when the daemon answers, and the
+  client re-lists the live tools. A daemon that stops answering mid-session
+  is handled the same way. A loopback daemon the shim spawns itself still
+  exits the shim when it never comes up. A degraded start cannot know
+  whether the daemon requires a bearer, so it does not exit on a missing
+  credential, but it still names a configured token file it cannot use on
+  stderr.
+- A Codex session started while the daemon is unreachable joins the agent
+  board once the daemon answers: its board check stays open and is asked
+  again in the background (the late Codex registration, below). Memory
+  tools themselves recover as above.
+- Deploying this needs the client step: the shim is a separate install
+  that a daemon deploy never touches.
+
+### Fixed (2026-10-03 — a Codex shim that starts while the daemon is slow joins the board later)
+- With `PSEUDOLIFE_AGENT_COORDINATION` unset, a Codex shim
+  (`PSEUDOLIFE_WRITER_ID=codex`) whose startup board check
+  (`GET /api/hook/coordination-start`) got no answer read it as "no board"
+  for the life of the process, so its threads never registered even after
+  the daemon came back. The Claude Code path has asked again since
+  2026-09-30; the Codex path now does too. The shim keeps asking in the
+  background on the registration retry schedule and builds its per-thread
+  registry once the daemon says it serves the board; each thread's first
+  result after that carries a one-time note that the board works, since
+  the instructions carried no check-in. While the check is unanswered, a
+  board write is refused locally with the retry message and memory calls
+  go out as before; a later no keeps the quiet default (no registry, no
+  warning, no note), except that an explicit `PSEUDOLIFE_CODEX_DOORBELL`
+  then says once that it is off. A fixed `PSEUDOLIFE_AGENT_STATE` now
+  draws its warning on an unanswered check too. The explicit opt-in is
+  unchanged. A shim change: it reaches clients through the client step of
+  a deploy.
+
+### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
+- A dispatched full suite checked for the live bank's server once, before
+  it queued for the suite lock, and passed over a server that refused the
+  connection. A live container that was restarting at that moment would
+  be up by the time the run started. The check now runs again once the run
+  holds the lock.
+- The explicit `PSEUDOLIFE_TEST_DATABASE_URL` is asked through its own
+  database first, where its tests and daemons connect, then through
+  `postgres` when that database is missing or will not have the login. A
+  server whose access rules let the suite into the test database but not
+  into `postgres` was passed over.
+- A URL whose servers the check cannot see is refused: a `service=` setting
+  or `PGSERVICE` (read from a service file at connect time), and a host
+  list given through `PGHOST` or `PGHOSTADDR`, not only one in the URL.
+
+### Fixed (2026-10-03 — a resumed session no longer wakes on plain mail)
+- On resume, compact and clear, SessionStart deleted the session's
+  `.seen` marker so the next prompt would print the digest again. With
+  `.seen` gone, a ring marker for mail the session had already seen
+  (acknowledged or not) read as unseen. Plain mail arriving later then
+  woke the idle session through the Stop hook or `pseudolife-mcp
+  wait-mail`, which broke the rule that only a ring wakes an idle
+  session. This happened with a marker left from before the restart, a
+  staggered ring the shim wrote after it, or a refused ring the shim
+  retried after it. SessionStart (`coordination-start.sh` and its Windows
+  twin `lifecycle.ps1`) now keeps `.seen` and writes a `<key>.reprint`
+  flag naming the marker it found. The prompt hooks print the digest
+  again when that flag is set and nothing showed the digest since, then
+  drop the flag. The shim's stale-file sweep takes day-old flags. This
+  drops the old second wake for a ring the session had already seen:
+  rung mail still unacknowledged at a compaction waits for the next
+  prompt, which prints it again. `hooks.json` is unchanged, so Codex
+  users approve nothing again.
+
+### Fixed (2026-10-03 — a revoked token is told so, not to retry)
+- An invited machine whose token was revoked between the daemon's gate and
+  the tool got the same refusal as a daemon that cannot check tokens at all
+  (`principals_unavailable`, -32003). The shim then said "retry shortly",
+  and the retry met the gate's 401. The daemon now keeps -32003 for a
+  table it cannot check and refuses a bearer it checked and no longer
+  finds with `unauthorized` (-32004, data `{"status": 401, "error":
+  "unauthorized"}`). The shim reports that exact refusal as
+  `authentication_required` with `operation_outcome: not_dispatched`: the
+  token is no longer accepted and no tool ran. Anything inexact still
+  keeps the unknown-outcome warning. Deploy the daemon with the client
+  step (`ops/update.ps1 -All`). An invited machine still on an older shim
+  reports the new refusal as an operation that may have completed, which
+  is cautious but not wrong, until that machine updates its own client.
+- `board_status.reason_hint()` is the public way to read a refusal
+  reason's plain-language line, which the shim uses in place of a
+  private table. The remote-bank guide asks reverse proxies to pass the
+  daemon's error responses through unchanged, since a rewritten 503
+  refusal reads as an operation that may have completed.
+
+### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
+- Codex hook setup could fail as a whole on the optional `memory_message`
+  approval step it promised never to fail on. `ops/setup-codex-hooks.py`
+  caught only Codex's refusals there, so an `OSError` (a `config.toml`
+  locked by another process on Windows, a permission error, or Codex
+  exiting mid-write) escaped to the outer handler and reported the hooks
+  unavailable. The step now reports the approval `unavailable`, naming
+  only the error type, and setup finishes ready. Closing the Codex
+  connection no longer raises when Codex has already exited with a request
+  still buffered (`pseudolife_memory/codex_connection.py`), which would
+  otherwise have re-raised the pipe error on the way out. Other unexpected
+  errors still reach setup's own handler, and the required hook trust
+  step still fails setup when it cannot back up `config.toml`.
+
+### Fixed (2026-10-03 — eval benches inside WSL no longer lose their database to a Windows test run)
+- Three eval harnesses still named their private databases with a bare
+  pid: `evals/epistemic_bench.py` (`pseudolife_memory_bench_<pid>`),
+  `evals/coordination_audit_volume.py`
+  (`pseudolife_memory_bench_audit_<pid>`) and
+  `evals/coordination_bench.py`. The test suite prunes
+  `pseudolife_memory_bench_*` databases whose pid is gone, and a WSL pid
+  is invisible to Windows, so a Windows pytest session could drop a bench
+  running in WSL mid-run, as it did a WSL suite's on 2026-10-02. They now
+  use the test fixtures' run suffix (`wsl<pid>` inside WSL), which a
+  Windows run's pruner leaves alone; the epistemic bench's drop guard
+  follows the same name. The benches keep importing the helper from
+  `tests/pg_defaults.py`, as two of them already did.
+- WSL detection no longer depends on the kernel release saying
+  "microsoft": `WSL_DISTRO_NAME`, `WSL_INTEROP` or a `WSLInterop*` binfmt
+  entry also count, so a custom WSL kernel still tags its database names.
+
+### Fixed (2026-10-03 — a token the daemon cannot check is reported as such)
+- When the daemon cannot check invited machines' tokens (its database is
+  not answering), it refuses the request before any tool runs: a
+  `principals_unavailable` 503 from its HTTP gate, or JSON-RPC error
+  -32003 after admission. When the refusal came after the tool call was
+  sent, the stdio shim reported it as "the memory operation may have
+  completed" (`operation_outcome: unknown`). It also replaced the
+  refusal's data with a generic `protocol` or `service_unavailable`
+  classification, and sent the 503 as -32603. The shim now answers -32003
+  with `classification: principals_unavailable`,
+  `operation_outcome: not_dispatched` (no tool ran), the daemon's
+  `status`/`error` data, and the same hint `doctor` prints. Only the
+  daemon's exact refusal counts: a small JSON body for the very request
+  that failed, or the exact JSON-RPC error. Anything that merely resembles
+  it keeps the unknown-outcome warning. The shim is a client install:
+  deploy with the client step (`ops/update.ps1 -All`).
+- The Console explained an invited machine's 403 on an operator-only
+  action (`operator_principal_required`: saving the config or the daemon
+  notice) as "a tokenless daemon serves loopback browsers only", and a 503
+  `principals_unavailable` as a bare HTTP code. Each now has its own
+  explanation.
+
+### Fixed (2026-10-03 — a dispatched suite refuses the live bank at any address)
+- A full suite dispatched to the second machine could still reach that
+  machine's live bank. The launchers refused a test server on host port
+  5433, but the live bank's Postgres also answers on its container's
+  Docker-network address (port 5432), and an explicit
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_ADMIN_URL` was not
+  port-checked at all. Nothing in the suite looks such an address up, so
+  it took a misconfigured env file, but nothing refused one. A dispatched
+  run now asks every server it would use (the default admin URL and both
+  explicit URLs) for its database list before anything else connects, and
+  stops when one holds a production bank (`pseudolife_memory`, or the
+  database the exported daemon DSN named). A server that refuses the
+  connection, has no address or rejects the login is passed over; a
+  timeout, a URL naming several hosts or one that does not parse refuses,
+  and a refused run skips its exit-time bench cleanup on that server.
+  Undispatched runs are unchanged: on the Windows host the dev server is
+  the live bank's server by design.
+
+### Added (2026-10-02 — full suites on a second machine, one per machine)
+- Full test suites took ~20-25 minutes each and queued one at a time on
+  the maintainer's workstation. `ops/remote-suite.ps1` now runs a
+  checkout's committed HEAD on the first free machine: local WSL, or a
+  second Linux machine over SSH. It waits for whichever frees first.
+  Each machine still allows one full suite, so two machines give two at
+  once. The remote side fetches the commit from origin, runs that commit's
+  own `ops/wsl-suite.sh` under a systemd `MemoryMax` scope, and streams the
+  log back. A log and a JSON result (machine, commit, exit code, summary)
+  are kept under `~/.pseudolife-mcp/suite-results`. The second machine's
+  address lives only in the private
+  `~/.pseudolife-mcp/locks/full-suite.remote`.
+- The suite's board lease is per machine: `PSEUDOLIFE_SUITE_LEASE`, else a
+  `full-suite.lease` file in the lock directory, else `full-suite`
+  (`full-suite@<host>` otherwise). Every machine shares one board, so
+  before this a second machine's suites read as the first machine's, and
+  that machine's gates held off for suites that did not load it.
+  `pseudolife-mcp lease check` maps a suite lease to the local lock only
+  when it is this machine's own name.
+- `ops/wsl-suite.sh` keys its WSL test copy by repository as well as
+  checkout name and re-points it at the current mirror on every run. Every
+  Codex worktree shares one folder name, so a copy made for one repository
+  stayed bound to its mirror, and a checkout of another repository exited
+  128 before pytest. The mirror is cloned and fetched under a lock, so two
+  launches cannot race there, and `ops/.env` is copied in owner-only.
+  `ops/wsl-suite.ps1` refusals exit 2 as documented (they exited 1).
+
+### Fixed (2026-10-02 — a ring marker the filesystem refused is written later)
+- The shim took a daemon ring as handled before writing its `<key>.ring`
+  marker. When the write failed (on Windows, a reader holding the marker
+  open refuses the replace), nothing retried it, and the daemon's repeat
+  of the same ring was dropped as a duplicate, so the Stop hook and
+  `pseudolife-mcp wait-mail` slept through it (wait-mail until its 4 h
+  timeout). The shim now writes a refused marker again at each heartbeat,
+  for the digest watermark the ring was for, while that mail is pending
+  and unshown. It drops the marker once the mailbox is empty, once a hint
+  or prompt hook has shown the mail (`.seen`), or when a newer ring
+  replaces it. A ring's `ring_at` stagger is unchanged.
+- A `pseudolife-mcp wait-mail --session-id <thread>` waiter on a Codex
+  thread counted as a listener only while the Codex doorbell was healthy:
+  once the doorbell turned itself off (a CLI failure), the shim reported
+  the doorbell's state alone, the daemon answered `no_path` and the waiter
+  slept to its timeout. The waiter's lease now arms the ring either way.
+  With the doorbell off from the start (`PSEUDOLIFE_CODEX_DOORBELL=0`, or
+  no codex CLI found) a Codex thread still declares no ring path, so
+  wait-mail there only times out; the configuration guide says so.
+
+### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
+- On the maintainer's Windows host, a full test suite made the mouse stutter.
+  Its hook-script tests start Git Bash processes in bursts of 10-32 a
+  second, and mouse input stalled 82-347 ms in exactly those seconds while
+  CPU, memory, disk and the compositor stayed normal. `ops/wsl-suite.ps1`
+  now runs a checkout's suite inside WSL instead, where starting a process
+  never touches the Windows console. It tests the checkout's committed HEAD
+  from a copy on WSL's own filesystem, fetched through a mirror so only new
+  objects cross `/mnt/c`: Linux git cannot read a Windows worktree, and a
+  run over `/mnt/c` roughly doubled driver (DPC) work on the host's first
+  CPU. A checkout with uncommitted changes is refused. It keeps a uv
+  environment per checkout (CPU torch, as CI), forwards the board bearer so
+  the run still shows as the `full-suite` lease, and returns pytest's exit
+  code. `ops/wsl-suite.sh` is its Linux half and works from any Linux shell.
+- A lock taken in WSL cannot see one taken on Windows, so a host that moves
+  to WSL needs Windows full runs stopped. The suite lock gains a per-machine
+  setting: `PSEUDOLIFE_SUITE_WINDOWS`, else a `full-suite.windows` file in
+  the lock directory, `allow` (the default) or `refuse`. With `refuse`, a
+  full run on native Windows exits before it queues and names the launcher.
+  Targeted runs and CI are unaffected.
+- A test run names its private databases after its pid and drops those
+  whose pid is gone. Windows and WSL share the dev Postgres but not a
+  process table, so a Windows pytest session dropped a running WSL suite's
+  database mid-run (78 setup errors, 2026-10-02). A run inside WSL now tags
+  its names (`pseudolife_memory_test_wsl<pid>`), and each run prunes only
+  its own namespace's.
+- `AGENTS.md` is now tracked and points every coding agent to `CLAUDE.md`,
+  so Codex sessions get the same conventions as Claude Code.
+
+### Added (2026-10-02 — `invite` and `pair`: a new machine joins a bank with one short code; schema v53)
+- `pseudolife-mcp invite <machine>` on the daemon host gives another machine
+  its own principal, admitted to the agent board, with no daemon restart and
+  no hand edits of `ops/.env` or `config.yaml`. It prints a single-use
+  12-character pairing code that expires after 15 minutes (`--expires`, at
+  most 24 hours), and the line to run on the new machine. `--tier`,
+  `--board` / `--no-board` (kept on a re-invite unless given), `--replace`
+  (a new code for a paired machine; its old token works until it is
+  redeemed), `--list` (never a token or a code) and `--revoke` (effective
+  within 10 seconds, 60 at worst while the daemon cannot read its database). `--list` and `--revoke` need no running daemon
+  (`--bank <fingerprint>` confirms the database); with a Docker daemon
+  container stopped they run through `psql` in the Postgres container. Names are lowercase
+  `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name
+  in `PSEUDOLIFE_MCP_TOKENS` or `PSEUDOLIFE_MCP_TIER_MAP` are refused. It
+  refuses a daemon without `"auth": true`, and a database whose bank is not
+  the one the local daemon's `/health` reports. On a Docker install it runs
+  inside the daemon container after checking the image has the command.
+- `pseudolife-mcp pair <url> <code>` on the new machine mints the bearer
+  token there, writes it to an owner-only `~/.pseudolife-mcp/<principal>.token`
+  (never replacing a file), and sends the daemon only its SHA-256: the token
+  never appears in a terminal, a chat, shell history or a network response.
+  A lost response is retried and answered again; a refused code removes the
+  file; an unknown outcome keeps it and says so, also when a later attempt
+  is refused (the lost one may have spent the code). `--read-code` reads the
+  code from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
+  confirmation (never in `--dry-run`, never for a plan with nothing to
+  re-point) and re-points the clients at the new file.
+- `POST /api/pair` redeems a code with one conditional UPDATE on the
+  database clock, so a code is single use under concurrency. It refuses any
+  request with an `Origin` header, takes only JSON up to 1 KiB, answers every
+  failure with the same `400 {"error": "pairing_refused"}` (any parse error,
+  a deeply nested body included), holds pairing at `429` after 20 failed
+  attempts in a minute without consulting the store (each attempt is
+  charged on arrival and refunded on success), runs at most two
+  redemptions at once on its own executor (a third gets `429`), refuses
+  without spending a code whose name the environment or a reservation
+  uses, and never logs the body.
+- The installers' option 2 accepts a pairing code where it asks for the
+  token (and `--pairing-code` / `-PairingCode`), and option 3 prints
+  `expose tailscale` and `invite <machine>` instead of the hand steps,
+  offering to run `expose tailscale` at the end (default no).
+- `pseudolife-mcp expose tailscale` now names `pseudolife-mcp invite
+  <machine>` as the next step.
+
+### Changed (2026-10-02 — stored principals in the bank; schema v53)
+- Schema v53: a `principals` table holds each invited machine's name, the
+  SHA-256 of its token (once paired) and of a pending code, its tier, its
+  board access and its times. Neither a token nor a code is stored in
+  plaintext. Excluded from logical exports (`EXCLUDED_TABLES`, like the
+  board's instance credentials); a physical backup carries it.
+- Every bearer is resolved by one resolver: the environment's
+  `PSEUDOLIFE_MCP_TOKENS` and `PSEUDOLIFE_MCP_TOKEN` first (they always win),
+  then an in-memory snapshot of the table keyed by token hash. The daemon
+  refreshes the snapshot every 10 s on its own connection, never under the
+  service or coordination lock and never on the event loop; a redemption is
+  visible at once. The HTTP gate, `/mcp` tool calls (resolved inside the
+  transport wrap from the request's own headers, so handshake-era requests
+  on the session manager's task group see it too), the board and its hooks
+  all use it, and the toolset tier falls back to the stored tier after
+  `PSEUDOLIFE_MCP_TIER_MAP`. An open daemon still refuses the board with
+  `authentication_required`. A presented bearer that stops resolving after
+  the gate (revoked meanwhile, or a stale snapshot) is refused with
+  `principals_unavailable`, never served as the default principal.
+- Board admission goes through one helper, `principal_admitted`: listed in
+  `coordination.allowed_principals`, or a stored principal with board
+  access that is not revoked (`coordination-recovery rebind` reads the
+  restored bank's table the same way). `is_stored_principal` is exposed
+  beside it.
+- A stored principal is refused `POST /api/config` and `POST
+  /api/daemon-notice` with `403 {"error": "operator_principal_required"}`;
+  environment principals keep both.
+- When the snapshot has never loaded or is older than 60 s, a bearer that
+  matches nothing in the environment gets `503 {"error":
+  "principals_unavailable"}` instead of 401; the always-200 hooks treat it
+  as unauthorized, and the board check-in names the reason. The daemon warns
+  at startup when the table has rows but no authentication is configured,
+  and when a stored name is shadowed by the environment.
+
+### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
+- A Codex thread woken by board mail could stall on an approval prompt,
+  because hook setup left the `memory_message` tool unapproved and only
+  printed how to approve it. Now the consent that approves PseudoLife's hooks
+  covers that tool too. The `--trust ask` prompt names it, and a yes, or
+  `--trust yes`, sets `approval_mode = "approve"` for `memory_message` on the
+  `pseudolife-memory` server in Codex's user configuration, through Codex's
+  config writer and after a backup. `--trust no` leaves it alone.
+- Setup never overrides a value you chose (`"prompt"`, say), and an existing
+  `"approve"` needs no change. The JSON report gains `mailbox_approval`
+  (`set`, `already`, `kept-explicit`, `declined` or `unavailable`, with
+  `mailbox_approval_detail` for a kept value or the reason it could not be
+  set). If the approval cannot be set, hook setup still completes. The
+  end-of-setup notice gives the remaining choice only when the approval is
+  not set.
+- The trade-off: Codex approves per tool, so this also lets the thread send
+  board mail without asking. Board mail is rate-limited, audited and
+  expires, cannot grant permissions, and reaches only allowed principals.
+  Nothing else is approved: no file writes, commands or other tools. The
+  plugin's `hooks.json` is unchanged, so no hook needs approving again.
+
+### Changed (2026-10-02 — plain mail never wakes an unparked session)
+- Plain mail to an idle session that has not parked no longer wakes it,
+  through the Claude Code Stop hook, the Codex doorbell or
+  `pseudolife-mcp wait-mail`. Before, such a session was rung at most once
+  an hour (`nudged`) and asked to record a park, and `wait-mail` woke on
+  any new mail at all. Now a parked session rings only for mail that
+  plausibly clears its need: the sender is its clearer (or just released
+  the lease it waits on), it accepts `anyone`, the message's `clears`
+  names the need, or `urgent`. An idle session that has not parked rings
+  only for `urgent` mail (reason `urgent`), which spends the sender's
+  urgent allowance (6 an hour) like any urgent ring. Every ring keeps the
+  existing per-recipient, nightly and stagger caps. Plain mail or `clears`
+  to an unparked session answers `not_needed` with reason `no_park` and
+  waits for its next turn; an active session is `hinted`, urgent or not
+  (maintainer decisions 2026-10-02).
+- `pseudolife-mcp wait-mail` follows the same rule: it returns only when
+  the daemon rings the session. It reads the `<key>.ring` marker the Stop
+  hook reads, under the same rule (a `rung` ring past `.seen`, with unshown
+  mail in the digest), and plain mail keeps it waiting; that mail is still
+  pending at the next turn. Exit codes are unchanged (0 now means a ring),
+  and its `wait` ledger line gains the ring as a sixth column. A session
+  that relies on it is woken only when parked with a need the mail clears,
+  or by `urgent` mail.
+- A `nudged` ring decided before the update is never served to an adapter
+  and its mail is never delivered through a live channel; the Console's
+  coordination timeline and `board-audit stats` still show it. The shim
+  ignores a `nudged` wake from an older daemon, and the Stop hook fires
+  only on a `rung` marker. The Codex doorbell and the Stop hook no longer
+  append a park request.
+- `coordination.wake.nudge_interval_seconds` is retired. A config.yaml
+  that still sets it loads as before and the key does nothing; `/health`
+  and `pseudolife-mcp doctor` no longer report it. The change is under
+  `plugin/` and in the shim, so a deploy needs the client step.
+
+### Fixed (2026-10-02 — subagents and the parent's mail hint)
+- A Claude Code subagent's memory tool call no longer spends its parent's
+  "you have mail" notice. The subagent runs inside the parent's shim, so the
+  tool-result hint could ride the subagent's result and advance the shared
+  `.seen` marker, after which the parent's prompt and Stop hooks stayed
+  quiet about mail the parent never saw (the mail itself stayed unacked).
+  The plugin's SubagentStart/SubagentStop hook now keeps a
+  `<key>.sub-<agent_id>` marker beside the digest while the subagent runs,
+  and the shim holds the hint and the reminder while one is live (markers
+  older than `HOOK_CHILD_TTL` are ignored, swept with stale digests, and
+  removed with the session's digest). Needs `ops/update.ps1 -All`.
+- The coordination check-in served at session start no longer asks a parent
+  to name its subagents by hand, which listed each one twice now that the
+  v50 hooks list them, and no longer says every subagent shares its parent's
+  address (a Codex subagent has its own). Rescored with
+  `evals/coordination_checkin_bench.py` against the text it replaces
+  (artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`).
+
+### Changed (2026-10-02 — bounded lease-list reads)
+- Board lease listings fetch the displayed FIFO queues and exact queue counts
+  in two reads for the whole lease page, avoiding two reads per returned lease.
+  Queue display limits, resource-first ordering, settlement and stale holders
+  retain their existing behavior.
+
+### Changed (2026-10-02 — quarantine retyping reads)
+- The second pass over quarantined untyped graph links loads ordered entry
+  text without transferring or decoding embeddings, and reads the relation
+  registry once per pass. Shared-note selection and proposal settlement are
+  unchanged.
+
+### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
+- `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
+  Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
+  tcp://127.0.0.1:<port>`). It refuses a daemon whose `/health` does not
+  report `"auth": true` (a redirect or a non-JSON answer on the port is not
+  the daemon), a Tailscale that is not installed or not running, and a
+  tailnet port that already serves anything else or has Funnel (public
+  internet) on; it shows the command and client URL and asks first
+  (`--yes` skips the question, no terminal without it exits 2). A
+  permission refusal names the fix for the OS (Linux:
+  `sudo tailscale set --operator=$USER`). A serve the status does not show
+  afterwards is removed again (exit 5), and a status that cannot be read
+  back is reported for checking rather than undone (exit 5); the probe of `<url>/health` through
+  the tailnet is advisory and never rolls back. `expose off` removes only a
+  forward to `127.0.0.1:<port>`, and `expose status` prints the client URL.
+  Standard library only, so it runs from a shim runtime. Guide:
+  `docs/guide/remote-bank.md`.
+- `/health` reports `bank`: the first 16 hex characters of the SHA-256 of
+  the coordination bank id, so two daemons' banks can be told apart. It is
+  `null` until storage has started and the id exists; `/health` never
+  starts storage for it, reads the meta row only after its database ping
+  succeeded (so a stalled database costs no second connect timeout), on
+  its own short-lived connection (never the service lock), at most once a
+  minute while it is absent, and caches it once found. The cache is dropped
+  when a reconnect finds that another writer held the bank.
+
+### Added (2026-10-02 — `pseudolife-mcp move`)
+- `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
+  Docker-tier checkout host over key-based ssh with no lost writes. It stops
+  the source daemon, cuts off any other connection to its database, takes
+  the final backup from the stopped container (dump, `/data` archive,
+  manifest with per-table row counts), and fences the source database
+  (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), which stops a daemon
+  of any version. It copies the files with a SHA-256 check, restores on the
+  target without starting it, compares the row counts and the bank identity
+  in Postgres, carries the environment identities into the target's
+  `ops/.env` over ssh stdin (keeping the file's owner and mode), starts the
+  target once, checks its running environment and its `/health` bank
+  fingerprint, and re-points this machine's clients.
+- Writing `moved.json` on the source is the commit point. A failure before it
+  rolls back in a fixed order that never leaves the target running beside
+  the source: the target is stopped, gated and confirmed stopped before the
+  source starts. A failure after it never rolls a moved bank back; it exits 5
+  with each follow-up's exact command. SIGTERM, SIGHUP and Ctrl-Break roll
+  back like Ctrl-C, and the rollback ignores them; every progress flag, with
+  the manual rollback, is written to the move record as it flips. A rollback
+  that cannot finish exits 6. `--resume` takes over only this move's
+  half-restored bank, through a marker kept on the target host outside
+  `/data`.
+- The target's unattended update and restart policy are paused for the move,
+  and the source's restart policy is set to `no` once moved. The report lists
+  the manual rollback, every other machine's `connect` line, held leases,
+  undelivered mail, the target's files that held its replaced token, and the
+  source leftovers to retire. The source is stopped and fenced, never
+  deleted.
+- Preflight refuses a target whose PostgreSQL major version is older than
+  the source's, since a plain dump restores only forward. The move's
+  directories, which hold the dump, the state archive and the move record,
+  are owner-only on both hosts.
+- `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
+  that leaves the daemon stopped (refused without `--apply` / `-Apply`). The
+  restore scripts' safety dump now covers the database being replaced
+  (`--container/--db/--user` are passed through).
+- The daemon refuses to start when its data dir holds `moved.json` (naming
+  the bank's new location) or `move.json` (an unfinished move: the bank is a
+  clone of the source, and the message says how to abandon or finish it).
+
+### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
+- `/ui/` now serves the rebuilt console, with every view native: Observatory,
+  Cortex, World, Lessons, Stream, Recall, Graph, Review, Insight, Board,
+  Episodes and Settings. The classic vanilla-JS console
+  (`pseudolife_memory/web/static/js`, `css`, `fonts`) is removed and
+  `/ui/next/` is gone; old `/ui/#/...` bookmarks land on the matching view
+  (`#/console` opens Settings, `#/atlas` the Graph, `#/coordination` the
+  Board). Nothing the classic console could do was dropped: every read,
+  every write and its confirmation step was ported, and the graph review
+  queue, formerly a drawer inside the Graph view, is now its own Review view.
+- A review decision answered with HTTP 200 `{"error": ...}` is now reported
+  as a refusal; the classic console counted it as done.
+- `GET /api/config` adds `saved` to a restart-required knob whose value in
+  `config.yaml` differs from the running one, and Settings measures edits
+  against it: a restart knob saved by mistake can be put back from the
+  console (typing the old value used to look like no change), and the row
+  says which value the next start will use.
+- The content column is centred on wide windows. On phones, touch screens
+  get ~44 px controls and 16 px form text (no zoom on focus), the topbar
+  drops the squeezed view-jump field, and the More tab marks a view that has
+  no tab of its own.
+- The build (Vite base `/ui/`) is committed under
+  `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
+  `frontend/public/vendor/` and is copied into the build unchanged.
+- CI gains a `frontend` job: type check, unit tests (vitest, which replace
+  the node-based tests over the classic sources), and a rebuild that must
+  match the committed output. `.gitattributes` checks the console's sources
+  out with LF on every OS so a Windows build reproduces the CI one.
+
+### Fixed (2026-10-02 — bench records keep words that contain the user name)
+- The memory-policy and coordination check-in benches redact the OS user name
+  from each saved record only as a whole word. A short name such as `dev`
+  used to be replaced inside ordinary words, so `device` was saved as
+  `<redacted>ice`. A name next to punctuation, curly quotes or an escaped
+  control character is still redacted, and a non-ASCII user name or home
+  path, which was never matched before, is now removed too. Both match in
+  any case, as a Windows home does (a lower-cased home path is the same home).
+
+### Changed (2026-10-01 — Cortex Console v3 brand)
+- The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
+  hero and the sidebar mark, and takes its two accents from it: the lavender
+  of the brain's outline for associative memory and the gold of the traces
+  for canonical facts, on the same black glass. The light theme follows.
+
+### Added (2026-10-01 — Cortex Console v3, phase 1)
+- A rebuilt web console, served beside the classic one at `/ui/next/`: a
+  Vite + Svelte 5 + TypeScript app under `frontend/` whose build output is
+  committed under `pseudolife_memory/web/static/next/` (the wheel ships
+  `static/**` and the daemon image has no Node). Phase 1 ships the shell,
+  the Observatory and a native Board view over the read-only coordination
+  snapshot (`GET /api/agents?view=coordination`): roster, park records,
+  leases and the mail/wake timeline, with no message bodies and no compose.
+  Every other view links to the classic console until it is ported.
+
+### Fixed (2026-10-01 — indexed coordination reads; schema v52)
+- Retained mail pages, exact peer filters, cursor high-water checks and lifecycle
+  reconstruction use participant and message indexes rather than scanning other
+  mailboxes under the coordination lock. Schema v52 adds seven audit indexes.
+- The read-only Console snapshot pins its connection through transaction completion,
+  uses principal and message indexes, and caps SQL execution while holding the
+  board lock. Expired parks remain historical metadata; holder labels wrap and
+  refresh retains keyboard focus.
+- Exact file-claim preparation shares the shim operation deadline and cancellation
+  lifecycle. Checkout-contained Git administration directories are refused.
+- Disposable doctor proofs keep Console state in their temporary directory,
+  reconnect for exact owned-bank cleanup, give each DROP a separate bounded budget
+  and report its safe name if cleanup fails. The async proof timeout excludes
+  fixture setup and cleanup.
+
+### Added (2026-10-01 — mailbox continuity)
+- Receive reports expired unacknowledged mail and gaps beyond its seven-day
+  metadata window without returning expired bodies. An ahead cursor keeps
+  the `invalid_cursor` error and adds `cursor_ahead` detail.
+- Authenticated instances can page retained sent and received mail with
+  `memory_message(action="history")` or `POST /api/coordination/history`.
+  History follows audit retention and operator redaction, supports an exact
+  peer filter and reply metadata, and has no delivery, wake or dream effects.
+
+### Added (2026-10-01 — repository-scoped exact file claims)
+- `memory_agents` claim/release accepts a local Git `worktree` and exact
+  repository-relative `path` through the stdio shim. Linked worktrees share
+  claims; unrelated clones remain separate. Unsafe paths, globs, directories
+  and symlink/junction aliases are refused. Claims retain the existing FIFO
+  queue and expiry; a conflicting holder reports its fence and expiry.
+- Direct HTTP clients can prepare `repository_id` and `path` locally. The
+  daemon does not open client checkout paths, and claim names contain hashes
+  rather than absolute host paths. File claims remain advisory.
+- A shim that serves several conversations (Claude Desktop) refuses a file
+  claim before it runs Git or reads the worktree, so the error cannot reveal
+  whether a host path is a checkout.
+
+### Added (2026-10-01 — read-only coordination view)
+- The Console's Coordination view shows active agents, status age, reported
+  children, park needs/resume, pending mail for the caller's principal, resource
+  holders and FIFO queues, and up to 100 retained mail/wake/expiry events.
+  It requires an authorized coordination bearer, omits message bodies, and
+  never receives/acknowledges mail or settles leases. Expired holds remain
+  labelled until normal board maintenance settles them.
+
+### Added (2026-10-01 — actionable coordination diagnostics)
+- Doctor separates daemon reachability, bearer admission, saved-instance
+  registration, coordination tool inventory and configured host wake. Optional
+  `--agent-state` verifies a read-only nonce proof without transmitting the
+  instance credential or changing saved state. Unsupported hosts and older
+  daemons report their limits; default diagnostics never register an adapter.
+- `doctor --disposable-proof` requires an explicit fixture PostgreSQL server,
+  creates and removes its own tagged bank, and checks enqueue, hint/synthetic
+  ring, receive and harness ack through real ASGI API/storage/adapter paths.
+  Host delivery and model acknowledgment remain unverified. Diagnostic wake
+  configuration and capability fields omit arbitrary credential-bearing values.
+
+### Added (2026-10-01 — disposable coordination recovery checks)
+- The local coordination harness can reopen persisted adapter identity, replay
+  pending mail with the same idempotent receipt, preserve an owned resource
+  fence, and interleave synthetic search with mail reads. It records recovery
+  evidence alongside its disabled control, pull and channel arms, and removes
+  only its newly minted bank. Physical restarts, real retrieval load, host
+  delivery and model acknowledgment remain outside this instrument.
+
+### Fixed (2026-10-01 — non-ASCII bearer tokens keep their principal everywhere)
+- A bearer token with non-ASCII characters now authenticates the same way on
+  every route. The auth gate read the header as UTF-8, while the coordination
+  routes, the `/mcp` identity binding and MCP tool calls read it as latin-1.
+  So `/api/coordination/*` answered 401 to a caller the gate had accepted,
+  and `/mcp` tool calls recorded that caller as `default` instead of its
+  named principal. Token comparison now uses the bytes the client sent,
+  whichever way the header was decoded. Only spaces and tabs are trimmed
+  from the presented token, so a token ending in a character such as `à`
+  or `ą` keeps its last byte.
+- Authorization header bytes that are not valid UTF-8 get a 401 instead of
+  an unhandled decode error (a 500).
+
+### Fixed (2026-09-30 — shared cloud conversations cannot act as one mailbox)
+- Shared stdio cloud hosts can declare `PSEUDOLIFE_MCP_SHARED_HOST=1`; the
+  known `tunnel` writer uses the guard automatically. Any value other than
+  empty, `0`, `false`, `no` or `off` turns the guard on. Like Claude Desktop's
+  app-level server, they register no coordination address and refuse status,
+  lease and mail operations before dispatch, while memory and awareness
+  calls remain available under the configured bearer principal.
+- Client metadata, a fixed adapter state file, channel mode or an explicitly
+  enabled board cannot override the shared-host guard. Session-aware Codex
+  and Claude Code hosts keep their existing bindings. Custom cloud launchers
+  require the operator marker and a restart; per-conversation mailbox binding
+  through this shared shim remains unsupported.
+
+### Fixed (2026-10-01 - incomplete learned rules stay pending)
+- Rule synthesis validates decision-critical values after its single retry;
+  empty or incomplete retries cannot restore an invalid initial rule or
+  acknowledge its source signal. Other valid rules in the batch still land.
+- Malformed or contradictory rule verdicts and polarities fail closed instead
+  of becoming success guidance. Ordinary clustered lesson parsing is unchanged.
+
+### Fixed (2026-10-01 — learned lessons keep their sources; only a forget retires them)
+- A synthesised lesson now records where it came from: the signal and episode
+  ids in its provenance, and the entries those signals credited through
+  `used_ids` in a `store_decisions` lineage row committed with it. A rule
+  carries its own signal's lineage and event time; a clustered lesson carries
+  its whole batch's and is tagged `lineage:batch`. Source ids proposed by the
+  model are ignored. Re-deriving a lesson that has lineage adds the new
+  entries; re-deriving one without lineage (an explicit or older lesson)
+  never attaches any.
+- A lesson retires only when an explicit forget removes the last entry of its
+  lineage. This follows the 2026-09-29 forget cascade for facts and dream
+  edges, except that a superseded entry still supports a lesson. Corrections, consolidation and capacity eviction never retire a
+  lesson: a superseded entry is kept as history and still supports it (so do
+  digests the forget itself retires), and an entry deleted earlier counts as
+  gone. A clustered lesson survives while any entry of its batch survives.
+  The retirement and its audit row commit in the forget's transaction;
+  lessons without lineage are untouched.
+- A signal stays pending, and is skipped before extraction, only when every
+  entry it credits has been deleted (forgotten or evicted), so current inputs
+  in the same clustered batch still land. One surviving credited entry is
+  enough, as for retirement; a superseded entry does not hold its signal
+  back. Failed and empty signals stay pending too, and capped sweeps rotate
+  through eligible batches so the oldest invalid signal cannot monopolise
+  them (a restart begins with the oldest eligible signal again).
+- A lesson reload never fails or reverts a committed forget or correction.
+  The resident lessons reload only after a forget actually retired one; until
+  that reload succeeds, lesson reads retry it and saves skip only the lesson
+  snapshot.
+
+### Added (2026-10-01 — guided Secure MCP Tunnel access)
+- Optional `pseudolife-mcp tunnel setup` resumes private account, key and app
+  onboarding without replacing local client registrations. Installer entrypoints,
+  status/doctor, explicit autostart, private key renewal and saved-profile updates
+  use the same flow.
+- Cloud verification requires two successful read-only challenge calls through
+  the tunnel; private receipts retain no memory or agent-board contents. Local
+  readiness remains distinct from cloud access. Full tool discovery across daemon
+  restart or tier expiry requires an explicit catalog choice.
+- A `memory_agents` reply that says the agent board is unavailable does not
+  count as a successful verification call.
+- `pseudolife-mcp doctor` and the client update say nothing about tunnels when
+  no tunnel profile directory exists, so a redirected home folder cannot crash
+  doctor or fail the update for someone who never set up a tunnel.
+- Updating an idle saved tunnel no longer downloads the tunnel runtime.
+- `pseudolife-mcp update` and `ops/update_clients.py` refresh running saved
+  tunnels after the shim step by running `tunnel update` through the newly
+  installed launcher. A tunnel freezes the bridge and packages of the process
+  that refreshes it, so an in-process refresh kept tunnels one release behind,
+  and from a checkout it would have frozen the checkout's code and virtualenv.
+  Without an installed launcher (pip or lite installs) the step is skipped and
+  names `pseudolife-mcp tunnel update`; after a failed shim step it is skipped
+  and names the launcher command. Idle saved tunnels need no refresh. The
+  refresh runs without `PYTHON*` environment variables, so an exported
+  `PYTHONPATH` cannot be frozen into the bridge, and a refresh that times out
+  is reported as timed out with the command to retry.
+- Tunnel services and managed starts run the side-by-side runtimes' launcher
+  (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) before whatever
+  `pseudolife-mcp` comes first on `PATH`. The previous fallback,
+  `~/.pseudolife-mcp/bin`, is not where any installer puts it.
+- Removing old shim runtimes keeps any runtime a running tunnel's frozen bridge
+  imports from, while the tunnel's runtime or supervisor process is alive. A
+  record left by a reboot, a kill or a timed-out refresh keeps nothing. When
+  saved tunnel records cannot be read, no runtime is removed in that run and
+  the update says why.
+- The Linux root `--system-service` installs, and a root tunnel starts or
+  refreshes, only when every path root would run is owned by root and not
+  writable by its group or others: the launcher, the runtime it starts, the
+  interpreter, the site-packages the bridge imports from, the bridge
+  interpreter's own import path and user site (asked of that interpreter), the
+  `.pth` files in those site directories, the package, the tunnel profile
+  directory, and each of their parent directories up to `/`. Otherwise it
+  refuses and names the path, since a non-root user able to change one of them
+  could run code as root. Debian's historical group-writable
+  `/usr/local/lib/python3.X/dist-packages` (root:staff, 2775) is refused.
+- `tunnel stop` now stops a service-managed tunnel for good: the supervisor
+  exits 0 for a requested stop. It exited with its stopped runtime's non-zero
+  status, so systemd (`Restart=on-failure`) and launchd (`KeepAlive`) started
+  it again. A runtime that exits by itself still fails, so the service restarts
+  it.
+- On Windows, reading a tunnel's status while its supervisor replaces the
+  process record no longer reports the record as unavailable: the read and
+  the replace each retry briefly on a sharing violation.
+- A stop marker no supervisor consumed is removed when the tunnel next runs.
+
+### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
+- An installed ring capability no longer makes an idle recipient's send receipt
+  claim `rung` after its listener has stopped. The adapter renews short-lived
+  listener evidence; absent or expired evidence returns `no_path` with
+  `listener_unknown` or `listener_expired`, while eligible mail stays queued
+  for a later listener. `rung` means a known armed path, not recipient action.
+- Waiting guidance covers the Stop hook's 59-minute limit: Claude Code arms one
+  main-session background four-hour `wait-mail` and re-arms after mail or
+  timeout; Codex uses its supported doorbell. Other hosts state
+  `next-turn-only`. Senders use available recipient host messaging as a
+  fallback and tell the maintainer when an urgent dependency cannot wait.
+
+### Fixed (2026-09-30 - REST identity and concurrent Console writes)
+- REST routes bind the authenticated principal and request headers in their worker, restoring the previous context on success or failure so writes carry the same writer/session attribution as MCP calls.
+- SessionEnd checks ownership and clears the active-session pointer atomically, preserving a newer session that starts concurrently.
+- Console config updates serialize YAML read/merge, backup, replacement and live publication within the daemon process. Unique temporary and backup files avoid collisions; failed persistence leaves runtime values unchanged. External editors and separate processes remain outside this lock.
+- Float config knobs reject NaN and infinities before persistence, including settings without a maximum.
+- REST POST bodies are bounded by group: 256 KiB for control requests, 4 MiB for fact/consolidation/supersession text writes, and 16 KiB for session-end hooks. Oversized requests return HTTP 413; coordination retains its 32 KiB limit.
+
+### Fixed (2026-09-30 — updating the plugin with sessions open installs beside them and never uninstalls)
+- Running the update while any Claude Code or Claude Desktop session was
+  open left the plugin uninstalled (2026-09-30). The updater compared the
+  marketplace clone with the plugin cache, counted the `.in_use` marker
+  Claude Code writes there while a session runs, and so always saw a stale
+  cache. It then uninstalled the plugin and reinstalled it; the reinstall
+  could not replace the same-version folder running sessions held (EPERM),
+  and the plugin stayed uninstalled until the apps were restarted.
+- The plugin's manifest no longer carries a version. Claude Code names each
+  cache folder by that version, and without one it uses the marketplace
+  commit, as for Anthropic's own plugins. Each update therefore installs
+  into a new folder beside the one running sessions loaded: they keep it,
+  new sessions start on the new one, and Claude Code deletes the old folder
+  14 days after it was replaced, once no session runs from it. The updater
+  (`pseudolife-mcp update`, `ops/update.ps1 -All`, `ops/update.sh --all`,
+  `ops/update_clients.py`) runs `claude plugin update` instead of uninstall
+  and install. It skips Claude Code's top-level markers when it compares,
+  follows `CLAUDE_CODE_PLUGIN_CACHE_DIR`, and on a failure leaves the
+  installed plugin installed. `/plugin update` inside Claude Code now moves
+  the plugin too.
+- The release the SessionStart hooks report for the version handshake moves
+  to `plugin/release.json`. `hooks.json` is unchanged, so Codex keeps its
+  approvals: it trusts a handler by its definition, not by the script
+  behind it (measured on Codex 0.158.0).
+  [Where the plugin lives](docs/guide/configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)
+
+### Fixed (2026-09-30 — Codex stops asking to approve PseudoLife's hooks after every update)
+- Codex users were asked to approve PseudoLife's hooks again after almost
+  every update. Codex approves a hook by its definition (the command,
+  timeout, `async` and `statusMessage`), not by the script it runs:
+  measured on Codex 0.158.0, editing a script left the approval in place
+  and editing the command asked again. Two things produced the churn.
+  Manual hook copies, which every Codex user without the plugin gets, named
+  a content-addressed script bundle in their commands, so each script
+  change was a new command. And the update told plugin users to re-approve
+  whenever a script changed, which Codex never asked for.
+- Manual copies now run through a launcher (`~/.codex/pseudolife/hooks/
+  run.sh`, `run.ps1` on Windows) whose commands never change; it runs the
+  bundle `current` names. Bundles stay content-addressed, and setup and
+  the update verify them and the launchers byte for byte. The update
+  (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
+  `ops/update.sh --all`, `ops/update_clients.py`) writes the new bundle,
+  checks it, moves `current` and removes the launcher bundle it replaced,
+  with no approval. A manual copy set up before this change asks for one
+  last approval (`python ops/setup-codex-hooks.py`); its old bundle stays,
+  since a Codex session started earlier may still run it.
+- A plugin copy whose scripts are older but whose `hooks.json` is not is
+  now reported as `behind` (update it in Codex's plugin manager; its
+  approvals carry over) instead of listing re-approval steps. A changed
+  `hooks.json`, which the old check missed because the scripts' digest
+  leaves it out, now does list them.
+- `tests/test_codex_hook_launcher.py` pins the fields Codex approves in
+  `plugin/hooks/hooks.json`, so a change that would ask every Codex user
+  again has to be deliberate. File writes in `ops/setup-codex-hooks.py`
+  retry a replace Windows refuses for a moment (a live setup run met one).
+- One approval now also covers the scripts later updates install, and the
+  consent prompt says so. A launcher an earlier release shipped is replaced
+  by a refresh (`PREVIOUS_LAUNCHERS`), so editing a launcher never strands
+  an install; setup with approval repairs a missing or changed launcher or
+  pointer, while a modified script bundle is still refused. A launcher
+  whose pointer names no bundle prints why on stderr and exits 1 instead of
+  running nothing silently. A manual refresh that cannot write or verify is
+  a failed client step, so the update exits non-zero for it.
+
+### Fixed (2026-09-29 — forget cascade for derived state)
+- Bulk source forget retains matching digests as retired history and excludes them from deleted-entry counts. Explicit digest-only deletion still removes the selected digest entries, as does a forget whose matched digest cannot be retired (its session episode is gone, or no matched source was persisted).
+- Revalidate captured relation evidence in the pinned edge transaction: a forget or supersession during extraction cannot publish an edge whose captured evidence was removed.
+- Exhausted digest retries release regeneration requests without rewinding the cursor; changing contexts rotate behind other eligible sessions and remain queued until a stable extraction can publish.
+- Pin the forget transaction to one connection so a disconnect cannot commit source deletion without its derived-state retirement.
+- Forgetting a source memory retires current facts whose last current citation was removed, keeps their version history, retires affected session digests and queues them for regeneration from surviving entries. Newly extracted dream edges retain entry evidence and retire when their last current source is forgotten; entities remain available for graph review. Schema v51 adds edge evidence provenance.
+- Digest extraction rechecks its source context before publishing. A forget during extraction discards the stale candidate and keeps regeneration queued, including when a later session advances the digest cursor.
+
+### Fixed (2026-09-30 — a shim that could not reach the daemon at startup gets its board address later)
+- A Claude Code session whose shim started while the daemon was unreachable,
+  overloaded or slow (2026-09-30: the desktop app restarted while this
+  host's tailnet link was stuck) stayed off the board for its whole life:
+  the startup registration gave up after its 3 s budget and was never tried
+  again, memory tools worked, and every `memory_agents update` and
+  `memory_message` went out without instance headers and was refused with
+  `instance_authentication_required`. Only a session restart fixed it.
+- The shim now retries that registration in the background when it failed
+  for a transient reason (a timeout, a refused or dropped connection, a 5xx
+  or 429, or `attachment_busy` from an attach the startup budget cancelled
+  after the daemon committed it) on the adapter's re-attach schedule (1, 2,
+  5, 10, 30 s, then every 60 s) until it lands or the session ends. Until
+  then a board write is refused locally with a message that says
+  registration is being retried; memory calls are unaffected. Once it
+  lands, board calls carry the instance headers, pending-mail hints and
+  channel delivery start, and the next tool result says once that the board
+  now works. The retry stops when the session ends (an attempt in flight is
+  cancelled and releases its state-file reservation) and on a refusal
+  retrying cannot change (unauthorized, principal not allowed, bank
+  mismatch, invalid saved state, a state file another process is
+  registering): that keeps the old stderr message and pass-through, and the
+  next tool result says once that registration stopped. A refusal at the
+  first attempt behaves exactly as before. Adapter requests the daemon never
+  answered now carry `code="transport_unavailable"` so the shim can tell
+  them from local state errors. The Claude desktop app's shared shim (no
+  board identity) and the Codex per-thread registry (already retried per
+  thread) are unchanged.
+- The same holds on the default path (`PSEUDOLIFE_AGENT_COORDINATION`
+  unset), where the shim first asks `GET /api/hook/coordination-start`
+  whether the daemon serves its bearer the board. A question the daemon did
+  not answer (no connection, a timeout past the 1.5 s bound, a 5xx, 408 or
+  429) was read as "no board" for the life of the process; it is now asked
+  again before each background attempt, and the shim registers once the
+  answer is yes. A definite no (an empty 200, another 4xx, a daemon older
+  than the route) keeps the quiet default: no adapter, no further warning,
+  no note. An unanswered check adds no board check-in to the MCP
+  instructions; the one-time note after registration says the board works.
+  While the check stays unanswered, board writes are refused locally with
+  the retry message rather than forwarded to a daemon that is not
+  answering. `_board_available` now returns `None`
+  for no answer (falsy, so Codex's default still reads it as no for that
+  process).
+
+### Fixed (2026-09-30 — session digest prompt echo)
+- Session digest parsing rejects distinctive instructions echoed from its own
+  prompt when those phrases are absent from the session record. The existing
+  bounded retry handles the rejected output; sessions that discuss the same
+  wording can still retain it in their digest. Whitespace differences in the
+  comparison do not reject wrapped source text or reformat the returned prose.
+
+### Fixed (2026-09-30 — JSON-shaped memory text can be corrected)
+- Nullable MCP string arguments now preserve JSON object, array and `null`
+  text instead of the SDK decoding it before validation. This lets
+  `memory_supersede(old_text=...)` select JSON-shaped memories by their exact
+  text. Plain strings and JSON-encoded list arguments keep their existing
+  behavior; tool schemas are unchanged.
+
+### Changed (2026-09-30 — a merge reject can name how the two are related, and the relationship becomes a link proposal instead of being lost)
+- Most merge proposals the judge rejects are related pairs, not unrelated
+  ones: a file and the concept it implements, a component and its parent
+  (most rejects in the 2026-09-29 merge-queue triage were this shape). A
+  reject dismisses the pair, and the relationship
+  was lost with it. A merge reject may now name a relation from the link
+  judge's vocabulary, read from FROM to INTO as the judge was shown the
+  pair; the judge's confidence stays about whether the two are different
+  things, and the relation never changes the verdict. Such a reject is
+  recorded as `relate`. For the merge, relate is a reject in every gate:
+  the single-vote gate, the two-vote gate (still only from two different
+  models), and `split`, which a reject beside a relate no longer stamps.
+  A relation outside the vocabulary is dropped and the reject stays a
+  plain reject.
+- No schema change: `relate` is stored in `judge_verdict` /
+  `judge2_verdict`, and the relation rides on the note
+  (`relate:<relation> | …`, and `2nd (<model>): relate:<relation> …` for a
+  second opinion). The review payloads' `judge` / `judge2` blocks carry it
+  as `relation`, and the Console chip shows `relate <relation>` as a
+  reject.
+- When an automatic reject applies and one of its votes was a relate, the
+  sweep files that relation (the more confident vote's) as a link proposal
+  with source `merge-judge-relate`, by entity id, through the ordinary
+  filing gate; the link judge settles it at its own gates, and the merge
+  judge never writes an edge. It files nothing for a relation that is not
+  registered (`tests`, `superseded-by`), nor when an edge or link proposal
+  already joins the pair: an accepted link changes the pair's evidence, so
+  reconsideration reopens the merge reject, and without the check each
+  reopening could file another relation. A filing that fails is logged
+  (`relate_link_errors`) and never undoes the reject. The judge result
+  counts `relate_links_filed`.
+- Measured before shipping (the private 2026-09-02 panel, merges only, two
+  replicates each, the same seed and batch as the 2026-09-29 baseline;
+  Opus 5.5 first opinion, Sonnet 5.5 second): in the sweep's order (the
+  first opinion alone at the 0.8 gate, else both at the two-vote gate)
+  the rejects applied are 18/18 and 21/21, against the baseline's 18 and
+  17. Of the rows both models rejected, 17 and 21 carry a relation to
+  file as a link (12 and 16 on pairs the panel itself called related; the
+  link judge settles the rest). Relate votes average 0.70 (Opus 5.5) and
+  0.71 (Sonnet 5.5) confidence, and 12 and 23 of them reach the 0.8
+  single-vote gate. On rows the panel called related, the relation
+  matches the panel's on 21 of 41 relate votes (Opus 5.5) and 21 of 44
+  (Sonnet 5.5), and across all relate votes the untyped `related-to` is
+  named on 29 of 61 and 35 of 68, so the link judge's own gates matter.
+  Costs to watch:
+  - fewer rejects apply on the first opinion alone (7 and 6, against the
+    baseline's 8 and 9), so a few more rows cost a second-opinion call
+    before they apply;
+  - two-vote non-low-differential accepts are 4/5 and 5/5, against the
+    baseline's 6/7 and 6/7, and accept precision per arm is 19/23 for
+    both models, against the baseline's 20/24 and 19/24 (accepts apply
+    only in `auto` mode);
+  - Sonnet 5.5's majority rejects are 29/34 correct, against the
+    baseline's 32/35: it names a relation on 8 votes for rows the panel
+    merged, and the cross-model gate applied none of them;
+  - accept-versus-reject splits left for a human
+    rise from 5 and 5 to 6 and 7.
+- Artifacts for the measurement:
+  `evals/results/queue-judge-ladder-20260930-relate-annot-opus55.json`,
+  `…-relate-annot-sonnet55.json` and
+  `queue-judge-cross-20260930-relate-annot.json`
+  (`evals/merge_relate_gates.py`, which now also replays the sweep's
+  order as `production_path` and counts the relations named), and the
+  baseline scored by the same script,
+  `queue-judge-cross-20260929-relate-baseline.json`.
+  `evals/queue_judge_ladder.py` and `evals/judge_ladder.py` count relate
+  as reject-class.
+- Retired before release: a first version asked for `relate` as a verdict
+  of its own. Its confidence then covered the relation as well as the
+  distinctness, none of the 85 relate votes reached the 0.8 single-vote
+  gate, and two-vote rejects fell to 5/5 and 9/9, so it would have left
+  more rows for a human, not fewer. It was not shipped; its artifacts stay
+  as the record (`queue-judge-ladder-20260930-relate-opus55.json`,
+  `…-relate-sonnet55.json`, `queue-judge-cross-20260930-relate.json`).
+- **Upgrade note:** the judge prompt is part of the signed judging policy,
+  so the first sweep after deploying this clears every pending merge
+  opinion (first and second, `split` rows included) for re-judging, one
+  `judge_batch` a tick, and reconsideration reopens the active automatic
+  merge rejects, deleting their dismissed pairs, one `judge_batch` a tick.
+  In `shadow` mode the reopened rows then wait for a human; in
+  `auto-reject` they are judged again under the new prompt.
+
+### Changed (2026-09-30 — subagents show on the board as their parent's children, not as peers; schema v50)
+- **Behaviour change for Codex users: a Codex subagent can no longer send
+  board mail.** A Codex native subagent (`collaboration.spawn_agent`) has
+  its own thread and so its own board address, and until now looked like
+  an independent session that could mail anyone (2026-09-23..30: 58 board
+  rows were such children, 2 of them with a task). Maintainer decision
+  2026-09-30: subagents are liveness information on their parent, not
+  peers. `memory_message(action="send")` from a subagent's address is now
+  refused with `child_send_refused` ("a subagent does not send board mail;
+  ask your parent session"; HTTP 403 on REST). It still receives and
+  acknowledges its own mail and sets its own status and park record; a
+  peer that sees a subagent working on something it is touching messages
+  the parent.
+- Schema v50: `coordination_agents.parent_thread` (the parent Codex thread
+  a native child registered with, set once) and `parent_agent_id` (the
+  parent's row). The shim reads the parent from Codex's
+  `x-codex-turn-metadata` (`thread_source: "subagent"`, `thread_id` equal
+  to the call's `threadId`, a canonical `parent_thread_id`; measured on
+  Codex 0.158.0 CLI and desktop) and passes it at register; malformed
+  metadata is ignored. A user's fork of a conversation carries no subagent
+  source and stays a peer. The daemon links the child to the most recently
+  active live Codex row for that thread under the same principal (a thread
+  that registered twice), or, when the parent
+  registers later, links it then (a logged `update` by the daemon); prune
+  unlinks the children of a parent it removes, and the parent's next
+  registration relinks them. No extra row or mailbox is allocated.
+  `memory_agents` list, register and update results carry
+  `parent_agent_id` and `subagent`. A shim newer than its daemon registers
+  the child without the link. The columns are added only when missing,
+  like v47's and v49's. Additive/idempotent; existing rows read NULL.
+- Claude Code: the plugin's new SubagentStart and SubagentStop hooks
+  (`plugin/hooks/subagent-board.sh`) keep a session's `children` current
+  on their own: one bounded `POST /api/hook/subagent` per event adds or
+  removes an entry `{label: "<agent_type>#<id8>", since, agent_id}` on the
+  session's row (found through the `<key>.agent` file the shim writes, as
+  the Stop hook finds it). SubagentStart carries no task description, so
+  the label is the type and a short id. Both are `async` (the answer is
+  ignored) and fail open (exit 0, no output). A parent's
+  `memory_agents(action="update", children=[...])` now replaces only its
+  own labels and keeps the live hook entries; a hook never removes a
+  parent label. Hook entries have their own cap of eight and never count
+  against the parent's eight labels, so a parent update is never refused
+  because of them; past it a new start replaces the oldest hook entry. A
+  hook entry older than three hours (`HOOK_CHILD_TTL`, the attached-idle
+  window) is no longer listed and goes at the next write, and a detach
+  (the shim ending with its session) clears them all, logged by the
+  daemon: a killed session cannot list dead subagents for long. A refused
+  `children` update applies nothing else sent in the same call (status,
+  park), and its `invalid_children` detail now says so. In Codex both
+  hooks are no-ops (lifecycle.ps1
+  exits at once; the bash script exits in Codex context), and
+  `ops/setup-codex-hooks.py` treats them as optional, like Stop. SubagentStop
+  now carries two plugin handlers, this one and Codex's child park gate (a
+  separate group, a no-op in Claude Code); setup accepts either or both
+  listed, and each stays a no-op in the other host.
+- `board-audit stats` counts only the model's own board actions as a
+  woken session acting: the hooks' children updates (actor `hook`) and the
+  daemon's parent links (actor `daemon`) are left out.
+  [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
+
+### Added (2026-09-30 — status and the session briefing say when the merge-proposal queue is piling up)
+- After a triage settled it on 2026-09-02, the pending merge-proposal
+  queue reached 1,016 by 2026-09-29 (the merge judge in `shadow` as a
+  containment from 09-11) with nothing reporting it: `memory_dream(action="status")`
+  carried only the deep-dream need signal and the briefing said nothing.
+  `dream_status` now carries a `review_queue` block beside `deep_dream`:
+  pending merge, junk and link counts, the ages of the oldest pending and
+  oldest unjudged merge, every judge's configured mode, and
+  `attention: {needed, reasons}` for the merge queue. Two aggregate
+  queries; a failure is an `error` field, never a failed status.
+  Attention is needed at `memory.deep_dream.review_queue_alert_pending`
+  (default 500) pending merges in any mode, or when at least
+  `review_queue_alert_min_pending` (default 100) wait and one has waited
+  past `review_queue_alert_age_days` (default 14): the oldest pending
+  merge while no judge applies merge verdicts, or the oldest unjudged one
+  while `auto-reject` / `auto` should be judging. While it is needed, the
+  briefing (`GET /api/briefing`, `pseudolife-mcp briefing`) and the
+  SessionStart hook output carry one line with the count, the age, the
+  merge judge's mode and the remedy; the plugin's hook leaves it out on a
+  resume or compaction.
+  The `/dream` command's status step reads the block and tells the user
+  why attention is needed before triaging.
+  [Deep dream](docs/guide/dreaming.md#deep-dream--full-corpus-graph-consolidation)
+
+### Added (2026-09-30 — a Claude Code subagent can no longer write to the board as its parent session)
+- A subagent runs inside its parent's shim, so its board calls carried the
+  parent's identity: its status update overwrote the parent's, its ack
+  marked the parent's mail read, its send went out under the parent's name
+  (#425). Until now only the served check-in asked subagents to read only.
+  The plugin now carries a PreToolUse hook (`subagent-board-guard.sh`,
+  matched to `mcp__<server>__memory_agents` and `mcp__<server>__memory_message`
+  on any server name) that denies, for a call whose hook input carries
+  Claude Code's `agent_id`, `memory_agents` update, claim and release and
+  `memory_message` send and ack, with a reason naming the board and telling
+  the subagent to ask its parent. List, receive, other tools and every
+  call the parent makes pass; an unreadable payload or
+  `PSEUDOLIFE_AGENT_COORDINATION` off lets the call through. No daemon
+  request. Probed live on Claude Code 2.1.283 against a stand-in server:
+  the child's update never reached it, its list and the parent's update
+  did. Codex 0.158 lists the entry (`pre_tool_use`); a Codex child has its
+  own board address, so there it allows every call (`lifecycle.ps1 -Event
+  SubagentBoardGuard` exits at once, the bash script checks the Codex
+  context). `ops/setup-codex-hooks.py` approves it with the rest and, like
+  Stop, does not require it; the hooks digest and the Codex byte check
+  cover the new script. A plugin change reaches clients only through
+  `ops/update.ps1 -All` / `ops/update.sh --all` (or
+  `ops/update_clients.py`); Codex asks for approval again after it.
+  [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
+
+### Added (2026-09-30 — the installer asks where the memory bank lives, and re-points what is already registered)
+- Whether an installer run was a local install or a client of a bank on
+  another machine was decided by whether `--daemon-url` named a non-loopback
+  host, before the banner, so a user who did not know the flag got a local
+  bank; and a client-only run on a machine that already had registrations
+  only warned about the ones naming another daemon ("Edit it in place"),
+  while the Codex credential setup refused its URL outright. Both
+  installers now open an interactive run that does not name the daemon
+  (`--daemon-url` / `-DaemonUrl`, `--client-only`, or
+  `PSEUDOLIFE_MCP_DAEMON_URL`) with one question: "Where does the memory
+  bank live?" **1** (the default) is today's local install. **2** asks for
+  the daemon's URL, then, once the agents are chosen, for the token: paste
+  it into a new owner-only file (`~/.pseudolife-mcp/<client>.token` by
+  default, never an existing file) or name a token file already on the
+  machine; the client-only install follows. **3** is a local install that
+  ends with the steps to share it: exposing the daemon (Tailscale Serve TCP
+  first), a principal and tier per client in `ops/.env`, and
+  `coordination.allowed_principals` (refused with `--no-token`: an
+  unauthenticated bank must never be exposed). With `--token-file` or
+  `--read-token` and no URL, which already mean another machine, only the
+  URL is asked. Pasted URLs and paths lose one pair of surrounding quotes,
+  and end of input at the question exits 2. The answer goes through the
+  same mode resolution and client-only refusals as the flags, which now
+  run after the banner. Runs without a terminal, and runs that name the
+  daemon, ask nothing and behave as before.
+- A client-only install re-points existing registrations with the
+  installed shim's `pseudolife-mcp connect`, before the Codex credential
+  setup and every registrar: a `--dry-run --json` pass for the clients this
+  run installs (with this run's token file) shows the plan in the
+  installer's output; when it found any, `--yes` applies it, and a non-zero
+  exit stops the install with what it means (a failed dry run with the
+  reason from its report). With no registration (exit 3) `connect` is not
+  run again, and entries it does not rewrite are named. Only connect's own
+  JSON report is trusted: a shim that answers without one (a held shim from
+  before `connect`, one that cannot start) gets a warning, and the install
+  goes on as before. The registrars then create only what is still missing.
+  Where `connect` checked, the "Edit it in place" advice for a Claude Code
+  or Codex registration still naming another daemon says `connect` could
+  not re-point it and how to finish (without its report the earlier advice
+  stands), and the Gemini token-file advice is skipped for a registration
+  `connect` wrote or confirmed. The shim helpers (`ensure_shim` / `Install-ShimOnce`
+  and the registration checks) moved, unchanged, from section 11 to the
+  top of section 9 so the client-only path can use them there.
+  [With the installer](docs/guide/remote-bank.md#with-the-installer-client-only-path)
+
+### Added (2026-09-30 — one command moves a machine's clients to a new daemon)
+- When a bank's daemon changed address, every client on every machine had to
+  be re-pointed by hand: each registrar fills in what is missing and leaves an
+  existing daemon URL alone, so the 2026-09-29 move of a live bank to a Linux
+  container took hand edits of `~/.claude.json`, Codex's `config.toml` (after
+  deleting `connection.json`), the Claude Desktop entry and
+  `~/.claude/settings.json`. `pseudolife-mcp connect <daemon-url>
+  [--token-file PATH [--read-token]] [--client ...] [--dry-run] [--yes]
+  [--json]` now re-points every Claude Code, Codex, Claude Desktop and Gemini
+  CLI registration it finds, plus the plugin hooks' copies (the
+  `settings.json` env block and Codex's `connection.json`). It plans first
+  (each place `current`, `change`, `manual` with the reason, or `absent` with
+  the command that registers it; it never creates a registration), asks once,
+  verifies every credential it points at the target (the shim's token-file
+  check, an authenticated request that follows no redirects, and an MCP
+  handshake with the board check-in off) before writing anything, then writes
+  all or nothing: each file backed up and read back, and on a failure every
+  file it wrote restored unless something else changed it since. Only the
+  daemon URL, the token-file path and, for a daemon on another machine,
+  `PSEUDOLIFE_MCP_NO_SPAWN=1` change. Project-scoped Claude Code entries,
+  non-stdio registrations, Desktop's old `pseudolife-memory` name, Codex
+  settings from another config layer, an ambient `PSEUDOLIFE_MCP_DAEMON_URL`
+  and a scheduled unattended update are reported, never written. Exit codes:
+  0 done, 1 rolled back, 2 usage or not confirmed, 3 no registration it can
+  write, 4 verification refused, 5 applied but the post-apply check failed.
+  [Moving a client to a new daemon](docs/guide/remote-bank.md#moving-a-client-to-a-new-daemon)
+- The token-file helpers and JSON env edits of `ops/client_credentials.py`
+  moved to `pseudolife_memory/client_config.py`, and the Codex connection
+  writer of `ops/setup-codex-hooks.py` (the app-server client,
+  `connection.json`, the token copy and `configure_credential_file`) to
+  `pseudolife_memory/codex_connection.py`, which adds the replace mode
+  `connect` uses. Both are standard library only, so `connect` runs from a
+  release install; the `ops/` scripts import them from the checkout and keep
+  their command lines, output and exit codes.
+
+### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
+- A Codex native child thread (`collaboration.spawn_agent`) or fork already
+  had its own board address: the shim keys identity by the MCP
+  `_meta.threadId` and writes the child's `<key>.agent` record and digest
+  under the child's thread id (`pseudolife_memory/codex_coordination.py`).
+  But the plugin's hooks read the root `session_id`, which Codex carries
+  unchanged into a child, and no hook ran at a child's stop, so the child's
+  own park record never reached the park gate. The 2026-09-29 probe (Codex
+  CLI 0.158.0, desktop 0.158.0-alpha.2.1) measured `SubagentStop` stdin
+  carrying `agent_id` equal to the child's MCP `threadId`, and a block
+  continuing the child once (`stop_hook_active` on its next stop).
+  `hooks.json` gains its own `SubagentStop` group: `lifecycle.ps1 -Event
+  SubagentStop` on Windows, `stop-wake.sh subagent-stop` elsewhere (behind
+  the same `bash -n` guard as `Stop`), synchronous, 10 s. In Codex context
+  it runs the root's park gate keyed by the validated `agent_id` (the
+  canonical lower-case UUID the shim accepts, exactly one top-level field;
+  no fallback to `session_id`): one `GET /api/hook/park-gate` for the
+  child's address, a block answered as `{"decision":"block","reason":...}`
+  on stdout, the `gate` ledger line under the child's key. A child gets no
+  prompt hook, so no turn stamp: the daemon judges its standing record. The
+  served text asks the child to park and never suggests sending. In Claude
+  Code, which fires `SubagentStop` too, the entry does nothing (before
+  this, the bash script run there would have gated the parent session).
+  `ops/setup-codex-hooks.py` lists `SubagentStop` in `PLUGIN_EVENTS`,
+  approves it with the other plugin hooks, treats it as optional (a Codex
+  that does not list it still reaches ready) and keeps a user's choice to
+  disable it. Manual installs stay without it, as they are without `Stop`.
+  Not done here: SubagentStart context, any parent relay or wake of a
+  finished child, and any change to the root session's hooks.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. The new `SubagentStop`
+  handler is a new position Codex has not approved: an existing Codex
+  plugin install lists it in Codex's startup hook review until it is
+  approved there (`/hooks`) or setup reruns
+  (`python ops/setup-codex-hooks.py --source plugin --trust ask`).
+
+### Added (2026-09-29 — a large merge queue can be read with its evidence)
+- `GET /api/graph/proposal-evidence?offset=&limit=` pages through the
+  pending merge proposals with the merge judge's own evidence pack
+  (`_judge_enrich_from`: per-side snippets at `judge_snippet_max_chars`,
+  degree, scopes, `low_differential`, the `judge`/`judge2` opinions).
+  `memory_dream(action="deep")` cuts its lists at 40 items and
+  `memory_graph_review(action="list")` carries no snippets, so the
+  2026-09-29 triage of a 1,016-row queue had to gather evidence one
+  `memory_search` at a time. `group` is computed over the whole queue, not
+  the page, so rows sharing an entity stay one accept-at-most-one decision
+  across pages; `limit` is clamped to 1–100 and the response carries
+  `total` and `next_offset`.
+
+### Measured (2026-09-29 — the review-queue judges move to Opus 5.5, with Sonnet 5.5 as the merge second opinion)
+- The merge judge had been held in `shadow` since 2026-09-11 because its
+  "second opinion" came from the same model: `judge_second_model` only
+  swaps the model name on the first judge's endpoint, and the deployed
+  endpoint (the Codex shim) serves unknown names as its launch default.
+  Pointing `judge_url` at a Claude shim makes `judge_model` and
+  `judge_second_model` two real models. `evals/queue_judge_ladder.py`
+  re-ran the 2026-09-02 panel for `claude-opus-5-5` and
+  `claude-sonnet-5-5` (two replicates each), `claude-fable-5-1` (merges,
+  one replicate) and `gpt-6-astra` / `gpt-6-sol` / `gpt-6-luna` (two
+  replicates each) (`evals/results/queue-judge-ladder-20260929-*.json`).
+  The new `evals/cross_judge_gates.py` pairs the first-opinion model with
+  each candidate second opinion, as the sweep does
+  (`evals/results/queue-judge-cross-20260929.json`).
+- Opus 5.5 first, Sonnet 5.5 second: two-vote rejects 18/18
+  (17/17 on the second replicate), which supports `auto-reject`; two-vote
+  non-low-differential accepts 6/7, which does not support `auto`. The
+  miss, panel row 2016, is accepted by five of the six arms (GPT-6 Luna
+  rejects it) and was labelled reject at panel confidence 0.62.
+- GPT-6 second opinions let false rejects through the two-vote gate:
+  Astra 25/26, Sol 27/30, Luna 25/28. Their confidence does not separate
+  right from wrong: 55 of 55 Astra reject votes sit at or above the 0.8
+  single-vote gate (Opus 5.5: 17 of 67).
+- On the 7 rows where Opus 5.5 and Sonnet 5.5 split,
+  Fable 5.1 matched the label 6 times (Opus 5.5 4, Sonnet 5.5 3). The sweep
+  leaves a split for a human, so this moves no gate.
+- Opus 5.5 on the other queues:
+  link auto-accept 3/3 and auto-reject 5/5,
+  junk auto-keep 8/8 and auto-delete under the bar 6/6,
+  curation auto-distinct 25/25, so the `auto` / `auto-distinct` modes those
+  judges already run in stand. Curation keep-side precision 8/11 and
+  candidate auto-dismiss 20/24 keep curation `auto` and the candidate
+  judge where they were.
+- Applied to a deployment by configuration alone: `judge_url` pointing at a
+  Claude shim, `judge_model: claude-opus-5-5`, `judge_second_model:
+  claude-sonnet-5-5`, `judge_mode: auto-reject`.
+
+### Fixed (2026-09-29 — the Codex shim no longer fails when the memory daemon is down)
+- `evals/codex_shim.py` ran every `codex exec` against the host's
+  interactive `~/.codex/config.toml`. Where that config marks the
+  pseudolife-memory MCP server `required`, an unreachable daemon made
+  Codex refuse to start a session, and every dream or judge call returned
+  HTTP 500 (a queue-judge ladder run, 2026-09-29). Each call now passes
+  `--ignore-user-config` (no MCP servers, plugins or hook trust from
+  `config.toml`; auth still comes from `CODEX_HOME`),
+  `-c features.hooks=false` (because `hooks.json` is read either way) and
+  `--skip-git-repo-check` (directory trust lived in the ignored config).
+  `-c mcp_servers={}` was measured on codex-cli 0.158.0 and is not
+  enough: the enabled pseudolife plugin started its own copy of the
+  server, and the model called the board and bank for a one-word reply
+  (80k input tokens; 16k with `--ignore-user-config`, no MCP calls). The
+  flag is present in codex-cli 0.157.1 and 0.158.0; an older CLI that
+  lacks it fails `/health` with an unexpected-argument error. A side
+  effect: a `model_reasoning_effort` in the host's `config.toml` no
+  longer reaches the shim. Pin it with `--reasoning-effort` or
+  `memory.dream.extractor_reasoning_effort`.
+  [Reasoning effort](docs/guide/dreaming.md#reasoning-effort--the-dreamers-thinking-budget)
+
+### Fixed (2026-09-29 — the dream-alias screen stops filing numbered siblings and unrelated names)
+- The embedding alias screen that files merge proposals for names a dream
+  just minted (`_propose_dream_alias_candidates`) was the review queue's
+  noisiest source. In the 2026-09-29 triage of 1,016 pending merge
+  proposals it had filed 574 proposals
+  (16 accepted, 524 rejected, 34 left). Two causes:
+  - It never applied `merge_veto`, the name-shape vetoes the write-dedup and
+    analyzer filings already use, so numbered siblings like two PR numbers
+    (which embed near-identically) were proposed as duplicates. The screen
+    now applies them. Replayed over the triage verdicts, the veto
+    vetoes 36 of its rejected proposals and none of its accepted ones.
+  - `memory.dream.alias_candidate_min_cosine` (0.5) was calibrated on
+    all-MiniLM-L6-v2 and went stale with the Qwen3-Embedding-0.6B swap,
+    which scores unrelated short names above it. The default is now 0.7:
+    past the veto the screen keeps 420 of the remaining 538 and
+    loses one accepted paraphrase (cosine 0.655);
+    0.8 would keep 194 but lose 6 of its 16 true duplicates, so 0.7 is the
+    conservative step. A real-model test pins that the screen still files
+    the paraphrase it was built for and drops an unrelated pair.
+- `evals/merge_detector_replay.py` replays labelled merge verdicts through
+  the vetoes and the threshold; its input carries bank names and stays in
+  the gitignored `evals/data/`, its artifact
+  (`evals/results/merge-detector-replay-20260929.json`) carries ids,
+  detectors, scores and verdicts only. Labels: the 2026-09-29 triage (eight
+  read-only Opus slice judges, a 0.8 accept floor applied in the main
+  thread); `leave` rows are unlabelled.
+
+### Changed (2026-09-30 — the merge judge's second opinion can come from another provider, and two votes from one model never auto-reject)
+- Two agreeing merge-judge rejects auto-apply only when the two votes came
+  from different models, the rule two-vote accepts already had. The same
+  model asked twice mostly repeats itself, and on the maintainer's
+  deployment it authorized rejects: from 2026-09-03 the second opinion's
+  endpoint was the Codex CLI shim, which answers any name outside its own
+  family with its launch default, so `judge_second_model: claude-fable-5`
+  was served by the first opinion's model until the merge judge went back
+  to shadow on 2026-09-11. Distinctness is read from the SERVED names (both
+  known and different, another endpoint object, and neither the second
+  vote's served nor configured name equal to the first vote's stamp). A
+  refused pair keeps its second vote, gains `auto-reject needs a distinct
+  second model` on its note and counts as `auto_reject_refused_same_model`
+  in the judge result. With neither `judge_second_model` nor
+  `judge_second_url` set, two-vote rejects therefore stop applying (and the
+  second opinion is not asked at all, below); the
+  single-vote gate (`judge_reject_min_confidence`) is unchanged, so a single
+  confident reject still applies on one model's say-so.
+- New `memory.deep_dream.judge_second_url`: an OpenAI-compatible endpoint
+  of its own for the merge judge's second opinion, serving
+  `judge_second_model` (empty = its launch default), with a bearer key read
+  only from `PSEUDOLIFE_JUDGE_SECOND_API_KEY` (forwarded by both compose
+  files, documented in `ops/.env.example`) and sent nowhere else. Empty
+  keeps today's behaviour: the second model on the first opinion's
+  endpoint. A failing second endpoint is reported as
+  `second_opinion_error` and its share of the batch goes to first opinions,
+  instead of ending the tick before any first opinion runs. It is signed
+  into the review fingerprints only while set, so deploying it does not
+  clear recorded verdicts or reopen automatic decisions.
+- A judge endpoint that serves another model than it was asked for is now
+  visible: the merge judge result counts it (`served_model_mismatch`, names
+  in `served_model_mismatches`) and logs a warning, for first and second
+  opinions. It blocks nothing; launch-default aliases (`judge`,
+  `extractor`, `bench`) and dated snapshots of the requested model
+  (`gpt-4o-2024-08-06`) do not count.
+- `judge_url`, `judge_model` and `judge_second_url` are live Console knobs
+  (Deep dream group); pointing the judges at another endpoint no longer
+  needs a `config.yaml` edit and a restart.
+- `judge_url` takes its own bearer key, env-only like the second
+  endpoint's: `PSEUDOLIFE_JUDGE_API_KEY` (forwarded by both compose files,
+  documented in `ops/.env.example`), sent to `judge_url` alone, including a
+  second model swapped onto it, and never to the dream extractor or the
+  second endpoint.
+- The merge judge skips its second-opinion pass, with no model call, when
+  the configuration makes that opinion the first model again: no
+  `judge_second_url`, and `judge_second_model` empty or equal to the first
+  endpoint's model name. Such a vote can authorize nothing, and in shadow
+  it is one model's opinion twice. The rows keep waiting, their batch share
+  goes to first opinions, and the result counts them
+  (`second_opinion_skipped_same_model`). No config field changes, so no
+  review fingerprint moves.
+- The sweep logs the merge judge's result whenever a tick took second
+  opinions, refused a same-model reject, saw a served-model mismatch or
+  lost its second endpoint, not only when it judged or reopened something.
+
+### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
+- A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
+  --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
+  first session on a Docker-tier host that started from a runtime crashed
+  in the shim at its first import (`coordination_adapter` imports `httpx`
+  and `anyio` itself, and reaches `storage/postgres.py` through the board's
+  constants). The pipx venv had carried both transitively through the
+  daemon's dependencies; mcp 2.1 depends on `httpx2`, not `httpx`. `httpx`
+  and `anyio` are now declared in `pyproject.toml` and in
+  `SHIM_REQUIREMENTS`, `storage/postgres.py` imports numpy where it uses
+  it, and `tests/test_shim_runtimes.py` pins the module-level import
+  closure of every client-side mode to the distributions the runtime
+  installs, and imports that closure with numpy and torch blocked.
+
+### Fixed (2026-09-29 — the update command the install names runs, on every kind of machine, and never replaces a checkout's shim with an older release)
+- The installers' closing line and the served update notices named a bare
+  `pseudolife-mcp update`, but the shim launcher's directory is not on
+  `PATH`: on a Debian 13 Docker-tier host the name found the old pipx
+  install, and after the suggested `pipx uninstall` nothing (2026-09-29).
+  `ops/install.sh` and `ops/install.ps1` now print the launcher's full path
+  when `PATH` does not find it, with how to add its directory; on a
+  client-only install the line names `update --clients-only`. The plugin's
+  SessionStart hooks (and `briefing --hook-json`) report the launcher's
+  path on the query string when `PATH` misses it, the daemon shape-checks
+  it and the update, version and hooks-differ notices name it; the shim's
+  own version notices do the same. Nothing changes `PATH` or pipx's link.
+  [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+- `pseudolife-mcp update` on a client-only machine (run from a shim runtime,
+  no daemon container) refused with "Start Docker and retry", and
+  `--clients-only` with "this is a pip install". Both now install the
+  daemon's release (the newest release when the daemon does not answer)
+  as a new shim runtime and refresh the plugin cache; `--daemon-only` is
+  refused naming the daemon's host.
+- The hooks-differ notice led a checkout user into a downgrade: it named
+  `update --clients-only --tag <daemon version>` first, a checkout-built
+  daemon still reports the last release's version, the launcher starts the
+  newest runtime, and shims through 0.15.0 cannot read
+  `PSEUDOLIFE_MCP_TOKEN_FILE`. `update --clients-only` now refuses a release
+  whose version equals the current shim runtime's when that runtime was
+  built from a checkout, and names the checkout command (`--reinstall`
+  overrides). `/health` `build` gains `source` (`checkout` from
+  `ops/docker-compose.yml`, `release` from the release workflow; the commit
+  cannot tell them apart, since release images carry one too), and a
+  checkout-built daemon's hooks-differ notice names the checkout command
+  first.
+- `pseudolife-mcp --version` (and `version`) answered "unknown mode"; it
+  prints the package version and, from a shim runtime, that runtime's
+  directory and source commit.
+- The README and the configuration guide say how to take the first update
+  from 0.15.0 or earlier, which has no `update` command: `git pull` and
+  `ops/update.sh --all` / `ops/update.ps1 -All` from a checkout, or
+  `pipx install --force` / `pip install --upgrade` of the release.
+
+### Fixed (2026-09-29 — doctor finds the credential a shell lacks, and the update advice matches today's paths)
+- `pseudolife-mcp doctor` run from a plain shell read the bearer only from
+  its own environment: on a token-gated Docker-tier daemon the handshake's
+  shim exited on its missing-credential line and doctor reported
+  `ExceptionGroup` with advice to reinstall the interpreter. When the shell
+  has neither `PSEUDOLIFE_MCP_TOKEN` nor `PSEUDOLIFE_MCP_TOKEN_FILE`, doctor
+  now takes them (and `PSEUDOLIFE_MCP_DAEMON_URL`, when unset) from this
+  server's Claude Code registration (`~/.claude.json`, honouring
+  `CLAUDE_CONFIG_DIR`), else its Codex one (`config.toml`), and names the
+  registration in a new `credential_source` field. When none carries one
+  and `/health` reports `auth: true`, it reports `BearerMissing` with the
+  exact env keys to set instead of running the handshake.
+- `ops/update.sh --clients-only` failed on "unknown argument", and
+  `ops/update.ps1 -ClientsOnly` silently ignored the flag and ran a full
+  daemon deploy. Both now print the same redirect as
+  `ops/update.py` (`python ops/update_clients.py` for the clients alone)
+  and exit 2 before running anything.
+- The shim update's advice to `pipx uninstall pseudolife-mcp` after moving
+  a pipx registration to the launcher now adds that an extractor shim
+  autostart may still run from that venv (`ops/shim_python.py` can choose
+  it on POSIX), and when the checkout's `ops/.env` names a
+  `PSEUDOLIFE_*_SHIM_PYTHON` inside it, says to keep the venv instead.
+- Docs: the GHCR-pull path updates with `pseudolife-mcp update` rather than
+  a bare `pull` + `up -d`; the troubleshooting and installer-migration notes
+  no longer say every session must close for a shim upgrade; the plugin,
+  provider and Codex-hook passages name `pseudolife-mcp update` beside the
+  checkout scripts; and the configuration guide says where `config.yaml`
+  lives on the Docker tier and what applies a change.
+  [Environment variables](docs/guide/configuration.md#connection--deployment-env-vars)
+
+### Fixed (2026-09-29 — updating a lite install keeps its embedded Postgres, and an unattended schedule that could never apply says so when it is installed)
+- `pseudolife-mcp update` on a pip or pipx install now asks for
+  `pseudolife-mcp[lite]==<version>` when the running install carries the
+  `lite` extra (its embedded Postgres provider, `pg0`, is importable), and
+  its step line names the requirement. It asked for the bare package:
+  `pipx install --force` rebuilds the venv, so `pg0-embedded` was gone
+  after the update and the daemon no longer started. The printed command
+  quotes the requirement, since the brackets are a glob in zsh.
+- `pseudolife-mcp update --schedule HH:MM` resolves the bearer the
+  scheduled run will see and refuses with exit 2 when none resolves,
+  naming the command that sets it; `--allow-no-bearer` installs the
+  schedule anyway, with a warning. Without a bearer the run cannot read
+  the board, so it held off every day with exit 4, which the scheduler
+  counts as success, and nothing said the updates never applied. On
+  Windows the task starts with the user's User-scope environment, not the
+  shell's, so that is what is read (`HKCU\Environment`); the fix is
+  `[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "<path>", "User")`.
+  On Linux the unit carries its own token file, the one the shell names or
+  one written from its `PSEUDOLIFE_MCP_TOKEN`. The output now names the
+  bearer the run will use. `--schedule` also refuses on a pip install,
+  which has no daemon container to update. The configuration guide said
+  the installer sets the token file as a User variable; none does, and
+  the sentence now says what the code does.
+  [Unattended daemon updates](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- `ops/preflight.sh` checks that python's `venv` can build the stdio
+  shim's side-by-side runtime (`import ensurepip, venv`) and names
+  `sudo apt install python3-venv` when it cannot (Debian and Ubuntu ship
+  ensurepip separately; Debian 13, 2026-09-29). It called pipx the
+  preferred installer; pipx is the fallback the installer takes when the
+  venv runtime cannot be built, and the line now says so.
+- The client-side ladder (`ops/update_clients.py`, and `pseudolife-mcp
+  update` in checkout mode) ends with an informational "Extractor
+  autostart" line when an extractor shim's scheduled task or systemd unit
+  was registered before `ops/shim_autostart.py` and still carries the
+  model on its command line, so at logon it starts that model, not
+  `ops/.env`. No update moves a registration; the line names the one
+  installer run that does. It never fails the run, and a host with no
+  extractor autostart registered prints nothing.
+
+### Fixed (2026-09-29 — an update's log reads in the order the steps ran)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`, behind
+  `ops/update.sh` and `ops/update.ps1`) flushes each `==> ...` step line,
+  each warning and the rollback text as it prints them, and flushes both
+  streams before a streamed child (the docker pull or build, the checkout's
+  backup and retention scripts) starts. With stdout a file (`ops/update.sh > log 2>&1` on a headless
+  host, 2026-09-29) Python block-buffered the step lines while the build
+  wrote to the file directly, so every step — "backing up the bank",
+  "tagged rollback image", "rebuilding the daemon only", "healthy" —
+  landed after the whole build output, and the log read as if the backup
+  had followed the build. A terminal run is unchanged.
+
+### Changed (2026-09-29 — `pseudolife-mcp` typed in a terminal runs the launcher, not an old pipx copy)
+- After the move to side-by-side shim runtimes every registration named the
+  launcher, but the name `pseudolife-mcp` in a terminal still resolved to
+  pipx's `~/.local/bin` link into its venv of the old package (Debian 13,
+  2026-09-29): `pseudolife-mcp update` ran old code, and after the
+  suggested `pipx uninstall` it ran nothing. The installers
+  (`ops/install.sh`, `ops/install.ps1`) and the update step
+  (`pseudolife-mcp update`, `ops/update_clients.py`) now make the name
+  reach the launcher; `python ops/shim_runtime.py expose` does it alone.
+- POSIX: `~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher.
+  A free name is linked; pipx's link into `venvs/pseudolife-mcp`, or a
+  pip --user console script of this package, is moved aside as
+  `pseudolife-mcp.<kind>-<stamp>` and never deleted; anything else is left
+  as it is and named. The link survives `pipx uninstall`, which removes
+  only bin-dir links that resolve into its own venv
+  (`pipx.commands.common.get_exposed_paths_for_package`). When
+  `~/.local/bin` is not on `PATH` the step prints the one-line fix
+  (`export PATH="$HOME/.local/bin:$PATH"`) and edits no profile; when an
+  earlier `PATH` entry still wins, it is named. `PSEUDOLIFE_SHIM_USER_BIN`
+  moves the directory.
+- Windows: the launcher directory is prepended to the user `PATH`
+  (`HKCU\Environment`, written back as an expandable string; the machine
+  `PATH` is never touched), skipped when already present, and
+  `WM_SETTINGCHANGE` is broadcast so consoles opened afterwards see it. A
+  terminal that still resolves the name elsewhere is told to open a new
+  one. pipx's `pseudolife-mcp.exe` further down `PATH` is left in place.
+  `ops/install.ps1` repeats the outcome in its summary ("Launcher on
+  PATH").
+- `pseudolife-mcp doctor` reports `path_resolution`: what
+  `pseudolife-mcp` resolves to, the launcher, and a warning when they
+  differ. A layout from `PSEUDOLIFE_SHIM_RUNTIMES` /
+  `PSEUDOLIFE_SHIM_LAUNCHER` changes no `PATH` unless
+  `PSEUDOLIFE_SHIM_USER_BIN` is set as well.
+  [Where the shim lives](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+
+### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
+- `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
+  line endings (one copied from a Windows host) with LF endings before
+  reading it — in place, keeping the file's mode, with the original kept
+  beside it as `ops/.env.crlf-<stamp>` — and say so; a file already on LF
+  is not touched. A value the installer read from such a file ended in a
+  CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
+  an invalid name (Debian 13, 2026-09-29). Compose itself tolerates CRLF;
+  the installer's own volume-name reads now drop a trailing CR as well.
+  [Environment variables](docs/guide/configuration.md#environment-variables)
+- The shim autostart scripts (`ops/install-shim-autostart.sh`,
+  `ops/install-codex-shim-autostart.sh` and their `.ps1` twins) no longer
+  fall back to a bare `python3` / `python`: `evals/claude_shim.py` and
+  `evals/codex_shim.py` import the dream system prompt from
+  `pseudolife_memory`, so on a host without a checkout `.venv` the unit's
+  `ExecStart` exited 1 in a restart loop until it was re-registered with
+  `--python` (same install). The new `ops/shim_python.py` picks an
+  interpreter that imports the package — the checkout's `.venv`, pipx's
+  `pseudolife-mcp` venv (not on Windows, where `ops/install.ps1` treats
+  anything running from that venv as a session holding the MCP shim and
+  would refuse every later shim upgrade), a venv it made earlier, a PATH
+  python that imports it, else a venv it creates from the checkout (torch
+  from the CPU wheel index) — verifies each candidate the way the unit
+  runs, prints the choice, and refuses with the fix when none qualifies;
+  `--python` / `-PythonExe` names one to verify instead, and a bare name
+  (`--python python3`) is looked up on PATH as the unit would have. The
+  `.ps1` twins read the choice as UTF-8, so a profile path with a
+  non-ASCII character reaches the task intact, and the `.sh` twins quote
+  the prompt-file and CLI paths in `ExecStart`. Both one-shot installers now
+  register the autostart after their own shim install, so that install's
+  venv is what the unit uses, and a mode switch says which family's
+  autostart it removed and why.
+  [Claude primary with local fallback](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
+### Changed (2026-09-29 — delete filters narrow the match, and a bulk delete needs confirming)
+- `memory_forget(scope="memory")`, `POST /api/delete` and
+  `MemoryService.delete` combine their `text` / `substring` / `source` /
+  `episode` / `tag` filters with AND across kinds, the way
+  `memory_search`'s `sources` / `bands` / `tags` do: `text="probe",
+  source="status"` removes the probe entry in that source. Before, the
+  filters OR-combined and that call removed every entry in the source
+  (1,399 status entries on 2026-09-29, restored from backup). At least one
+  filter is still required.
+- A delete that would remove more than `memory.delete_confirm_threshold`
+  entries (new, default 20, `0` disables) is refused unless the call
+  carries `confirm_bulk=true`: nothing is removed and the response is
+  `{deleted_count: 0, error: "bulk_confirm_required", would_delete,
+  threshold, sample_texts}`. The guard is count-based whatever the filters
+  (a broad substring is as dangerous as a bare source). The default equals
+  the `deleted_texts` sample cap, so an unconfirmed delete always lists
+  everything it removed. `CMS.delete_entries` takes the bound as
+  `max_removed` and raises `BulkDeleteRefused` before touching any band or
+  row. The Console's Delete deletes by exact text, and identical texts are
+  not deduplicated, so a click can match more than the threshold: it then
+  asks a second time with the count and resends with `confirm_bulk`,
+  instead of reporting "Deleted 0". [Built-in defaults](docs/guide/configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+
+### Added (2026-09-29 — opt-in unattended daemon updates for headless hosts; the Codex re-approval steps, complete and only when the hooks changed)
+- `pseudolife-mcp update --schedule HH:MM` installs a daily scheduled
+  task (Windows, `schtasks`) or systemd `--user` timer (Linux) that runs
+  `pseudolife-mcp update --unattended`; `--unschedule` removes it. The
+  run applies a new release only while `config.yaml`
+  `updates.unattended_daemon: true` (default false, read from `/health`,
+  so the timer alone changes nothing) and the agent board lists no active
+  session, with the same backup and rollback tag as an attended update,
+  reading the board once more right before the recreate, and posts a
+  board notice from the daemon's reserved principal, stamped with the
+  posting principal, to the sessions the board lists as active, saying it
+  updated (rollback tag, client states, the Codex steps when the hooks
+  changed) or held off and why (active sessions, the board unreadable;
+  with the knob off it only logs); a failed update posts the failure with
+  the rollback line when the daemon can still take it. Exit 0 updated,
+  3 current, 4 held off, 2 could not check, 1 failed; every line goes to
+  `~/.pseudolife-mcp/unattended-update.log`, the durable record.
+  `--unattended` refuses the flags that would skip the backup or half
+  the update. New route `POST /api/daemon-notice` carries the notice:
+  only a bearer whose principal is listed in the new
+  `coordination.daemon_notice_principals` (default empty) may post, since
+  the reserved sender is otherwise unforgeable and `allowed_principals`
+  admits `default`, the principal every ordinary session uses; the
+  refusal names the key and the setup (a dedicated `PSEUDOLIFE_MCP_TOKENS`
+  principal as the scheduled run's bearer), `--schedule` prints one line
+  saying so, and the run says in one line why a notice was not taken
+  (refused for the principal, the board off, the daemon silent). One
+  update runs at a time per host: a daemon-recreating
+  `pseudolife-mcp update` (release or checkout mode), a `--clients-only`
+  run and the unattended run hold an exclusive OS lock on
+  `~/.pseudolife-mcp/update.lock`; an attended run that finds it held
+  exits 2 naming the holder's pid, the unattended run holds off (exit 4),
+  and the unattended run reads the daemon's version again under the lock,
+  so a release an attended run applied meanwhile is "nothing to do"
+  rather than tagged as the rollback of the version it replaced. The
+  guide states what the idle check cannot see (clients off the board) and
+  the board's activity windows (1 h, 3 h while holding a lease). The
+  systemd unit carries `SuccessExitStatus=3 4` and the guide says to
+  enable lingering; a `--daemon-url` given with `--schedule` rides into
+  the task or unit.
+  [Configuration](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- Every update path (`pseudolife-mcp update`, `ops/update.*`,
+  `ops/update_clients.py`, the unattended notice) prints the complete
+  Codex re-approval steps when and only when Codex's hook copy differs
+  from the scripts just deployed: the changed files (from Codex's
+  marketplace clone against the checkout or the Claude plugin cache), the
+  refresh, the `/hooks` approval or `--trust yes` for unattended installs
+  (the manual-copy commands for a `setup-codex-hooks.py --source manual`
+  install), what is off until then, and the check `pseudolife-mcp doctor`
+  now reports as `codex_hooks`. An update whose hooks did not change says
+  nothing about Codex, and neither does one that finds no marketplace
+  clone at all; until now one generic line fired for any non-current
+  state. A daemon-only update (`ops/update.ps1` without `-All`,
+  `update --daemon-only`) whose hook scripts changed says in one line
+  that the client side and the Codex steps are still to do; the shim's
+  unattended client half leaves the steps beside its result file and its
+  next session's note points at them.
+
+### Added (2026-09-29 — sessions are told when a release is out, and the shim can take the client half of an update by itself)
+- The daemon reads the newest release from PyPI on a background thread
+  once per `updates.check_interval_seconds` (six hours; `config.yaml`
+  `updates.check_releases: false` turns it off), keeps the last good
+  answer and serves it on `/health` (`updates.latest_release`,
+  `checked_at`). When it is newer than the daemon, the session-start
+  briefing opens with one line naming the command (`release X is
+  available (daemon Y, plugin Z) — run pseudolife-mcp update`) in place
+  of the plugin-version notice. Every notice that names an update now
+  names `pseudolife-mcp update` or `--clients-only` first (the briefing's
+  plugin-behind, daemon-behind and hooks-differ lines, the shim's version
+  line, `doctor`), with the checkout scripts as the alternative, and the
+  client half pinned to the daemon's release (`--clients-only --tag
+  <version>`: without the tag the newest PyPI release would be installed
+  and the mismatch would only change direction). Until now only
+  `pseudolife-mcp update --check`, run by hand, compared the daemon with
+  the release page. `PSEUDOLIFE_RELEASE_CHECK=0` in the daemon's
+  environment makes no request whatever the file says (the test daemons
+  run with it); a failed check is retried after fifteen minutes until the
+  first answer. The comparison guide's egress note names the check and
+  the switch.
+- `updates.unattended_clients: true` (default off): when a session's shim
+  finds the daemon on a newer release than itself, it starts
+  `pseudolife-mcp update --clients-only --tag <daemon version>` in the
+  background (a new shim runtime beside the running one, the plugin cache
+  refreshed; log `~/.pseudolife-mcp/update-clients.log`), at most once per
+  release per hour, and its served instructions say so instead of asking
+  for the command; the run writes its exit code to a result file (a
+  failed client step — the runtime install, the plugin refresh — is exit
+  5, on every update path, not a warning beside exit 0), and the next
+  session says when the last attempt failed rather than trying again.
+  Only a Docker-tier registration on this host (loopback daemon
+  URL, `PSEUDOLIFE_MCP_NO_SPAWN` set) takes it: elsewhere the command
+  could not succeed. The running session keeps its runtime; the next
+  starts on the new one. The daemon recreate, with its backup and rollback
+  tag, is never taken unattended by this knob. [Configuration](docs/guide/configuration.md#being-told-and-the-unattended-client-half-updates)
+
+### Changed (2026-09-29 — the extractor shims start from ops/.env; changing a model is an edit plus a restart, not an elevated re-registration)
+- The Claude and Codex shim autostart task (Windows) and units (Linux)
+  now run `python ops/shim_autostart.py run claude|codex` and nothing
+  else; the runner reads the model, prompt file (Claude), health TTL
+  (Codex), port, host, CLI path, interpreter and log file from `ops/.env`
+  (`PSEUDOLIFE_CLAUDE_SHIM_*` / `PSEUDOLIFE_CODEX_SHIM_*`) at every start,
+  falling back to the defaults the installers name. The installers' flags
+  (`-Model` / `--model`, `-Port`, `-PromptFile`, `-HealthTtl`, `-CodexCli`,
+  ...) keep working: `ops/install-*-shim-autostart.*` write them into a
+  managed block of `ops/.env` (`shim_autostart.py config`) before
+  registering; `config` changes only the keys it is given and moves a
+  hand-written `PSEUDOLIFE_*_SHIM_*` line from elsewhere in the file into
+  the block, which is read last. Changing a value later is an edit plus
+  `python ops/shim_autostart.py restart claude|codex`, with no elevation
+  (a task or unit registered before the runner still carries its own
+  values, so `restart` refuses rather than start the `ops/.env` ones under
+  it — the defaults, for an install that never wrote the block — until the
+  autostart installer has run once more; `--force` restarts from
+  `ops/.env` anyway): on Windows it stops the shim (on its configured
+  port and on the port it
+  was last started on) and starts it again itself, then waits for the
+  port, since running a scheduled task is not a right its owner always
+  holds unelevated and a disabled task would leave no shim; on Linux it
+  is `systemctl --user restart`. The Windows restart starts the shim with
+  the calling shell's environment minus a Claude Code session's own
+  variables (`CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
+  `CLAUDE_AGENT_SDK_*`), so restart from a plain terminal; the scheduled
+  task keeps the logon environment. The elevated shell remains a one-time
+  step to register the task. On 2026-09-28 a model change needed a
+  Start-menu elevated PowerShell only because the model sat in the task's
+  command line. `show` prints the resolved settings and warns when the
+  registered task or unit predates the runner (its command line still
+  carries the values, which is what starts at logon until the installer
+  runs once more, elevated on Windows); `run --dry-run` prints the
+  command line. The runner opens the log itself, writes a failed start
+  (a bad port, a missing prompt file) into it, and starts the shim under
+  the hidden console it inherits from the task, so the Windows task no
+  longer goes through `cmd >> log`. When no `…_CLI` is set the shims'
+  own `PSEUDOLIFE_SHIM_CLAUDE_CLI` / `PSEUDOLIFE_SHIM_CODEX_CLI` lookup
+  applies, as before. [Dreaming](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
+### Added (2026-09-29 — `pseudolife-mcp update`: the whole install updates from a release, with no checkout)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`) updates a
+  Docker-tier install from a published release: it pulls the pinned GHCR
+  daemon image for the newest release on PyPI (or `--tag`), backs the bank
+  up (the checkout's `ops/backup.*` when the compose project's working
+  directory is still a checkout, else a built-in `pg_dump -Z9` in the
+  Postgres container checked for the dump's closing marker plus a tar of
+  the daemon's `/data`, under `~/.pseudolife-mcp/backups`), tags the
+  running image by id as `…-pre-update-<stamp>`, recreates only the daemon
+  container from the compose files the running container was created with
+  (its compose labels; the package's bundled copies, pinned byte-equal to
+  `ops/`, when those are gone) plus the GHCR overlay, waits for `/health`
+  at the new version, then installs the release as a new shim runtime
+  beside the running one, refreshes the plugin cache and prints the Codex
+  hook step. `--check` reports only (exit 0 when a newer release exists, 3
+  when current); `--clients-only` / `--daemon-only` take one half;
+  `--reinstall` recreates at the same version; `--allow-downgrade` is
+  needed for a `--tag` older than the daemon; `--env-file` names the
+  compose env file when the labelled one is gone (the update stops rather
+  than recreate the daemon with default password, volumes and bearer).
+  The rollback tag lives in the GHCR repository and the printed rollback
+  sets `PSEUDOLIFE_IMAGE_TAG` to it; a daemon back at a version other than
+  the one pulled fails the update and moves no client. Docker installed
+  but not answering stops the update (never a pip upgrade of the shim's
+  own runtime), and a target that cannot be read from PyPI is not guessed.
+  On a pip / lite install it upgrades the package where it is installed
+  (pip; on Windows or under pipx the command is printed, since pip cannot
+  replace the running console script and pipx deletes the environment
+  the command runs from), never an editable checkout or a shim runtime,
+  and restarts nothing. [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+- `ops/update.ps1` and `ops/update.sh` are now thin wrappers that map their
+  flags onto the same Python deploy (`ops/update.py` runs it from the
+  checkout, ahead of any installed package), so there is one
+  implementation of the clean-tree guard and build stamp, the rollback-tag
+  guard, the credential scoping around `docker compose`, the health wait,
+  the client step and the retention calls. Their flags and exit codes are
+  unchanged. `tests/test_update_cli.py` carries the contracts the three
+  shell test files held; `tests/test_ops_update_wrappers.py` pins the
+  flag mapping.
+- `ops/update_clients.py`'s logic moved into the package as
+  `pseudolife_memory/client_updates.py` (the script now runs it from the
+  checkout), so the installed command can move the shim runtime, the
+  plugin cache and the Codex check without a checkout; the Codex check
+  compares the marketplace clone against the daemon's `hooks_digest` when
+  there is no checkout to compare with.
+
+### Changed (2026-09-29 — the shim installs side by side, behind one launcher path; no session has to close for an upgrade)
+- Every shim version now installs into its own runtime directory
+  (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN` on Windows,
+  `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere; a virtualenv
+  with the package and the shim's dependencies only, plus a `runtime.json`
+  marker written last), and every client registration points at ONE
+  launcher path (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp` — not `~/.local/bin`,
+  the file pip --user and pipx own) that starts the newest complete runtime.
+  Sessions already running keep the runtime they started with; the next
+  session start uses the new one; a runtime is removed only when no process
+  runs from it and no registration names it (the process-table check the
+  installers' in-use gate already used, now also on Linux via `/proc` and
+  macOS via `ps`). `pseudolife_memory/runtimes.py` holds the logic;
+  `python ops/shim_runtime.py install|list|current|launcher|prune|migrate`
+  drives it from a checkout with nothing installed. On 2026-09-28 thirteen
+  idle Desktop sessions had refused the shim step of a deploy; nothing has
+  to close now. [stdio shim](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+- `ops/update_clients.py` (and so `ops/update.ps1 -All` / `update.sh
+  --all`) reads every stdio registration from the client config files
+  (Claude Code, Codex, Claude Desktop, Gemini CLI), installs the checkout as
+  a new runtime whenever a registration runs the launcher, a runtime under
+  the runtimes root, a pipx-managed launcher or a virtualenv's launcher or
+  `python -m pseudolife_memory.cli`, moves those registrations to the
+  launcher in place (each file backed up as `<file>.bak-<stamp>`; Codex's
+  `config.toml` is edited textually inside the shim's table and verified by
+  re-parsing, with the other tables untouched), prunes idle old runtimes and
+  names the ones still held or hand-made. The `in-use` refusal, the pip
+  stash restore and the "close every session and rerun" instruction are
+  gone with the in-place upgrade they guarded. An editable checkout
+  `.venv` is still named, never reinstalled, and a registration that would
+  spawn its own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1`, loopback URL: the
+  pip and lite tiers) is left where its full install is, since a shim
+  runtime cannot serve. Migration keeps a mode argument (`channel`), the
+  file's permission bits and a dotfile symlink; pipx's bin-dir copy of the
+  launcher and a pip --user script are moved by their exact path. The
+  shim's and `doctor`'s version-mismatch advice name the runtime install
+  instead of `pipx install --force`.
+- The installers (`ops/install.sh`, `ops/install.ps1`) install the shim
+  runtime first and register the launcher; pipx / `pip install --user`
+  remain the fallback for a host whose Python cannot make a virtualenv, with
+  the earlier in-use check. On a rerun, an existing registration that names
+  a runtime, pipx or virtualenv path — or bare `pseudolife-mcp` on PATH —
+  is moved to the launcher (ladder state `present-migrated`).
+  `PSEUDOLIFE_SHIM_PYTHON` names the interpreter the runtimes are created
+  from; `PSEUDOLIFE_SHIM_RUNTIMES` + `PSEUDOLIFE_SHIM_LAUNCHER` relocate
+  both paths.
+
+### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
+- The one-shot installers' extractor modes are renamed from the models that
+  were current when they were written: `claude-only` / `claude-fallback`
+  (were `sonnet-only` / `sonnet-fallback`) and `openai-only` /
+  `openai-fallback` (were `codex-only` / `codex-fallback`); `sidecar` is
+  unchanged. The old names still work in `ops/install.sh --extractor` and
+  `ops/install.ps1 -Extractor`, with a one-line note that they are
+  deprecated spellings. The installer-managed compose override is now
+  marked `(sidecar disabled)`; files carrying the earlier `(sonnet-only)`
+  or `(shim-only extractor)` marker are still recognised as the
+  installer's own. [Extractor modes and dreamer models](docs/guide/dreaming.md#extractor-modes-and-dreamer-models)
+- New modes `endpoint` and `endpoint-fallback`: any OpenAI-compatible
+  server the operator names, `--extractor endpoint --extractor-url <base
+  url> --model <name>` (Windows: `-ExtractorUrl`). The model may be any name
+  the server serves (the fixed model list applies only to the CLI shim
+  modes). The installer checks that `<url>/models` answers before it
+  configures anything (an unreachable server is refused; a 401/403 or
+  another HTTP status only warns, since a server may list no models or want
+  a key), writes `PSEUDOLIFE_DREAM_BASE_URL` and `PSEUDOLIFE_DREAM_MODEL`
+  into its managed block of `ops/.env` (a loopback host as
+  `host.docker.internal`, the daemon container's name for this machine), and
+  disables the sidecar for `endpoint` while `endpoint-fallback` keeps it as
+  the automatic fallback. A key goes in `PSEUDOLIFE_DREAM_API_KEY` by hand;
+  the installer never takes one on its command line.
+- `claude-opus-5-5` joins the Claude dreamer models: both installers' lists
+  and menus, the Claude shim autostart scripts' help, the Console's
+  Dreamer card, the Extractor panel's suggestions and the Claude shim's
+  `/models` list. On the paired extraction ladder (Claude shim, v5 prompt,
+  two replicates per arm) `claude-opus-5-5` clears the gate with no
+  regression and is not distinguishable from `claude-opus-5` at the ladder
+  ceiling (`evals/results/ladder-opus55-paired-verdict-threshold.json`; the
+  arm files record the rung, not the model, so the verdict's `served_model`
+  field records the shim's serving lines: `claude-opus-5` pre,
+  `claude-opus-5-5` post). The default stayed `claude-opus-5` until the
+  maintainer decision below. `tests/test_extractor_model_lists.py` now fails
+  when any of these lists, or the mode lists of the installers and the
+  dreaming guide, differ.
+- **`claude-opus-5-5` is the default Claude-shim extractor** (maintainer
+  decision 2026-09-29): the shim autostart scripts' default, the installers'
+  recommended menu entry and non-interactive choice, the guide, the README
+  and the Console's Dreamer card. It clears the extraction-ladder gate with
+  no regression against `claude-opus-5`
+  (`evals/results/ladder-opus55-paired-verdict-threshold.json`, 2026-09-28);
+  the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality)
+  (`evals/results/dreamer-choice-verdict.json`) ran on `claude-opus-5`, which
+  stays in the list. A non-interactive re-run of the installer moves an
+  existing Opus 5 shim to 5.5; pass `--model claude-opus-5` (`-Model` on
+  Windows) to keep it. The guard test now also fails when the places naming
+  a default disagree, or a menu number and its case arm name different
+  models.
+- `gpt-6-sol` and `gpt-6-luna` join the OpenAI dreamer models (both ids
+  accepted by the Codex CLI on 2026-09-29): both installers' lists and
+  menus, the Codex shim autostart scripts' help, the guide, the Console and
+  the Codex shim's `/models` list. The OpenAI default stays `gpt-5.6-terra`;
+  no ladder run has measured GPT-6.
+- On Linux, an endpoint on this machine's loopback is out of the daemon
+  container's reach (`host.docker.internal` is the docker bridge there), so
+  once the stack is up the installer asks it from inside the container
+  (`docker exec pseudolife-mcp-daemon python ...`); when the container
+  cannot reach it, the installer warns with the fix (`OLLAMA_HOST`,
+  `llama-server --host`, LM Studio's "Serve on Local Network") and marks the
+  extractor endpoint `[!]`. Model ids and endpoint URLs are held to letters,
+  digits and `. _ : / @ + -` before they reach `ops/.env` or a command line,
+  and a URL carrying credentials is refused without being echoed. The two
+  installers now share one family rule: claude modes take `claude-*` ids,
+  openai modes `gpt-*` or `codex-*` ids, refused otherwise before any
+  pass-through note. The PowerShell endpoint check now reads a redirect as a
+  reachable server, as the bash one does (under the script's
+  `ErrorAction Stop` pwsh 7.6.6 turned it into an error).
+- A CLI shim mode's `--model` / `-Model` takes an id the installer does not
+  list: it prints one line (`model <id> is not in this installer's known
+  list; passing it to the shim unchanged ...`) and passes it on, so a model
+  release is usable the day it ships. An empty or whitespace id is still
+  refused, and so is an unlisted id with `--extractor sidecar`, which serves
+  only its bundled model.
+### Added (2026-09-28 — a stalled dream extractor is reported, not silent)
+- When live dreams stop being served, the daemon now says so. On 2026-08-11
+  the primary extractor's CLI login had been expired for over a day and ten
+  dream runs served silently from the fallback; with no fallback the dream
+  holds its cursor and stops, and nothing told anyone. The service keeps a
+  stall record: opened on the second consecutive failed extraction (one is
+  noise; a run whose per-memory retry set aside every memory it pulled
+  counts as a failure), or when a due backlog (`backlog >= min_batch`,
+  `would_fire`) has had no successful dream for three sweep intervals (a
+  primary that never answers; checked each sweep, so it fires at the first
+  sweep past that, up to about one interval later); closed by the next
+  dream the primary serves that pulled at least one memory and extracted
+  any of them, which records `recovered_at`. A claim-write hold is the
+  database, not the extractor, and opens nothing. Its reason is
+  `login_expired` (HTTP 401/403, or an error naming a failed login in whole
+  words, such as the CLI shims' "OAuth session expired" or "not logged
+  in"), `extractor_unreachable` (refused, timed out), `extractor_error`
+  (anything else) or `served_by_fallback` (auto mode chose the fallback: a
+  warning, not a stall). `last_error` is an HTTP status or an exception
+  type name, never exception text or a response body. Process-local: a
+  restart forgets it and two failed sweeps re-open it.
+  `memory.dream.stall_repeat_hours` must be greater than 0.
+- Surfaces: `memory_dream(action="status")` gains `stall` (null or the
+  record) and `last_stall`; `/health` reports `extractor: "stalled"` with a
+  `stall` sub-object (reason and times only; the probe is unauthenticated)
+  while `status` stays `ok`, and the fallback warning keeps `configured`
+  with the sub-object; the briefing (`GET /api/briefing`,
+  `pseudolife-mcp briefing`) and the SessionStart hook (the plugin's
+  `session-start.sh` and `briefing --hook-json`, authorized callers) open
+  with one line naming the stall and its remedy, such as re-running
+  `claude auth login` / `codex login` on the daemon host.
+- Board notices from the daemon itself: a reserved sender principal
+  `daemon`, which no bearer can use (dispatch refuses it with
+  `principal_not_allowed` whatever the token map or `allowed_principals`
+  say, and the peer roster refuses it the same way; the daemon warns at
+  startup when a configured principal is named `daemon`), posts one message
+  to every attached, non-idle session when a stall begins and one when it
+  clears. A begin or repeat goes out at most once per
+  `memory.dream.stall_repeat_hours` (default 6) counted across incidents,
+  so a flapping extractor is announced once per window, and an incident
+  never announced owes no recovery notice; a fallback warning that becomes
+  a hard stall is announced at once. A notice that reached nobody stays
+  owed. The wake decision is `hinted` (reason `daemon_notice`): the notice
+  is context for the next turn, never rings a parked session and is not a
+  live-channel turn. No session may register or rename itself with the
+  label `daemon`, and the per-turn digest names a sender "daemon" only for
+  mail whose sender principal is `daemon` (its preview entries now carry
+  `sender_principal`). Skipped silently where the board is off or has no
+  Postgres, and retried at the next sweep. `memory.dream.stall_notice:
+  false` turns the notices off. No DDL.
+  [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls)
+
+### Changed (2026-09-28 — merge gate trial: CI gates ordinary code; the local full suite is reserved for schema, test-infrastructure and process-model changes)
+- Through 2026-10-12, ordinary code uses touched and dependent local tests
+  plus current-merge-ref CI; required local full runs queue after review
+  fixes. One slot, CPU-only, PostgreSQL preflight and fingerprint guards stay.
+### Added (2026-09-28 — coordination telemetry from the board's own records)
+- `pseudolife-mcp board-audit stats`: one JSON object of coordination
+  telemetry for a window (default the last 24 h; `--since`/`--until`,
+  `--out` a new file, `--append` a JSON lines log, `--input` an export file
+  instead of the bank, `--durations` the suite lock's file), computed from
+  the audit log, the v49 `coordination_wakes` table and the suite lock's
+  `full-suite.durations.jsonl`: mail latency (send to first read, p50/p95,
+  by wake decision and by recipient principal), wake precision (the share of
+  `rung`/`nudged` rows served, followed by a recipient board action within
+  120 s of being served and of the turn starting, and the share never
+  served), park outcomes (parks by reason, time from park to clear, and how
+  each cleared: a clearing send, an owner update, or expiry), sends per
+  attached session-hour by principal, and the full-suite lock's queue wait
+  and hold. Only counts, seconds, decision, reason and principal names and
+  version strings leave the tool: no body, no agent id (not even a prefix),
+  no path, no worktree, no user name. The report shape is `"shape": 1`.
+  [Coordination telemetry](docs/guide/configuration.md#coordination-telemetry)
+- Two recording gaps closed so the figures above exist. The suite lock's
+  durations record (`tests/suite_lock.py` `record_duration`) now carries
+  `queued_at` and `started_at` beside `seconds` and `ended` (queue wait is
+  their difference); a record without them still reads. And the Claude Code
+  Stop hook (`plugin/hooks/stop-wake.sh`), once a wake has fired, posts one
+  woke marker, `POST /api/hook/woke?agent=<id>` (in the background, 2 s,
+  the gate's bearer and URL), which the daemon logs as a `woke` audit event for the address whose
+  payload counts the rings served to it in the last hour, and nothing else;
+  the wake fires whether or not the daemon answers. No DDL: the marker is
+  an event, tied to its ring by recipient and time. The hook script
+  changed, so `ops/update.ps1 -All` (or `ops/update_clients.py`) is needed
+  for it to reach installed plugins.
+
+### Changed (2026-09-28 — Codex hook approval names the board check-in and mail hint)
+- `ops/setup-codex-hooks.py` asked to approve hooks for "briefings,
+  reminders, and session cleanup", but since the coordination hooks landed
+  the same approval also runs `coordination-start.sh` (the agent-board
+  check-in at session start) and `coordination-prompt.sh` (the per-prompt
+  new-mail hint). The setup menu, the yes/no prompt, and the verification
+  failure message now name both. `--trust` and `--instructions` behave as
+  before; the JSON report's shape is unchanged. README and the providers
+  guide say the same.
+### Fixed (2026-09-28 — a park set after a lapsed one stands again)
+- A session that parked again after its park had lapsed (past its
+  `park_expires`), without naming a new expiry, kept the lapsed one, so the
+  new park was expired the moment it was set: mail that cleared its need
+  did not ring it, and the Stop-hook park gate answered `no_park` and asked
+  it to park again. `memory_agents(action="update")` now treats only a live
+  park as standing: a new `park_reason` over a lapsed park is a new park,
+  with the 12-hour default counted from then, `park_set_at` restamped and
+  the lapsed `park_needs`, `park_clear_by` and `park_resume` not carried
+  over (with a fresh expiry they would be live again, and the old clearer's
+  chatter would ring for 12 hours); a park field on its own (including `park_expires` alone) is refused
+  with `invalid_park` on a lapsed park as on an unparked row, since its need
+  may be stale and the session restates it with a reason. A plain status
+  update still clears a lapsed record as it clears a live one. Found by the
+  review of the `board-audit stats` PR (#441), whose `park_outcomes`
+  mirrors the old rule.
+### Fixed (2026-09-28 — a lease notice skips a session whose park has lapsed)
+- The full-suite and GPU lease notices (the lease-mirror entry below) no
+  longer go to a peer whose park has lapsed. A peer parked with
+  `park_clear_by` naming the lease counts only while its park stands, by
+  the daemon's own rule (`CoordinationStore._live_park`): `park_reason`
+  set, and `park_expires` unset or still ahead. The peer list returns a
+  lapsed park's fields as they were stored, and the daemon ignores that
+  park everywhere else, so the notice was an extra message the session
+  had stopped waiting for. A lapsed peer whose status says
+  `suite=running|queued` or `gpu=` is still told, like any live peer.
+  Found in review of #442 (a park set after a lapsed one stands), 2026-09-28.
+### Fixed (2026-09-28 — a session parked on a lease is rung when the lease frees)
+- A session parked with `park_clear_by` naming a lease (`full-suite`,
+  `gpu`) slept through the release notice the lease CLI sends it: the
+  notice comes from the hold's own `lease-hold@` address, never equal to
+  the lease name, so the wake decision withheld it as chatter
+  (`need_not_cleared`). The daemon now counts the sender as the clearer
+  when its audit log shows the sender's hold on that lease released or
+  expired within the last 60 seconds (`LEASE_CLEAR_GRACE`); the CLI frees
+  the board lease before it mails the notice. It reads only the daemon's
+  own records, never a string the sender supplies; the receipt's reason
+  stays `clearer`. Taking a lease clears nothing, so the acquire notice
+  and mail from a current holder are still held, and no lease stands in
+  for `maintainer`, an agent id or an id prefix (8 or more hex
+  characters). Found in the review of #443.
+### Fixed (2026-09-28 — Codex hook readiness distinguishes mailbox approval and bundle presence)
+- Successful Codex hook setup now prints the documented `memory_message`
+  approval choice for unattended receive, ack and send, and includes it in
+  its JSON report; setup continues to leave tool approvals unchanged.
+- Client updates report a matching manual hook bundle as present with trust
+  and execution unchecked, and show the setup command to verify with consent.
+### Fixed (2026-09-28 — Windows plugin hooks read installer-created token files)
+- The Bash Stop gate, board check-in, SessionStart and SessionEnd hooks now
+  validate Windows token files with the native ACL rules used by
+  `lifecycle.ps1`: current-user ownership, a protected DACL, and allow rules
+  only for the owner or OWNER RIGHTS. They retain regular-file, link and
+  size checks and reject reparse points in the file or its parents. Git
+  Bash's POSIX mode check previously rejected the installer's private NTFS
+  file, so a fresh install's hooks could silently skip their requests.
+  POSIX hosts retain the existing permission check. The installer summary
+  distinguishes saving the setting from verifying hook authentication.
+  A token file rejected by the Stop gate or coordination-start hook leaves
+  a `token` / `rejected` digest-ledger line without a path or credential,
+  so a refused file can be diagnosed while its daemon request stays suppressed.
+### Changed (2026-09-28 — the Codex setup check names the wake path the shim will take)
+- `ops/setup-codex-coordination.py --check` reported no wake path, and
+  `--enable` reported `wake: pull-only` for every registration without the
+  live-delivery bridge, while since the entry below the Codex doorbell rings
+  by default. The report
+  now carries the wake path the shim would take, read the way
+  `pseudolife_memory/shim.py` reads the switches and `pseudolife-mcp doctor`
+  reports them: `wake` is `live` (`PSEUDOLIFE_AGENT_WAKE` with the app-server
+  bridge and a bridge credential distinct from the bearer the shim sends,
+  read from `PSEUDOLIFE_MCP_TOKEN_FILE` when one is configured), `doorbell`
+  (the codex writer with a bearer and a `codex` CLI found through the
+  server's `env` over the launching environment, unless
+  `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes) or `pull-only`,
+  and `wake_reason` names the gate that decided it
+  (`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`, `no
+  codex CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a
+  fixed `PSEUDOLIFE_AGENT_STATE`, a server disabled in Codex, or the board
+  question the daemon answered no to). `--disable` reports `pull-only` with the master switch.
+- `examples/hook-instructions.md` (the maintainer host's dialect for
+  `<data_dir>/hook-instructions.md`) no longer asks every full suite for a
+  hand-sent `SUITE-START`/`SUITE-END`: a run that takes the lock mirrors
+  itself as the `full-suite` lease and mails the peers concerned (the lease
+  entry below). The hand-sent note stays for what the mirror does not cover
+  (`PSEUDOLIFE_SUITE_LOCK=off`, a suite without a bearer, a GPU launch
+  outside `Start-Qwen`, any other saturating window), as the project
+  `CLAUDE.md` already says.
+### Changed (2026-09-28 — a Codex thread is asked to park at turn end on macOS and Linux too)
+- The Stop-hook park gate (the v49 entry below) reached Codex only on
+  Windows, where Codex runs the plugin's native command
+  (`lifecycle.ps1 -Event Stop`); on macOS and Linux Codex runs the bash
+  command, and `stop-wake.sh` exited unless Claude Code had started it, so
+  a Codex thread there was never asked to park when it stopped (its only
+  prompts were `memory_agents`' description and the doorbell's nudge, which
+  needs mail to arrive). Maintainer call flagged in #433, decided
+  2026-09-28: parity. In Codex context (`PSEUDOLIFE_CODEX_HOOK=1`, or
+  `PLUGIN_ROOT` equal to `CLAUDE_PLUGIN_ROOT`, as the sibling bash hooks
+  read it) the script now runs the same gate: one 2 s request to
+  `GET /api/hook/park-gate` for the thread the payload names, the daemon
+  and bearer resolved the way `coordination-start.sh` resolves them (the
+  managed connection file under the Codex home, else the explicit settings,
+  with the same URL-conflict and private-file checks), a block answered the
+  way Codex documents for `Stop` (`{"decision":"block","reason":...}` on
+  stdout, exit 0, the reason JSON-escaped; a message carrying a control
+  character the script does not escape is replaced by the fixed text), and
+  then exit without arming Claude's wake wait. Allow, no address, a
+  continuation's Stop (`stop_hook_active`) or no answer prints nothing. The
+  explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
+  This is the plugin install: a manual Codex install
+  (`ops/setup-codex-hooks.py` without the plugin) carries no `Stop` hook,
+  so it gets no gate on any platform, as before. Both Codex paths now
+  append the `gate` ledger line Claude's gate writes, so a block is
+  auditable in `ledger.log` on every client, and every client records its
+  length column in the same unit, UTF-8 bytes plus one (bash counted
+  characters under a UTF-8 locale, PowerShell UTF-16 units). A hook Claude
+  Code started for its own session (`CLAUDECODE=1` and
+  `CLAUDE_CODE_SESSION_ID` equal to the payload's id) stays Claude's
+  whatever Codex marker its environment carries, so a leaked marker cannot
+  cost it the wake. The gate's request, on both clients, now treats a
+  redirect as a failure (`curl -L --max-redirs 0`, as the sibling hooks do)
+  and drops whatever a failed request printed, so neither a 3xx body nor an
+  answer cut off at the 2 s limit can block. Whether Codex honours the
+  decision of a hook declared `async` is still unprobed on a live install,
+  on every platform.
+### Added (2026-09-28 — one bank shared across machines: client-only install, a shim that never spawns for a remote daemon)
+- The installers take `--daemon-url <url>`, `--token-file <path>` and
+  `--client-only` (`-DaemonUrl`, `-TokenFile`, `-ClientOnly` on Windows) to
+  wire a machine that has no daemon of its own to a daemon elsewhere,
+  typically over a tailnet. A daemon URL whose host is not loopback implies
+  client-only. That mode skips everything a local daemon needs (Docker
+  preflight, volumes, `ops/.env`, token minting, the extractor, `compose
+  up`, shim autostart) and still installs the shim, registers Claude Code,
+  Gemini and Claude Desktop with the URL, the token file and
+  `PSEUDOLIFE_MCP_NO_SPAWN=1`, hands Codex its own copy of the token
+  through its credential helper, installs the Claude Code plugin and Codex
+  hooks, and writes the standing instructions. It never mints a token: the
+  token file must already exist, or `--read-token` (`-ReadToken`) reads one
+  without echo and writes it owner-only; on every OS the file is validated
+  with the shim's own owner-only check, so an install cannot report success
+  for a file every session would then refuse (a plain `Set-Content` file on
+  Windows inherits an ACL the shim rejects). The preflight refuses a daemon
+  that does not answer `/health` or answers with auth off over a
+  non-loopback host, and a URL with credentials, a path, a query or a
+  fragment. A plain-`http` URL to another machine gets one warning that the
+  link itself is unencrypted, so it belongs inside a tailnet or behind TLS.
+  In client-only mode Codex is marked failed rather than registered against
+  loopback when its Python, credential step or shim install is missing, and
+  the Claude Code hooks' `settings.json` env is set to the client URL and
+  token file even where an earlier local install left loopback values. One
+  token file per run means one principal: run the installer once per
+  client for per-client attribution. The 2026-09-28 dogfood of a Linux
+  container against the maintainer's daemon did all of this by hand, and
+  its Codex step then failed on a bare system Python: the Codex credential
+  helper imported the coordination adapter (anyio, httpx) just to open a
+  private file, which now lives in the stdlib-only
+  `pseudolife_memory/private_state.py`. The new guide page
+  `docs/guide/remote-bank.md` walks through exposure (Tailscale Serve in
+  TCP mode, HTTPS, LAN or a reverse proxy), per-machine principals, board
+  admission via `coordination.allowed_principals`, and what was measured.
+- Upgrading: nothing changes for a machine that runs its own daemon. A
+  machine wired to another machine's daemon by hand before this release
+  keeps working; re-running the installer with `--client-only` puts the
+  registrations, the hooks' env and the token file on the supported path.
+- The public-tree identifier guard (`tests/test_release_ux.py`) now also
+  screens tailnet addresses (100.64.0.0/10 and Tailscale's
+  `fd7a:115c:a1e0::/48`) and `*.ts.net` names, allowing only the
+  `100.64.0.x` and `<machine>.<tailnet>.ts.net` placeholders.
+- The shim never starts a local daemon for a daemon URL that is not
+  loopback, whether or not `PSEUDOLIFE_MCP_NO_SPAWN` is set. Before, a
+  remote client whose link was down spawned a host-side daemon with an
+  empty bank while the shim kept probing the remote URL, then gave up three
+  minutes later. Now it waits 15 s for the remote daemon, probing with a
+  2 s timeout (the loopback probe's 0.25 s is too short for a relayed
+  tailnet path), and exits 1 with a message that says the address is
+  another machine and names what to check (the link, the host's exposure,
+  the daemon's `/health`), instead of the local Docker remedy. Loopback is
+  `localhost`, `::1`, any `127.x` address and the IPv4-mapped form; those
+  keep today's autostart. Any other hostname counts as another machine
+  without being resolved, so a name that happens to resolve to loopback no
+  longer spawns either: that is the safe direction, and the 15 s wait is
+  longer than Codex's default MCP startup timeout, which the guide says how
+  to raise.
+- `mcp` is capped below 2.2 in `pyproject.toml`: a shim on mcp 2.2.0 fails
+  every `tools/list` against a daemon on 2.1.x with "unhandled errors in a
+  TaskGroup" (its upstream initialize gets an error response) while the
+  same bearer over curl succeeds, which the first remote client hit on a
+  fresh pipx install. The lock already pins 2.1.0; a guard test keeps the
+  cap and the lock on the same minor line. A shim installed from an older
+  release fixes itself with `pipx runpip pseudolife-mcp install
+  "mcp==2.1.1"` or a reinstall from the daemon's checkout.
+### Changed (2026-09-28 — park guidance distinguishes completion from review waits)
+- The Stop-hook prompt and configuration guide now state that `done` means
+  no follow-up is expected and nothing will ring the session. Awaiting a merge
+  click or a review that may bring fixes uses `needs_approval` with
+  `park_clear_by` set to the reviewer's agent id or `maintainer`, or
+  `waiting_peer`. The wake decision is unchanged. Both local hook fallback
+  prompts match the served prompt. Install this update with
+  `ops/update.ps1 -All` because the plugin hook files change.
+### Fixed (2026-09-28 — the Stop gate honours a live standing park)
+- A session whose park still stands can end a turn without recording the
+  same park again. A `rung` delivery to that session after the turn started
+  still requires a park set strictly after the newest such delivery,
+  including when the session updated earlier in the turn. The gate uses
+  the delivery's `created_at`, not the staggered ring or adapter hand-off;
+  lapsed parks and unparked status checks keep their existing behaviour.
+
+### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
+- Wake is on by default (maintainer decision 2026-09-28, superseding the
+  2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
+  stay opt-in" and the opt-in framing of the two 2026-09-23 entries "board
+  mail can wake an idle Codex task, opt-in" and "board mail can wake an idle
+  Claude Code session"). The plugin's `Stop` hook runs unless the hook
+  environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=0` (or `false`/`no`/`off`),
+  and the Codex shim arms its doorbell whenever it finds a `codex` CLI
+  unless `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` stays the master off switch for a
+  client. This supersedes, too, the "Upgrading" bullet of the park-record
+  entry below, which kept both paths opt-in. A ring stays policy-gated: the
+  daemon rings a session only while it is parked with a declared need that
+  the message plausibly clears, never for chatter (the park-record entry
+  below). The 27 Sep night showed a session parked on a blocker a message
+  had already cleared, with no wake path on; unattended runs are where wake
+  pays.
+- The Stop hook's command now refuses a script that does not parse
+  (`bash -n` first) instead of relying on the opt-in flag to keep a broken
+  copy from waking every session at every turn end, and it honours
+  `PSEUDOLIFE_AGENT_COORDINATION` before bash reads the script, both
+  trimmed and case-insensitive as the shim reads them. Existing
+  `=1` settings keep working. Codex loads the same `hooks.json`; there the
+  bash command still exits unless Claude Code started it, and the native
+  command runs only the park gate. The hook scripts changed, so Codex asks
+  to approve them again after the plugin update.
+- The Codex CLI lookup falls back, on Windows, to the desktop app's own
+  `%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe` (newest build, as
+  `ops/setup-codex-hooks.py` finds it), so a desktop-only install rings;
+  PATH stays absolute-directories-only and `PSEUDOLIFE_CODEX_BIN` still
+  overrides both. With no CLI found the default stays quiet and falls back
+  to pull delivery; an explicit `=1` still says why on stderr.
+- The `coordination.wake` caps (the park-record entry below) are visible:
+  `/health` reports `coordination: {enabled, wake: {...}}`, and
+  `pseudolife-mcp doctor` gains a `wake` section: each registered client's
+  wake path (`claude_code.stop_hook`, `off` unless the plugin is installed
+  and enabled, since only the plugin carries the Stop hook, then read from the settings.json `env`
+  block over the shell; `codex.doorbell`, read from the MCP server's `env`
+  table and forwarded `env_vars`, plus the CLI lookup; `off` without the
+  codex writer id or a bearer) as `on`, `off (<the setting>)` or `off (no
+  codex CLI)`, and the caps in force, or why they
+  are unknown (daemon unreachable, or one that predates them).
+- Docs: the configuration guide's doorbell and Stop-hook sections describe
+  the default-on behaviour and the opt-outs, the coordination block gains
+  `wake`, the README's Codex setup states the `memory_message` approval a
+  woken task needs (without it the task stalls on a prompt) and its
+  Updating section says existing installs start ringing after the client
+  update and how to opt out.
+- The live Codex doorbell probe the 2026-09-12 validation record lacked has
+  run once (2026-09-28, codex-cli 0.156.1 against the 0.15.0 shim runtime,
+  the pre-policy path): the bell was queued, the idle thread took a turn,
+  read the mail and acknowledged it. The procedure, the timeline and the
+  recorder (`evals/codex_doorbell_probe.py`) are in that record; artifact:
+  `evals/results/codex-doorbell-probe-20260928.json`. One run on one host:
+  it shows the path works, not how reliably.
+
+### Added (2026-09-28 — sessions park with what they need, and board mail wakes a session only when it clears that need, schema v49)
+- A session that ended its turn on a cleared blocker sat there all night on
+  2026-09-27 because no message could reach it, while any message at all
+  could wake a session that had nothing to wait for. The maintainer decided
+  (2026-09-28) that wake is policy-gated on a **park record**: a session's
+  standing statement of why it stopped and what would clear it. Schema v49
+  adds it to the agent row: `memory_agents(action="update", park_reason=...,
+  park_needs=..., park_clear_by=..., park_resume=..., park_expires=...)`.
+  `park_reason` is one of `done`, `blocked`, `needs_approval`, `needs_info`,
+  `needs_resource`, `waiting_peer`; `park_needs` (120 characters) says what,
+  `park_clear_by` (120) an agent id, `maintainer`, a lease name or `anyone`,
+  `park_resume` (240) what to do once cleared, `park_expires` an epoch
+  (a park set without one expires after 12 hours, and none may be set more
+  than 7 days ahead, so a park whose clearer vanished cannot withhold mail
+  forever: the board orchestrator's call on review, awaiting the
+  maintainer's). An
+  omitted field stays; `park_reason=""` (REST: `null`) clears the record,
+  and so does a plain status update, since a session that is working is
+  not parked; a park field alone refines a standing park (`invalid_park`
+  otherwise, and for an unknown reason or a bad expiry; credential-shaped
+  text is `secret_like_body`). Every peer row in `memory_agents(action=
+  "list")`, and the caller's own in the update result, carries the six
+  `park_*` fields (`park_set_at` is the daemon's stamp). `memory_agents`'
+  description and the Stop hook's park gate ask sessions to park when they
+  stop. The check-in sentence the decision asked for is written
+  (`PARK_CHECKIN_SENTENCE`) but not served: the check-in is pinned to the
+  text its bench measured (#435), so it joins with the next bench run.
+- **The daemon decides, the shim rings.** Every `memory_message(action=
+  "send")` now returns `wake` beside the receipt: `hinted` (an unparked
+  recipient acted within the last 60 s, so its next tool result carries the
+  mail; a parked one has stopped, and is decided on its park however
+  recently it parked); `not_needed` (parked `done`); `no_path` (neither a
+  live channel nor a ring path, with the parked need); `rung` (parked with
+  a need the mail plausibly clears: the sender is `park_clear_by`,
+  `park_clear_by` is `anyone`, the send's new `clears` names the need in
+  whole words, including one of four letters or more, or the sender set
+  `urgent`), with `ring_at`; `withheld`
+  (parked with a need the mail does not clear) with `park_needs` and
+  `park_clear_by`, so the sender knows what would wake it; `nudged` (idle,
+  no park record: rung at most once an hour, with a request to park);
+  `capped`. Chatter never rings. A retry repeats its decision, and the
+  audit log's `send` event names it. The rings the daemon decides are
+  `coordination_wakes` rows (left out of portable `export`, like the other
+  board tables). A live-channel recipient's delivery receive yields only
+  mail decided `rung`, `nudged` or `hinted` (and mail from before v49);
+  the rest waits for an explicit receive. The recipient's next attach or heartbeat
+  carries the newest as `wake` for one heartbeat interval (so a retried
+  heartbeat still gets it; the adapter takes each ring once). An adapter
+  declares at register and every attach whether a ring reaches it without
+  a live channel (`ring`: the Claude shim when it has a digest for the Stop
+  hook, a Codex thread the doorbell watches), and the daemon counts that as
+  a wake path; a daemon older than v49 refuses the attach parameter once
+  and the adapter stops sending it. The Claude adapter writes
+  `<key>.ring` beside the digest (the digest watermark, then the decision
+  and reason) at `ring_at`, while the Codex doorbell asks the adapter for a
+  due ring at the moment it would otherwise run `codex queue`; an offer
+  whose mail the session has already seen is dropped. The Stop
+  hook fires only on a ring past `.seen`, a nudge adds one sentence asking
+  for a park record, and every ring's ledger line (`wait`, `bell`, `ring`)
+  carries the decision and reason. Against a daemon older than v49 nothing
+  rings; pull delivery, hints and the prompt-hook digest are unchanged.
+- **Caps**, in `config.yaml` under `coordination.wake`: `per_recipient_per_hour`
+  (20, the figure the Stop hook already used, now counting every ring),
+  `urgent_per_sender_per_hour` (6), `nightly_total` (200, a rolling day
+  across the bank), `fan_out_stagger_seconds` (30 between rings from one
+  sender's burst), `active_seconds` (60, the `hinted` window) and
+  `nudge_interval_seconds` (3600). Over a cap the send answers `capped`
+  with the cap's name as its reason.
+- **The Stop-hook park gate.** When a turn ends, `stop-wake.sh` (Claude
+  Code) and `lifecycle.ps1 -Event Stop` (Codex, which was a no-op) ask the
+  daemon once, `GET /api/hook/park-gate?agent=<id>&since=<turn start>`,
+  whether this session parked: the shim names the address in `<key>.agent`
+  and the prompt hook stamps the turn's start in `<key>.turn`. The daemon
+  answers `block` when the row has no live park record and its status is
+  not done-shaped, or when it set no status or park during the turn, and
+  the hook ends the turn once with "Before ending: update your board status
+  with why you stopped and what you need (memory_agents update
+  park_reason=... park_needs=... park_clear_by=... park_resume=...)"; the
+  continuation's Stop carries `stop_hook_active` and is not asked. Claude
+  Code's async Stop hook blocks through the same exit-2 rewake path as the
+  mail wake (async hooks cannot use `decision`); Codex gets the documented
+  `{"decision": "block", "reason": ...}` on stdout. No answer is allow.
+  The Codex gate runs only on Windows (Codex runs the native
+  `commandWindows`; elsewhere it runs the bash command, which exits unless
+  Claude Code started it), and an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off` turns it off.
+  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when its private-file
+  check passes (the sibling hooks' check): native Windows ACLs under Git
+  Bash since the 2026-09-28 fix above, POSIX owner and mode elsewhere.
+  A configured file that fails validation suppresses the gate request;
+  it does not fall back to `PSEUDOLIFE_MCP_TOKEN`. Saving the setting alone
+  does not verify hook authentication.
+- `memory_agents` and `memory_message` grew by 199 characters after each
+  docstring was tightened to pay for its own line; the core and full
+  description budgets move deliberately (11,500 -> 11,750, 17,800 ->
+  18,000) rather than cut the decision table.
+- **Upgrading:** a schema bump (v49, additive) plus a shim and plugin
+  change: deploy with `ops/update.ps1 -All` and restart the clients. The
+  Stop hook still runs only with `PSEUDOLIFE_AGENT_WAKE_HOOK=1` and the
+  Codex doorbell with `PSEUDOLIFE_CODEX_DOORBELL=1`; once on, they ring
+  only on the daemon's decision, so a v49 shim beside a pre-v49 daemon
+  never rings. Upgrade the plugin and the shim together (`-All`): the new
+  `stop-wake.sh` fires only on the `.ring` marker, which only a v49 shim
+  writes, so an updated plugin beside an older shim never wakes. The `wait`
+  and `bell` ledger lines gain a sixth column, the ring's reason.
+### Added (2026-09-28 — the full-suite lock and the bench server's GPU show on the board as leases, and tell the peers concerned)
+- On the night of 2026-09-27 two full suites and three GPU cells ran while
+  the agent board's lease list stayed empty: `tests/suite_lock.py` took its
+  OS lock and `evals/qwen_server.ps1` launched the server, and neither
+  touched the board; the `SUITE-START`/`SUITE-END` notes the rule asked for
+  were status overwrites nobody was sent. A full `pytest` run now mirrors
+  its lock as the board lease `full-suite` (`BoardMirror` in
+  `pseudolife_memory/lease_cli.py`): a queued run is a board waiter, a
+  running one the holder, with its pid and worktree name (never its path) as the purpose and an
+  expected end from the median of the last five timed runs
+  (`full-suite.durations.jsonl` beside the lock; 25 minutes until five are
+  on record; only runs that ran their tests are timed). The OS lock stays the
+  truth: all board traffic runs on the mirror's own thread, the lock is
+  freed before the board hears, a run that leaves the queue gives its board
+  place back, a waiter hands back a grant it has no lock for (and
+  registers a new board address if the daemon retired its old one during a
+  long wait), and a board that is unreachable, slow, refuses, or shows
+  another holder costs one line on stderr and never delays or stops the run;
+  `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. conftest reads the bearer
+  and daemon URL at import, before the suite's client isolation strips them,
+  and builds the mirror only for a run that takes the lock.
+- `pseudolife-mcp lease hold NAME --while-pid PID` holds a lease for a
+  process the command did not start: the OS lock first (the process already
+  owns the resource; `--timeout 0` gives up at once, exit 75), the board
+  second, the lock freed before the board is told when PID exits or the hold
+  is stopped. `Start-Qwen` refuses to launch while `lease check gpu` says the
+  lease is held (the VRAM busy-check stays as the guard against anything that
+  takes no lease), holds `gpu` for its server from the launch on, so the lease
+  covers the model load, and says so when the hold could not take the lock;
+  `Stop-Qwen` ends the hold with the server. It runs the CLI from the
+  checkout (`PSEUDOLIFE_LEASE_PYTHON`, the checkout's `.venv`, or `python -m`),
+  and a `pseudolife-mcp` on PATH only after that. Without any, the lease
+  steps warn once and the server runs unleased, as before.
+- `pseudolife-mcp lease check NAME [--json]` is the launch gate for
+  orchestrators: exit 0 when free, 1 when held, 70 when the check itself
+  failed, with the holder and expected end. It is held when the local lock
+  or the board says so, except that a hold stamped with this lock
+  directory's random instance id (`lease-hold@<id>`) beside a free local lock
+  is shown as stale; a session's claim, a `lease run`, or a hold from another
+  machine or account counts as held. For
+  `full-suite` it probes the suite's own lock and its slots, with the holder
+  record's pid, worktree and start.
+- Acquiring and releasing (`hold`, and the suite's mirror) send one board
+  message each to the peers of the same project that it concerns: live
+  agents (attached, or registered without an adapter) whose status says
+  `suite=running`, `suite=queued` or `gpu=`, and agents parked with
+  `park_clear_by` naming the lease, attached or not (while that park stands;
+  see the lapsed-park entry above). At most 20 per event, with pid, worktree and
+  expected end. `CLAUDE.md`'s full-suite rule and
+  `docs/guide/configuration.md` now say to read `lease check` instead of
+  hand-announcing.
+
+### Changed (2026-09-28 — a full test suite the bench Postgres rejects refuses to start)
+- The PG-backed tests take the dev server's password from
+  `PSEUDOLIFE_TEST_PG_PASSWORD`, else `ops/.env`, else the compose default.
+  A fresh worktree has no `ops/.env`, or a copy of `ops/.env.example`, so a
+  full suite launched from one resolved the compose default, the server
+  rejected it, and the run went to the end with every PG-backed test
+  ERRORing on setup: 1,424 setup errors in one run on 2026-09-27 (twice that
+  day, and on 2026-09-24 before), each holding the machine's one full-suite
+  slot for 20-25 minutes and gating nothing.
+- `tests/conftest.py` now connects once to the dev server's admin database
+  with the resolved password before a full run queues for the suite lock.
+  A server that answers and rejects it stops the run with a usage error
+  naming the password's source (the missing file, the template copy, the
+  example placeholder, a rotated `ops/.env`, or the override) and the fix:
+  copy `ops/.env` from the main checkout, or export
+  `PSEUDOLIFE_TEST_PG_PASSWORD` (or, when that override is the rejected
+  password, to correct or unset it). The password itself is never printed.
+  A server that accepts it, or that does not answer, lets the run start as
+  before: the PG-backed tests still skip without a server. Any other answer
+  (too many connections, a missing admin database) also lets it start, by
+  design: only a clean credential rejection is sure to fail every PG-backed
+  test, and the fixtures report the rest per test. A targeted run is
+  never refused; it prints one line saying its PG-backed tests will error,
+  and runs. It first checks for a listener on the port for at most 0.5 s, so
+  on a machine without the dev server it does not wait out libpq's connect
+  timeout (3.09 s measured to a closed loopback port). The check gates on the lock's own conditions, so an xdist worker,
+  `PSEUDOLIFE_SUITE_LOCK=off` and GitHub Actions (which hands the fixtures a
+  full `PSEUDOLIFE_TEST_DATABASE_URL`, itself a reason to skip the check)
+  never see it (`tests/pg_defaults.py`, `full_run_password_preflight`;
+  `tests/suite_lock.py`, `session_kind` and `take_for_session`'s
+  `preflight` hook).
+
+### Changed (2026-09-28 — the coordination check-in says when to send a message, not only how)
+- The served check-in (`CHECKIN_TEXT`, what `GET /api/hook/coordination-start`
+  prints at session start) listed the board's verbs and never said when a
+  message is due. A 2026-09-27 review of six sessions found 15 status
+  updates, 9 peer lists and 7 receives against no sends until a human told
+  one session to broadcast. The check-in keeps its mechanical steps and adds
+  two field-neutral rules. Before using something shared, look for whoever
+  holds it or has it booked: if someone does, message them that you are
+  next, even when their status says when they expect to finish, because a
+  status line is not a queue; if the board shows it free, use it and say so
+  in your status. And keep your status true. The Codex form
+  (`CHECKIN_INSTRUCTION`, appended to the MCP instructions, 508 of Codex's
+  512 characters with the subagent sentence from the 2026-09-27 subagent
+  entry below) carries the first rule with its boundary: "Need what a peer
+  holds? Message them you're next. Free? Use it, update status." An
+  unbounded Codex form over-sent on held-out situations; the bounded one
+  gained on both held-out sets and never over-sent (`-codex`, `-codex4`).
+  Both were scored without the closing "Subagents only read the board.",
+  which is about who may write, not when to send.
+- Measured with a new bench, `evals/coordination_checkin_bench.py`: four
+  teams that share something (a lab, an agency, a data team, one developer
+  with two CLIs) x five candidate rules x a situation where a message is due
+  and one where it is not, one tool-free `claude -p` decision per run, plus
+  two held-out sets. Three candidate rules were cut: removing them changed no
+  decision in 120 pairs: the model already did what they ask, with no
+  check-in or with the old check-in's mechanical steps. The
+  shared-resource rule took three wordings; the second won on the situations
+  it was reworded against and over-sent on held-out ones (-0.208 against the
+  old check-in, `-heldout`). The shipped third wording, on the second
+  held-out set frozen before it was scored, beats the old check-in by +0.062
+  [-0.062, +0.208] over 48 pairs, which cannot be told apart from zero; on the
+  main set by +0.075 [-0.008, +0.175] over 120 pairs; and the second wording
+  by +0.167 [+0.000, +0.375] on the frozen set (artifact:
+  `evals/results/coordination-checkin-bench-checkin-rules-20260928-final.json`;
+  `evals/README.md` walks through all nine runs, two of which re-scored the
+  frozen set at +0.042 each).
+- Host-specific vocabulary belongs in the daemon's
+  `<data_dir>/hook-instructions.md`, served after the memory core.
+  `examples/hook-instructions.md` is the maintainer host's copy (suite and
+  GPU status words, the lease holder, the `ops/.env` pre-flight, host-shaped
+  symptoms); the configuration guide says how a Docker install copies it
+  into the data volume. The project `CLAUDE.md` gains two bullets: an
+  announcement is a message to the peers whose status shows the resource,
+  with pid, worktree and ETA, and a holder is never assumed idle from
+  process stats; a host-shaped symptom is broadcast before it is debugged.
+
+### Added (2026-09-28 — one `memory_message` send reaches a whole project or the whole board, and ids can be given by prefix, schema v48)
+- `memory_message(action="send")` takes `to: "project:<name>"` (every
+  attached, non-idle agent in that project but the sender) and `to: "all"`
+  (every attached, non-idle agent on the board but the sender): the peers
+  `memory_agents list` shows with `adapter_available`. On 2026-09-27 a
+  session that had fixed a host-wide fault sent the same text to six agents
+  one at a time, finding them by reading the peer list and pattern-matching
+  statuses, and had to repeat one send that failed transiently. One request
+  id covers the burst, so a retry returns the same per-recipient receipts,
+  each with its `message_id`, `recipient_agent_id` and a `wake` decision
+  (`live` for an attached peer that opted into wake, which the daemon rings;
+  `pull` otherwise). The burst is atomic and refused whole, writing nothing,
+  above 50 recipients (`fanout_too_large`), when nobody is reachable
+  (`no_recipients`) or when one mailbox is full (`queue_full`, naming that
+  mailbox's prefix); it counts once against the sender's rate; a reply
+  cannot ride it. Each recipient gets its own message row and its own `send`
+  audit event with its own body and salt, the payload carrying
+  `fanout: {to, recipients}`, so `board-audit verify`, `redact` and
+  `export --agent` need no new event kind and the coordination report keeps
+  counting bursts per message. Schema v48: the mailbox's
+  `UNIQUE (sender_agent_id, request_id)` becomes the unique index
+  `coordination_messages_request_idx` over `(sender_agent_id, request_id,
+  recipient_agent_id)`, created before the old constraint is dropped, and
+  the drop runs only where the constraint exists so an open export never
+  blocks the schema pass.
+- `to`, `reply_to` and `ack`'s `message_id` accept a unique prefix of 8 to
+  31 lowercase hex characters of the id; so do `board-audit export --agent`,
+  `board-audit redact --message-id` and `coordination-recovery rebind
+  --agent`. Every surface shows an 8-12 character prefix, and on 2026-09-26
+  seven sends bounced with `recipient_not_found` because a prefix was
+  pasted as the address (Coordination v2 design, Addressing E8). A prefix
+  that matches several ids is refused with `ambiguous_recipient`,
+  `ambiguous_message_id`, `ambiguous_reply` or, in the CLIs,
+  `ambiguous_agent`, and the error's detail lists the candidates cut to the
+  shortest prefixes that tell them apart; one that matches none fails as
+  the full id would. `reply_to` and `ack` resolve among the caller's own
+  mail, so another mailbox's ids neither resolve nor make a prefix
+  ambiguous; an address a restore revoked is not a candidate for `to`, and
+  is one for `rebind`. A direct send's receipt now names
+  `recipient_agent_id` and the `wake` decision, and its request key is
+  taken over the resolved recipient, so a retry that spells it by prefix is
+  the same request. A refusal that carries a detail surfaces it as
+  `code: detail` in the MCP tool's error and as a separate `detail` field
+  beside `error` on REST (`CoordinationRefused`, a `ValueError`, replaces
+  the bare code `dispatch` raised).
+- Nothing is resolved before the caller is authenticated, so a prefix
+  lookup cannot tell an unauthenticated caller whether an address or a
+  message exists. A retry is recognised from its stored rows before any
+  prefix is resolved, so it returns its receipts even after a new address
+  made its prefix ambiguous or its recipient was revoked. The per-minute
+  send rate counts requests, so a burst counts once and a sender reaches at
+  most 60 x 50 mailboxes a minute. An ambiguous prefix in an `ack` batch
+  refuses the whole call. `board-audit redact` of one copy of a burst lists
+  the others as `other_copies` (and says so on stderr), since each keeps its
+  own body until it is redacted too.
+
+### Fixed (2026-09-28 — the plugin's Windows hooks: Git Bash is the requirement, the /clear handoff fits its budget, an orphaned wake watcher stops)
+- Claude Code runs the plugin's hook commands through Git Bash on Windows,
+  found by its own rules (`CLAUDE_CODE_GIT_BASH_PATH`, then the default Git
+  for Windows directories, then the `git` on PATH), and falls back to
+  PowerShell only when it finds none; it ignores the `commandWindows`
+  field, which is Codex's. Measured on Claude Code 2.1.280 on 2026-09-27:
+  with every Git directory removed from PATH and `bash` on PATH resolving
+  to the WSL launcher, the hooks still ran under
+  `C:\Program Files\Git\bin\bash.exe`, and the `commandWindows` command
+  never ran. Without Git Bash every plugin hook fails silently in
+  PowerShell, so Git for Windows is now a stated requirement (README,
+  `plugin/README.md`, `docs/guide/providers.md`), and
+  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`,
+  honouring `CLAUDE_CODE_GIT_BASH_PATH` from the process environment or the
+  `env` block of `~/.claude/settings.json`, which wins as in Claude Code), fails
+  with `GitBashMissing` when there is none, and warns when `bash` on PATH
+  is the WSL launcher (`bash_on_path_is_wsl_launcher`), which does not
+  affect Claude Code but breaks tools that look bash up on PATH. The
+  2026-07-16 plugin design note, which said hooks ran in PowerShell by
+  default on Windows, carries a dated correction.
+- Claude Code gives a plugin's SessionEnd hooks 1.5 s in total, whatever
+  `timeout` hooks.json sets: a settings.json hook with `"timeout": 60` ran
+  the 8.7 s it asked for, the plugin hook asking for 10 s was cancelled at
+  1.5 s (2.1.280, 2026-09-27). The `/clear` and `/resume` digest handoff
+  measured the process creation identity inside that budget with `ps -W`,
+  which took seconds a call on the loaded 2026-09-23 test host (65 ms idle
+  on 2026-09-27). SessionStart now measures it, with seconds to spare, into
+  a third line of `claude-<pid>.host`, with a fourth line saying until when
+  that text holds: `ps -W` prints a start time as HH:MM:SS for a process's
+  first 24 hours and as "Mon DD" after, in local time, so the Windows
+  identity lasts until a little before the 24-hour mark and under the same
+  UTC offset (macOS's is local time too; Linux's never changes). SessionEnd
+  reads line 3 inside that window and measures otherwise, and for a record
+  the previous hooks wrote; SessionStart still checks a handoff against a
+  fresh measurement, never against the record. The handoff work took about
+  0.3 s on the maintainer's host; the episode-close request still follows
+  it and may be cut short, as before (the idle reaper is the backstop).
+  Two-line records stay valid. The coordination SessionStart hook's budget
+  in hooks.json goes from 5 s to 10 s, since it now runs `ps -W` at every
+  start beside its 2 s check-in request.
+- The opt-in Stop hook could not tell whether Claude Code was still running
+  on Windows (`kill -0` cannot see a Windows PID), so a watcher orphaned by
+  a crash ran its full hour. It now lists the process through `ps -W` at
+  arm time and once a minute, and ends within the minute of it going away;
+  a listing that fails leaves the watch alone. Linux and macOS are
+  unchanged.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks` (the coordination SessionStart
+  entry's timeout changed).
+
+### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
+- A running shim whose saved board address the daemon had pruned (the host
+  slept, or the daemon was unreachable, past the seven-day retention, then a
+  heartbeat) stopped background delivery with "check bearer access or
+  restore/rebind the saved identity". Neither helps: `rebind` refuses a
+  missing address row. The stderr notice and the per-call hint now say the
+  address no longer exists and that restarting the session registers a new
+  one, which startup does since the 2026-09-28 fix for resumed sessions.
+  Auth and bank-mismatch failures keep the old wording. The running adapter
+  still does not swap its address in place; that stays a restart.
+
+### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
+- The plugin's bash hooks check digest keys, PIDs, timestamps and session
+  ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
+  under bash 3.2, which matches a range like `a-f` by locale collation, so
+  under a UTF-8 locale it also takes upper-case letters. The first macOS CI
+  run found `stop-wake.sh` following a `claude-<pid>.host` record of 64
+  upper-case letters to a digest that does not exist; Linux and Windows run
+  bash 5, which matches ranges by code point and refuses it.
+  `coordination-prompt.sh`, `coordination-start.sh` and `session-end.sh`
+  read the same record with the same check. The hooks write that record in
+  lower case themselves, so this took a damaged or planted file. With the
+  same collation reproduced on Git Bash, `0-9` also takes digits such as
+  `²`, and such a value would reach the timestamp arithmetic that the
+  checks guard. Every set is now spelled out (`[!0123456789abcdef]`), which
+  bash compares character by character with no collation involved.
+  `tests/test_hook_glob_ranges.py` reproduces the 3.2 matching on any bash
+  and fails on any bracket range in a hook line that is not a sed, grep
+  or awk expression.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks`.
+
+### Added (2026-09-27 — CI runs the plugin hooks on macOS)
+- A fourth CI lane, `test-lite-macos` (macos-latest, Python 3.11), runs
+  the plugin hook, client installer, coordination and embedded-provider
+  tests on a real macOS runner, under its bash 3.2 and BSD tools. The
+  hooks' BSD fallbacks (`stat -f`, `base64 -D`, `shasum`,
+  `ps -o lstart=`) had run nowhere before. It is a fixed file list like
+  the Windows lane, not the full suite: about 8 runner minutes, of which
+  the tests take about 7. The first run failed only on the hook bug
+  above. The lane starts no Postgres, so the store tests in
+  `test_coordination_turn_digest.py` skip there (the Linux lanes run
+  them); every other skip is Windows-only. A step fails the job unless
+  the bash on PATH is 3.2.
+
+### Fixed (2026-09-28 — a Claude Code session resumed after its board address was pruned gets a new one)
+- A Claude Code session whose shim keeps agent state
+  (`PSEUDOLIFE_AGENT_STATE_DIR`) re-attaches to its saved board address on
+  `claude --resume`. The daemon removes a resumable address seven days after
+  its last activity or lease, once no retained message names it. Resuming
+  after that failed startup attach with `instance_not_found`, and the shim
+  kept the state file, so every later resume of that session failed the same
+  way and it never got a board address again (memory kept working). The
+  retire-and-re-register path ran only for adapters without a credential
+  provider, and the shim and the Codex registry always pass one.
+- A bank-bound adapter now takes the same path: the saved state moves aside
+  with a `.stale` suffix and a fresh address is registered. This reverses the
+  rule, added 2026-09-13, that bank-bound clients keep an address the server
+  no longer has. The daemon returns `instance_not_found` only when the
+  address row is missing, every request first re-verifies the saved bank and
+  principal, and `rebind` refuses a missing row, so the recovery that rule
+  pointed to could not restore the address. A rejected bearer or instance
+  credential, or a different bank or principal, still preserves the saved
+  address. Unchanged too: pre-2026-09-13 state not yet bound to a bank stops
+  earlier, at the ownership proof, when its address is gone, because that
+  answer does not tell a missing address from a different principal.
+
+### Fixed (2026-09-27 — a default install turns the agent board on, and the installer says whether it did)
+- The agent board needs a bearer token, but neither installer created one,
+  so a default install left the board dormant with nothing on screen saying
+  so. Once a user added a token, the Claude Code registration still carried
+  none (unlike Codex's), and a tokenless shim exits at startup against a
+  token-gated daemon, so memory broke too.
+- `ops/install.sh` and `ops/install.ps1` now write a random
+  `PSEUDOLIFE_MCP_TOKEN` to `ops/.env` when neither it nor
+  `PSEUDOLIFE_MCP_TOKENS` is set there or in the installer's environment.
+  The file becomes owner-only and the value is never printed.
+  `--no-token` / `-NoToken` keeps the documented open-loopback mode.
+  `--transport http` (whose registrations cannot carry a token file) mints
+  none either, nor does a host that cannot install the shim (no pipx, and no
+  pip-capable Python outside a PEP 668 externally managed environment),
+  since its registrations would fall back to HTTP.
+- Each shim client the installer wires gets an owner-only token file,
+  `~/.pseudolife-mcp/claude-code.token` and `gemini.token`, holding its
+  principal's own `PSEUDOLIFE_MCP_TOKENS` entry or else the singular token.
+  The Claude Code registration now carries `PSEUDOLIFE_MCP_TOKEN_FILE`,
+  `PSEUDOLIFE_MCP_DAEMON_URL` and `PSEUDOLIFE_AGENT_STATE_DIR`
+  (`~/.pseudolife-mcp/claude-code-agents`, so `claude --resume <id>` keeps
+  its board address); Gemini CLI's carries the first two. With the Claude
+  Code plugin, `PSEUDOLIFE_MCP_TOKEN_FILE` and `PSEUDOLIFE_MCP_DAEMON_URL`
+  also go into the `env` block of `~/.claude/settings.json`: the plugin's
+  hooks read the Claude Code process environment, not the registration, and
+  beside a Codex connection file they refuse a token file without the
+  matching URL. A symlinked config is written through. A credential the user's own
+  environment or settings already supply is left alone. The shared work
+  lives in the new `ops/client_credentials.py`, which writes token files
+  through the same owner-only writer as the Codex and Claude Desktop paths.
+- With the state directory now set by default, a Claude Code session keeps
+  one board address across `claude --resume <id>` instead of taking a new
+  one per launch. That address registers as resumable, so the daemon keeps it
+  for seven days after its last activity rather than one hour: the board
+  now holds about a week of Claude Code sessions, as it already did for
+  Codex threads. A session resumed after its address was removed runs
+  without one. A new test drives two launches of one session, and one of
+  another, through the shim and the adapter to pin this.
+- The installers' final ladder and `pseudolife-mcp doctor` (a new `board`
+  field) print one line: `on - token present, principal allowed`, or `off -`
+  and the reason. The reason is the daemon's own, from a new `X-PL-Board`
+  header on `GET /api/hook/coordination-start`.
+- Upgrading: re-run the installer. It mints the token if `ops/.env` has
+  none, and after upgrading the shim behind an existing Claude Code
+  registration it adds the token file, daemon URL and state directory to
+  that registration in place (a backup of `~/.claude.json` first), keeping
+  any credential already there. Restart Claude Code sessions afterwards. A
+  custom or HTTP Claude Code registration, and any existing Gemini CLI
+  registration (`gemini mcp list` shows no environment, so the installer
+  cannot tell whether it carries a token), is left alone with a warning
+  naming the fix.
+
+### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
+- A subagent that a Claude Code session spawns with its Agent tool shares the
+  parent's shim, so its board calls carry the parent's identity (probed
+  2026-09-27: its `memory_agents(action="list")` left out the parent's own
+  row, and its receive returned the parent's cursor). Its status update
+  overwrote the parent's, its `ack` marked the parent's mail read unseen, and
+  its `send` went out under the parent's name, and nothing in the shim can
+  tell the calls apart. The served check-in (`CHECKIN_TEXT`, and the compact
+  `CHECKIN_INSTRUCTION` the shim appends to the MCP instructions) now says a
+  subagent only reads the board, and that status, ack and send belong to the
+  parent. The compact form's wording was tightened to fit: the daemon's
+  instructions plus it are 501 of Codex's 512 characters.
+- Schema v47 adds `coordination_agents.children`, where the parent names its
+  subagents instead of giving them addresses:
+  `memory_agents(action="update", children=[...])` takes at most 8 labels of
+  at most 40 characters, with no duplicates (`invalid_children` otherwise, and
+  `secret_like_body` for a credential-shaped label). The daemon stores each as
+  `{label, since}`, stamping `since` itself and keeping it for a label the next
+  update carries over. Omitting `children` leaves it unchanged and `[]` clears
+  it, like the other fields; a children-only update does not move
+  `status_set_at`. Every peer row in `memory_agents(action="list")`, and the
+  caller's own row in the update and register results, carries `children`. The
+  column is added only when missing, as v46's are. The same field goes through
+  the REST `update` action. `memory_agents`' description paid for the new line
+  by trimming its own wording: the core manifest is 11,496 of 11,500
+  characters, caps unchanged.
+- README's `memory_agents` row now lists `lease`, `expect` and `children`,
+  and the claim and release actions, which it had lagged since v45.
+
+### Fixed (2026-09-27 — Codex coordination setup keeps live delivery on and recognises the default-on board)
+- Re-running `ops/setup-codex-coordination.py --enable` no longer turns
+  off Codex live delivery. Enable wrote `PSEUDOLIFE_AGENT_WAKE=0` whenever
+  the value differed, so a registration set to `1` for the app-server bridge
+  went back to pull-only. The script no longer writes the variable. When
+  it is unset the shim already uses pull, so the only thing the `"0"` ever
+  did was reset an opt-in. Enable's report now says `wake: live` only when
+  the wake flag and both bridge settings are present.
+- `--check` recognises the board being on by default. Before, it reported
+  `needs-configuration` unless `PSEUDOLIFE_AGENT_COORDINATION` was
+  explicitly truthy, but since the board went on by default an unset value
+  is a working configuration. The check now asks the daemon what the shim
+  asks at startup (`GET /api/hook/coordination-start` with the
+  registration's bearer). It reports `ready (default-on)` when the daemon
+  serves the board and `ready (explicit)` for a pinned opt-in. A new
+  `coordination_mode` field carries the same mode. `--enable` is now only
+  for pinning explicit mode, and the Codex setup steps in
+  `docs/guide/configuration.md` say so.
+- When the daemon refuses the bearer's principal, `--check` says so:
+  `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
+  `--enable`'s refusal names the same cause. A Codex principal from a
+  `PSEUDOLIFE_MCP_TOKENS` map is off the board until it is listed (the
+  2026-09-25 default, unchanged). In that state a shim on the default
+  setting leaves coordination off without an error, and one pinned with
+  `--enable` shows only an attach-unavailable hint. The coordination section of the
+  configuration guide and the README's Codex setup now say this for
+  upgraders.
+
+### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
+- `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
+  bounded names with Python's `\w`, which leaves out combining marks: a
+  decomposed accent, or a Devanagari vowel sign, anusvara or virama. A mark
+  therefore ended a word, so "cafe" matched inside a decomposed "café",
+  "jose" inside a decomposed "josé", and "हि" inside "हिंदी". The
+  constraint-pin scope test (`_entity_in_query`, which `memory_search`
+  uses) already counted marks as part of a word, so on such text the two
+  matchers disagreed. A match is now re-checked with the marks just outside
+  it read as letters, and the search moves on to the next candidate if that
+  check rejects it. The rest of the rule is unchanged, including the
+  period, apostrophe and separator-folding rules from the entry
+  "`memory_recall` seeds an entity a sentence ends on". The seed bench's
+  corpus is all ASCII and scored the same as that fix's after run
+  (`evals/results/seed_bench-2026-09-27-mentions-after.json`) on every
+  metric but latency (artifact:
+  `evals/results/seed_bench-2026-09-27-combining-marks.json`). A name and a
+  text in different Unicode normal forms (NFC "café" against NFD "café")
+  still do not match; neither matcher normalises.
+
+### Fixed (2026-09-27 — a hung Codex CLI's whole tree dies at the doorbell timeout on Windows, even on a busy machine)
+- When `codex queue` hangs, the opt-in Codex doorbell kills it and everything
+  it started. On Windows that kill was `taskkill /T /F`, given 5 seconds, then
+  a kill of the direct child only. On a loaded machine taskkill can take
+  longer than that (measured 2026-09-27: 0.11 s idle, up to 2.5 s with the
+  CPU oversubscribed 2x); the launcher then died and its worker kept running,
+  and `taskkill` could still act on the PID after its handle was released.
+  `taskkill /T` also never reaches a worker whose parent has exited, or one
+  started after it walked the tree. CI run 36222271064 (2026-09-26) failed
+  `test_a_hung_cli_tree_is_killed_at_the_timeout` this way.
+- The CLI now starts suspended, joins a new job object and only then runs, so
+  every process it starts belongs to the job, however late it starts; the
+  timeout and shim shutdown end the job with `TerminateJobObject`, with no
+  helper process to wait for. The job allows no breakaway. It has no
+  kill-on-close: a CLI that exits normally leaves whatever it started running,
+  as before. Where the job cannot be created or cannot take the CLI (a parent
+  job that forbids nesting), the CLI runs as before, with taskkill as the kill.
+  POSIX is unchanged: the CLI's process group is killed.
+
+### Fixed (2026-09-27 — a rule is pinned when the query names its entity before punctuation)
+- Constraint pinning in `memory_search` missed a rule whenever the query
+  named the rule's entity right before punctuation. With a rule stored
+  under `bench server`, "about to start the bench server on the 4090"
+  pinned it, but "should I start the bench server?", "start the bench
+  server, then run" and "the bench server's config" did not (probed
+  2026-09-27). The scope test (`_entity_in_query`) required a hyphen on
+  each side of the entity after slot normalisation, and `?`, `,` and `'`
+  are not slot separators. It now requires only that no letter, digit or
+  combining mark touches the entity, so any punctuation ends it while a
+  Devanagari vowel sign or a decomposed accent still continues the word.
+  An apostrophe inside a word still binds it, except before a possessive
+  `s`: "Don's team" names `Don`, "don't" does not. The slot key
+  (`_norm_key`) is unchanged, so no slot is re-keyed. Every query that
+  named an entity before still names it, because the scope test only
+  widens; newly named rules compete for the same capped pin slots, so
+  one can take a slot a lower-cosine rule held before. The test is now a
+  substring scan with a neighbour check instead of a regex, so no pattern
+  is compiled per entity. `memory_recall`'s default mechanical driver
+  seeds through its own raw-text matcher (`recall._mentions`), which
+  already treats `?`, `,` and `'s` as boundaries and is left as it is.
+
+### Changed (2026-09-27 — the standing memory block says where hard rules belong)
+- A rule stored only in the bank ("hold the GPU run when VRAM is in use")
+  was missed when a session asked about its task rather than about the
+  rule. In `memory_search`, constraint pinning serves a `constraint` fact
+  ahead of the ranking only when the query names the fact's entity (in
+  `memory_recall`, only on the walk's seeds), and a session asks about the
+  task it is doing, not the rule it is about to break — probed on the live
+  bank on 2026-09-27 while checking a client's local memory files against
+  it. The standing memory block (`examples/CLAUDE.memory.md`,
+  byte-identical to `MEMORY_LOOP_BLOCK`, which the `full_separate_hook`
+  policy variant serves) now says so at the constraint label: name a
+  rule's entity the way a task would say it, and keep any rule that must
+  hold however the task is phrased in the standing instructions too, with
+  the bank holding its why and its history. `docs/guide/retrieval.md`
+  explains the consequence beside the mechanism; `memory-model.md` points
+  there.
+  No retrieval behaviour changes.
+
+### Fixed (2026-09-27 — `memory_recall` seeds an entity a sentence ends on)
+- `memory_recall` starts its graph walk from the entities the question
+  names, and the name matcher behind that (`_mentions` in
+  `memory/recall.py`) treated a period right after a name as part of a
+  word. "Start the bench server." named no entity, so the walk seeded from
+  whatever the search hits mentioned instead. The same blind spot hid every
+  name that ends a sentence in a hit text, where the matcher also picks
+  fallback seeds and ranks re-queries. A period after a name now counts as
+  a boundary unless a word character follows it, so "node" still does not
+  match inside "node.js" and "v1" not inside "v1.2". A period before a name
+  still blocks it, so a dotfile path such as ".env" does not name "env".
+- Two more alignments with the constraint-pin scope test
+  (`_entity_in_query`) that `memory_search` uses. A name's own separators
+  (space, `_`, `-`, `/`) now match each other, so "payments db" and
+  "payments-db" name the same entity. An apostrophe inside a word is no
+  longer a boundary, except before a possessive "s", so "don't" does not
+  name "Don" but "the bench server's config" names "bench server". Hyphens
+  in the text stay boundaries ("k8s" matches "k8s-prod"). The docstring
+  claimed the opposite, and now says what the code does.
+- Seed bench (`evals/seed_bench.py`, 2026-09-27, deterministic: a control
+  run with the old matcher reproduced the before numbers exactly). The
+  shipped query-first seeder is unchanged at precision 1.0, recall 1.0,
+  because every bench question ends in "?". Six of the bench's 17 corpus
+  sentences end on an entity name, which the old matcher missed, so the
+  hit-derived variants moved: the retired liberal seeder went 0.28 → 0.295
+  (its June figure was 0.262) and the rejected ranked-and-capped variant
+  0.75 → 0.625. Artifacts: `evals/results/seed_bench-2026-09-27-mentions-*.json`.
+  Compiled patterns are now cached per name, so a vocabulary larger than
+  `re`'s own 512-pattern cache no longer recompiles every name on every
+  seeding.
+
+### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
+- `pseudolife-mcp prompt-hook`, which installs without the plugin run on
+  every user prompt, took a median of about 270 ms a turn on the
+  maintainer's Windows host. About half of that was importing the shim
+  module for three small helpers, because the shim's own imports pull in
+  httpx and, through it, rich. The daemon URL check (`_daemon_url`,
+  `_validated_daemon_url`, `DEFAULT_URL`) and the redirect-refusing handler
+  (`_NoRedirectHandler`) now live in `pseudolife_memory/daemon_url.py`,
+  which imports only the standard library. The shim re-exports them under
+  the same names, and the hook takes them from the new module, so it no
+  longer imports the shim. `pseudolife-mcp briefing` still imports the
+  shim for its health probe; it runs once per session, not every turn.
+  Measured 2026-09-27 against a stub daemon (runs of 10 spawns): medians
+  of 132-136 ms, down from 266-275 ms.
+  Behaviour is unchanged, error text included. A test fails if the hook
+  path imports the shim, httpx or rich again.
+- Deploy with `ops/update.ps1 -All`: the hook runs from the client-side
+  shim runtime (or, on the Docker tier, inside the daemon image), and a
+  daemon-only deploy does not update the shim runtime.
+
+### Fixed (2026-09-26 — a redaction no longer reports a clean-up Postgres skipped as done)
+- `board-audit redact` reported `"vacuumed": true` even when Postgres had
+  skipped part of its clean-up. A role that may not vacuum or analyze a table
+  gets a warning and a skip rather than an error, and psycopg drops notices
+  nobody handles, so on a managed Postgres where the bank's role is not the
+  tables' owner the statistics could still hold the redacted body while the
+  result said it was done. The clean-up now collects Postgres's warnings: any
+  skip reads `"vacuumed": false`, and the warning is printed with the
+  commands to run as the tables' owner. It asks for warnings itself for its
+  two statements and restores the setting after, so a role or database whose
+  `client_min_messages` is `error` cannot hide a skip. The Docker tier connects as a
+  superuser and was not affected. The guide also lists what a vacuum leaves
+  on disk (freed bytes are not overwritten) and what can hold it back (a
+  replication slot, like an open snapshot).
+
+### Security (2026-09-26 — a secret pasted into an agent-board message can be removed from the audit log, and credential-shaped text is refused, schema v46)
+- A message sent on the agent board stays in the board's audit log for its
+  retention window (90 days by default, forever with `0`), and until now its
+  body sat inside the log's sha256 hash chain: a credential an agent pasted
+  into a message by mistake could not be removed without breaking
+  `board-audit verify`, and restoring a backup brought it back. Nothing
+  refused such a body at send time either.
+- From schema v46 a `send` event keeps the body in a new
+  `coordination_events.body` column, beside a random 16-byte salt in
+  `body_salt`, both outside the row hash; its hashed payload carries only
+  sha256(salt || body) (`text_commitment`), not the text and not its length.
+  The hash itself does not change, so every existing chain still verifies.
+  The salt goes with the body on a redaction, so nothing left in the chain
+  can confirm a guess of a short or structured body (an unsalted digest, or
+  a byte count, could).
+- `pseudolife-mcp board-audit redact --message-id ID --reason TEXT`
+  (operator-only; no MCP tool or REST route) blanks that body and the live
+  mailbox copy (and its seven-day request fingerprint, so a retry of that
+  request is refused), ends the message's delivery, and appends a chained operator
+  `redact` event naming the send event and the reason, in one transaction and
+  under the daemon's own locks, so it runs beside a live daemon; a busy board
+  is reported as busy (exit 2), with nothing changed. It then vacuums the two
+  board tables so the old row versions are freed, rebuilds their planner
+  statistics and vacuums `pg_statistic` (`ANALYZE` copies sampled bodies,
+  salts and fingerprints into it word for word), and prints the new head
+  (`expect_head`) to record for a later `verify --expect-head`. For a message
+  sent before v46, whose body is inside the hashed payload and stays until
+  audit retention removes the event, it still blanks and expires the live
+  copy while there is one, and logs that the audit copy was kept. It refuses
+  an unknown id and a body already redacted.
+- `board-audit verify` checks every present body against its commitment
+  (`body_mismatch`, which also covers a body on a row that commits to none
+  and a body written back after its redaction) and accepts an absent one only
+  behind a later operator `redact` event that names it and removed it
+  (`body_missing`). `export` lines carry `body`; an export without body fields
+  (written by a pre-v46 CLI) fails as `body_not_exported` rather than as
+  tampering, a line with a repeated key is refused, and exports of pre-v46
+  logs still verify. The offline recovery CLI still records its events on a
+  restored v42-v45 bank that has no body column yet.
+- The v46 column is added only when it is missing. `ADD COLUMN IF NOT EXISTS`
+  takes an exclusive table lock even when the column exists, so an open
+  `board-audit export` (a read lock held for its whole snapshot) would have
+  failed every daemon start's schema pass at its 5 s lock timeout.
+- The board refuses text shaped like a credential wherever it would keep it,
+  with a new `secret_like_body` error (HTTP 400) that never repeats the text:
+  message bodies and request ids; statuses, labels, projects, tasks,
+  episodes and capability names (project and task are copied into every
+  later audit row); lease names and purposes; and redaction reasons. The
+  shapes are GitHub, GitLab,
+  Hugging Face, Anthropic, OpenAI-style, Stripe, Slack and Google keys and
+  tokens, AWS access key ids and secret keys, JWTs, bearer tokens, DSN
+  passwords, PEM private-key headers, and a secret-named key or `--flag`
+  (including `PSEUDOLIFE_MCP_TOKENS` maps and the `X-PL-Agent-Key` header)
+  given a generated-looking value; paths, branch names, digests, ids, names
+  and placeholders after such a key are not. Over the 2026-09-23/24
+  fifteen-session trial's board export it refused none of the 816 message
+  bodies and request ids, the 25 statuses, or the labels, projects, tasks and
+  episodes of its 26 agents. It is a net for common shapes, not a guarantee:
+  single-case passwords under 32 characters get through.
+- Redaction also takes the live mailbox row's request fingerprint (a digest
+  of the body kept seven days for retries), so a retry of the redacted
+  request is refused; with audit retention under seven days it still takes
+  the fingerprint after the send event itself was cut, and logs that the
+  audit copy was already gone.
+- Limits: backups, WAL archives and exports taken before a redaction still
+  hold the body, as do audit copies of messages sent before v46 and whatever
+  the recipient already read. Rotate a leaked credential first; redaction is
+  tidiness, not remediation.
+
+### Added (2026-09-26 — a coordination report, and the trial baseline to beat)
+- Coordination changes had nothing to be measured against: the 2026-09-23/24
+  trial's figures came from one-off scripts over a private board export.
+  `evals/coordination_report.py` reads an audit export
+  (`pseudolife-mcp board-audit export --out`) or that older whole-board export
+  and writes an aggregate-only JSON report plus a Markdown rendering. It never
+  replaces either without `--force`, and never its own input even with it.
+  It measures acknowledgement latency per recipient principal (overall and
+  per `--window`), the share of acknowledgements covering three or more
+  messages at once, each directed pair's busiest 60 minutes, near-identical
+  fan-out bursts, the kind mix (a declared `kind`, else a tag-first heuristic
+  marked as such), SUITE-START/SUITE-END baton traffic, status staleness at
+  the end of an audit export (leaving out detached and revoked sessions,
+  whose statuses no peer is shown), and resources coordinated by hand
+  repeatedly, listed as candidate lease declarations (proposals only, nothing
+  enforced). Wakes per session-hour, requests past their reply-by time and
+  the time to answer a NEEDS-HUMAN message are `null` until the schema
+  records what they need.
+- Export the whole audit log and scope the report with `--since`/`--until`:
+  the report then still reads the registrations and statuses set before the
+  scope, which an export filtered at the source drops. A filtered export
+  (a gap in its sequence, or a start no retention cut anchors) is flagged in
+  both files, and staleness counts the agents with no status event. A schema
+  v46 export's top-level `body` is read (older sends' bodies still come from
+  the payload, including in an upgraded bank's export); a redacted body
+  counts its message without text, in `input.bodies_missing`.
+- The committed baseline (`evals/results/coordination-baseline-20260924.json`)
+  is the report over the trial's final export. It matches every figure of
+  the trial's one-off analysis except one, pinned in
+  `tests/test_coordination_report.py`: fan-out similarity now runs difflib
+  with autojunk off, which past 200 characters had scored near-identical
+  copies as unrelated. Over 816 messages, acknowledgements to Claude
+  Code sessions took a median 296.8 s (p90 5261.2 s) from 16:00 to 21:30 AEST
+  and 31.7 s (p90 140.2 s) from 01:00 to 07:05; 12 messages were never
+  acknowledged; 32.7% of acknowledgements came in batches of three or more;
+  39 fan-out bursts covered 22.8% of messages; and SUITE-END traffic amounted
+  to 39 baton passes. The older export has no status history, so the
+  baseline's staleness is `null`. One night is a reference point, not an
+  interval: night-to-night noise stays unmeasured until a second comparable
+  night is reported.
+- Aggregate-only by construction: bodies, labels, statuses, tasks, projects
+  and paths are matched in memory against fixed keyword lists and only
+  counts are written; agents appear as `<principal>-<n>` in first-seen order,
+  and no raw id or input path is written. A principal is written by name only
+  when it is one of the installer's role names (or `--keep-principal` names
+  it), since an operator-chosen principal can be a username or a host. Window
+  labels are short plain names. A test sends bodies, statuses, labels, tasks,
+  a username-shaped principal and machine paths carrying a sentinel through
+  both input formats and checks that neither output file contains any of
+  them.
+
+### Added (2026-09-26 — agents queue for shared resources on the board instead of by message, schema v45)
+- Agents that share one machine can now hold a named, expiring **resource
+  lease** (a full test suite, the GPU, a maintenance window, a work area)
+  and queue for it on the agent board, instead of announcing turns by hand.
+  In the 2026-09-23/24 overnight trial the full-suite relay ran on
+  hand-written SUITE-START/SUITE-END messages, and one hand-off to a session
+  that never took its turn stalled the relay for twenty minutes.
+- A freed lease is granted to the head of its queue, which must renew within
+  five minutes (or its own ttl, if shorter) or lose it to the next waiter.
+  Every grant takes a fence number from one sequence, so a lease's fence
+  never repeats, even after prune forgets its row. Grants, releases, expiries and
+  operator breaks are audit-log events; renewals are not, like heartbeats.
+  Every acquire, listing and prune pass first settles lapsed holds, so a
+  queue moves on even when its holder died without a word. Prune drops a
+  departed agent's place in every queue before anything is granted, never
+  removes an agent that holds a live lease, and forgets a lease row left
+  free and unqueued for a week. Restore recovery frees every lease and
+  empties every queue, since it revokes every credential.
+- A renewal only extends the hold: repeating the estimate a hold already
+  carries leaves its expected end alone, so a stalled holder that keeps
+  renewing still reads stale. A new estimate or purpose is logged as a
+  `lease_update`. Lease names refuse control and invisible format
+  characters (zero-width, bidi), so two names that look alike are one lease.
+- REST gains `lease` (acquire, renew or queue once), `release` and
+  `leases` (a listing that needs only the bearer). A full queue is a
+  transient 429.
+- `pseudolife-mcp lease run NAME [--expect D] [--ttl S] [--purpose T]
+  [--no-board] [--timeout D] -- COMMAND` holds a named lease around any
+  command. What excludes is an OS file lock
+  (`~/.pseudolife-mcp/locks/lease-<name>.lock`, `PSEUDOLIFE_LEASE_LOCK_DIR`
+  overrides), released the moment its holder exits or dies, so nothing goes
+  stale. Where the daemon's board is on for the bearer, the board mirrors
+  it: runs queue in arrival order and see the holder, purpose and expected
+  end. Without a board, or when the board fails in any way, the run waits on
+  the OS lock alone; a board failure never stops the command. Ctrl-C,
+  SIGTERM and SIGHUP stop the command, giving it time to clean up, before
+  the lease is released. A run nested inside a run of the same lease exits
+  64 instead of waiting for itself. The command gets
+  `PSEUDOLIFE_LEASES_HELD`; exit codes are the command's own, 75 when
+  `--timeout` expired first, 128+N when stopped by a signal.
+- `pseudolife-mcp lease list [NAME] [--json]` shows the board's leases
+  beside the local lock files, and `pseudolife-mcp lease break NAME` is the
+  operator's way to free a hold nobody will release: through the bank
+  directly, never an agent credential, logged with the operator as actor.
+  The test suite's own `full-suite.lock` is unchanged; `lease list` only
+  probes it.
+- `memory_agents` gains `claim` and `release`: a session-held lease such as
+  `coordinator:<project>` or `claim:<path>`, whose `status` is its purpose.
+  A model renews by claiming again; a `claim:` lease lasts a day between
+  renewals and any other an hour. The roster lists held and queued leases,
+  resource leases before claims, and says when the page cut some off. A
+  claim is advisory: it tells peers, it blocks no edit. A queued model is
+  not told when its turn comes: it sees the grant the next time it lists or
+  claims, and must renew within the five-minute window.
+- A status can carry an expected duration: `memory_agents update` takes
+  `expect` (seconds), and past it the roster marks the row
+  `status_overdue`. The audit log records the expectation only when it
+  changes, so existing status history keeps its shape.
+- Schema v45 adds `coordination_leases`, `coordination_lease_waiters` and
+  `coordination_agents.status_expires_at`. The lease tables carry no
+  foreign keys, like the audit log, and stay out of portable exports.
+- The opt-in full-tier tool-description budget moves from 17,500 to 17,800
+  characters for the new `memory_agents` contract (+295); core fits within
+  its unchanged 11,500.
+
+### Changed (2026-09-26 — installs without the plugin get the memory-change note too)
+- Claude Code and Codex installs wired by `ops/install-hook.*` (the
+  fallback without the plugin, and the Docker tier's installers) still
+  echoed the 614-character discipline line on every turn. They now run
+  the plugin's memory-change note through a new CLI mode,
+  `pseudolife-mcp prompt-hook`: it reads the hook payload on stdin, asks
+  `GET /api/hook/memory-changes` once (2 s, no retry, redirects refused so
+  the bearer never follows one), and prints a UserPromptSubmit
+  `hookSpecificOutput` only when new lessons or other sessions' status
+  notes landed. It keeps the plugin hooks' cursor file
+  (`<PSEUDOLIFE_DIGEST_DIR or ~/.pseudolife-mcp/digests>/<sha256(session
+  id)>.mark`), saves it only after printing, stays silent when the cursor
+  cannot be saved, and is silent on every failure. The bearer comes from
+  `PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN`; the payload is
+  read as UTF-8 whatever the console code page.
+- `install-hook` writes `pseudolife-mcp prompt-hook`, or for the Docker
+  tier's `docker exec pseudolife-mcp-daemon … briefing --hook-json`,
+  `docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook` (`-i`
+  hands the container the hook's stdin). There the cursor lives in the
+  container's writable layer, so after a daemon rebuild the next turn
+  reports again what landed since the session started; the bearer is the
+  container's `PSEUDOLIFE_MCP_TOKEN` (a stack set up only with
+  `PSEUDOLIFE_MCP_TOKENS` gets no note), and a stopped container makes
+  `docker exec` fail on each turn, which the client reports as a hook
+  error, as it does for the briefing once per session. A re-run
+  removes the exact static echoes earlier versions wrote: the current
+  line, the 2026-08-28..09-05 one, and Codex's `Write-Output` pair. An
+  entry whose command or `commandWindows` differs from those is the
+  user's and stays; the same exact-pair rule now also applies to the
+  check-in echo it replaces. `--remove-legacy` and
+  `ops/setup-codex-hooks.py` recognise the new commands.
+- Upgrading: the command runs from the host's `pseudolife-mcp` runtime
+  (the daemon container's on the Docker tier), so update it before
+  rewriting the hook: `ops/update.ps1 -All` (or `ops/update.sh --all`, or
+  `ops/update_clients.py --only shim`), then re-run the installer or
+  `ops/install-hook.*`, then restart clients. An older runtime rejects the
+  unknown mode (exit 2), which Claude Code reports as a hook error on each
+  turn. Codex asks to approve the changed hook in `/hooks`.
+
+### Changed (2026-09-26 — session hooks say each thing once, and the per-turn hook speaks only when memory changed)
+- The session-start hook stopped serving "What your memory is unsure
+  about" (graph bridges and contested slots). Every session paid for it, and
+  it carried test probe slots and a LAN-address slot into transcripts. The
+  Console's Insight view (`/api/graph/digest`), `GET /api/briefing` and
+  `pseudolife-mcp briefing` keep it. The hook now asks
+  `session_briefing(max_unsure=0)`.
+- A resumed or compacted session is no longer re-sent the startup block.
+  Both re-fire SessionStart; the 2026-09-23 review found 88 of 156 payloads
+  were such re-fires, and one local session re-sent about 5.3 KB on each of
+  3 compactions and 4 resumes into a transcript that still held the first.
+  For `source=resume|compact` `/api/hook/session-start` now serves the drift
+  notices, the episode-handle line (resume can change the session id;
+  compaction drops the line from context) and one pointer line; after a
+  compaction also a daemon-side `hook-instructions.md`, whose rules nothing
+  else carries. `/api/hook/memory-policy` serves nothing for those sources,
+  and both plugin hooks now forward `source` to it (`lifecycle.ps1` forwards
+  the reason it resolved, so a Codex payload that names it
+  `session_start_reason` counts too). Startup, `/clear` and
+  any other source still get the full block. The route honours `source`
+  only for an authorized caller, like `session_id`.
+- The plugin's UserPromptSubmit hook no longer echoes the 614-character
+  discipline line every turn (170 turns of one session cost about 25k
+  tokens). It is now a memory-change note: one request per turn to the new
+  `GET /api/hook/memory-changes` (2 s cap, no retry, silent on failure),
+  printing only when new lessons or new `source="status"` notes from other
+  sessions landed since this session's last note, with the newest one-line
+  excerpt of each and a one-line reminder of the memory loop. Quiet turns
+  add nothing. The hook keeps its cursor (the daemon's clock) in
+  `<digest dir>/<sha256(session id)>.mark` and saves the next one only after
+  printing, so a timed-out request is asked again next turn; a cursor it
+  cannot save keeps it silent rather than repeating the note. A session's
+  first turn counts from the start of its episode, so what landed between
+  SessionStart and the first prompt is reported. Mail keeps its
+  coordination digest.
+  `user-prompt-submit.sh` sources `session-start.sh memory-changes`, so the
+  connection checks stay in one script; `lifecycle.ps1` does the same for
+  Codex on Windows. `ops/setup-codex-hooks.py` now reads the fixed line from
+  `install-hook.ps1`; the `ops/install-hook.*` fallback moved to the note
+  too (see the entry above, "installs without the plugin get the
+  memory-change note too").
+- New `MemoryService.memory_changes_since(since, session_key=)`: counts and
+  the newest of each kind, scanned under the service lock that every entry
+  and lesson write holds while stamping, so its `now` (rounded down) is a
+  safe next cursor. A lesson confirmation is not new; a superseded status
+  note is not counted. Known limits: rows restored with their original
+  stamps (recovery, reinstatement) or written while the wall clock is
+  stepped back can land behind a cursor; a status note stored without
+  `episode=` after `/clear` can be attributed to the previous session and
+  reported back to its own writer. Read-only; no schema change.
+  `session_briefing(max_unsure=0)` no longer reads the graph digest.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to re-approve
+  the changed hooks in `/hooks`. An old plugin against a new daemon keeps its
+  static line; a new plugin against an old daemon gets a 404 and prints
+  nothing per turn until the daemon is updated.
+
+### Fixed (2026-09-26 — the memory-policy bench names a leaked coordination check-in again)
+- The bench's validity check keeps a list of known policy texts, and a run
+  whose context carries one its arm does not serve is invalid with that
+  text named. The coordination check-in was read from `echo "..."` in
+  `plugin/hooks/coordination-start.sh`, but since #367 that script fetches
+  the check-in from the daemon (`/api/hook/coordination-start`), so the
+  parse matched nothing and the entry silently dropped out of the list. A
+  leaked check-in was still caught by the generic `memory_*` scan, but only
+  as an unnamed "memory-policy mention". `policy_texts()` now takes it from
+  `pseudolife_memory.coordination.CHECKIN_TEXT`, the constant the daemon
+  serves, and a test pins the full set of known texts so a marker whose
+  source moves fails the suite instead of vanishing. The committed
+  2026-09-25 artifacts were graded with the check-in present in the list;
+  their results are unaffected. The coordination-start ledger rows need no
+  change: they are not context hooks, so a served check-in cannot excuse
+  itself from the scan.
+
+### Fixed (2026-09-25 — Postgres connects retry a Windows local-port failure)
+- A daemon running natively on Windows (including the daemons the test suite
+  spawns) now tries its own Postgres connects again (the storage connection
+  and its reconnect, the `/health` probe, the mailbox connection) when a
+  loopback connect fails for want of a local port: libpq's "Address already
+  in use (…/10048)" (WSAEADDRINUSE, the port it picked still has a TIME_WAIT
+  entry to the same server) or "…/10055" (WSAENOBUFS, the ephemeral range is
+  exhausted). Neither says anything about the server, and a second connect
+  picks another port. Until now the tool call or health probe that opened
+  the connection failed. Measured 2026-09-25 with about twenty sessions
+  against one Postgres on `127.0.0.1:5433`: three such failures in two full
+  test runs, one inside the storage connect, with 250-600 TIME_WAIT entries
+  to that port. At most four calls, with a jittered backoff from 0.05 s that
+  stays under a second, and one warning per retry naming only the attempt
+  and the code. Every other failure (refused, timeout, authentication, too
+  many clients) is still raised on the first call. The Docker daemon is a
+  Linux container that reaches Postgres over the compose network and never
+  sees these codes; the operator CLIs are unchanged.
+
+### Fixed (2026-09-25 — the client-side updater no longer strands a shim runtime that sessions are running)
+- On 2026-09-25 `ops/update.ps1 -All` ran `pip install --upgrade` into the
+  maintainer's shim runtime while about 36 sessions ran its
+  `Scripts\pseudolife-mcp.exe`. pip failed with WinError 32 but did not
+  put back what it had already moved. pip 24.0 stashes an uninstall in
+  sorted order, so `Lib\site-packages\pseudolife_memory` and its dist-info
+  had been renamed to `~`-prefixed siblings before the running launcher
+  refused to move. That failure comes from `uninstall()`, which sits
+  outside the `try` that rolls back a failed install. The runtime was left
+  with no package of its own, and imports silently fell through to another
+  copy on `sys.path` (the venv includes system site-packages). pipx has the
+  same exposure with no stash at all: `install --force` removes the venv
+  with `rmtree(ignore_errors=True)` before rebuilding it.
+- `ops/update_clients.py` now reads the Windows process table (stdlib
+  `ctypes`: Toolhelp32 plus `QueryFullProcessImageNameW`) before a pip or
+  pipx upgrade. The upgrade is skipped if any process is running from the
+  registered launcher, from the virtualenv the shim lives in, or, for
+  pipx, from pipx's venv for the package, since `--force` deletes all of
+  it. For pip `--user` the owning interpreter's own venv, if it has one, is
+  not held, because pip writes to the user site. Paths are compared both
+  as written and as resolved, so a registration made through a junction
+  or symlink still matches the resolved path Windows reports.
+- The ladder reports `in-use` with the number of sessions and the exact
+  rerun, `python ops/update_clients.py --only shim --repo <checkout>`.
+  Each process tree counts as one session: a Claude session is a launcher
+  plus the venv's redirector. The gate itself is on any matching process.
+  `in-use` exits non-zero, so `update.ps1 -All` still warns that a client
+  step needs attention.
+- The helper's own process and its parent never count. A process table
+  that cannot be read is `unknown` and is left alone, like the existing
+  unclassifiable-probe case, which also exits 0. A bare global interpreter
+  registered with `-m` names no path of its own and is not checked; the
+  restore below still covers it. Off Windows nothing changes, since an
+  open or running file does not stop pip or pipx there.
+- As a safety net for a session that starts between the check and pip's
+  stash, a failed pip run now gets back what it moved aside. Each entry
+  that vanished from the runtime's library directories during that run is
+  renamed back from the one `~` sibling that appeared during the same run
+  and matches pip's stash naming. An older failed run's leftover is never
+  picked. Where that is ambiguous, or where this package's own entries are
+  simply gone, they are named rather than guessed. A dependency whose
+  upgrade the same run finished before failing is not reported. A fresh
+  probe then fills in the failure line: the runtime still imports its own
+  package, imports it again after the restore, or has none. For a venv
+  shim, "its own" means imported from inside the venv. With system
+  site-packages on, a copy in the user site or the base interpreter is
+  what imports fell through to on 2026-09-25, not the runtime's package.
+- The metadata refresh named for a shim in the checkout's `.venv` put the
+  probe's failure reason into `pip install -e "<...>"` when the probe did
+  not answer. It now names a project directory only when the probe found
+  an editable install, and the checkout otherwise.
+- Tests: a fake process table covers each registration kind, and a stub
+  pip reproduces pip 24.0's stash-then-fail. Two checks use a real
+  interpreter: a real venv whose stub pip strands the package must import
+  its own package again afterwards, and on Windows a real process started
+  from a runtime's interpreter must block the upgrade.
+
+### Fixed (2026-09-25 — rerunning the installer no longer strands a shim that sessions are running)
+- On Windows, rerunning `ops/install.ps1` or `ops/install.sh` while a
+  Claude Code or Codex session was running the stdio shim could leave the
+  shim without its own package. The installers upgrade it with
+  `pipx install --force <checkout>` or `pip install --user --upgrade
+  <checkout>`, and neither puts back what it removed before failing on the
+  running launcher. pip 24.0 stashes an uninstall in sorted order, so
+  site-packages is already renamed to `~` siblings when WinError 32 is
+  raised from `uninstall()`, outside the `try` that rolls back. pipx
+  deletes the venv with `rmtree(ignore_errors=True)` first, so everything
+  that is not locked is gone. The client updater hit this on 2026-09-25.
+- Both installers now read the Windows process table
+  (`Get-CimInstance Win32_Process`; `install.sh` under Git Bash, MSYS2 or
+  Cygwin calls `powershell.exe` for it) before upgrading an installed shim.
+  If a process is running from the shim's pipx venv or from its installed
+  launcher, the upgrade is skipped. The warning names the number of
+  sessions (one per process tree: a Claude session is the launcher plus the
+  venv's redirector), the paths and the rerun, and it is repeated at the
+  end of the run. The installed shim stays in place and usable, so clients
+  are still registered against it. A registration the installer would have
+  reported as "upgraded" is reported as not upgraded, marked `[!]`. A
+  process table that cannot be read leaves an installed shim alone. A first
+  install, with nothing installed yet, is not checked. Off Windows nothing
+  changes, since a running file does not stop pip or pipx there.
+- Not covered: a session that starts between the check and pip's
+  uninstall. The installers do not restore pip's `~` stashes after a
+  failed pip run.
+- Tests: fake process tables cover a pipx venv with a Claude and a Codex
+  session, a pip `--user` launcher, lookalike paths that must not count,
+  an unreadable table, a first install and a non-Windows host, against
+  every available bash and PowerShell. The registration steps of both
+  installers are covered for Claude Code, Codex and Gemini CLI. On Windows
+  a real interpreter started from a disposable pipx venv must block the
+  upgrade, through the real process table.
+
+### Fixed (2026-09-25 — `/clear` no longer revives the old session's root)
+- After `/clear` or an in-session `/resume`, a `memory_store` that passed the
+  new session's handle still reopened the old session's root under the
+  shim's launch id (the root SessionEnd had just closed, within the resume
+  window) or, if SessionEnd had pruned it empty, opened a new empty one that
+  lingered until the idle reaper and the sweep. The entry itself already
+  landed on the handle's root. The store path opened a root for the
+  `X-PL-Session` header session whenever one was present; it now does so only
+  when no handle resolves. The header stays the identity stamp (writer and
+  session keying of auto-promoted facts, HLC), as the documented split
+  between identity and target episode says. Such a store also no longer
+  clears the close SessionEnd stamped on the old session's durable
+  `client_sessions` record (v43), which the reopened root did, as if that
+  session had never ended.
+- A store's `episode_hint` now reads the root the entry landed on (the
+  handle's root when one resolves), not the header session's root, and when
+  a handle resolved it names it (`memory_session_title(..., episode='<id>')`):
+  a title call without the handle resolves the header session, which after
+  `/clear` would reopen and rename the old session's root.
+- `memory_episode_start` with a handle already nested under the handle's root
+  without opening one for the header session; a test now pins it.
+- A session end that matches no open root (a SessionEnd for a reaped
+  session, the exit of a non-Claude-Code shim that never wrote) no longer
+  re-upserts every episode row, one committed statement each, under the
+  service lock. A close that matched still writes through.
+
+### Added (2026-09-25 — lesson searches and used_ids outcomes are recorded, schema v44)
+- Two memory-loop questions could not be answered from the bank: whether a
+  session consulted its lessons, and what share of the ids an outcome names
+  in `used_ids` a search had actually served. `memory_lesson_search` wrote
+  no log row, and lessons have no read counter. `memory_outcome` persisted
+  only the credited ids, and nothing linked those to the outcome; the
+  unmatched and served-elsewhere ids went back to the caller and were
+  dropped. Found 2026-09-25 by the memory-policy bench.
+- Schema v44 adds `lesson_search_events`: one row per `memory_lesson_search`
+  call, with the query, the caller's session and episode, and the lessons
+  served by `(entity_norm, attribute_norm)` slot key with rank and score.
+  A search that found nothing gets a row too. It is a separate table from
+  `retrieval_events` on purpose: `evals/retrieval_replay.py`, the telemetry
+  review and the graph ablation re-run every retrieval event as a
+  `memory_search`, so a lesson query there would contaminate them. It
+  shares the retrieval log's switch and retention, and `memory_stats`
+  reports its size as `retrieval_log.lesson_searches`. Lessons shown in
+  the session-start briefing are not counted.
+- Schema v44 adds `outcome_signals.used_ids` (JSONB). It holds what the
+  outcome's ids became: `{"credited", "unmatched", "served_elsewhere"}` id
+  lists, or `{"unchecked", "reason"}` when the label write failed. It is
+  `NULL` when the outcome named no ids, the retrieval log is off, or the
+  record write itself failed. The tool's response is unchanged. Ids the MCP
+  layer drops before the service sees them (`used_ids_ignored`,
+  `used_ids_truncated`) are not recorded. The column is serving telemetry,
+  so `pseudolife-mcp export` leaves it out, as it leaves out the retrieval
+  log; the signals themselves still travel.
+- Both records are observational: a failed write is counted in
+  `memory_stats` `retrieval_log.write_errors` and never fails the search
+  or the outcome.
+
+### Fixed (2026-09-25 — Claude Code without the plugin starts with the memory core)
+- The SessionStart hook the installer writes for Claude Code without the
+  plugin (`pseudolife-mcp briefing --hook-json`, also used by older Codex
+  hook setups) now injects what the plugin hook injects, read from
+  `/api/hook/session-start`: the compact memory core, then, when the request
+  is authorized, any daemon `hook-instructions.md`, cold-bank onboarding and
+  the bounded briefing. It used to inject
+  only the live briefing from `/api/briefing`, so those sessions started
+  without the memory core, and a cold bank injected nothing. Existing
+  `settings.json` entries need no edit: the installer's `docker exec` command
+  picks this up with the daemon image, a host-installed command with the
+  `pseudolife-mcp` package. As with the plugin, this briefing no longer
+  includes the coordination section. Plain `pseudolife-mcp briefing` still
+  prints the full `/api/briefing`.
+- An explicit `--instructions append` (`-Instructions append`, or the
+  `--claude-md` alias) now writes the standing block to `~/.claude/CLAUDE.md`
+  when the Claude Code plugin is installed, as the README states; Codex
+  already honoured it. `auto` and `skip` still leave `CLAUDE.md` alone beside
+  the plugin.
+
+### Security (2026-09-25 — the fallback dream extractor stops receiving the primary's API key)
+- The fallback extractor was built with the primary's key
+  (`PSEUDOLIFE_DREAM_API_KEY` / `memory.dream.extractor_api_key`), so a hosted
+  primary's provider key rode every fallback dream as a bearer header to the
+  fallback host — usually the in-stack sidecar over plain HTTP, which needs no
+  key. The fallback now sends its own key, the new
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` / `memory.dream.fallback_api_key`, or
+  none. Like the primary's key it never appears in the Console, is honoured
+  under either settings source, and `ops/docker-compose.yml` forwards it to
+  the daemon. Forced `fallback` mode, `auto` falling back, and the
+  review-queue judges (which reuse the selected extractor, including under
+  their second-opinion model) all follow the rule; the primary still
+  receives its own key.
+- Migration: a fallback that relied on sharing the primary's key — a second
+  model on the same hosted provider, or one key-protected server behind both
+  URLs — now gets a 401. Set `PSEUDOLIFE_DREAM_FALLBACK_API_KEY` to the same
+  value. Until then fallback dreams fail like any fallback outage: pulled
+  entries stay pending and retry, except that a batch of exactly one entry
+  (an idle dream with a backlog of one) failing three dreams running is
+  quarantined and never extracted — its memory stays in the bank — and
+  pending outcome signals stop being offered for lesson synthesis after
+  `signal_retry_days` (30). No shipped configuration is affected: the
+  installer never writes a dream key, and the bundled sidecar and both CLI
+  shims check none.
+
+### Added (2026-09-25 — every registered session leaves a record)
+- A session that only searched, set facts or logged outcomes left no trace
+  that it had happened: its root episode is deleted when it ends holding no
+  stored entry, and its searches and outcomes were left naming nothing (on
+  2026-09-25, 43 surviving client sessions in 24 h beside 94 pruned ones
+  with searches and 67 with outcomes). Schema v43 adds `client_sessions`:
+  one row per session key the SessionStart hook or `POST
+  /api/episode/start` (the stdio shim, the CLI episode hooks) registered,
+  never pruned, holding how it registered, the bearer's principal, its
+  first start and every registration since, its most recent close and why
+  (`end` or `idle`, cleared when the session is reopened), the
+  memory-policy variant the hook assigned (so a `memory_policy.ab_arms`
+  test keeps each session's arm), and every root episode id it was given.
+  Best-effort: a failed write never fails a session start. Excluded from
+  `pseudolife-mcp export`. See
+  [Episodes — session record](docs/guide/episodes.md#session-record).
+- `evals/capture_metrics.py` counts sessions from that record, which lifts
+  the limit the capture-metrics entry below describes for sessions that
+  register: a session whose roots were all pruned still counts, its
+  searches attribute by session key and its outcomes by the pruned root's
+  id, a resumed session's new shim pairs with the start it began beside,
+  and the report adds sessions per memory-policy variant. Roots without a
+  record (banks before v43) count as before, except that a key's several
+  roots are now one session (a session outliving the 6 h resume window
+  gets a new root; each used to count separately, with the key's searches
+  credited to its last root only), and "searched early" is measured from
+  the latest start before the search instead of the last root's. On the
+  live bank (read-only, 2026-09-25 16:01) the 24 h window is unchanged; 7
+  days goes from 130 to 117 sessions and 60 days from 348 to 264.
+
+### Fixed (2026-09-25 — the daily backup can run current master)
+- `ops/install-backup-task.ps1 -ScriptCheckout <dir>` runs `ops\backup.ps1`
+  from a dedicated checkout instead of the main one, which can lag master for
+  days while it holds uncommitted work. On 2026-09-24 and 09-25 the daily task
+  ran a `backup.ps1` from before the row-count gate: the nightly dumps were
+  ungated and `/health` `last_backup` did not advance. A worktree is refused
+  until `git worktree lock` protects it, and so is a script checkout that
+  would receive the dumps itself. Dumps and the log stay in the main
+  checkout's `data\backups` (the task now always passes `-OutDir`), where
+  replica pushes read them. Each run logs the script checkout's HEAD.
+- The installer now rejects a misspelled parameter instead of ignoring it:
+  a typo in `-ScriptCheckout` would otherwise have reinstalled the main
+  checkout's copy.
+
+### Fixed (2026-09-25 — a fact set to the parked contender's value settles the contest)
+- A contested slot stayed contested after a write made its contender's
+  value current. With `eu-west-1` current and `us-east-2` parked, setting
+  `us-east-2` superseded the slot but left the contender parked, so
+  `/api/facts` and `memory_search` kept reporting `contested: true` with a
+  `contender_value` equal to the current value (found 2026-09-25 by the
+  memory-policy bench). The write now also marks that contender
+  `superseded` (kept in `memory_history`) and logs it as `resolved` /
+  `contender_value_now_current`. Values match the way a confirm matches:
+  case and surrounding whitespace are ignored. The same fix covers the
+  first write at an empty slot that still holds a contender, and adding
+  the contender's value to a set (`memory_set_add`, including the
+  scalar-to-set conversion). A contender with any other value still
+  conflicts with the new current and stays parked. The contender's support
+  and provenance are not merged into the new current record.
+- `dream_rollback` re-parks a contender that the reverted run's write
+  settled. The run journal has no contender column, so without this a
+  rollback would have dropped a pending review item that used to survive
+  it untouched. The rollback's per-row details name it as
+  `contender_restored`.
+- The live bank held no slot in this state on 2026-09-25 (read-only check:
+  37 active contenders, none equal to a current value), so nothing heals
+  existing rows at load.
+
+### Fixed (2026-09-25 — the loop-health tile counts client sessions, not root episodes)
+- The Console's loop-health tile counted every root episode started in the
+  window as a session and divided its per-session rates by that count.
+  One client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and most new roots are idle shim roots: on 2026-09-25 the
+  live bank held 166 keyed roots in 24 h, against 34 client sessions by the
+  bench's first count (before its review revised the pairing rules). So
+  `sessions` read high and `stores_per_session` / `outcomes_per_session`
+  read low.
+- `sessions` in the `loop` block of `/api/overview` now uses the
+  client-session definition of the memory-policy bench's
+  `evals/capture_metrics.py`:
+  - hook-keyed roots always count;
+  - other keyed roots count only with an entry, an outcome or a search in
+    the window;
+  - a search counts for the root holding its session id, not for its
+    episode stamp, which is the daemon's current episode rather than the
+    caller's;
+  - a hook root and an active shim root opened within 5 s of each other
+    count once, when neither has another candidate.
+
+  The old count stays as `root_episodes`, and the tile shows both.
+- Still not counted: a session whose root was pruned because it stored
+  nothing. An explicit end prunes at once; the reaper prunes after the
+  resume window. So `sessions` undercounts those and the per-session rates
+  still lean high.
+
+### Added (2026-09-25 — measure what the startup memory policy changes)
+- `memory_policy.variant` selects the standing memory policy session start
+  serves: `none`, `compact` (the default: the core the hook already
+  serves) or `full_separate_hook` (the full memory-loop block, from its own
+  SessionStart output so it never shares the briefing's 9,500-byte budget).
+  A `compact_gaps` variant (the core plus three rules) was retired before
+  release, because the same three rules now live in the core itself; the
+  committed smoke artifact still carries one arm of it.
+  `memory_policy.ab_arms` assigns hook-registered sessions an arm by a
+  SHA-256 of the client session id. See
+  [configuration](docs/guide/configuration.md#startup-memory-policy-memory_policy).
+- The plugin gains a third SessionStart handler (`session-start.sh
+  memory-policy`; `lifecycle.ps1 -Event MemoryPolicy` for Codex on
+  Windows) calling the new `GET /api/hook/memory-policy`; it adds nothing
+  unless the variant is `full_separate_hook`. `ops/setup-codex-hooks.py`
+  installs, counts and verifies it. A change under `plugin/`: deploy with
+  `ops/update.ps1 -All`.
+- `evals/memory_policy_bench.py`: headless `claude -p` (and `codex exec`)
+  sessions against a disposable daemon and a cloned `plbench_` bank, one
+  scenario per policy rule, scored only from the daemon's records, with a
+  per-run check that the arm's policy text is the only memory-policy text
+  in the model's context, paired bootstrap statistics against an A/A noise
+  floor, and a hill-climb acceptance rule. Each run records the embedder
+  that seeded its bank and the one that served its queries. It refuses the
+  live bank and the live daemon ports and never writes a real client
+  configuration.
+
+### Fixed (2026-09-25 — session counts in capture metrics)
+- `evals/capture_metrics.py` counted every keyed root episode as a session.
+  A client session can leave two roots (the SessionStart hook's and the
+  stdio shim's), and idle shim roots dominate: on 2026-09-25 the live bank
+  held 166 keyed roots in 24 h for 34 client sessions. It now counts hook
+  roots plus shim roots with memory activity, merges a hook root with its
+  only nearby shim root, attributes searches by the caller's session id
+  (a search row's episode is the daemon's current one), reports what it
+  cannot attribute, and adds the online loop metrics (searched early,
+  outcome coverage, credited used_ids, entries retrieved again within 14
+  days). It also says what the bank cannot provide: the daemon deletes a
+  session root that ends with no stored entry, so sessions that only
+  searched are reported separately and sessions that never touched memory
+  are invisible; lesson searches and unmatched used_ids are not persisted.
+
+### Fixed (2026-09-25 — one board identity per session, statuses that show their age)
+- Claude Desktop's app-level MCP entry (writer ID `claude-desktop`) no longer
+  registers a coordination address. It is one process serving every
+  conversation in the app, so its address was shared: on 2026-09-25 a Code-tab
+  session posted through it and overwrote another session's status line. It
+  now refuses `memory_message` and `memory_agents(action="update")` before any
+  request, with an error pointing at a session's own per-session server, and
+  prepends that advice to its MCP instructions. Memory tools pass through
+  unchanged; `memory_agents` list there shows open sessions only, not the
+  board. A Code-tab session in Desktop keeps board writes only where its
+  per-session entry is named differently from the Desktop entry (the
+  installer currently gives both the same name).
+- An adapter re-attaching under its own attachment ID no longer counts as
+  activity; a new attachment (a process starting) still does. A 9-minute host
+  sleep on 2026-09-25 lapsed every idle shim's lease, and the re-attach wave on
+  wake made eleven sessions idle for hours read as active within 28 seconds.
+  Those re-attaches had also kept live idle shims young against the
+  seven-day retention, so prune now counts a held lease as well: an address
+  goes once it has had neither its own activity nor a lease for its window
+  (seven days, or one hour for state-less ones), and a daemon restart or a
+  host sleep shorter than that cannot retire a live shim's address.
+- `memory_agents` list gives each listed peer `status_set_at`, `status_age` and
+  `status_stale`. The time comes from the audit log (the newest registration
+  or status update); a non-empty status older than two hours is stale, and a
+  status the log no longer covers is reported as older than the log. No
+  schema change.
+- A peer holding a lease is listed for three hours after its own last action,
+  then counted in `idle_omitted`; peers without a lease keep the one-hour
+  window. Both windows come from the live audit log's first day, as the
+  comments on `STATUS_STALE_AFTER` and `ATTACHED_IDLE_WINDOW` record.
+
+### Fixed (2026-09-25 — Claude Desktop's entry no longer hides Code-tab sessions' own server)
+- `ops/install.* --client claude-desktop` (through
+  `ops/register_claude_desktop.py`) now names Claude Desktop's app-level MCP
+  entry `pseudolife-desktop` instead of `pseudolife-memory`. Claude Code
+  registers its per-session server as `pseudolife-memory`, and where both
+  carried that name Desktop served a Code-tab session's
+  `mcp__pseudolife-memory__*` calls from the app-level entry. The session's own
+  server got no calls, so the session had no board identity of its own (found
+  live 2026-09-21; the maintainer's hand rename restored per-session routing).
+- A re-run renames an entry the registrar wrote under the old name, recognised
+  by `PSEUDOLIFE_WRITER_ID=claude-desktop` in its `env`, and keeps its
+  hand-added `env` keys, its token-file path and any literal token still to
+  migrate. When both names exist, `pseudolife-desktop` wins where both set a
+  key and the old entry fills the gaps; the output names the `env` keys whose
+  old values were dropped, never a value. A `pseudolife-memory` entry the
+  registrar did not write is left untouched and reported on stderr, and
+  `pseudolife-desktop` is written beside it. The config is backed up before
+  every rewrite, as before.
+- Takes effect once the installer is re-run and Desktop is fully quit and
+  relaunched. Chat and Cowork then list the tools as
+  `mcp__pseudolife-desktop__*`, and the log file becomes
+  `mcp-server-pseudolife-desktop.log`. `ops/update.ps1 -All` does not apply it:
+  it never edits `claude_desktop_config.json`.
+
+### Fixed (2026-09-25 — Codex hook setup no longer hangs on a hook Codex killed)
+- `ops/setup-codex-hooks.py` could hang on a busy Windows machine for as long
+  as a killed hook lingered (two test runs were still stuck when stopped after
+  7 and 10 minutes). Codex kills a hook that outruns its budget, and a
+  PowerShell hook killed while still starting up could stay stuck mid-exit,
+  holding an inherited copy of the Codex app-server's output pipe; setup
+  waited on that pipe with no limit. It now gives the pipe two seconds after
+  the app-server exits and moves on, so setup finishes and reports the
+  verification check that failed.
+
+### Changed (2026-09-25 — deploys name their commit and refuse a dirty tree)
+- `/health` reports the commit the running image was built from:
+  `build: {git_sha, dirty, built_at}`. The daemon image carries the same
+  values as OCI labels (`org.opencontainers.image.revision`,
+  `org.opencontainers.image.created`, `pseudolife.build.dirty`).
+  `ops/update.ps1|.sh` pass them from the checkout, and the release
+  workflow passes them for the GHCR image. An image built another way, such
+  as a bare `docker compose up --build` or the first install, reports
+  `"unknown"`, and a pip install omits the key. Until now the only answer
+  to "what is deployed?" was the package version, which moves only with a
+  release. Because the build time is part of the image, every deploy now
+  builds a new image and recreates the daemon container, even when the
+  commit has not changed.
+- `ops/update.ps1` and `ops/update.sh` refuse to deploy a tree with
+  uncommitted or untracked files, or one whose state git cannot report,
+  before the backup or any docker call. The refusal lists the paths, or
+  quotes git's own reason (such as its `safe.directory` advice).
+  `-AllowDirty` / `--allow-dirty` deploys it anyway, stamped `dirty: true`,
+  or `unknown` when git cannot describe it. Just before the build, the
+  scripts check the tree again and stop if HEAD or its clean state moved
+  meanwhile, so an image is never stamped with a tree it was not built
+  from. The maintainer's main checkout often carries another session's
+  uncommitted work, and a deploy from it would ship that work under a
+  commit that does not contain it.
+- The test suite dumps every thread's stack when one test runs longer than
+  600 s (`faulthandler_timeout`); the slowest legitimate test on CI takes
+  about 72 s. CI's `ops/ci_tests.sh` now also ends a pytest run at 35
+  minutes with SIGABRT, inside the step, so a hang fails the step while the
+  runner is still up. Every pytest process then prints its thread stacks
+  as it dies, even for a hang outside any single test; the step log keeps
+  them, and the diagnostics upload still runs. A master CI run hung until
+  the 50-minute job timeout on 2026-09-22, and that cancelled job kept no
+  log at all. Neither helps if the runner itself stops responding.
+
+### Security (2026-09-25 — the extractor API key no longer follows a redirect to another host)
+- **Requests to the configured OpenAI-compatible extractor now refuse HTTP
+  redirects.** The dream extractor's seven calls (claims, events pass,
+  lessons and rules, relations, the review-queue judges, outcome inference,
+  session digest) and the `driver="llm"` recall controller's seed call
+  (`recall.simple_complete`) send `PSEUDOLIFE_DREAM_API_KEY` /
+  `extractor_api_key` (on a fallback dream, the fallback's own
+  `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`) as a bearer header. They used plain
+  `urllib.request.urlopen`, which on every supported Python (checked on
+  3.11, 3.12 and current CPython main) answers a
+  301/302/303 to a POST by re-sending it as a body-less GET to the
+  `Location` target with every header except Content-Length and
+  Content-Type, `Authorization` included. An endpoint that redirected,
+  whether misconfigured, compromised or hostile, handed the key to
+  whatever host it named. Reproduced on loopback: the redirect target
+  received `GET /v1/chat/completions` carrying the bearer and an empty
+  body.
+- These calls now open through `pseudolife_memory/utils/no_redirect.py`, a
+  stdlib-only `urlopen` whose redirect handler raises `HTTPError` with the
+  redirect's status and target instead of following it. Timeouts, the
+  proxy environment and TLS verification are unchanged. A redirecting
+  endpoint now fails the call with `ExtractorError` (for example
+  `HTTP Error 301: Moved Permanently; redirect to https://… refused --
+  configure the final URL directly`), the same cursor-holding failure as
+  any other transport error; `simple_complete` still returns `""`.
+- No working configuration relied on a redirect. The re-sent request was a
+  GET without the prompt, which no OpenAI-compatible server answers with a
+  completion, and the stdlib already refused 307/308 on a POST. An
+  endpoint configured as `http://` for an https-only host, or with a path
+  that redirects, was already failing and now says why. The endpoint health
+  probes (`probe_endpoint`, `fetch_served_model`) are unauthenticated GETs
+  and are unchanged.
+
+### Changed (2026-09-25 — dated search results, an honest low_confidence, and a replay gate for serving changes)
+- Every compact entry from `memory_search`, `memory_recent` and
+  `memory_episode_summary` carries its write `date` (local `YYYY-MM-DD`,
+  as in `replaced_by.at`). Like `replaced_by`, it is not a size cut, so it
+  also survives `memory.mcp.compact_payloads: false`.
+- `low_confidence` is now described as what it is. It fires only when
+  nothing matched, meaning no entry and no cortex fact; over 1,072 agent
+  searches it fired on none. The `memory_search` description no longer says
+  "prefer abstaining" or calls the cortex block "the current, deduped
+  answer". The docs' recommended `guard_min_score = 0.65` +
+  `search_confidence_floor = 0.70` pair, measured on the old MiniLM
+  embedder, is retired: on current agent traffic it would flag 26% of
+  searches, including 20% of the searches whose hits the agent then used.
+  No floor ships; the flag's behavior is unchanged.
+- `memory.search.min_score` (default `0.25`, unchanged) replaces the
+  literal floor in `cms.retrieve`, and a value that is not a number in
+  [0, 1] now fails at load. A per-call `min_score` still overrides it, and
+  only a caller's floor bounds the slot and BM25 injections.
+- The daemon's startup warmup search no longer counts as a read: it adds
+  no access to the entry it hits and no query to the per-band retrieval
+  counters.
+- New gate for projection-side serving changes:
+  `evals/serving_policy_replay.py`. It replays logged served lists under a
+  candidate policy (a narrower default `top_k`, a score floor, a source
+  exclusion) and reports the used hits kept, with rows and entry-text chars
+  as the cost. A narrower `top_k` is simulated from each row's logged
+  fusion inputs, because the dense pool is cut by cosine before the
+  supersession multiplier and the BM25 boost reorder it, so a narrower
+  list is not a prefix of a wider one. Checked against 146 real narrower
+  searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),
+  the simulation reproduced the exact served set in 98 and the prefix in
+  20. It reads the bank in a read-only transaction and writes an
+  aggregates-only artifact. `evals/regression_gate.ps1` cannot see these
+  changes: it rebuilds contexts offline and never runs search or the MCP
+  projection.
+- Reported, not changed: the default `top_k` stays 8. Over 276
+  default-width agent searches (2026-09-06 to 2026-09-25), a default of 6
+  would keep 85.4% of the hits agents reported using (Wilson 95%
+  79.6-89.8) at 75% of the rows, and 7 would keep 93.0%. The 2026-09-23
+  review's ~90.5% for 6 read the narrower list as a prefix of the wider
+  one; that method gives 90.3% on the same searches. At most 25.7% of
+  agent searches use the default width. Evidence:
+  `evals/results/serving-policy-replay-20260925-r3.json`.
+- Digests, reported and left unchanged: served digests are used at 0.51x
+  the rate of other entries at the same rank (session bootstrap 95%
+  0.38-0.64). 53% of unfiltered agent searches serve at least one digest.
+  Digests are 15% of the rows unfiltered searches serve, but 9% of the hits
+  agents used from them. `memory.dream.digest_enabled` and default search
+  are untouched pending a decision on digests.
+
+### Fixed (2026-09-25 — upgraded Claude Code installs stop running their hooks twice)
+- Upgrading an installer-wired Claude Code to the plugin left the old hooks
+  in `~/.claude/settings.json`. Since 2026-09-21 the installers add the
+  plugin and stop writing those hooks, but never removed them, so an
+  upgraded user got every session-start context twice (memory core
+  included) and the discipline line twice per turn. `plugin/README.md` was
+  the only fix: delete them by hand.
+- With the plugin installed and Claude Code selected, `ops/install.sh` and
+  `ops/install.ps1` now list those entries and offer to remove them. The
+  prompt defaults to keep (`[y/N]`); an unattended run keeps them and names
+  the flag. `--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove`
+  removes them without asking, `keep` never asks. The wiring summary
+  reports the outcome, with the backup path.
+- The removal is `ops/install-hook.sh --remove-legacy` /
+  `ops/install-hook.ps1 -RemoveLegacy` (`--dry-run` / `-DryRun` lists
+  only), usable on its own. It removes only the exact commands the
+  installers shipped (both briefing commands, both coordination hooks: the
+  2026-09-24 echo and the gated `--coordination` briefing, both
+  discipline-line versions, and the pre-2026-07-14 episode hooks), per
+  event, as `ops/setup-codex-hooks.py` already does for Codex. An edited
+  or compound command that merely mentions one is listed for review and
+  left alone. Other hooks in a shared group stay; a group is dropped only
+  when this emptied it, and an emptied event stays as an empty list, as
+  install-hook's episode-hook clean-up already leaves it. It acts only while
+  `installed_plugins.json` records a user-scope install and
+  `enabledPlugins` enables the plugin in the same `settings.json`: a
+  project-scoped or disabled plugin leaves these hooks as the only ones
+  that run. It writes a timestamped backup first, writes through a
+  symlinked `settings.json`, keeps the line endings and never changes a
+  value (the PowerShell writer spells emoji as `\u` pairs). A file with
+  duplicate keys is refused and left alone, as is a hook whose command is
+  not a string.
+
+### Fixed (2026-09-25 — the search log and outcome signals name the caller's episode)
+- With several sessions sharing one daemon, every `retrieval_events` row
+  was stamped with the episode of whichever session had started most
+  recently, not the session that searched. The `session_id` on the same
+  row was already correct. Rows now record the caller's own open episode:
+  the leaf a handle-less `store()` stamps for that session identity. They
+  record no episode when the caller has no session identity or nothing
+  open. Search never opens an episode to fill the column.
+- Two more writers had the same fault: `memory_outcome` without an
+  `episode` handle (or with one that does not resolve), and the correction
+  signal a user-tier supersession emits. Both now use the handle's root
+  when a handle resolves, then the caller's open episode, then no episode.
+  The correction signal also honors a `memory_fact_set` handle for the
+  first time. A session-less caller, including an embedded single-session
+  one, now records these with no episode instead of the process-wide
+  current one.
+- Known limit under the stdio shim with the Claude Code session hook:
+  each session has two open roots. One is keyed by the shim's
+  `X-PL-Session` id, and one is keyed by the hook's session id, whose
+  handle the briefing tells agents to pass. Search takes no handle, so its
+  events land on the shim's root. Outcomes logged without the handle land
+  there too, while handle-carrying stores land on the hook's root. When
+  the shim root captured no entries, closing the session prunes it and
+  leaves those rows naming a deleted episode.
+- There is no schema change. `episode_id` stays nullable and has no
+  foreign key. `retrieval_replay` and `graph_ablation` never read the
+  column, `retrieval_telemetry_review` skips null, and the
+  `retrieval_events_window` export passes it through. Search-log rows
+  written before this fix keep their old episode, so attribute those by
+  their `session_id`. Earlier outcome signals cannot be re-attributed,
+  because `outcome_signals` records no session. Unchanged on purpose:
+  with no session identity, a `store()` (including the replacement entry
+  of a supersede or consolidate) and `memory_episode_start` still fall
+  back to the process-wide current episode.
+
+### Fixed (2026-09-25 — a session start can no longer hang while trimming its briefing)
+- `format_bounded_briefing`, which fits the memory briefing into the
+  SessionStart hook's byte budget, could loop forever. It re-packed items
+  until the omitted count stopped changing, but greedy packing is not
+  monotonic: a smaller budget can skip one long item and fit more short
+  ones, so when the count crossed from 9 to 10 the marker grew a byte and the
+  selection flipped between two sizes indefinitely. The 2026-09-25
+  post-merge audit reproduced it at 318 bytes; production-shaped 13-item
+  briefings hung at 620 and 1,849 bytes. It now packs once, leaving room for
+  the widest marker the call could print, so it always returns.
+- The same loop, when it did settle, kept a selection packed without room for
+  its omitted-items marker and fell back to "Briefing omitted." although
+  shorter items plus the marker fit (a 160-byte lesson ahead of three short
+  ones at 210–221 bytes). The final selection now always has room for the
+  marker, which states how many items were left out.
+- Tests run each repro under a thread-join timeout, so a regression fails
+  instead of hanging the suite, and sweep every budget from 0 to 2,000 bytes:
+  the output fits, no item is sliced (a recap keeps its summary line), and
+  the marker's count matches what was omitted.
+
+### Changed (2026-09-25 — the served memory core carries the rules only it can deliver)
+- Since #364 the SessionStart hook serves `STARTUP_MEMORY_CORE`, not the
+  detailed `MEMORY_LOOP_BLOCK`, yet several places still said the hook
+  delivered the full block. The maintainer kept the compact core (decision
+  2026-09-25), so it restates three of the detailed block's rules: search
+  before stating a "current" version, number or benchmark; trust the code
+  and correct drifted memory on the spot, at the same slot; route verified
+  external facts to `memory_world_set`. It points at the full guidance by its
+  public GitHub URL, which a pip install can open, and stays under the
+  2,000-char pin.
+- `examples/CLAUDE.memory.md`, the README, `docs/guide/providers.md`, the
+  System Atlas and both installers' messages and summaries now say the
+  plugin and verified Codex hooks serve a compact core, and that the full
+  block is an optional standing copy. The installers still skip the block by
+  default for Claude Code and for verified Codex hooks; `covered-by-hooks`
+  stays the report's state name. Without the plugin, Claude Code's
+  installer-written `settings.json` hook serves the briefing alone, not the
+  core; the installer summary names the file to append the block to.
+- `evals/agent_token_ledger.py` now prices the core the hook serves. The
+  published 7,492-char session-start row in `evals/README.md` is marked as
+  the pre-#364 measurement until the ledger is rerun against the live daemon.
+- Comment-only edits to `plugin/hooks/session-end.sh` and `stop-wake.sh`
+  change the hooks digest: deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), or the session start reports hook drift until the
+  plugin cache is refreshed.
+
+### Changed (2026-09-25 — the regression gate reuses a correctly configured bench server)
+- Since the 2026-09-24 integration, `evals/regression_gate.ps1` exited 2
+  whenever any Qwen server was running, including one already serving the
+  reproducible config the gate needs. `Start-Qwen -Owned` now reuses such a
+  server without taking ownership, so the gate's cleanup leaves it running.
+  A fast (MTP), foreign or unresponsive server is still refused, with a
+  message naming it, and never displaced. A fresh launch keeps the GPU-busy
+  hold (more than 5 GB of VRAM in use) and the owned-process cleanup.
+
+### Fixed (2026-09-25 — one session episode per client session)
+- The stdio shim no longer opens a session episode of its own at launch. It
+  opened one keyed by a fresh id and titled after its working directory,
+  beside the root the plugin's SessionStart hook registers, so every Claude
+  Code session had two roots: a write without an `episode=` handle, or a
+  `memory_session_title`, landed on the shim's root and the rest on the
+  hook's. A host that kills its MCP servers (Codex, the desktop app) never
+  reached the shim's close. In the 24 h to 2026-09-25 the live bank gained
+  193 shim-keyed roots, 189 of them empty, 154 titled after the shared shim
+  runtime directory Codex launches from. The idle reaper closed them and they
+  were deleted only after the resume window.
+- Under Claude Code (writer id unset or `claude-code`) the shim's
+  `X-PL-Session` is now the session id Claude Code launched it with
+  (`CLAUDE_CODE_SESSION_ID`, canonical UUIDs only), which is the id the hook
+  registers. The shim's calls land on the hook's root (see the limits
+  below), and the coordination adapter registers that id as its episode.
+  The shim's exit leaves the root to the host: the SessionEnd hook closes
+  it, or else the idle reaper, which is also what closes it on an install
+  without the plugin's hooks. A reconnect restarts the shim mid-session, and
+  an explicit close would prune an empty root outright, orphaning the handle
+  the hook advertised.
+- A host with any other writer id keeps one id per shim process, even when
+  started from inside a Claude Code session, whose id it inherits and
+  would forward if it passes its environment through to MCP servers (Codex
+  keys each call by its thread anyway). The daemon opens that session's episode on the first
+  write that needs one (a store, sub-episode or title call without a
+  handle, even a store the surprise gate drops), as it does for a
+  direct-HTTP client. The shim closes it at exit when its host lets it exit, and the
+  idle reaper otherwise. A shim that is idle or only searches leaves no
+  episode.
+- Two daemon paths treated the shim's root as disposable, and now that
+  handle-less lifecycle calls reach the hook's root they must not. After the
+  idle reaper closed a root, `memory_session_title` without a handle opened
+  a second root; it now reopens the closed one within the resume window, as
+  a store does. `memory_episode_end` without a handle closed the session
+  root when no sub-episode was open; for a session-keyed root it now
+  returns `{}` and leaves the root to the session lifecycle, as the tool
+  always described and as the handle path already did. Keyless roots
+  (embedded and legacy callers) close as before.
+- Limits: `/clear` and an in-session `/resume` give the session a new id,
+  but the shim keeps its launch id. Afterwards a `memory_store` or
+  `memory_episode_start` without a handle reopens the root under the launch
+  id (the root SessionEnd just closed, within the resume window) or, if
+  SessionEnd pruned it empty, opens a new one, and lands there; a
+  `memory_session_title` without a handle renames that root. A call that
+  passes the handle SessionStart advertised lands on the new root and opens
+  nothing under the launch id (see the `/clear` entry above). Without a
+  coordination adapter, `memory_agents` then excludes only the launch id's
+  roots from its peers, so it can list the session's own new root.
+  `--continue`, or `--resume` without an id, may launch the shim with an id
+  no hook registers, so its handle-less writes open a root of their own.
+  Shim sessions no longer take their title from the working directory: an
+  episode the daemon opens starts as `session - <time>`, store results carry
+  an `episode_hint` until the agent names it, and a title still generic at
+  close is derived from the content.
+- **Upgrading:** this changes the shim, a separate install that a
+  daemon-only deploy never touches. Deploy with `ops/update.ps1 -All` (or
+  `ops/update.sh --all`), then restart the clients.
+
+### Fixed (2026-09-25 — the daemon bearer is no longer forwarded across a redirect)
+- `pseudolife-mcp episode-start` / `episode-end` refuse HTTP redirects. They
+  POST with the `PSEUDOLIFE_MCP_TOKEN` bearer through `urllib`, whose
+  default opener follows 301/302/303 and copies `Authorization` to the
+  redirect target (verified on Python 3.11 and 3.12). A daemon URL that
+  redirected would therefore have handed the bearer to whichever host it
+  named. They now open through the shim's no-redirect handler, as the shim's
+  own episode calls already do. A 3xx fails the call, which the hook swallows
+  as it does any error. The installers stopped registering these hooks and
+  remove them when re-run, but a `settings.json` written before that still
+  calls these commands. The fix is in the client package, so it arrives with
+  an upgraded install, not a daemon redeploy.
+- `evals/agent_token_ledger.py` sends the daemon bearer on its REST reads and
+  now refuses redirects the same way.
+
+### Fixed (2026-09-25 — the session-start briefing no longer hands its bearer to a redirect target)
+- `pseudolife-mcp briefing` (the SessionStart hook that `ops/install-hook.ps1`
+  and `ops/install-hook.sh` install) fetched `/api/briefing` with plain
+  `urllib.request.urlopen`. urllib follows redirects and copies every header
+  except the content headers to the target, so a daemon URL answering with a
+  redirect would have sent `Authorization: Bearer <token>` to whatever host
+  it named. The fetch now uses the shim's no-redirect opener, as the shim's
+  own episode calls do: a redirect fails the fetch, and the hook prints
+  nothing. The five-second timeout is unchanged. The `--coordination`
+  check-in fetch already refused redirects.
+
+### Fixed (2026-09-25 — naming a session by handle retitles its stored memories)
+- `memory_session_title` with an `episode` handle (the form the SessionStart
+  briefing asks for) now rewrites the `episode_title` stamp on the memories
+  already stored in that session, in memory and in the database, as the
+  handle-less form and `episode_rename` always did. Before, only the episode
+  itself took the new name, so everything written before the rename kept the
+  generic `session - <date> <time>` title. Memories mis-stamped before this
+  fix keep their old stamp until the episode is renamed again:
+  `episode_rename`, or `memory_session_title` once more (the same name
+  works).
+
+### Changed (2026-09-25 — agent coordination on by default, check-in only where it works)
+- The agent board (`memory_agents`, `memory_message`, the awareness digest) is
+  on by default: `coordination.enabled` defaults to `true`, and without an
+  `allowed_principals` key the singular-token principal `default` is admitted.
+  Principals from a `PSEUDOLIFE_MCP_TOKENS` map stay off the board until listed.
+  Bearer authentication is still required: an open (tokenless) install keeps
+  the board dormant. Wake, the Codex doorbell and the Claude stop-wake hook
+  stay opt-in.
+- The shim starts its coordination adapter (Codex: its per-thread registry)
+  by default when it holds a bearer token and the daemon serves that bearer
+  the board, which it asks once at startup; otherwise it stays quiet.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` (any value but `1`/`true`/`yes`/`on`)
+  turns it off for that client, and `=1` keeps the old unconditional start.
+- The startup check-in no longer asks for calls that must fail where the
+  board is off. The daemon serves it from the new
+  `GET /api/hook/coordination-start` only where the board is on for that
+  bearer; the plugin's coordination SessionStart hook (bash and PowerShell, on
+  startup, resume, compaction and `/clear`) and the installers' new
+  `pseudolife-mcp briefing --coordination` hook print what it serves. The
+  daemon cannot see a client's adapter, so an HTTP client without the shim, an
+  opt-out set only in the MCP env block, or a `docker exec` installer hook can
+  still show it. The daemon's MCP instructions drop the board clause; the shim
+  adds a compact one only when its adapter is up.
+- An identity binding sent to `/mcp` now requires bearer authentication; an
+  open install refuses it before touching the store.
+- `ops/update_clients.py` (run by `ops/update.ps1 -All`) reports Codex plugin
+  hook handlers that Codex has not approved as `needs-approval`. The
+  2026-09-24 split added two handlers, which Codex skips without a word in
+  the desktop app until approved, so mail previews silently stopped there.
+- `ops/setup-codex-hooks.py` expects the check-in during its live
+  verification only where the board is available, and migrates the
+  installers' gated check-in hook like the older echo.
+- **Upgrading:** a `config.yaml` with no `coordination` key, or a
+  `coordination` block without `enabled`, now runs the board; write
+  `enabled: false` to keep it off (an explicit `false` is respected). An
+  explicit `allowed_principals` list is kept as is. Deploy with
+  `ops/update.ps1 -All` (or `ops/update.sh --all`) so the plugin cache and
+  the shim move with the daemon, then restart the clients. Re-run
+  `ops/install-hook.*` on installs wired by it, which replaces the old
+  unconditional check-in. Codex plugin users approve the two coordination
+  handlers once: `python ops/setup-codex-hooks.py --source plugin --trust ask`,
+  or `/hooks` in the Codex terminal app. Offline mailbox recovery now needs
+  an explicit `enabled: false` in the restored configuration.
+
+### Fixed (2026-09-24 — complete startup briefings and agent check-ins)
+- Startup memory context preserves its essential guidance and complete briefing
+  items within its output budget, with explicit notices when content is omitted.
+  Detailed memory instructions remain available as standing guidance.
+- Separate coordination hooks prompt messageboard setup at the first task and
+  on resume, and deliver changed inbox previews independently of memory reminders.
+  Full messages continue through the existing receive/acknowledge tools; mailbox
+  identity, credentials and optional wake behavior remain with the existing adapter.
+- MCP initialization instructions also request the startup check-in, so clients
+  without lifecycle hooks receive the same core workflow guidance.
+- **Upgrading:** `<data_dir>/hook-instructions.md` no longer replaces the
+  served memory instructions. It is appended after the core and capped at
+  3.5 KB; a longer file is served in whole paragraphs with a notice that the
+  copy is partial. An override written to replace the old block now arrives
+  in addition to the core.
+
+### Fixed (2026-09-24 — integration safety checks)
+- Coordination sends validate the writer epoch before committing. After a
+  writer handover they reload durable clock history before stamping new mail.
+- The regression gate only stops the benchmark server it launched; helper
+  processes start with hidden windows.
+- Audit retention now removes only a fully expired prefix. A writer whose
+  timestamp precedes an earlier append cannot cause a newer event to be
+  deleted inside its retention window. Repeating an acknowledgment leaves
+  activity unchanged when it appends no audit event.
+- Coordination benchmark resets use the server-verified production-bank
+  guard before truncating; the reset tripwire also covers literal table lists.
+- The curation rejudge guard reads escaped listing keys, preserving saved
+  judgments for names containing a pipe while still honoring requeue.
+
+### Fixed (2026-09-23 — test and bench resets refuse the production bank)
+- Every reset that opens its own connection now asks the server which
+  database it reached, as its first statement. It raises
+  `ProductionDatabaseError` before reaping backends, running DDL or
+  truncating when that database is `pseudolife_memory` or the one
+  `PSEUDOLIFE_MCP_DATABASE_URL` names (case-folded). Covered: the `pg_conn`
+  fixture, `evals/ladder_sweep.py` `reset_bench` (shared by 12 eval
+  harnesses), and the transfer, graph, dream-ack and lesson test resets. The
+  bundled stack's server holds the bank beside the test and bench databases
+  under the same owning role. Until now, a mistyped
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_DB` in a
+  single-process run would have killed the daemon's connections and emptied
+  all 31 tables. The same names are also refused where the test and bench
+  database names resolve, before anything connects.
+  `pseudolife_memory_bench`, the per-run names and CI's names are unaffected.
+- The test suite removes `PSEUDOLIFE_MCP_DATABASE_URL` from its environment
+  at start-up. It records only that DSN's database name (the default bank's
+  when none was exported), so the guard still refuses it. Inside the suite
+  the guard checks that record, not the live variable, which tests point at
+  their own per-run databases. With the DSN exported, file-mode fixtures
+  bound to that bank, and `pristine_service.save()` would have run
+  `DELETE FROM facts` there. The exit-time drop of the per-run bench
+  database now drops the name it pinned, not whatever
+  `PSEUDOLIFE_BENCH_DB` holds by then.
+- A daemon DSN that leaves its database implicit fails closed. That covers
+  the user-name default, as in `postgresql://live_bank@host` or an explicit
+  empty `dbname`, and a `service=` entry. libpq picks a bank the guard cannot
+  name, so the test
+  suite now stops at start-up and every reset refuses. It is no longer
+  recorded as the default bank, which let a reset reach that bank (Codex
+  review of this change).
+- The five eval harnesses that refuse the live and shared-bench databases by
+  DSN now read the name with libpq's own parser, through the shared helper
+  in `storage/schema.py`. Two exact-match copies let a keyword DSN, a
+  trailing slash or an upper-case name through. The three hardened copies
+  still missed a `?dbname=` query override and a percent-encoded name. A DSN
+  that names no database is checked against `PGDATABASE` when no service is
+  in play, as libpq would resolve it; otherwise the harness refuses it.
+- `.gitignore` now covers every `ops/.env*` copy except the tracked
+  `ops/.env.example`. A timestamped backup of `ops/.env` matched neither
+  `.env` nor `*.bak`.
+
+### Added (2026-09-23 — one full test suite at a time per machine, CPU-only)
+- A full test run (`pytest tests/`, or bare `pytest` from the root) takes a
+  machine-wide exclusive lock, `~/.pseudolife-mcp/locks/full-suite.lock`,
+  before it loads the embedder. A second full run from any worktree or agent
+  waits for it and prints the holder's worktree, pid and start time about
+  once a minute. The OS holds the lock (`msvcrt.locking` on Windows,
+  `fcntl.flock` elsewhere), so a holder that crashes frees it; no pid file
+  can go stale. `PSEUDOLIFE_SUITE_LOCK=fail` exits with a usage error
+  instead of waiting, and `=off` skips the lock. `off` is the default on
+  GitHub Actions, where each job has its own VM. Runs naming half or more of
+  the test files, or selecting with a `-k`/`-m` that only excludes
+  (`not slow`), count as full. Targeted runs are never locked: a few named
+  files or node ids, other `-k`/`-m` selections, `--collect-only` and the
+  other listings. xdist workers leave the lock to their controller. A lock
+  error other than contention is a usage error, never an endless wait.
+  Measured 2026-09-23 on the maintainer's Windows host, one full CPU suite
+  commits ~20 GB, and two concurrent suites crossed the commit limit: test
+  daemons died with os error 1455 (`tests/suite_lock.py` has the numbers).
+  The Windows CI lane now runs `tests/test_suite_lock.py`, so both lock
+  backends are tested in CI.
+- The test session hides the GPU with `CUDA_VISIBLE_DEVICES=-1` unless
+  `PSEUDOLIFE_TEST_CUDA=1` is set. An empty value does not work here: on
+  Windows it left `torch.cuda.is_available()` true, so the embedder still
+  loaded on the GPU.
+
+### Fixed (2026-09-25 — queued full test suites take the lock in arrival order)
+- A full run waiting for the suite lock now waits its turn. Each waiter
+  holds a ticket in `~/.pseudolife-mcp/locks/full-suite.queue/`, named for
+  its arrival time and pid, and only the earliest live waiter may take the
+  lock. Before, every waiter polled the lock and whichever polled first
+  after a release won: on 2026-09-25, with eight suites queued, one run
+  waited from 13:48 to past 14:57 while later arrivals went ahead. A waiter
+  that dies loses its ticket's OS lock, so later waiters pass its ticket
+  over at once (and delete it after 30 s); Ctrl-C and a `fail` refusal
+  remove it at once. `fail` now also refuses while an earlier waiter is
+  queued, and the waiting notice names the waiters ahead. A waiter stopped
+  while first in line (a debugger, a Windows console mid-selection) keeps
+  its place until it resumes or ends; the notice names its pid. A run from
+  a checkout older than this change takes no ticket and races for the lock
+  as before; the lock file is unchanged, so old and new runs still exclude
+  each other.
+- `CONTRIBUTING.md`: a docs-only change can skip the local full suite and
+  run the doc guards plus the tests naming each touched file; CI must still
+  pass before merge.
+
+### Added (2026-09-25 — a machine can allow more than one full test suite at once)
+- The suite lock has a slot count: `PSEUDOLIFE_SUITE_SLOTS`, else a
+  `full-suite.slots` file in the lock directory, else 1. With 2, two full
+  runs hold the lock at once; waiters still take free slots in arrival
+  order, and the waiting notice and `fail` refusal name every holder. Slot 0
+  keeps the file names `full-suite.lock` and `full-suite.holder.json`, so
+  runs from older checkouts share it (and never see a second slot); slot k
+  is `full-suite.k.lock` with its own `full-suite.k.holder.json`. Queued
+  runs re-read the count at every poll, so raising or lowering it reaches
+  the backlog at once. A count that is not a whole number from 1 to 8 is a
+  usage error that names its source; the file may carry a UTF-8 byte-order
+  mark, and a UTF-16 file (Windows PowerShell 5.1's `>`) is reported as
+  such. The default stays 1, and so does the maintainer's host: a two-slot
+  trial on 2026-09-25 ran each suite in ~50 min instead of ~17, with
+  load-timeout failures.
+
+### Fixed (2026-09-25 — a queued full test suite no longer runs code that changed while it waited)
+- A full run that waits for the suite lock has already imported
+  `tests/conftest.py` and what it loads: `tests/suite_lock.py`, the test
+  helpers, and some package code (`tests/fake_embedder.py` brings in
+  `pseudolife_memory/utils/config.py`). Everything else is imported at
+  collection, after the lock. On 2026-09-25 a run queued from 14:59 to 17:46
+  while its session merged master at ~15:50, and it tested the old
+  `CoordinationConfig` defaults against the new test files: 9 failures that
+  all passed alone. Now a full run fingerprints (SHA-256) what it has
+  already read from the checkout before it queues: the modules it imported,
+  pytest's ini file, and `ops/.env`, which conftest reads for the bench URL.
+  It compares them on every poll of the queue, the last time just before it
+  takes the lock. On a change it leaves the queue within seconds, without
+  ever holding the lock, and stops with a usage error, "the tree changed
+  while this run was queued; rerun it", naming the files (marked deleted or
+  created where they went or came). It never reloads them. Modules not yet
+  imported are read at collection as before. An interpreter environment
+  inside the checkout (a `.venv`) is not fingerprinted. xdist workers need
+  no check of their own: they start after their controller holds the lock
+  and import from disk then, and a controller that refuses stops the run
+  before any worker starts. Unseen: a change within the first second of
+  startup, between an import and the fingerprint. The fingerprint takes
+  ~120 ms per full run (834 modules loaded, 11 of them the checkout's); the
+  per-poll check about a millisecond (0.7 ms measured for the 11 modules).
+
+### Fixed (2026-09-23 — a half-loaded bank is never served or written, and a bank has one writer)
+- **Hydration fails closed.** If loading cortex facts, world facts or lessons
+  from Postgres failed at startup, the daemon logged a warning and carried on
+  with that store empty. Its next write to a pre-existing slot then replaced
+  the slot's durable history with a single row, because a slot save deletes
+  the slot's rows and re-inserts the resident ones. An explicit save rewrote
+  the whole table from the empty copy. A failed entry load was a different
+  failure: it left the half-built store in place, and startup never ran
+  again. `tests/test_fail_closed_hydration.py` reproduces the history loss
+  against real Postgres; before this it had only been shown on fake storage.
+  Now any failure while building the resident stores drops all of them and
+  raises. Nothing is served, autosaved or flushed until an attempt completes.
+  - `/health` reports `status: "degraded"` with the reason under a new key,
+    `not_ready`, and the first init that completes clears it.
+    `init_refusal` stays reserved for permanent refusals (the embedding-dim
+    guards). The stdio shim exits on `init_refusal`, but a client that
+    starts during a retry window still attaches.
+  - Retries back off exponentially, from 5 s doubling to 60 s. A call inside
+    the window is refused at once without touching storage.
+  - A failure during the daemon's startup warmup is retried each time the
+    window expires, until the window reaches its cap (about two minutes),
+    so a daemon nobody is calling still recovers from a transient cause.
+    After that, callers and the session reaper (every 5 minutes) retry, so
+    a failure that never clears is not re-attempted every minute forever.
+  - A storage connect failure, such as a database that is still starting,
+    never opens a window.
+  - The embedder is still built once and reused across attempts (the
+    2026-08-04 boot balloon). The abandoned attempt's stores are
+    garbage-collected when the next attempt starts, not inside the failed
+    one, where the exception in flight still referenced them.
+- **One writer per bank, enforced.** The single-writer rule was documented
+  but nothing enforced it.
+  - `PostgresStorage` now holds a Postgres session advisory lock, the bank
+    writer lease, on its shared connection for as long as it lives. It is
+    taken before any schema DDL, keyed by
+    `hashtextextended('pseudolife-bank-writer', 0)`, a key space apart from
+    the per-entry mutation locks.
+  - A second instance on the same database waits up to 2 s for the lease,
+    long enough for a holder that is exiting (a restart) to go, then refuses
+    with `WriterLeaseHeld`. The error names the holder's backend pid and
+    `application_name`, which is now `pseudolife-mcp pid=<os pid> <program>
+    [<subcommand>]` unless the DSN sets one. A daemon refused this way reports
+    `degraded` with the reason in `not_ready`, and retries on the same
+    backoff as a failed load, so a burst of calls pays the 2 s wait once per
+    window, not once per call under the service lock.
+  - After a lost connection, the replacement must win the lease back before
+    it serves anything. While another writer holds it, calls keep failing:
+    from a cached refusal for 5 s between attempts. `/health` reports
+    `degraded` until that writer has gone.
+  - Winning the lease back is not enough if another lease-holding writer
+    held the bank in the gap. Its saves could have been overwritten by this
+    process's stale resident copy, per slot or by a flush (Codex review of
+    this change).
+    - Every lease acquisition now bumps a `writer_lease_epoch` row in
+      `meta`. A reconnect that finds another writer's epoch refuses every
+      storage call (`BankChangedHands`), including the rest of an operation
+      already under way, such as a flush.
+    - The service then drops its resident stores and meta-backed state and
+      re-reads the bank before serving or saving anything. It logs any
+      pending recovery or unsaved write it discards.
+    - Operations probe the writer session (`SELECT 1`) at most once a
+      second, so a dead session is caught before a stale copy is served.
+      The measured probe cost on the bench PG was 0.72 ms median. Probing
+      on every call cost +1.0 ms on a fact lookup, and took `recent(5)`
+      from 34 µs to 673 µs. With the 1 s gate, a burst costs +65 µs and
+      +3 µs respectively; on store/search it is below the noise.
+    - A reconnect with no other writer in between keeps the resident copy.
+    - The counter stays out of logical exports, so an import cannot move it
+      backwards.
+    - Only lease-holding writers are detected. Raw `psycopg` scripts,
+      `writer_lease=False` peers and `import --force` bump nothing.
+    - A daemon serving only mailbox traffic notices a handover at the
+      session reaper's next tick, because mailbox calls deliberately skip
+      the service lock.
+  - During a database outage, reads served from memory (such as `search`)
+    keep working, because nothing else can write a bank this process cannot
+    reach. Anything that needs the database fails as before. A failed
+    reconnect is retried at most every 5 s rather than on every call under
+    the service lock.
+  - The lease session sets server-side TCP keepalives (60 s + 3 × 10 s). A
+    writer that vanishes without closing its socket now frees the bank in
+    about 90 s. The server defaults would take over 2 h (7200 s + 9 × 75 s,
+    read from the bench server's settings, not timed).
+  - `PostgresStorage(dsn, writer_lease=False)` is the explicit opt-out. Only
+    the test probes that build a racing peer on purpose use it.
+- **Behaviour change, intended: a second writer now refuses to start.**
+  Anything that opens a `MemoryService` or `PostgresStorage` on a bank a
+  running daemon holds now refuses instead of silently becoming a second
+  writer. That covers `ops/dedup_cortex.py`, `ops/restore_from_pt.py`, the
+  eval harnesses when pointed at a live bank DSN, a stdio-embedded server,
+  and a second daemon. Stop the daemon first, or point them at a restored
+  copy. Anything that does not open the bank through `PostgresStorage` takes
+  no lease and is unchanged:
+  - `pseudolife-mcp export`, which only reads.
+  - `import`, which already refuses a bank other sessions are connected to.
+  - `backup` (`pg_dump`).
+  - The coordination mailbox's own connection.
+  - The `/health` ping.
+  - Ops scripts that write through plain `psycopg`, such as
+    `ops/retire_by_writer.py` and `ops/backfill_edge_confidence.py`. These
+    still rely on their own safeguards.
+- **`ops/dedup_cortex.py --dry-run` no longer rewrites the bank.** Every run
+  ended with `svc.flush()`, a full snapshot that deletes and re-inserts every
+  fact, world fact and lesson from the script's own copy. Against a bank a
+  daemon was serving, that silently reverted everything the daemon wrote
+  after the script started. Now:
+  - A dry run saves nothing. Opening the bank still runs the startup
+    bookkeeping that every service start does.
+  - `--apply` persists per slot, like the daemon's autosave: the slots it
+    retired, plus the weights file and entry access counts that every
+    autosave writes. It never rewrites a whole table.
+  - While a daemon holds the bank, the script exits 2 and names the holder.
+
+### Added (2026-09-23 — the daemon hands memory freed by encode bursts back to the OS)
+- After concurrent embedder encodes, glibc kept the memory they freed
+  resident, and much of it was still there once the burst was over.
+  Measured in throwaway containers from the 0.15.0 image with four
+  persistent worker threads (the daemon's threadpool shape) and
+  `MALLOC_ARENA_MAX=2`: concurrent encodes left up to 3,158 MiB of freed
+  memory resident with the fp32 embedder (1,693 MiB bf16), and
+  1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident at idle;
+  with glibc's default arenas, 2,616-2,739 MiB (bf16 1,462-1,523 MiB). A
+  daemon thread now calls glibc's `malloc_trim(0)` every
+  `PSEUDOLIFE_MALLOC_TRIM_SECONDS` (default 60; `0` disables; Linux/glibc
+  only, so the Docker tier). With a trim after each burst, resident memory
+  stayed at or below its starting level (within 14 MiB above it with
+  default arenas). Trims returning 1,387-3,030 MiB after a concurrent
+  burst took 21-54 ms; across the single-burst sweep a trim took a median
+  7 ms (at most 141 ms, returning 1,381 MiB), and in paired runs the next
+  fp32 encode was no slower (+0.01 s against a 0.23 s noise floor). It
+  lowers what the daemon holds after a burst, not the peak of the burst
+  itself.
+- Measured and not shipped: a fixed `MALLOC_MMAP_THRESHOLD_=131072` also
+  removes the retention and cuts burst peaks by 228-1,238 MiB, but it
+  multiplies the embedder's page faults 3.4-4.9x and slows a bf16 encode
+  ~26% (fp32 ~10%). Evidence: `evals/results/allocator-trim-pool-20260923.json`,
+  `allocator-trim-probe-20260923.json` and
+  `allocator-trim-latency-20260923.json`, harness
+  `evals/allocator_trim_probe.py`.
+
+### Fixed (2026-09-23 — a superseded hit's pointer says whether its replacement was itself replaced)
+- `replaced_by` gains `current`: true only when the successor was resolved
+  and is itself still live. The 2026-09-23 live-bank review found the
+  recorded successor itself superseded in 529 of 730 served superseded
+  slots (161 entries chain up to 44 links into one note), so "never follow
+  chains" gave an agent no way to see a chain link before stepping onto
+  it. The service's entry dicts gain `superseded_by_current` beside
+  `superseded_by_id`; the successor is still resolved one link at a time,
+  never walked.
+- `memory_get` on a superseded entry now serves `superseded: true` and the
+  same `replaced_by` pointer, so dereferencing `replaced_by.id` shows when
+  that note is itself a chain link. The state is read from the Postgres
+  row being served (two existing columns added to its `SELECT`, no schema
+  change), so a row the CMS does not hold is not served as live. A live
+  entry's payload is unchanged. The service / REST payload (`/api/entry`)
+  gains `superseded: true`, `superseded_at`, `superseded_by_text` and the
+  successor annotation on superseded entries only.
+- `memory_episode_summary` compacts `recent_entries` the way
+  `memory_recent` compacts its entries: the raw dicts carried every
+  superseded entry's uncapped `superseded_by_text`. The MCP entries also
+  lose `timestamp`, `episode_id`, `episode_title`, `bank`,
+  `access_count`, `surprise_score` and `slots`, as `memory_recent`'s do;
+  `memory_recent(episodes=[id], verbose=true)` still serves the full
+  dicts, and the service (Console, REST) keeps them, now annotated. None
+  of this follows `compact_payloads`.
+- The `memory_search` description, the served session-start block and
+  `examples/CLAUDE.memory.md` say what `current: false` means: the
+  replacement was itself replaced or is unresolved, so search again
+  instead (even when its preview is on-subject). No cap moved. The block
+  grows 7,491 → 7,498 of its 7,500 chars; the sentence is funded by
+  dropping two restatements ("once at the start is not enough" beside
+  "RECALL AGAIN mid-session"; "so they don't pollute the graph" beside
+  "excluded from fact/graph extraction"), a filler "now", and saying the
+  briefing arrives "via a hook, not MCP" instead of "via a hook, a
+  separate channel". The tool manifests measure minimal 5,215 / core
+  11,178 / full 17,466 against 5,250 / 11,500 / 17,500, paid for by
+  compressing `memory_search`'s clipped-hit sentence, moving its
+  `min(5, top_k)` cortex-width rule into the `top_k` parameter
+  description (where the 2026-08-25 restructure puts argument contracts),
+  and tightening the `memory_get` / `memory_episode_summary` descriptions
+  — the next addition to the block trims first. Ranking, the retrieval
+  log, the schema and every eval number are unchanged.
+  **Upgrading:** a copied instruction block gains one sentence.
+
+### Fixed (2026-09-23 — search stops handing agents an often-unrelated "replacement" as the answer)
+- A superseded hit in compact `memory_search` / `memory_recent` output now
+  carries `replaced_by: {id, at, preview, verified}` instead of the
+  uncapped `superseded_by_text`: the successor's row id (resolved by exact
+  text over the resident entries: the one other entry with that text, or
+  the only current one when a retired twin shares it; otherwise none), the
+  supersession date, the replacement's first 120 characters, and whether
+  an explicit correction made the link (the successor's source is
+  `correction` or `consolidation`). `verbose=true` still serves the full
+  text. The 2026-09-23 live-bank review found that about 4 in 10 links
+  left by the automatic contradiction detector, before it stopped
+  superseding (PR #294), point at an unrelated note, while three surfaces
+  told agents to use that text in place of the entry. `verified` is
+  inferred from the successor's source until a schema column records it:
+  a `memory_consolidate` call with a custom `source` reads unverified.
+- Those three surfaces — the `memory_search` description, the served
+  session-start block and `examples/CLAUDE.memory.md` — now say what the
+  pointer means: `verified: false` means only that the link is not
+  confirmed as an explicit correction (often an old detector link, but an
+  evicted or ambiguous successor or a custom-source consolidation reads
+  false too), so the entry may still be valid; `memory_get` the replacement
+  only when its preview is on the same subject, and never follow chains.
+  The block stays inside its 7,500-char pin (7,488 → 7,491) by dropping
+  clauses it already said elsewhere; the `memory_search` description grows
+  242 chars, so the
+  `minimal` and `full` manifest budgets in
+  `tests/test_tool_consolidation.py` move to 5,250 and 17,500. **Upgrading:**
+  if you copied `examples/CLAUDE.memory.md` into your own instructions or
+  override the block with `<data_dir>/hook-instructions.md`, replace its
+  "use the replacement text" line — compact output no longer carries that
+  field.
+- The service's entry dicts (Console, REST, benches) keep
+  `superseded_by_text` and gain `superseded_at`, plus `superseded_by_id` and
+  `supersession_verified` on superseded search/recent hits. The successor
+  lookup is one pass over resident entries per call, only when a
+  superseded hit is served. Ranking, the retrieval log and every eval
+  number are unchanged; `compact_payloads: false` restores the old payloads
+  except for this pointer. `evals/agent_token_ledger.py` meters the pointer
+  in its own column, and the 2026-09-04 ledger rows that priced
+  `superseded_by_text` are marked superseded in `evals/README.md`.
+
+### Fixed (2026-09-23 — lessons keep their evidence, and "do this" lessons stop reading as "avoid")
+- `memory.lessons.signal_retention_days` now defaults to **3650** (was 30).
+  The dream sweep deletes `memory_outcome` signals, consumed or pending, past
+  this window, and those signals are the only evidence behind a lesson. On
+  the live bank on 2026-09-23, 760 of 1,618 current lessons predated every
+  retained signal, and 14-21 more rows were being deleted a day. The log
+  grows about 800 rows (under 1 MB on disk) a month. The Console knob's
+  shown default moved with it, and a new test pins every Console knob
+  default to the config dataclass. Existing installs that never set the
+  knob pick up the new window on upgrade; one that set it keeps its own
+  value. The config comment and Console help for `synthesize_in_dream` said
+  signals are still pruned when synthesis is off; nothing prunes them then,
+  and they now say so.
+- New `memory.lessons.signal_retry_days` (default **30**) bounds how long a
+  pending signal is offered to lesson synthesis, apart from retention. A
+  batch that lands no lesson stays pending, and the dream reads pending
+  signals oldest-first up to `synthesis_max_signals`. Under a ten-year
+  retention, a full batch of permanently failing signals would have been
+  re-offered on every sweep and no newer signal would ever reach synthesis
+  (Codex review of this change). Past the retry window a pending signal is
+  kept as evidence but no longer offered. The age counts from when the
+  signal was recorded, so signals never offered (synthesis off, a long
+  extractor outage) age out of eligibility too; raising the value offers
+  them again. `0` retries for the whole retention window. The Console's
+  loop-health tile now counts pending signals inside the window as "next
+  dream distils" and those past it separately (`pending_signals_expired`
+  in `/api/loop-health`), instead of counting every unconsumed row.
+- The session-start briefing labels a lesson `avoid:` only when its polarity
+  is `-`. It used to label every `failure` or `correction` lesson `avoid:`
+  too, but synthesis writes a correction (and often a failure) as `+`,
+  phrased as the behaviour to follow. So 303 of those 1,618 lessons (236
+  `+ correction`, 67 `+ failure`) would have printed "avoid: <what to do>".
+  Failures and corrections are still listed first. The Console already
+  labelled by polarity.
+
+### Fixed (2026-09-23 — the review judges stop holding the service lock for seconds every sweep)
+- The merge, link and junk judges no longer rebuild the evidence for their
+  whole pending queue under the service lock on every sweep tick. In ~23.5 h
+  of daemon logs the judge stages held the lock for 1 s or more 636 times
+  (879 s in total, up to 3.13 s), and every store and search waited behind
+  them. A tick now reads its evidence under the lock, builds and signs the
+  evidence packs with the lock released, and takes the lock again only to
+  clear stale verdicts and, after the model call, to re-check the judged
+  batch together with the writes that check guards. It signs the rows that
+  carry a verdict (each still gets its freshness check every tick) and the
+  first `judge_batch` unjudged rows, which covers any batch the tick can
+  take; the rest of the queue is neither read nor signed. The stale check
+  reads the last observed judge identity once per tick, not once per
+  verdict row (up to ~490 reads under the lock).
+- The model is shown the packs that were signed, instead of a second pack
+  built under the lock just before the call. A write that lands while the
+  packs are built is caught by the batch re-check, like a write during the
+  model call.
+- The evidence reads skip entry embeddings, which none of the three packs
+  uses (new `load_entry_texts`: 23 ms against 650 ms for `load_entries` on
+  the 2,239-entry live bank). Merge mentions are resolved for the rows' own
+  entities, not all 7,473 graph entities, which was ~1.1 s of every ~1.3 s
+  merge enrichment. The link pack tokenizes the entries once instead of once
+  per row (~140 ms a row). Measured from the host against the live bank,
+  read-only: the merge judge's locked read takes ~50 ms and its batch
+  re-check ~270 ms, where each hold took ~1.3-1.7 s before.
+- The candidate judge reads the bank once per lock hold instead of up to
+  three times, and computes the scan-generation fingerprints with the lock
+  released. When no automatic dismissal is due for reconsideration it skips
+  that evidence read entirely. The fingerprints themselves are unchanged, so
+  no stored generation or memo resets on deploy. Its locked read (~480 ms)
+  still loads embeddings, because the candidate evidence fingerprints them.
+- `tests/test_judge_lock_budget.py` pins each tick's work by counting rows,
+  entities, reads and tokenizations, never by timing.
+
+### Fixed (2026-09-23 — dream stages stop freezing the daemon; the shadow merge judge records again)
+- The contested-facts scan behind the graph digest's "unsure" questions no
+  longer holds the service lock for 42-78 s on every dream, empty dreams
+  included. It paired each current fact with its contenders through one
+  whole-store `contenders_for` scan per fact, normalising every record's
+  slot key (46M key evaluations on the 7,162-fact live bank). It now
+  buckets contenders by slot in one pass, as `cortex_dump` already did;
+  the output and its order are unchanged.
+- `contenders_for` and `_active_contender` test a record's status before
+  its slot key, which normalises on every evaluation: 13 ms to 0.13 ms per
+  lookup on the live bank, for `cortex_search`, the dream claim path and
+  every contended write.
+- The dream alias screen no longer embeds entity names while holding the
+  service lock. On a dream that minted a new entity it re-encoded
+  ~1,000-2,050 existing names on CPU inside the lock (55-171 s holds, the
+  embedder's 1,024-entry LRU being smaller than the name set). Names are now
+  read under the lock, embedded outside it, and proposals filed under it
+  again. A per-process memo (at most 4,096 names, ~8 MB for today's ~2,050)
+  means later screens encode only names they have not seen. This is the
+  first embedder call made outside the service lock; a concurrent
+  four-thread probe of the real model matched serial output (fp32 and bf16,
+  cosine >= 0.9999998, no errors), and a cold screen right after a restart
+  now slows concurrent searches by CPU contention instead of blocking them.
+- The alias screen no longer re-mints a deleted entity. It resolved both
+  names with create-on-miss, so an endpoint deleted while the names were
+  being embedded (`graph_delete_entity`, an accepted junk review) came back
+  with a merge queued against it (Codex review, P1). The same path already
+  resurrected such names at any later dream, because deleting a graph
+  entity keeps its facts and so its name. The screen now only looks
+  entities up (aliases included, so a merged-away name lands on its
+  survivor) and skips a match whose endpoint is gone. Fact writes mint
+  their subject's node, so the names skipped are ones the graph never kept
+  or has dropped: deleted entities, junk-shaped subjects, facts older than
+  that rule (2026-06-11), and new names whose claim wrote nothing (which the
+  old code turned into orphan nodes).
+- The shadow merge judge records verdicts again. A row's review fingerprint
+  included the evidence pack's `group` (the endpoint it shares with other
+  pending rows), which is computed over whatever list is enriched: the
+  whole queue at refresh, only the judged batch at validation. Any row
+  sharing an endpoint with a row outside its batch therefore never
+  validated, and from 2026-09-22 17:56 the judge re-sent the same 8 rows to
+  the extractor ~125 times a day and recorded nothing. The fingerprint now
+  signs that cross-row field, which the judge never sees, as None. Rows that
+  never shared an endpoint keep their existing fingerprints, so their
+  verdicts and automatic decisions carry over; only rows that carried a
+  group re-judge once. The same field also reopened automatic merge rejects
+  that shared an endpoint whenever reconsideration re-signed them apart,
+  deleting their dismissed pairs. The link, junk, candidate and curation
+  judges bind per-row evidence and were not affected; a test now pins batch
+  independence for every review queue.
+
+### Fixed (2026-09-24 — a slot named with a `|` no longer shares its curation listing with its separator twin)
+- Two different lesson or world slots whose names differ only by a literal
+  `|` against a separator (`ci|cd deploy` and `ci cd deploy`) were listed for
+  duplicate curation under one key, because the key folded the pipe to `-`
+  (`ci-cd-deploy|approach`). The two twins were never listed as a pair; their
+  pairs with any third slot came out under one name, so the judge took one
+  twin's record as the evidence for both and judged the other pair on it or
+  not at all; a memo, dismissal or automatic dismissal of either pair applied
+  to both; and a retired pipe slot's listed key could not restore it. The key
+  now escapes a literal `|` as `%7C` (`ci%7Ccd-deploy|approach`). Normalized
+  names are casefolded, so none contains an upper-case `C` and the key is
+  injective. Every pipe-free key is unchanged, so nothing stored for any other
+  pair moves.
+- `memory_graph_review` decodes a listed key (`dismiss_slot_pair` `src`/`dst`,
+  `restore_slot` `src`) instead of splitting it at the first `|`: normalizing
+  an escaped half would casefold `%7C` to `%7c`, a name no slot has. A key
+  with more than one bare `|` is refused rather than split by guess, and the
+  refusal says how a pipe is spelled. The Console posts display names and
+  needed no change.
+- Human dismissals made under the folded spelling (every one since
+  2026-07-19) are carried over once, on the first start of this version
+  (`curation_listing_spelling_v2` meta key): each is copied, with its date,
+  to every pair of a pipe slot it hid, and stays where it is, because its name
+  is also the twin's own. A fallback that also read the folded name would
+  not do: a dismissal of the pipe-free twin made after the upgrade is
+  byte-identical to a folded row, so it would go on hiding the pipe slot's
+  pair. A failed carry-over is retried a minute later, and `import` into a
+  fresh bank clears the flag unless the export carries it, so an older
+  export's dismissals are carried over on the next start.
+- Automatic dismissals are not carried over; the judge re-derives them. A
+  pipe pair that one hid (its own, under the folded spelling, which only a
+  bank that ran the 2026-09-23 fix below without this one has; or its
+  twin's, which shared the name) is judged once more: the refresh withdraws
+  a folded marker together with its row, and the twin's own dismissal stays.
+  A memo row under the folded spelling is left in place when the pipe pair
+  is judged again, because the name is also the twin pair's own.
+
+### Fixed (2026-09-23 — the curation judge stops re-judging a slot pair whose name contains a `|`)
+- A lesson or world slot with a literal `|` in its entity or attribute was
+  listed under a key that folds the pipe to `-`, but the store-curation judge
+  saved its memo, its automatic distinct dismissal and that dismissal's marker
+  under the raw key. Nothing that reads them found them: the pair went back to
+  the model on every tick that reached it instead of once per
+  `curation_rejudge_days`, `review_rejudge('curation')` could not
+  forget it, and an automatic "distinct" never hid it. All three are now
+  written under the listing's spelling (`curation_safety.curation_pair_keys`,
+  built on `service._slot_key`). The fingerprinted evidence keeps its raw key,
+  so no memo binding, marker fingerprint or retire audit changes and no other
+  pair is re-judged.
+- Rows written under the old spelling retire on their next touch rather than
+  through a migration: the first auto-dismissal refresh (the Console listing or
+  a judge tick) withdraws a raw-spelled marker together with the dismissal row
+  it owns, and the pair's next judgment, which the missed memo now triggers
+  once, deletes the raw-spelled memo row it replaces. A raw memo row whose
+  pair is never judged again (dismissed by a human, one side retired, or no
+  longer similar enough to list) stays behind unread; its key has at least two
+  `|` and cannot match a listing key, which has exactly one.
+
+### Fixed (2026-09-23 — the per-turn mail notice survives /clear under Claude Code)
+- The plugin's prompt hook stopped printing the coordination digest after
+  `/clear` or an in-session `/resume`. Claude Code gives hooks the new session
+  id, while a stdio MCP server keeps the id it was launched with, and the shim
+  writes the digest under that launch id. The plugin's session hooks now keep
+  one record per Claude Code process, `claude-<CLAUDE_PID>.host` beside the
+  digests. Line 1 holds the shim's key and line 2 the session the record is
+  confirmed for. The prompt hook follows the record only while line 2 names
+  its own session. Claude Code v2.1.214 and later export `CLAUDE_PID` to hooks
+  but not to MCP servers.
+- A record passes from one session to the next only through a handoff the
+  SessionEnd hook writes first, before its connection checks and network
+  call. The handoff carries the time, the process's creation identity (start
+  time from `/proc` on Linux, `ps -o lstart=` on macOS, the `ps -W` row in Git
+  Bash) and the ending session's key. SessionStart accepts it only if it is
+  under a minute old, names this process and matches the record. Compaction
+  keeps a record only when it is already confirmed for the session. Anything
+  unproven, including a host that offers no creation identity, fails closed to
+  the session's own key. So a record or handoff left by a dead process whose
+  PID a new one reused is never followed (Codex review of this change,
+  2026-09-24).
+- Every step needs `CLAUDE_PID` and a hook `CLAUDE_CODE_SESSION_ID` equal to
+  its stdin `session_id`. A host run from a Claude Bash command inherits both
+  variables, so it neither writes nor follows the outer session's record. A
+  session launched under the previous hooks, or before the plugin was enabled,
+  names its key on its first `/clear`. A startup sweeps records and stray temp
+  files untouched for more than 30 days, and only those. After `/clear` the
+  current digest prints once more, as it already does after resume and
+  compaction.
+- An in-session `/resume` to a conversation whose earlier shim left a digest
+  behind no longer prints that dead shim's stale mail.
+- Docs: the configuration guide and the shim no longer claim that every resumed
+  session keeps its coordination address. That holds for `--resume <id>`;
+  `--continue`, or `--resume` without an id, may launch the shim with the
+  startup id, which gets a new address and no prompt-hook digest (tool-result
+  hints still arrive). Claude Desktop's Code tab does pass the session id to
+  its per-session shim; only the app-level servers from
+  `claude_desktop_config.json` get none.
+
+### Added (2026-09-23 — `pseudolife-mcp wait-mail` wakes an idle session when addressed mail arrives)
+- Addressed mail reached a recipient only on its next Pseudolife tool call or
+  prompt, so an idle session sat on it until someone typed. `pseudolife-mcp
+  wait-mail` is a supported, cross-platform command (native Windows needs no
+  Git Bash) that an agent arms as a background command: it exits when new
+  mail shows up, and Claude Code reports the exit as a notification that
+  starts a turn in an idle session. It replaces a hand-rolled watcher script
+  used in the 2026-09-23 coordination trial. It blocks on the coordination
+  digest file the shim's adapter already writes, keyed like the shim
+  (`--session-id`, else `CLAUDE_CODE_SESSION_ID`; `--digest` names a
+  `<64 hex>.txt` digest outright), and needs no daemon connection, token or
+  network. The new `coordination_identity.resolve_digest_path` follows a
+  per-process `claude-<CLAUDE_PID>.host` record of the shim's spawn-time key
+  after `/clear` when one exists and its second line confirms it for the
+  current session (the SHA-256 of its id; a one-line record is never
+  followed), and falls back to the plain id key otherwise; nothing in this
+  release writes that record yet.
+- It fires only for mail nothing has shown yet: the digest watermark past the
+  shared `.seen` marker, with pending mail in the body. Mail that arrived
+  while the agent was busy fires at once, instead of being absorbed into an
+  arm-time baseline (the trial's watcher missed a message exactly that way).
+  On firing it prints the digest body verbatim, then advances `.seen` (in
+  that order, so a killed waiter duplicates rather than loses a wake) and
+  logs a `wait` line to `ledger.log`, so the prompt hook and tool-result hint
+  do not repeat it and a re-arm over unread mail waits. Exit 0 mail, 3
+  timeout (default 4 h, at most 24 h), 2 nothing to wait on. Polling is a
+  `stat` every 2 s; the file is read only after a rewrite, so a waiter fires
+  within about one 20 s adapter heartbeat of the send. A daemon outage
+  leaves the digest untouched, so a restart wakes nobody. The docs recommend
+  a narrow `Bash(pseudolife-mcp wait-mail *)` allow rule for auto mode.
+
+### Fixed (2026-09-23 — a long-idle session no longer loses its coordination digest)
+- Each adapter's first write sweeps digest and `.seen` files a day old, and a
+  live adapter rewrote its digest only when the text changed, so a session
+  whose mailbox stayed quiet for a day had its file swept by the next
+  session to start, and nothing ever put it back: its prompt hook and any
+  waiter went blind. The adapter now rewrites an unchanged digest hourly
+  (`DIGEST_REFRESH_SECONDS`) and touches its marker, puts a missing file
+  back at the next heartbeat, and never moves the watermark for either.
+- A digest write whose atomic replace failed (on Windows, a reader holding
+  the file open refuses it) still counted as written, so the file kept its
+  old text until the next text change and the temp file was left behind.
+  The write now counts only when it lands, is retried at the next heartbeat,
+  and removes its temp file.
+- A new adapter continues above a `.seen` marker its predecessor left without
+  a digest, so new mail is not treated as already shown.
+
+### Added (2026-09-23 — board mail can wake an idle Codex task, opt-in)
+- With `PSEUDOLIFE_CODEX_DOORBELL=1` in its environment, the Codex shim runs
+  `codex queue --thread <task id> --message <notice>` when new addressed mail
+  arrives for a task that has gone quiet. Codex's app-servers, the desktop
+  app's included, dispatch the queued notice once the task is idle. Without it,
+  an idle task sees mail only at its next Pseudolife call. Default off;
+  `PSEUDOLIFE_CODEX_BIN` names the CLI by absolute path when it is not on PATH.
+  The PATH lookup skips relative entries and never the working directory, the
+  task's checkout, so a repository cannot supply its own `codex`.
+- Codex delivers queued text as a user message, so the notice is fixed text
+  carrying only the pending count. Peer text, labels and excerpts never go
+  there; the woken model reads the mail with `memory_message receive`, framed
+  as agent-origin as before.
+- One doorbell per batch: it rings only after 30 s with no Pseudolife call,
+  only for mail no hint or prompt hook has shown, and never again until a
+  receive succeeds or the mailbox empties. The CLI runs in the background with
+  a 20 s timeout and no `PSEUDOLIFE_*` variables; a timeout kills its whole
+  process tree. Any failure turns the doorbell off for that shim process with
+  one stderr line, and pull delivery is unchanged. Tasks served by the
+  WebSocket bridge are not rung until the bridge stops for them.
+
+### Added (2026-09-24 — the agent board keeps a durable, tamper-evident record)
+- Schema **v42** adds `coordination_events`, an append-only audit log of the
+  agent board (`memory_agents` / `memory_message`). Before this, a message
+  body was blanked 24 hours after sending, message rows went after seven days,
+  idle addresses were removed, and each status update overwrote the last, so
+  nothing could say afterwards who reported what, or when. Every board
+  mutation now appends one row in the mutation's own transaction: register,
+  update (with the values it replaced, which is the status history), attach,
+  detach, send (with the full body), first read, acknowledgment, delivery
+  attempt, the prune pass's body expiry and row removal, bank identity, and the
+  operator's restore `recover` and `rebind`. Lease heartbeats are not logged.
+  The live mailbox keeps its 24-hour body TTL, and `memory_message`'s
+  description now tells agents the operator's audit log keeps a copy.
+- The first time a receive returns a message, explicitly or to the recipient's
+  live-delivery adapter, is stamped as `coordination_messages.first_read_at`
+  and logged as a `read` event; the push transport previously left only a
+  delivery attempt, and the pull path left nothing. The per-turn digest's
+  preview is not a read.
+- Rows are chained by sha256 over the previous hash and the row's canonical
+  content, in a dense sequence allocated under a transaction-scoped advisory
+  lock taken after every board-row lock, so edited, inserted or reordered rows
+  fail verification, and so do removed rows other than the oldest behind a
+  retention cut whose own fields add up. With no secret, the chain cannot on
+  its own see its newest rows dropped, a rewrite with every hash recomputed, or
+  its oldest rows removed behind a forged but consistent cut record;
+  `verify --expect-head` catches the first two, and a series of recorded
+  heads, checked against the cut the report says the log starts from,
+  exposes the third.
+- The log keeps events for `coordination.audit_retention_days` (default 90;
+  `0` keeps it forever), separate from the mailbox TTL. The prune pass cuts
+  only a prefix, on UTC day boundaries so at most once a day (a cutoff that
+  moved every minute re-cut its own records on nearly every pass), logs the
+  cut as the surviving chain's anchor, and runs only while the board is in
+  use. A synthetic replay at the scale of the 2026-09-23/24 fifteen-session
+  trial left 2,671 events in 1.6 MB with indexes, and
+  the append added 1.3 to 2.2 ms to median send, receive and acknowledgment
+  against a control arm whose own runs differed by up to 0.6 ms
+  (`evals/results/coordination-audit-volume-20260924.json`,
+  `evals/coordination_audit_volume.py`).
+- `pseudolife-mcp board-audit export` (JSON lines, filterable by project, task,
+  agent and time) and `pseudolife-mcp board-audit verify` (prints the chain
+  head and the cut it starts from; `--expect-head` checks a recorded head,
+  `--input` checks an archived export) are operator-only and read-only. They
+  read the bank through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's
+  embedded instance; there is no MCP tool or REST route. The log holds bodies
+  verbatim, lives only in the bank and its full backups, and is excluded from
+  portable exports. Offline restore recovery handles a restored backup that
+  predates the log: it still revokes and rebinds, and says the operation went
+  unrecorded.
+
+### Fixed (2026-09-23 — starting a service no longer opens a document store it may never use)
+- The reference (document) bank opens its ChromaDB client on the first
+  document ingest, or on the first read once a store exists on disk, instead
+  of whenever a service starts. chromadb keeps every opened client in a
+  process-wide cache until the process exits, each with about 19 threads and
+  ~3 MB on a 16-CPU host, so a process that builds many services, like the
+  test suite, piled them up by the thousand. Measured on that host:
+  with the embedding model stubbed out,
+  a service start drops from 0.068 s to 0.002 s,
+  and 50 starts leave 34 threads instead of 988
+  (`evals/results/service-init-reference-bank-*.json`);
+  a slice of 218 PG-backed tests runs in 91.2 s instead of 107.5 s
+  and peaks at 61 threads instead of 3,743 and 3.92 GB instead of 4.54 GB
+  (`evals/results/suite-cost-reference-bank-slice-*.json`). A store that
+  does not exist yet reads as empty. A store that fails to open, including
+  a directory that cannot be read, still disables the bank without
+  affecting memory search, and document ingest still refuses. The daemon is
+  effectively unchanged: an existing store (every install so far) still
+  opens during its start-up warmup search.
+
+### Fixed (2026-09-23 — daemon boots no longer warn about an ONNX backend nobody asked for)
+- The MCP defaults selected the ONNX embedding backend whenever the optional
+  ONNX stack was installed, whether or not the configured model had an ONNX
+  artifact. The daemon image installs that stack, and the default
+  Qwen3-Embedding-0.6B has no artifact, so every daemon boot logged "ONNX
+  embedding backend failed to load … falling back to torch". The defaults
+  now select ONNX only when the configured artifact already resolves in the
+  local model or Hub cache, using the loader's own local-only preflight
+  (about 1–3 ms in the daemon image). Otherwise they choose torch up front
+  and log one INFO line naming the model. MiniLM, whose `onnx/model.onnx`
+  the image bakes, still gets ONNX. An explicit `embedding.backend` is never
+  overridden, so `backend: onnx` without an artifact still warns and falls
+  back at load. An invalid `onnx_file_name` also stays on the ONNX path, so
+  the loader's warning names the bad path instead of hiding it. The loader
+  and the defaults share one normalize-and-resolve helper, so a
+  backslash-separated `onnx_file_name` resolves the same way in both.
+- The same applies on native Windows to a model whose Transformer module
+  loads from a nested subfolder. The pinned Optimum stack mis-detects that
+  artifact there, so the loader refuses it and falls back with a warning.
+  The defaults now choose torch up front for such a model, with an INFO line
+  naming the reason, through the same helper the loader's fallback uses. A
+  flat layout, and any layout on Linux or in the daemon image, still gets
+  ONNX.
+
+### Added (2026-09-23 — eval results say which embedder precision produced them)
+- `embedding.cpu_dtype` defaults to `auto`, which is bf16 on a CPU with
+  native bf16 and fp32 elsewhere (GitHub runners, most Intel CPUs), and
+  `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides it per process. A bf16 run on
+  one host and an fp32 run on another could therefore differ, and no eval
+  result file recorded which precision produced it. Every eval harness that
+  builds an embedder now stamps `EmbeddingPipeline.describe()` (`backend`,
+  `device`, `dtype`) into what it writes, through the new stdlib-only
+  `evals/embedder_stamp.py`.
+- LongMemEval and BEAM rows record one description per stage that embedded
+  their contexts: `extract`, and `rebuild_contexts` / `rag_lite_rebuild` /
+  `band_ablation` for the offline rebuilds. The stages are kept apart
+  because a rebuilt row's cortex facts and its rag block come from
+  different embedders. `--report` summaries, `replicate.py agg` files and a
+  newly established gate baseline carry the merged stamp. A file whose rows
+  mix precisions says so, with the row count of each variant in that file.
+  Re-judged and ablated rows (`lme_rejudge`, `beam_rejudge`,
+  `beam_attrib_ablation`) carry the stamp of the contexts they re-read.
+  The single-run harnesses (`ladder_sweep`, `graph_ablation`,
+  `retrieval_replay`, `recall_fanout_bench`, `live_replay_flat_ab`,
+  `retention_interval_eval`, `quarantine_gate`, `memcot_bench`,
+  `seed_bench`, `warm_cache_probe`, `epistemic_bench`, `lme_v2_smoke`,
+  `beam_reader_sweep`, `retrieval_pool_probe`) stamp their result file.
+  `embedder_recall`'s bake-off arms, which load a bare SentenceTransformer
+  outside `cpu_dtype`, record the dtype read back from their parameters.
+  The two stdout-only probes (`retrieval_sweep`, `window_echo_check`) print
+  it.
+- `replicate.py compare` and `gate-check` warn, like the nondeterminism
+  warning, when the two sides embedded at different precisions. The warning
+  never fails the gate. Stages are compared one by one, and a side that
+  never ran a later stage is compared through its `extract` stage, which
+  built that part of its contexts. So a `diag-knobs` tag rebuilt in bf16
+  warns against its own fp32 `diag` source. A stage that ran but was
+  recorded as unknown never inherits: `describe()` fails soft to None, and
+  a `band_ablation` rebuild over pre-stamp dumps records None.
+  `rag_lite_rebuild` is recorded
+  but never compared: it refuses to write unless its ranking is
+  byte-identical to the judged control's. compare writes the warning to
+  stderr and records `a_embedder` / `b_embedder` / `embedder_warnings` in
+  its `--out` artifact; `recall_fanout_bench --combine` does the same for
+  its two arms. A missing stamp reads as `unknown` and is never a mismatch,
+  so every artifact written before this change (the committed gate
+  baseline included) compares silently. `gate-check` prints both sides'
+  precision so an unknown side is visible rather than mistaken for a
+  match.
+- Pinned by `tests/test_eval_embedder_stamp.py`,
+  `tests/test_eval_embedder_stamp_writers.py` and tests beside each
+  consumer. The writers file holds a static guard over `evals/` that
+  follows calls across modules and has two rules:
+  - Every function that calls a constructor, or a `build_service`-style
+    factory that returns one, must itself call a stamp-WRITING helper. The
+    merge and report helpers do not count, so a `report()` cannot stand in
+    for a deleted row stamp.
+  - Every module that reaches a constructor through any chain of calls
+    (`warm_cache_probe` → `ladder_sweep.run_rung` → `build_service` →
+    `MemoryService`) must write a stamp.
+
+### Fixed (2026-09-23 — the memory daemon OOM-restarted under ordinary load)
+- The Docker daemon was cgroup OOM-killed (exit 137) at 15:12 AEST on
+  2026-09-23 by an ordinary burst of concurrent requests. At rest it held
+  ~3.1–3.3 GiB anon (RssFile only ~80–165 MB; most of the cgroup's ~0.7 GB
+  `file` charge was reclaimable page cache) under a 4 GiB cap with no
+  burst allowance, and a ~30–34-search burst grew anon ~0.8 GB to the
+  limit (kernel memcg kill at 4,169,120 kB anon-rss). What grew is not
+  pinned down: the idle daemon held ~256 MB in 25 per-thread malloc
+  arenas, but that is a partial contributor at most. After the restart
+  `memory.events` `max` reached 8,021 within ~27 minutes (model load and
+  early load), then stayed flat. Sizing, not a leak: the 4g cap
+  (2026-08-20) was set against 2.8 GB / 2.7 GB steady states on a smaller
+  bank and missed the fp32 embedder's 3.8 GB load peak, burst growth and
+  bank growth. By ~19:45 the same evening the live fp32 daemon (cap
+  already raised to 6 GiB) held 4.48 GB anon.
+- `ops/docker-compose.yml`: the daemon cap defaults to `6g`
+  (`PSEUDOLIFE_DAEMON_MEM_LIMIT`; memory+swap still pinned equal, so no
+  swap), and the daemon runs with `MALLOC_ARENA_MAX=2` (after a concurrent
+  encode burst, 2,841 MB vs 3,274 MB with the default arenas; the peak is
+  unchanged). The compose comment's claim that the 2026-08-04 21 GB
+  balloon's root cause was "still open" is corrected: it was found and
+  fixed that day (4df20ef2). `ops/wslconfig.example` and the Windows / WSL2
+  memory section are re-sized to match (they still assumed a ~400 MiB
+  daemon): ~9–10 GiB for the full stack under dream load, and a default VM
+  of 10 GB so the VM does not run out before the daemon's own cap trips.
+- New `embedding.cpu_dtype` (`auto` / `fp32` / `bf16`, default `auto`):
+  the torch embedder on a CPU loads straight into bf16 when the CPU has
+  native bf16 (x86 AVX512_BF16 / AMX_BF16, from torch's cpuinfo probe or
+  `/proc/cpuinfo`) and stays fp32 otherwise, since emulated bf16 is slow
+  (the 2026-09-20 CI finding behind the fp32 cast). Qwen3-Embedding-0.6B on
+  a Ryzen 7 9800X3D, bf16 vs fp32: ~1.4 GB vs ~2.85 GB steady, peak RSS
+  while loading 537 MB vs 3,808 MB (bf16 weights page in on first use), a
+  short query ~88 ms vs ~160 ms. Through the new pipeline on 400 live bank
+  entries and 60 real queries, bf16 queries against the stored fp32
+  vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score
+  delta 0.0058), and `evals/regression_gate.ps1` run in bf16 passed with
+  every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,
+  hybrid 0.7692, cascade 0.7692; evidence:
+  `evals/results/embedder-cpu-bf16-probe-20260923.json`). The default is
+  deliberately library-wide, so evals on a native-bf16 CPU now embed in
+  bf16 too. The model is loaded in bf16, not cast after an fp32 load
+  (which keeps the 3.8 GB load peak), using `dtype` or `torch_dtype` by
+  Transformers version (the rename landed in 4.56); a sentence-transformers
+  too old for `model_kwargs`, or a loader that leaves any parameter
+  outside bf16 (sentence-transformers 3.0.x left a Dense head fp32), falls
+  back to casting after load with a warning. Embeddings still leave the
+  pipeline as float32, so stored vectors and cosine math are unchanged in
+  type. GPU and ONNX backends are untouched. `PSEUDOLIFE_EMBEDDING_CPU_DTYPE`
+  overrides the config value (forwarded by compose, so `fp32` in
+  `ops/.env` rolls a deployment back without a rebuild), and the test suite
+  pins it to `fp32` in conftest, daemons it spawns included. The
+  `Embedding backend:` log line gains `dtype=`.
+- `document_ingest` encodes a document in slices of 8 chunks instead of one
+  call over the whole chunk list (batched at the daemon's
+  `embedding.batch_size` 16). A 104-chunk document peaked +2,565 MB over
+  steady state in fp32 the old way, past the old cap on its own; sliced it
+  peaks +1,028 MB at the same speed. Production held no documents, so the
+  path had never run there.
+- `/health` gains `memory` (cgroup v2 usage, limit, working set,
+  `used_fraction` and `near_limit` at 90% on the working set so reclaimable
+  page cache cannot trip it, anon/file split, `memory.events`
+  max/oom/oom_kill, process RSS and peak; process RSS only when no cgroup
+  v2 `memory.current` is readable; `source: "unavailable"` rather than
+  silence, and a failed read never breaks `/health`) and `embedder` (backend,
+  device, resident dtype). Near the limit the daemon logs a WARNING at most
+  every 10 minutes. `status` is never touched: a 503 would have the
+  healthcheck and `ops/update.*` treat a daemon that is still serving as
+  dead.
+- Deploying needs the container recreated for the new cap and environment
+  (`ops/update.ps1` does). Verify live: `/health` `embedder.dtype` is
+  `bf16` on this host, `memory.limit_bytes` is 6 GiB, and
+  `memory.events.max` stops climbing.
+
+### Fixed (2026-09-23 — backups run daily, and a wiped bank can no longer rotate the good ones away)
+- `ops/backup.ps1|.sh` write a `pseudolife_manifest-<stamp>.json` beside
+  each dump with its per-table row counts, read from the dump in the same
+  pass as the end-of-dump check. If `entries`, `facts` or `lessons` fell by
+  more than 25% (`-MaxRowDropPercent` / `--max-row-drop-percent`) against
+  the newest manifest that was not itself held, in the backup folder or the
+  mirror, the new dump is kept, local rotation and mirror pruning are
+  skipped with a loud warning, and the run still exits 0. The warning names
+  the last good dump and the `restore -BackupFile` command for it. The gate
+  fails closed: it also holds when manifests exist but none is usable, or a
+  backup folder cannot be listed (which no longer aborts the run). With no
+  manifest anywhere (the first run after upgrading), the newest complete
+  date-stamped dump is read as the baseline, so an already-wiped bank is
+  not marked "ok". The hold repeats on every run until `-AcceptRowDrop` /
+  `--accept-row-drop`.
+  Before, a logical wipe followed by `PSEUDOLIFE_BACKUP_MIRROR_KEEP`
+  backups rotated every good copy off the mirror.
+- `ops/restore.ps1|.sh` with no file named skip dumps the gate held (after
+  a wipe, the newest dump is the wiped one, and its rehearsal passed
+  because both sides were wiped) and refuse if every dump is held;
+  `-BackupFile` / `--backup-file` overrides.
+- The end-of-dump marker now counts only outside COPY data. A dump cut off
+  right after a stored memory that quoted the marker used to pass.
+- New `ops/install-backup-task.ps1` registers a daily `ops/backup.ps1` run
+  from the main checkout, even when installed from a worktree
+  (StartWhenAvailable, battery-tolerant, one-hour limit, runs as the
+  logged-on user; `-At`, `-Uninstall`). Each run waits up to 10 minutes
+  for Docker (`-DockerWaitSeconds`), since a catch-up run fires at logon,
+  and is appended to `data/backups/backup-task.log`. The installer warns
+  when the main checkout's `backup.ps1` predates the gate. Nothing backed
+  up on a schedule before: from 2026-09-14 13:28 to 09-20 12:18 no dump
+  existed anywhere.
+- `/health` gains `last_backup` (`at`, `age_hours`, `rotation`), read from
+  the manifest the backup scripts copy into the daemon as
+  `/data/last-backup.json`. It is informational and never changes
+  `status`. The memory-status command reports it and flags an age over
+  36 hours or a held rotation.
+
+### Added (2026-09-23 — warning before capacity eviction deletes history, and a durable record of every drop)
+- Under the flat default every capacity eviction permanently deletes an
+  entry (a Postgres `DELETE`; its `memory_traces` cascade), superseded
+  entries first. On the production bank's measured growth of 36-65
+  entries/day the 5,250-entry cap would be reached between about 9 Nov and
+  18 Dec 2026, with nothing to say so beforehand: `true_drops` was a
+  per-process counter that every restart reset, and a drop left only an
+  INFO log line.
+- `memory_stats()` now carries `capacity_warning` (band, size, capacity,
+  fill and a message) once the terminal band — the only band whose
+  evictions are true drops — reaches 80% of its capacity, and `null` below
+  that. On a multi-band preset a full upper band demotes into the next and
+  loses nothing, so it does not warn. `/health` carries
+  `capacity_warning: true` at the same point; counts stay out of the
+  unauthenticated probe, and `status` is untouched, so a filling bank never
+  turns into a 503 restart loop.
+- Each true drop logs a WARNING naming the entry id, source, superseded flag
+  and band. On Postgres the row is deleted by the new
+  `delete_evicted_entry`, which counts the drop in the `meta` row
+  `capacity_true_drops` in the same transaction: a row is never deleted
+  without being counted, and a drop inside a correction that rolls back is
+  neither. `memory_stats()` reports the all-time `true_drops_total` and
+  `last_true_drop` (time, entry id, source, superseded) across restarts.
+  The record travels with a logical export, like the entry ids it explains.
+  A malformed record (hand-edited or imported: not a number, negative, or
+  without room below the bigint maximum for the increment) restarts the
+  count instead of blocking the delete, and never breaks `memory_stats()`.
+  No schema change.
+- The plugin's `/memory-status` command leads with `capacity_warning` and
+  reports `true_drops_total` / `last_true_drop` instead of the per-process
+  `true_drops` alone.
+
+### Fixed (2026-09-23 — a merge second opinion cannot pair with a requeued first verdict)
+- A `review_rejudge` (or `/api/graph/rejudge`) that cleared a merge row's
+  first verdict while its second opinion was in flight no longer lets that
+  second vote land. The second-opinion pass paired the new vote with the
+  first verdict it read before the model call, and the evidence check it
+  re-ran afterwards ignores every `judge*` column. So the vote was recorded
+  on a row with no first verdict, and in `auto-reject` (or `auto`) mode two
+  rejects auto-rejected the row on the verdict a human had just requeued.
+  Before recording, the pass now requires the live row's `judge_verdict`
+  and `judge_confidence` to match the pair it read, under the same lock
+  hold and transaction as the write. A requeued row is left to a fresh
+  first opinion on the next tick. The link and junk judges take one vote
+  per row and never read an earlier one, so they were not affected.
+
+### Fixed (2026-09-23 — a rejudge that lands during a judge call is no longer undone)
+- `review_rejudge('candidate')` forgets opinions in the
+  `deep_candidate_verdicts` memo, but the candidate judge read that memo
+  before its unlocked model call and wrote its copy back afterwards, so a
+  rejudge landing during the call restored every requeued pair and did
+  nothing. The judge now re-reads the live memo under the lock hold that
+  writes it and updates only the pairs it judged in this tick. A saved reply is
+  replayed only while its memo entry is unchanged, so a requeued saved
+  `dismiss` is not applied in `auto` mode. A fresh model verdict for a pair
+  requeued during the call still lands: the requeue forgot the older opinion.
+  The per-apply watermark stays incomplete when a requeue forgets a
+  candidate's opinion during the tick and this tick does not re-judge it,
+  including on the "all judged" path that makes no model call. The 500-pair
+  bound is unchanged.
+- The curation judge had the same gap. `review_rejudge('curation')` deletes
+  the `curation_judgments` row but keeps the evidence binding, and the
+  automatic distinct dismissal and duplicate fold checked only the binding.
+  A saved pending action replayed after a mid-call requeue, and a fresh
+  verdict requeued between being recorded and being applied, were therefore
+  still acted on. Both actions now also require the pair's judgment row to
+  exist. The row is looked up under the key it is stored with, and the check
+  runs under the service lock that both the apply and the requeue hold.
+
+### Added (2026-09-23 — board mail can wake an idle Claude Code session)
+- The plugin ships an opt-in `Stop` hook (`plugin/hooks/stop-wake.sh`, off
+  unless the hook environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1`, checked in
+  the hook's command before bash reads the script) that waits on the
+  session's coordination digest after each turn and wakes the idle session
+  when new addressed mail arrives. It is registered with `async` and
+  `asyncRewake`, so exit code 2 starts a new turn even when the session is
+  idle: under a second from exit to turn in the Desktop Code tab on Claude
+  Code 2.1.280 (2026-09-23 probe). It fires when the watermark is past
+  `.seen` and the digest lists mail, so mail that landed during the turn
+  fires at once and a digest already shown does not fire at the next turn
+  end; firing advances `.seen` (no wake if it cannot) and logs a `wait`
+  ledger line. A lease file keeps one watcher per session, wakes are capped
+  at 20 an hour per session (mail over the cap is delayed, not dropped), and
+  a digest absent at arm time is waited for, while one that vanishes
+  mid-watch (the shim exited) ends it. The wait ends at 3540 s, under the
+  hook's enforced 3600 s timeout; `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` shortens
+  it. The plugin hooks digest now covers `stop-wake.sh` too; a manual Codex
+  bundle (four scripts, no `Stop` hook) therefore sends no digest, which
+  changes nothing, since it sends no plugin version either.
+- Codex loads the same `hooks.json`, so the `Stop` entry is a no-op there:
+  `lifecycle.ps1 -Event Stop` exits at once and the bash script exits
+  outside Claude Code. `ops/setup-codex-hooks.py` accepts the plugin's fourth
+  definition, byte-checks `stop-wake.sh`, approves it with the other three,
+  treats it as optional for Codex before 0.148 (which does not list async
+  `Stop` hooks), and no longer refuses setup over a disabled `Stop` entry.
+  Manual installs keep the three lifecycle events. An existing Codex plugin
+  install lists the new entry in Codex's startup hook review until setup
+  reruns.
+
+### Fixed (2026-09-23 — recovery cannot overwrite a newer peer correction)
+- Correction and reinstatement recovery hold the target's mutation protection
+  through resident publication, including reinstatement admission and replay.
+  Losing the PostgreSQL session during publication restores the prior resident
+  objects. A correction then reconciles again within the same call (next
+  entry). Otherwise, and for reinstatement, a pending recovery guard stays and
+  the next ordinary read reloads committed state under fresh protection before
+  serving it.
+- A correction whose mutation-lock session dies with its outcome in flight
+  reconciles on a fresh session before returning, as the pre-lock code did by
+  reconnecting. A committed correction reports its result instead of an
+  error. The outcome is no longer exposed to peer writes until the next call,
+  where one that changed the source could leave it unclassifiable until
+  restart; only the moment before the fresh lock remains. A publication that
+  fails after a proven commit is reconciled the same way; if that retry fails
+  too, the error says the correction committed.
+- A routine refusal inside the mutation lock releases its keys on the same
+  PostgreSQL session instead of closing the shared connection, which logged a
+  spurious "postgres connection lost" and reconnected on every refusal.
+
+### Added (2026-09-22 — retired continuum entries can be reinstated with a durable audit)
+- Schema **v41** adds the FK-free `entry_reinstatement_decisions` audit and
+  the full-tier `memory_reinstate` tool. One named principal can reinstate one
+  independently reviewed retired entry by durable ID using an exact preimage
+  and operation UUID; the decision and retirement-field clear commit together,
+  retries are idempotent even after later retirement or deletion, and uncertain
+  commits reconcile from durable state before resident publication. The first
+  version refuses every target with a trace invalidation and never changes or
+  confirms derived cortex state.
+- Admission, publication and recovery reconcile only the target entry against
+  its durable row rather than rebuilding the resident bank from rows, so
+  access counts not yet synced and entries still awaiting the dream re-flush
+  survive every call, refused ones included. Retired rows that never recorded
+  a replacement text (pre-v5 migrations) are refused as
+  `retirement_text_missing`. Logical transfer keeps audited entry IDs retired,
+  so an import never hands a deleted, reinstated entry's ID to a new entry.
+
+### Fixed (2026-09-22 — a cancelled Codex delivery start-up ran on into its rpc timeout)
+- `pseudolife_memory/codex_delivery.py` bounded its connect, send, reply and
+  close waits with `asyncio.wait_for`, which before Python 3.12 returns the
+  inner result instead of re-raising when the cancellation lands in the
+  same loop tick as the inner task's completion (bpo-42130). A caller
+  cancelling `__aenter__` at that instant — `codex_coordination._verified_delivery`'s
+  start-up deadline is one — saw the bridge carry on into its five-second
+  rpc timeout and raise `DeliveryError` instead of the cancellation. All
+  four waits now go through one `_bounded` helper built on
+  `asyncio.wait`, which propagates the cancellation after
+  cancelling and reaping the inner task (retrieving its exception, so
+  nothing unsanitized is logged at garbage collection); timeouts still
+  surface as `asyncio.TimeoutError`, so every `DeliveryError` message is
+  unchanged. The daemon image runs 3.12 and was never affected; the shim
+  runs on the host interpreter and was. Surfaced as a CI flake of
+  `tests/test_codex_delivery.py` on the 3.11 lane (2026-09-21, runs
+  35597200621 and 35603265565); the cancellation test now delivers its
+  cancel explicitly and a second test forces the interleaving.
+- Test-only, no hook behaviour change: `tests/test_codex_hooks.py` measures
+  the Codex SessionEnd three-second cap at the fixture daemon (each attempt
+  is held without a reply and timed until curl hangs up, and the attempts
+  are counted) instead of on the subprocess wall-clock, and the hang guard
+  on every hook and installer process the file runs is one 180s constant
+  instead of 20–40s literals. On the loaded windows-latest runner of run
+  35603265565 process creation under Git Bash cost seconds per spawn:
+  session-end.sh took 19s wall-clock around a curl that honoured its
+  two-second budget, and session-start.sh, with roughly four times the
+  spawns, hit its 30s guard. Neither script stalls on stdin, DNS or a
+  proxy; the budget was honoured in the failing run. The live cap
+  assertion was mutation-checked (blanking the script's Codex-context flag
+  makes curl wait out the Claude budget and fails it).
+
+### Fixed (2026-09-22 — bounded reranking keeps one score domain)
+- Optional cross-encoder reranking now scores the entire combined candidate
+  pool only when it fits `top_n`. Larger pools retain their original ranking
+  and report `candidate_budget_exceeded`, instead of returning a scored head
+  followed by an unscored tail. Reference reservations and the disabled default
+  are preserved; query parameters record the pool size and scored count.
+- The LongMemEval bench summary stamps the reranker's `top_n` beside
+  `enabled`, and `PSEUDOLIFE_BENCH_RERANK_TOP_N` is the sanctioned override
+  for it (`evals/ladder_sweep.py`). Under the all-or-skip rule a widened-pool
+  cell whose pool outgrows the budget serves the un-reranked order, which an
+  `enabled: true` stamp alone would misreport as a reranked run.
+
+### Fixed (2026-09-21 — the client-side updater never pip-upgrades an editable shim)
+- `ops/update_clients.py` decided "editable" by checking whether the
+  registered launcher lay under `<--repo>/.venv`; run from a deploy
+  worktree, the checkout's own `.venv` launcher read as a plain virtualenv
+  and got `pip install --upgrade`, which failed on the in-use launcher,
+  rolled back, and stripped the editable install (first real `-All` run).
+  Editable-ness is now asked of the interpreter itself — the package's
+  import location against its library directories, probed from a neutral
+  working directory so the checkout cannot shadow it — and an editable
+  install anywhere is named, never upgraded. A probe that does not answer
+  (crashes, or prints no report) is a distinct `unknown` state that is
+  named and left alone — "the probe failed" and "the package is absent"
+  are different facts and only the second licenses a pip install; a
+  warning printed after the report no longer breaks the parse. One probe
+  per interpreter per run. Failure details quote pip's last `ERROR` line
+  rather than an earlier `WARNING: Error …` or its trailing `[notice]`.
+
+### Added (2026-09-21 — one command moves the shim and the plugin with the daemon; same-version hook drift is detected)
+- `ops/update.ps1 -All` / `ops/update.sh --all` run `ops/update_clients.py`
+  once the daemon is healthy: the shim behind each Claude Code / Codex
+  registration is reinstalled where that is safe (pipx, or the registered
+  interpreter's pip; a shim running from the checkout's `.venv` is editable
+  and already live, so its metadata refresh is named, not run — it needs
+  every session closed), the Claude Code plugin cache is refreshed only when
+  its bytes differ from the marketplace clone (CRLF read as LF, `.git`
+  ignored), and Codex's content-addressed hook copy is reported current or
+  stale with the consent command. A failed client step is reported on a
+  ladder, never a failed deploy. The helper runs on its own too (`--only
+  shim,plugin,codex`, `--json`).
+- The plugin's version string is pinned to the package version, so a
+  plugin-only change on master left `/plugin update` saying "already
+  latest" and the version handshake seeing two equal strings. `/health`
+  now carries `hooks_digest` (SHA-256 over the hook scripts the daemon
+  image shipped with, `pseudolife_memory/plugin_hooks.py`; the image copies
+  `plugin/hooks` and sets `PSEUDOLIFE_PLUGIN_DIR`), the SessionStart hooks
+  send `plugin_hooks_digest` computed the same way over the scripts beside
+  them (bash and PowerShell agree with Python byte for byte, LF or CRLF, on
+  a checkout, a cache or Codex's bare copy), and an equal version with a
+  different digest opens the briefing with one line naming the `--all`
+  command. Both shape checks (version, digest) now use full matches, so a
+  trailing newline can no longer ride into the model's context.
+
+### Added (2026-09-21 — the installer installs the Claude Code plugin)
+- `ops/install.sh` and `ops/install.ps1` add the `pseudolife-mcp`
+  marketplace (when it is not yet known) and install
+  `pseudolife-memory@pseudolife-mcp` whenever Claude Code is a selected
+  client, then read the result back from `installed_plugins.json` — the exit
+  code alone is not proof. The plugin was the one install beside the daemon
+  and the shim that still needed two commands typed inside Claude Code. An
+  installed plugin is left alone (its cache moves through `/plugin update`;
+  the session briefing says when it is behind), a missing `claude` CLI or a
+  failed command is reported on the wiring ladder with the manual commands,
+  never fatal, and `--claude-plugin skip` / `-ClaudePlugin skip` opts out.
+  Newer CLIs get `--yes` for the non-interactive install; older ones are
+  called without it. The step runs before hook ownership is decided, so a
+  fresh install's hooks come from the plugin rather than `settings.json`.
+
+### Added (2026-09-21 — the plugin, the shim and the daemon say when they are not the same release)
+- `/health` carries `version`, the daemon's package version. The plugin's
+  hooks run from a cache that moves only on `/plugin update` and the shim is
+  installed separately, so a deploy left both behind with nothing to say so
+  (an hour of it on 2026-09-21).
+- The SessionStart hooks (`session-start.sh`, `lifecycle.ps1`) send the
+  plugin's version from `.claude-plugin/plugin.json` as `plugin_version`.
+  When it differs from the daemon's, the briefing opens with one line naming
+  the side that is behind and the command that moves it (`/plugin
+  marketplace update pseudolife-mcp` then `/plugin update
+  pseudolife-memory@pseudolife-mcp`, or `ops/update.ps1` / `ops/update.sh`).
+  Only a version-shaped value is ever echoed; a hook copy without a manifest
+  beside it (Codex's content-addressed hooks) sends nothing. The line serves
+  unauthorized hooks too, since it carries no memory content.
+- The shim prints one stderr line and puts the same notice ahead of the
+  instructions it serves when its package version is not the daemon's.
+- `pseudolife-mcp doctor` reports `daemon_version` and, on a difference,
+  `version_mismatch: true` with the recovery, instead of leaving the
+  comparison to the reader.
+
+### Security (2026-09-21 — anyio 4.14.2, Dependabot alerts 16–18)
+- **`anyio` bumped 4.14.0 → 4.14.2 in `ops/requirements.lock.txt`**
+  (CVE-2026-63374 / GHSA-82r6-8w77-94w6, critical: `TLSStream` encoded
+  internationalized host names with IDNA 2003, so a certificate issued for
+  the IDNA 2003 form validated on a hijacked connection; CVE-2026-63349 /
+  GHSA-3w57-8xmc-8v26, high: `open_process` forwarded `group` where
+  `extra_groups` was meant, so child processes kept the parent's
+  supplementary groups; CVE-2026-64847 / GHSA-5p39-cfhj-2xmp, medium:
+  process-pool workers could block forever on an undrained stderr pipe).
+  None of the three paths is reachable: nothing in the tree calls
+  `run_process`, `open_process`, or the process pool, and the only anyio TLS
+  path is httpcore's async backend under the coordination adapter and the
+  shim's streamable-HTTP client, both of which talk to the daemon URL (plain
+  HTTP on loopback by default). Taken anyway as a clean patch bump: 4.14.2
+  declares the same dependencies as 4.14.0, every lockfile consumer
+  (httpcore, mcp, starlette) already accepts it, and a dry-run resolve
+  against the bumped lock installs anyio alone. CI installs from
+  `pyproject.toml`, not the lock, so the daemon image build is what
+  exercises the pin.
+
+### Fixed (2026-09-21 — corrections commit as one decision)
+- Explicit supersede and consolidate operations now stage source retirement,
+  trace invalidation, replacement storage, and any capacity movement together.
+  Encoding, admission, or write-through failures leave the original entries
+  active; ambiguous commit responses reconcile from durable state before the
+  bank can be read or saved again. File-backed banks persist complete Before
+  and After snapshots before publishing the replacement in memory.
+
+### Fixed (2026-09-21 — the Codex SessionEnd hook fits its three-second cap)
+- `plugin/hooks/session-end.sh` under a Codex runtime makes one two-second
+  request with no retry, matching `lifecycle.ps1`; the previous 3+1+3 s
+  worst case overran the 3 s cap `ops/setup-codex-hooks.py` sets, so a busy
+  daemon could turn the episode close into a hook timeout. Claude's budget
+  (10 s in `hooks.json`) and its retry are unchanged.
+- Docs: the coordination recovery guide's rebind example named port 8099
+  where the daemon serves 8765, and did not say that a state path under any
+  Git repository is refused.
+### Added (2026-09-21 — acknowledge several messages in one call)
+- `memory_message(action="ack")` takes one `message_id` or several
+  comma-separated (at most 50). The parameter stays a string because some
+  hosts stringify list parameters, and the form that produces — a JSON
+  array of strings — is read as that list. A batch returns `receipts` in
+  the order given and `missing` for ids that were not this mailbox's to
+  acknowledge, instead of failing whole; a single id keeps its receipt and
+  `message_not_found`. Items must be id-shaped (letters, digits, `-`, `_`);
+  anything else, empty items, or more than 50 ids is `invalid_message_id`,
+  never a silent `missing`. The batch is two statements under the agent row
+  lock, so overlapping batches serialize.
+
+### Added (2026-09-21 — coordination mail reaches the model once per turn, for free when quiet)
+- The daemon's `attach` and `heartbeat` answers carry `pending_preview`
+  beside `pending_count`: the five oldest pending messages with sender
+  label and a one-line excerpt (`PREVIEW_LIMIT`, `PREVIEW_EXCERPT`). Reading
+  the preview is not delivery; attempts and acknowledgements are untouched.
+- The shim's adapter renders a per-turn digest from that preview and keeps a
+  watermark that moves only when the rendered text changes. With a host
+  session id (`CLAUDE_CODE_SESSION_ID` for Claude Code, `_meta.threadId` per
+  Codex thread) it writes the digest to
+  `~/.pseudolife-mcp/digests/<sha256(id)>.txt` (`PSEUDOLIFE_DIGEST_DIR`
+  overrides the directory; the file goes on clean exit).
+- The UserPromptSubmit hooks (`user-prompt-submit.sh`, `lifecycle.ps1`) read
+  that file by the `session_id` they receive and print the digest only when
+  the watermark passed the shared `.seen` marker, then advance it. A quiet
+  turn adds no text. SessionStart on `resume` or `compact` clears the marker
+  so the next prompt prints the current digest afresh. Every firing that
+  finds a digest appends one line to `ledger.log` beside it (time, session
+  prefix, watermark, bytes added) for cost measurement.
+- The tool-result hint carries the same digest under the same marker, so a
+  change is delivered once whichever of the hook or the hint sees it first,
+  and hosts without hooks (Desktop Chat) still get it. While mail stays
+  pending and unchanged, a one-line reminder rides every tenth tool result
+  (`CoordinationAdapter.HINT_REPEAT_CALLS`). The count-only hint text is
+  replaced by the digest header.
+- Test helper: `tests/test_codex_hooks.py` now finds Git Bash when `git` on
+  PATH is `mingw64/bin/git.exe`, so the bash hook tests run on Windows
+  instead of silently skipping.
+
+### Fixed (2026-09-21 — avoid slow CPU embedding precision drift)
+- CPU torch embeddings explicitly retain float32 inference when newer
+  Transformers versions default to the checkpoint's lower precision. This
+  avoids slow bfloat16 inference on older CI CPUs while preserving the
+  previously validated CPU precision, real models and full test coverage.
+  GPU inference and the optional ONNX backend keep their existing precision.
+
+### Fixed (2026-09-20 — CI requires its database coverage)
+- Both full Linux CI lanes now fail when their test PostgreSQL is unavailable,
+  including before collection and at shared fixture/reachability checks.
+  Local runs can still skip database tests when PostgreSQL is optional.
+- The same full suites and two-worker file scheduling now record slow-test
+  timings, skip reasons, JUnit results and runner CPU/memory/I/O diagnostics
+  for investigating variable CI runtime. Test failures retain their exit code.
+
+### Changed (2026-09-20 — the coordination roster shows who is working)
+- `memory_agents(action="list")` returned every registered address. On the
+  live bank that was 90 rows, 11 of them leased and 67 Codex threads whose
+  shim had been killed with the row still marked attached, 5 to 160 hours
+  idle, no task, no mail; and a parked shim looked as busy as a working one because the
+  20 s lease heartbeat bumped `last_activity`. The list now shows peers
+  holding a lease or active within the last hour
+  (`storage.coordination.ACTIVE_WINDOW`), leased first, reports the
+  number of other matching peers as `idle_omitted` and sets `truncated`
+  when the page cut listed peers. A peer's public agent ID stays
+  addressable while its row exists.
+- Lease renewal is no longer activity. The shim notes every tool call it
+  forwards (`CoordinationAdapter.note_turn`) and the next heartbeat carries
+  `active: true`; only then does the daemon move `last_activity`. A shim
+  upgraded ahead of its daemon drops the flag for the process after one
+  `unexpected_parameter` refusal, so the lease survives either upgrade
+  order; deploy the daemon first all the same.
+- Addresses nothing can resume are retired sooner. The adapter registers
+  `capabilities.resumable` (true when a state file backs the address); an
+  address registered `resumable: false` is removed once both its lease and
+  its last activity are an hour old and no retained message references it
+  (`EPHEMERAL_AGENT_RETENTION`), instead of seven days. The lease
+  condition matters: the first heartbeat after a daemon restart prunes
+  before it is served, so a parked shim whose lease lapsed during the
+  restart must not lose its address. If a state-less address is retired
+  all the same, the adapter registers a fresh one instead of stopping with
+  advice to restore a saved identity it never had; state-backed addresses
+  keep the deliberate-recovery rule. Addresses that declared themselves
+  resumable, or that predate the flag, keep the seven-day rule, so nothing
+  an older adapter can still resume goes early.
+- A Claude Code session keeps its coordination address across resume: with
+  `PSEUDOLIFE_AGENT_STATE_DIR` set, the shim keys a private state file by
+  the `CLAUDE_CODE_SESSION_ID` the host exports to it
+  (`shim._session_state_path`). An explicit `PSEUDOLIFE_AGENT_STATE` still
+  wins; without either, each launch gets a new address as before. The
+  shim's comment that MCP servers never receive the session id was wrong
+  (checked 2026-09-20 in a running shim's environment).
+
+### Fixed (2026-09-20 — `memory_graph_review` scope description)
+- `memory_graph_review(action="list", scope=...)` described `scope` as
+  "keep only findings of this kind". It has always been a memory-source
+  filter — the same project scope the Console's Atlas switcher sends to
+  `/api/graph/review?scope=` — keeping only analyzer findings (duplicate,
+  orphan, dubious edge, test artifact, unattributed) whose entities carry
+  that source, while queued proposals (`proposed_link` / `merge_candidate`
+  / `junk_candidate`) always list (omit or `"all"` for everything).
+  Passing a finding kind such as `merge_candidate` matched no entity and
+  returned an empty analyzer listing, which the PR #316 review caught after
+  a draft hint had told agents to page that way. The served description and
+  the README tool row now state the real contract; no behavior change. Two
+  tests pin it: the served text (`tests/test_tool_consolidation.py`) and
+  the service semantics — a source keeps its entities' findings, a
+  finding-kind string yields none (`tests/test_graph.py`).
+
+### Fixed (2026-09-20 — deep dream results lost between daemon and shim)
+- `memory_dream(action="deep")` through the stdio shim failed after a few
+  seconds as "The memory daemon returned an invalid MCP response" while the
+  daemon logged nothing and answered a raw HTTP probe correctly. The SDK
+  client's SSE decoder refuses any server-sent event over 1 MiB (httpx2
+  `DEFAULT_MAX_EVENT_SIZE_BYTES`) and the SDK reports that as a closed
+  connection; a 316-proposal review queue with snippets made a 597 KB tool
+  result that was 1,124,250 bytes on the wire once escaped into the JSON-RPC
+  envelope and duplicated as `structuredContent`. Latent since the SDK v2
+  port (2026-08-25); it surfaced as the queue grew.
+- The MCP tool now bounds the deep response: when the JSON text exceeds
+  250 KB, each top-level list is cut to its leading 40 items, halving that
+  head until the text fits, and `truncated` maps each cut key to its full
+  length with a `hint`. A response that fits is returned untouched. The
+  service method, the Console and the sweep tick are unchanged.
+- The shim widens the SDK client's event limit to 16 MiB at both places it
+  builds an event source (the module `EventSource` for a POST's response
+  stream, and the http client's `sse` method for the listen stream and for
+  resuming a cut response), so any other large tool result arrives instead
+  of vanishing.
+- A response stream that closes after dispatch is now classified
+  `response_lost` ("response stream closed before a result arrived") instead
+  of `protocol`, so the next diagnosis starts at the transport, not the daemon.
+
+### Fixed (2026-09-20 — fresh and upgraded client setup)
+- Coordination sends wait for the initial clock reseed even while memory
+  hydration has already published its CMS, preserving ordering against stored
+  history during concurrent startup. Failed reseeds cannot be bypassed by a
+  previously cached readiness result.
+- Desktop shim compatibility probes exclude inherited token, token-map, and
+  token-file variables, including temporary installer credential sources.
+- Benchmark database selection preserves PostgreSQL URI options and accepts
+  keyword connection strings when changing the isolated database name.
+- Docker-tier setup validates the no-spawn guard's effective value, reports
+  incomplete existing registrations, and refuses a fresh stdio registration
+  when the client cannot set the guard. Repair guidance preserves custom
+  commands, arguments, connection settings, and credentials.
+- Codex setup helpers load the checkout's credential implementation before
+  consulting installed packages. Fresh installs and upgrades from older host
+  packages no longer fail before hook setup and MCP registration; subprocess
+  regressions cover both without installed dependencies or a repository
+  `PYTHONPATH`.
+- Source installers install the host shim from the same checkout as the
+  Docker daemon, replacing an older or same-version installation instead of
+  mixing new client configuration with an older PyPI shim. Existing custom
+  MCP registrations remain preserved; their registered interpreter must be
+  upgraded separately when it differs from the installer-managed executable.
+  Fresh registrations pin the installed executable; reruns upgrade recognized
+  installer-managed commands and report a failure if a bare command still
+  resolves to a competing shim on `PATH`.
+- Claude Desktop setup preserves an existing private credential file on
+  ordinary reruns and refuses an unusable explicit replacement before changing
+  its configuration. Fresh setup can select a unique `claude-desktop`
+  credential from the daemon's per-principal token map; ambiguous maps require
+  an explicit credential file instead of producing a broken registration.
+
+### Fixed (2026-09-20 — coordination no longer waits behind the dream)
+- Every adapter-authenticated mailbox operation (`context`, `register`,
+  `attach`, `heartbeat`, `receive`, `send`, `ack`, `agents`, `update`) used
+  to run under the service lock on the shared storage connection, so it
+  queued behind whatever else held that lock. On the live daemon the idle dream and the
+  session reaper hold it for seconds at a time (2026-09-20 log: `_dispatch
+  waited 8.6s`, `autosave_if_changed waited 47s`); the adapter's per-call
+  identity check has a 5s timeout, so tool calls failed with "Coordination
+  identity is unavailable", heartbeats missed and 60s leases expired, and a
+  shim whose adapter timed out at startup ran memory-only for its whole
+  life ("instance_authentication_required" on every later mailbox call).
+  `coordination.dispatch` no longer takes the service lock: the store runs
+  on a dedicated autocommit connection
+  (`storage.coordination.CoordinationConnection`, same session setup and
+  commit check as the shared one, heal-on-next-use after a Postgres restart
+  but never mid-transaction) serialized by its own
+  `MonitoredLock("coordination")`. Mailbox rows were already guarded by SQL
+  row locks, so a second connection is safe. Only `send` needs the fully
+  initialized service (its HLC stamp must outrank stored ones), and it pays
+  that once per process unless a memory call already did; every other
+  action, including a cold daemon's first `attach`/`heartbeat`, needs only
+  the durable tier. A bound-identity request from the wrong bank is still
+  refused before any embedder load. The no-adapter `memory_agents` awareness
+  view is unchanged and still reads episodes under the service lock.
+  `HybridLogicalClock` gained an internal lock because `send` now ticks it
+  outside the service lock. `tests/test_coordination_dispatch_isolation.py`
+  holds the service lock for 3s and asserts
+  `context`/`register`/`attach`/`receive`/`send` each complete in under 1s
+  (watched red at 3.01s), that the mailbox connection is distinct,
+  autocommit and committed as seen from the service connection, that it
+  reconnects after loss, that an initialized service is never re-locked by
+  a mailbox call, and that a cold service pays full init only for `send`
+  and only once.
+
+### Fixed (2026-09-20 — Desktop registrar refuses a shim that cannot read the token file)
+- `ops/register_claude_desktop.py` probes `<command> --help` for the
+  `PSEUDOLIFE_MCP_TOKEN_FILE` marker before writing anything when a token
+  file is requested, and refuses (exit 4, config and credential file
+  untouched, upgrade named) a shim whose help answers without it. The
+  installers previously took the shim from PyPI, and every release through 0.15.0
+  reads only the literal `PSEUDOLIFE_MCP_TOKEN` — which Desktop never
+  delivers — so the Claude Desktop client shipped above would have
+  registered an entry those shims silently ignore, reproducing the
+  2026-09-19 "unhandled errors in a TaskGroup" failure with no hint. A
+  shim from before `--help` existed (it answers "unknown mode") is refused
+  the same way; a probe that yields no evidence (missing, not executable,
+  timeout, any other non-zero exit, exit 0 with no output) is noted and
+  not blocking. The probe runs with no stdin and without the token
+  variable, so a wrapper that drops its arguments cannot start a real
+  shim holding the bearer. `--skip-shim-check` bypasses it. A frozen copy
+  of the real 0.15.0 help (`tests/fixtures/`) is driven through a real
+  subprocess in the tests, so "refuses the released shim" is reproducible
+  rather than a hand-run. The shim's
+  `--help` now carries a credentials paragraph naming both env forms and
+  their precedence (the file wins), which is the marker the probe reads;
+  a test pins the two together and proves the check is load-bearing.
+  README's Updating section says the shim is a separate install that does
+  not move with `ops/update.*`.
+
+### Added (2026-09-20 — Claude Desktop client)
+- `ops/install.sh --client claude-desktop` / `ops\install.ps1 -Client
+  claude-desktop` register the stdio shim in `claude_desktop_config.json`
+  through the new standard-library-only `ops/register_claude_desktop.py`,
+  which both installers call: absolute shim path (Desktop's sanitized PATH
+  omits pipx/venv bin dirs), the `claude-desktop` writer id, the Docker-tier
+  no-spawn guard, and — when the daemon is token-gated — a
+  `PSEUDOLIFE_MCP_TOKEN_FILE` path, never a token value. Because the shim
+  reads that file first and unconditionally, the registrar never points
+  the entry at a file it did not write or validate: it writes the file
+  (owner-only, via the package's credential writer) from the installer's
+  `PSEUDOLIFE_MCP_TOKEN` (environment or `ops/.env`), or migrates a literal
+  token already in the entry into it and drops the literal from the config;
+  with nothing to write and no usable file it registers without a
+  credential and exits 3 so the installer reports it. It resolves the
+  config location per OS, including the Windows Store/MSIX package cache
+  (naming the other copy when both exist), backs the file up before
+  changing it, preserves every other key and any hand-added env var, and
+  is idempotent. Menu option 5, preflight (which now checks for python
+  3.10+ for this client), the capability matrix, the writer-id default and
+  the wiring ladder know the new client.
+
+### Fixed (2026-09-20 — shim startup against a token-gated daemon)
+- The shim exits at startup with a one-line explanation when `/health`
+  reports `auth: true` and it holds neither `PSEUDOLIFE_MCP_TOKEN` nor
+  `PSEUDOLIFE_MCP_TOKEN_FILE`, instead of 401-ing on every call — which
+  Claude Desktop surfaced only as "Couldn't start for Cowork and Code
+  sessions. Error: unhandled errors in a TaskGroup (1 sub-exception)" for
+  four days after the 2026-09-14 credential activation. Desktop launches
+  MCP servers with a sanitized environment, so an OS-level token export
+  never reaches the shim; the message says so and names the config fix.
+  A configured token file that is missing or not owner-only is reported
+  the same way at startup — the per-call `credential_unavailable` error
+  reaches Desktop as the same opaque wrapper.
+
+### Fixed (2026-09-14 — Windows deployment authentication)
+- The Windows updater now removes inherited authentication variables before
+  launching Compose, rather than passing empty values that override the
+  configured credentials. It restores the caller's exact absent, empty or
+  populated environment state after both successful and failed deployments.
+
+### Fixed (2026-09-14 — review queue resolution)
+- Settled analyzer link proposals close their matching duplicate findings in
+  the same transaction. Bounded reconciliation covers earlier decisions, and
+  ordinary sweeps file analyzer candidates without waiting for a deep apply.
+- Pending graph opinions are bound to their evidence and judging policy.
+  Changed inputs are re-evaluated and stale replies cannot authorize actions.
+  The Console explains waiting states and can requeue a bounded set of opinions.
+- Tagged automatic rejections and dismissals can reopen on changed evidence or
+  policy; human confirmations and legacy decisions remain closed. The Console
+  exposes the decision audit, and interrupted actions have bounded retry paths.
+- Automatic lesson/world duplicate retirement validates both original records
+  and commits retirement and audit together, leaving the survivor unchanged.
+  Exact-content and metadata checks preserve guidance; model-authored rewrites
+  remain for review. Existing automation defaults are unchanged.
+- A Terra/high diagnostic ladder completed 54 calls across five review categories
+  with no call failures. Its simulated gates still made incorrect decisions outside
+  junk detection, so the run does not justify broader enablement. The tagged
+  evidence contains labels and vote summaries, not private memory text.
+
+### Fixed (2026-09-14 — Windows credential ownership)
+- Newly created credential and coordination state files belong to the current user even
+  when Windows defaults elevated processes to group ownership. Existing files
+  still require private permissions and current-user ownership before rotation.
+
+### Fixed (2026-09-13 — client authentication recovery)
+- Codex setup connects the shim and lifecycle hooks to one private credential
+  file. Running clients reload changes without replaying failed tool calls;
+  transport failures report sanitized diagnostics and uncertain write outcomes.
+  Tokenless setup pins the intended endpoint, and shared Bash hooks use Codex
+  connection state only when invoked for Codex.
+- Agent mailboxes retain their address across bearer rotation for the same
+  authenticated bank and principal. Legacy state is adopted only after mailbox
+  ownership is verified; mismatched authority preserves the saved state.
+  Saved identities must remain private and owned by the current user.
+- Portable knowledge transfers preserve the destination bank's identity rather
+  than copying the source mailbox authority.
+- Daemon updates honor explicit authentication settings in `ops/.env`
+  without inherited client credentials overriding them or changing the caller's
+  environment.
+
+### Fixed (2026-09-13 — Codex coordination readiness)
+- The Codex coordination setup helper now recognizes the daemon's authenticated
+  instance-credential challenge as readiness, so an enabled and allowed bearer
+  principal no longer reports that the daemon is unavailable.
+
+### Fixed (2026-09-12 — interrupted legacy imports)
+- Repairing a failed legacy import preserves source entries even when daemon
+  writes have identical text and timestamps. New imports commit each entry and
+  its source-order cursor together, so another interruption or a lost commit
+  response resumes without skipping source entries or duplicating committed ones.
+  Previously interrupted imports without a source cursor retain their legacy
+  matching behavior because their original row ownership was not recorded.
+
+### Added (2026-09-12 — Codex task coordination)
+- Codex CLI and desktop MCP calls use their host-supplied task ID for attribution
+  and, when coordination is enabled, a private mailbox that survives resume.
+  Forks receive separate mailboxes. Registration is lazy and bounded; optional
+  coordination failures leave ordinary memory available.
+- `ops/setup-codex-coordination.py` checks access without registering an agent
+  and enables pull messaging through scoped, version-checked Codex configuration
+  writes with a private backup. It refuses a single shared state file.
+- An optional experimental bridge submits addressed messages as tool output to
+  an authenticated local Codex app-server. It requires explicit wake opt-in and
+  an already loaded recipient; it never starts or resumes a task, grants approval,
+  or acknowledges mail for the recipient. Ordinary desktop stdio connections
+  continue to use pull messaging.
+
+### Added (2026-09-11 — experimental agent coordination)
+- Agents can discover other open sessions and exchange addressed messages within
+  one bank. Coordination defaults off; mailbox access requires an allowed bearer
+  principal and a separate adapter-held instance credential. Awareness reports
+  last observed activity without claiming that an open session is alive or that
+  a resource is reserved.
+- Schema **v40** adds `coordination_agents` and `coordination_messages` outside
+  retrieval and dream extraction. Transactional recipient ordering, idempotent
+  sends and explicit recipient acknowledgments preserve pending mail across
+  reconnects. Expiring bodies and retained request fingerprints bound storage;
+  portable knowledge exports omit both operational tables and their clock metadata.
+- Offline restore recovery revokes restored credentials and wake grants, then
+  deliberately rebinds retained addresses through private state files. Mailbox
+  HLC high-water metadata survives body pruning and backward-clock restarts;
+  a failed startup read must recover before bank initialization proceeds, reads
+  included. The recovery guide preserves a verified high-water bound when
+  repairing a malformed row, including mailbox-only history after pruning.
+- Optional Claude channel transport uses the documented preview protocol and
+  preserves the ordinary shim's per-call upstream connections. Transport
+  submission is not proof of host receipt; real-host delivery remains subject
+  to explicit opt-in and host verification. Authenticated retrieval remains the
+  fallback when live delivery is unavailable.
+- Live Claude checks cover addressed review/reply/acknowledgment, busy delivery,
+  crash replay and explicit retrieval fallback. On Claude Code 2.1.267, a first
+  channel turn after startup/resume can precede host tool readiness; pending mail
+  can require an ordinary prompt and explicit receive. Live delivery stays
+  experimental and does not promise unattended startup recovery.
+- Review fixes (2026-09-11, before merge). A registration that fails or is
+  cancelled by the shim's startup budget releases its empty state reservation,
+  so the next launch registers instead of refusing on invalid state; an empty
+  file older than a minute (a crash) is taken over under an exclusive operating-
+  system lock, while a fresh one still belongs to the process registering with
+  it. Only a confirmed missing address is retired to `.stale` and replaced on
+  startup. Rejected bearer or instance credentials preserve the saved identity;
+  explicit authentication or identity rejection during background recovery stops
+  retries with an actionable error. The adapter re-attaches after transient
+  outages (backoff from
+  1 s to 60 s) and retries 429 answers within a call, so a daemon restart no
+  longer ends live delivery for the session; a re-attach that keeps its lease
+  keeps its cursor and never re-delivers, a new generation replays the mailbox,
+  and an older page cannot clobber the replay even when the generation changes
+  between yielded messages or during attempt reporting. Live delivery attempts
+  a message at most three times across
+  attachments, then leaves it for explicit receive, and a message acknowledged
+  or expired between page and attempt is skipped, not treated as an outage.
+  Pruning also removes addresses idle for seven days with no lease and no
+  retained mail (an acknowledgment counts as activity), and peer listings rank
+  live adapters first. Live events carry a fixed agent-origin header ahead of
+  the text; explicit receive labels messages as agent-origin and carries a note
+  that peer requests cannot grant user approval. Awareness shares the mailbox's
+  allowed-principal gate, including on the session-start hook. Coordination
+  calls run on their own small executor instead of the console's shared one.
+  The probe and bench record Python, MCP SDK and host handshake versions; the
+  System Atlas gained cards for the five coordination modules.
+
+### Fixed (2026-09-11 — regression gate input requirements)
+- The regression gate rejects a missing bank directory as an infrastructure failure
+  before clearing prior results or starting its GPU server. It no longer falls
+  back to copied contexts that could pass without testing fact ranking.
+  Its documented scope now distinguishes offline cortex reconstruction from
+  entry retrieval, service search and MCP rendering.
+
+### Fixed (2026-09-11 — durable correction warnings)
+- Facts retain their `re_verify` warning when a corrected source memory is
+  later evicted or deleted. PostgreSQL schema v39 records source supersession
+  independently of evictable traces, in the same transaction as source-entry
+  retirement.
+  Re-confirming a fact still clears its warning; deleting an uncorrected source
+  does not create one.
+- Existing trace relationships retain correction events while tracing is
+  disabled, with warning serving still controlled by `memory.traces.enabled`.
+  Logical exports preserve the events. Upgrades and older imports reconstruct
+  only surviving superseded source/trace pairs; already-deleted history cannot
+  be recovered.
+- **Upgrade effect.** The first v39 start materialises one durable event per
+  surviving superseded-source trace pair — 2077 pairs on the reference bank on
+  2026-09-11. That reproduces the warnings the bank already served rather than
+  raising new ones, but from then on a warning no longer drains when its
+  source memory is evicted or deleted. Each clears only when its slot is
+  confirmed again: a `memory_fact_set` at that slot with the same or a new
+  value, or accepting a contender there. An operator clearing a population
+  deliberately re-asserts those slots; there is no dismissal that skips
+  confirming the value. `re_verify` remains passive and is still excluded from
+  `correct_with`, so a larger standing population does not become a larger
+  instruction list.
+- Grouped set-slot `last_confirmed` now falls back to each member's
+  `asserted_at` when the member carries no confirmation stamp, matching the
+  scalar and lookup paths. A set slot that previously warned only because a
+  legacy member held a zero clock may no longer warn, and the served
+  `last_confirmed` on a grouped set entry may report an assertion time.
+- A correction whose target list repeats the same entry no longer fails after
+  the rows are already retired. The atomic retirement count is checked against
+  the distinct targets, matching what the storage call reports.
+- `ops/measure_reverify_population.py` re-measures the flagged population
+  read-only from a DSN: current facts, the served `last_confirmed`-keyed
+  warning count, the latching "any source superseded" upper bound, and the
+  trace/supersession pair count the v39 backfill inserts. Measured on the live
+  bank 2026-09-11: 1668/6015 current facts (27.7%) served the warning, 1981
+  (32.9%) under the bare test, 2077 pairs.
+
+### Fixed (2026-09-11 — durable dream acknowledgement)
+- Dream batches acknowledge their exact entries instead of moving a timestamp
+  boundary past other entries. New memories remain eligible after equal or
+  backdated timestamps, source-policy changes and restarts. Manual commits use
+  the token returned by the pull; numeric cursor writes are rejected with
+  instructions to pull again.
+- PostgreSQL schema v38 adds per-entry acknowledgement state. Existing entries
+  are classified once against the legacy cursor and source policy; this keeps
+  the prior boundary and does not repair historical omissions. File checkpoints
+  move to format v7 with durable entry identities and acknowledgement state.
+- A memory whose storage write failed no longer stalls every later dream until
+  the daemon restarts. The pull re-persists such entries, excludes any that
+  still cannot be stored — reporting `skipped_unpersisted` and leaving them
+  pending for the next pass — and consolidates the rest. Pull ordering no
+  longer depends on every pending memory having a storage row, so a backlog
+  with tied timestamps reports its status instead of failing.
+- Entries deleted between a pull and its commit are reported as `missing`
+  instead of failing the whole batch, so a concurrent deletion no longer
+  leaves its batch to be re-extracted on every later pass.
+- A failed dream-tracking initialization is named on `/health`
+  (`dream_tracking_error`, without changing `status`) and a transient storage
+  failure is re-attempted by the next dream call. A corrupt bank secret or an
+  unusable legacy cursor still stops only the dream, and still requires repair.
+- Classifying a bank's pre-v38 entries is two statements rather than one per
+  entry, so startup no longer holds the service lock for a round trip per
+  legacy memory. The classification rule itself is unchanged.
+
+### Security (2026-09-11 — require existing ONNX artifacts)
+- A configured ONNX backend with no matching artifact could enter
+  SentenceTransformers and Optimum's automatic export path. That path saves a
+  model's tokenizer or processor and made Transformers
+  GHSA-xrqw-3rrv-vx5w conditionally reachable for a malicious local or cached
+  model even with Hugging Face offline mode enabled. ONNX loading now verifies
+  the configured artifact for each supported Transformer module and passes
+  its owning local model directory to the backend. Missing files or unknown
+  module layouts fall back to torch before ONNX construction; filenames must
+  use lowercase `.onnx` to match case-sensitive loader discovery. No validated
+  ONNX artifact path or `modules.json` may traverse a link between the model
+  root and the file: the loader's discovery glob does not descend into linked
+  directories, so a link that stays inside the root still hides the artifact
+  and re-enables export. Only a cached Hub snapshot's leaf link is accepted,
+  and only after local-only cache resolution and only into the same
+  repository's `blobs` directory.
+- The pinned Optimum stack matches the loader subfolder against OS-native path
+  strings, so on native Windows an artifact under a nested module subfolder
+  such as `0_Transformer/onnx` goes undetected and export is enabled despite
+  `export=False`. A model whose recognized Transformer module loads from a
+  subfolder now falls back to torch there before ONNX construction. A flat
+  `onnx` layout resolves on both platforms and keeps the load-only backend, as
+  do Linux and the daemon image.
+- The daemon image's bake guard checks the provisioning script's model list and
+  the Dockerfile's call to it. It previously matched the default model name
+  anywhere in the Dockerfile, which a comment naming the model satisfied while
+  downloading nothing.
+- The daemon image explicitly downloads MiniLM's `onnx/model.onnx`, then loads
+  it from the owning local snapshot with export disabled. A missing artifact or
+  incompatible same-revision metadata now fails the build instead of creating
+  an ONNX model implicitly. Dependency versions are unchanged because
+  `optimum-onnx` 0.1.0 still requires Transformers below 4.58.
+
+### Fixed (2026-09-11 — exact correction targets)
+- Explicit supersede and consolidation calls accept entry IDs from retrieval,
+  and the Console carries those selected IDs through to the correction.
+  A correction no longer retires a similarly worded note or every duplicate
+  across sources and episodes. Legacy text selectors require one exact match;
+  missing, retired, ambiguous or unavailable targets reject the whole selection
+  before any changes. File mode retains unique exact-text selection.
+- Consolidation candidates exclude retired entries before candidate limits
+  and clustering, so suggested IDs do not include already-replaced targets.
+- Correction results include the superseded IDs and actionable target errors.
+  The Console keeps the edit open when the service rejects a correction,
+  preserving replacement text instead of reporting a false success.
+- The Console treats a correction as rejected only when the service reports an
+  error or retired nothing. A correction whose replacement text was filtered
+  out still retired its target, so the Console now closes the edit and warns
+  that the replacement was not stored, instead of reporting a failure for work
+  that already happened and inviting a retry that cannot succeed.
+- A legacy text selector needs one LIVE match, not one match overall. Text that
+  was corrected and later restated leaves a retired twin behind; that twin no
+  longer makes the live entry ambiguous, which file mode could not work around
+  because it has no entry IDs. Two live duplicates are still ambiguous, and a
+  text whose only matches are retired still reports `target_superseded`.
+  Consolidation candidates apply the same rule, so such a note is offered again.
+- `memory_supersede` and `memory_consolidate` require `new_text` again; an
+  omitted replacement is a client-side schema error rather than a silent
+  empty-input no-op.
+- A failed storage read while listing consolidation candidates degrades to
+  unverified candidates with a logged warning instead of failing the call;
+  the correction itself still validates every ID before changing anything.
+
+### Fixed (2026-09-11 — durable lesson acknowledgement)
+- Lesson synthesis commits staged lessons, graph updates and acknowledgements
+  together in PostgreSQL. A failed write leaves the batch retryable without
+  exposing tentative lessons; overlapping extractions recheck their selected
+  signals before applying changes. A lost commit response is reconciled from
+  durable state before further service use or saving.
+- Empty or failed extraction routes retain their signals, including individual
+  empty rule responses. Successful routes can proceed independently; a custom
+  rule extractor with incomplete output coverage leaves that route pending.
+  Signal retention and file-mode synthesis behavior are unchanged.
+- A claim the batch cannot write costs only itself: it rolls back on its own
+  savepoint (lesson and graph halves together), the rest of the batch still
+  commits, and the count appears as `write_errors` in the synthesis report.
+  Its rule signal stays pending; the clustering route is acknowledged once any
+  of its claims lands. A claim that fails every time no longer stalls every
+  later sweep.
+- Within one batch, the near-duplicate gate compares a claim against the
+  lessons that batch has already staged as well as the durable ones, so the
+  second of two near-identical claims is counted as `deduped`, not written.
+- Claim embeddings are computed before the batch transaction opens, and one
+  sweep drains at most `memory.lessons.synthesis_max_signals` signals
+  (default 200; 0 disables). Both bound how long a batch holds the service
+  lock and one PostgreSQL transaction; the remainder waits for the next sweep.
+- An unresolved lesson reconciliation no longer blocks unrelated persistence:
+  weights, access counts and cortex/world slots are written, only the lesson
+  snapshot is skipped, and the save still fails loudly afterwards. A restart
+  discards exactly what those parts would have made durable.
+- `/health` reports `lesson_reconciliation_required` while a lesson commit is
+  unresolved, and the daemon logs it at ERROR. Status stays `ok` so the
+  container healthcheck does not restart the daemon out from under the
+  unsaved state, matching `migration_partial`.
+- A synthesis report keeps its extraction-route errors when a transaction
+  error follows, instead of replacing them.
+### Fixed (2026-09-10 — preserve source evidence)
+- Automatic contradiction candidates can admit a possible update through
+  the surprise gate, but no longer retire or weaken whole source entries.
+  A conflicting claim does not establish that every claim in a note is
+  obsolete. Explicit supersede/consolidate operations and cortex fact
+  supersession remain available; existing replacement history is preserved.
+- Explicit supersede/consolidate operations bypass surprise filtering for
+  their replacement note, so a near-identical correction is still stored
+  after its target is retired. Ordinary stores retain their admission rules.
+
+### Fixed (2026-09-10 — scoped entry retrieval)
+- Dense retrieval applies source, episode, tag, logical-turn and optional
+  superseded-entry eligibility before each band's candidate cap. Eligible
+  evidence can surface even when higher-scoring out-of-scope entries fill the
+  global top-k. Unfiltered ranking is preserved; diagnostic traces include
+  total, eligible and excluded entry counts without exposing excluded text.
+
+### Added (2026-09-10 — offline supersession auditing)
+- `evals/audit_supersessions.py` audits a private entry snapshot on CPU using
+  saved embeddings and the current detector. It reports missing/ambiguous
+  replacement links and produces a stratified blinded review packet separately
+  from detector predictions. It does not change memory or infer historical
+  cause or semantic correctness from replay agreement.
+
+### Added (2026-09-10 — verified Codex hook setup)
+- Both installers now detect PseudoLife's hook source automatically and offer
+  one scoped approval for briefings, reminders, cleanup, and instruction fallback.
+  Unattended approval uses `--codex-hook-trust yes` / `-CodexHookTrust yes`.
+- The shared setup helper backs up existing files before changing hook
+  definitions or trust, records Codex-generated trust hashes for PseudoLife's
+  verified scripts only with scoped user approval, and verifies their actual
+  lifecycle without contacting an external model provider. Disabled hooks and
+  managed trust restrictions are respected; unrelated plugin settings and
+  nonmatching commands are retained. Approved setup may replace recognized
+  manual definitions during migration; modified recognized script bundles or
+  mixed known/custom platform commands require manual review.
+- In automatic mode, verified hook readiness controls whether approved standing
+  instructions are needed; selecting an owner alone does not suppress fallback.
+  Explicit append/skip choices still apply. If the helper cannot run, native
+  fallback requires explicit instruction append or hook approval with automatic
+  instructions. Appending retains existing instruction bytes and backs up the
+  existing file first.
+
+### Fixed (2026-09-10 — Codex memory onboarding)
+- The stdio shim now forwards the running daemon's MCP instructions, and all
+  tools expose conservative read/write, destructive and external-access hints.
+  Mixed status/mutation tools remain writes; client approval policy still applies.
+  Destructive hints cover document replacement and configured store auto-promotion.
+- Codex hook installation includes Windows and per-turn reminders. The plugin
+  supplies native PowerShell lifecycle commands with bounded SessionEnd I/O;
+  Unicode context survives OEM console encodings and SessionStart retries one
+  transient failure. Claude's existing Bash commands remain supported. Codex
+  still enforces hook trust; scoped user approval through setup can authorize
+  the verified PseudoLife definitions without a separate trust step for them.
+- Both installers now base automatic instruction fallback on verified hook
+  readiness and scoped consent, with explicit append/skip overrides. Users can
+  choose instructions-only setup; skipping hooks alone does not authorize an
+  append. An unavailable optional instruction fetch no longer kills the shim
+  before client initialization, and its five-second deadline keeps a stalled
+  endpoint from blocking startup.
+
+### Added (2026-09-10 — registered-runtime diagnostics)
+- `pseudolife-mcp doctor` verifies the invoking runtime, daemon health and actual
+  stdio handshake without spawning a daemon or calling bank tools. Onboarding
+  now covers cold-start budgets, standing guidance, duplicate registrations,
+  stale editable metadata, discovery limits and explicit hook verification.
+  Unavailable-daemon and timeout reports retain specific recovery advice
+  without exposing transport exception text.
+
+### Added (2026-09-08 — the lessons tier can distil one verbatim rule per episode, and a τ-bench adapter runs the "Learning on the Job" protocol on it)
+- **The dream's lesson synthesis clusters and paraphrases; a protocol that
+  needs one situation-specific rule per episode with its values intact had
+  no way to get one.** Tablan et al. (arXiv 2607.22157) distil every τ-bench
+  banking episode into a retrievable rule and lift single-trial success 1.6×
+  from the verdict alone and 2.6× from corrections. Mapped against the
+  lessons tier (`docs/specs/2026-09-08-learning-on-the-job.md`): capture is
+  identical, cadence is reproducible by an orchestrator-triggered
+  `memory_dream(action="run")` — the paper's own data shows learning only
+  from a task's second trial, ~97 episodes after the rule was written, so a
+  trial-boundary batch reproduces the loop and no synchronous
+  distill-on-outcome path is needed — but the synthesis prompt and the
+  one-value-per-`(task, aspect)` slot would fold 97 situations into each
+  other. **Rule mode**: `memory.lessons.rule_mode` (default off) or an
+  `about` starting with `rule:` routes a signal to
+  `OpenAICompatExtractor.extract_rules` — one call per signal under a
+  separate prompt, exactly one `WHEN … THEN …` / `WHEN … do NOT …` rule,
+  `aspect` forced to `rule`, the slot keyed by the situation, decision-critical
+  values copied verbatim (a `MUST INCLUDE:` line in `detail` is checked and
+  the call retried once), and no cross-key dedup for rules. The shipped
+  prompt, its single batched call and the default slot semantics are
+  unchanged and pinned; an extractor without the rule path synthesises rule
+  signals under the shipped prompt and the report says so.
+  `evals/lesson_synthesis_bench.py --rules` scores value survival on two
+  generic fixtures. Not added, on purpose: retrieval credit for lesson ids
+  (`retrieval_uses.entry_id` shares the entries' id space — a `kind` column
+  is a schema change), a pending-signal term in the sweep's `would_fire`,
+  the twin-situation merge, a daemon read-only mode.
+- **`evals/claude_shim.py --emulate-tools`**: the shim serves `claude -p` as
+  a pure completion, and tau2-bench's agent loop reads OpenAI-format tool
+  calls with no text fallback, so Sonnet could not act as a tool-using agent
+  through it. In emulate mode the request's tools are rendered into the
+  system prompt with a strict JSON reply schema, tool history is folded into
+  the transcript, and a parsed reply becomes `tool_calls` whose `arguments`
+  is always a valid JSON string; a near-JSON reply is retried once, never
+  raised. Off by default and byte-identical when off; refuses to start on the
+  production port (`:8082`).
+- **`evals/taubench_adapter.py` + `evals/taubench_pseudolife/`** run the
+  paper's τ-bench banking protocol with Pseudolife as the memory backend:
+  a `pl_memory` agent for the pinned tau2-bench 1.0.1 (four-hunk patch under
+  `evals/taubench_pseudolife/patches/`, its own Python 3.12 venv, never
+  imports the engine), memory tools as environment tools with mid-episode
+  writes deferred, a post-evaluation reflection turn, one `X-PL-Session` per
+  episode with the outcome's distance from the first search recorded against
+  `use_window_seconds` (`window_ok` in telemetry — the outcome is still sent,
+  and the report refuses to publish ratios on any violation), two rule routes
+  (`entries`: the reflection writes each rule as a `constraint` entry credited
+  by `used_ids`; `lessons`: `memory_outcome` with the `rule:` prefix and a
+  dream per episode or per trial), the three feedback arms, read-only
+  transfer, and the paper's estimators (per-trial curve, pass^k, hold rate,
+  floor conversion, paired cluster bootstrap). Customer = local Qwen under
+  the reproducible config; agent = Sonnet 5 at medium effort through the
+  emulating shim on an eval-only port. **No τ-bench number is published**;
+  `--smoke` and the full grid are separate launches, and the parity bar
+  (first written as 2.6× / 1.6× over our own static-RAG baseline, paired
+  intervals excluding 1.0× — amended below to the Sonnet replication's 1.6×)
+  is preregistered in the spec.
+- **The first smokes (2026-09-08, four runs of 3 tasks × 2 trials, 24
+  episodes, zero agent or customer errors) changed five things.** The local
+  customer's thinking mode returned empty turns that tau2 rejected three
+  times per episode: the user-LLM args now pin `enable_thinking: false` the
+  way the bench's own client does. tau2 resolves its domains and its
+  simulations under one `TAU2_DATA_DIR` and runs with the checkout as its
+  working directory: the adapter now passes the checkout's data dir as an
+  absolute path and refuses a root without the banking domain. The paper's
+  released task list is one whitespace-separated line: the loader splits on
+  whitespace. Under emulation the model twice answered with the shim's own
+  history marker as plain text: the preamble now forbids it and a
+  marker-shaped reply is recovered as the call it names. And retrieval
+  compliance under `nudge` was one memory search in twelve episodes even
+  with a memory addendum in the policy, so `--retrieval inject` (the paper's
+  second mode: the harness searches on the first turn and folds the results
+  into the agent's copy of it, through the same dispatch, so served ids and
+  the window clock are recorded) is now an arm; under it every episode
+  served three to five memories and every served id was credited, and the
+  rule-mode daemon distilled a situation-keyed `WHEN … THEN …` lesson per
+  episode. The smoke rewards are not a number: three tasks, two trials, a
+  bank that carried over between smokes.
+- **The τ-bench parity bar was the paper's Mistral ratio, and on the Sonnet
+  instrument it is a ceiling.** The 2.6× (instruction) and 1.6× (experience)
+  figures are Mistral Large at a 0.064 baseline; the adapter runs Sonnet 5 at
+  medium effort — the paper's replication model — whose committed grids score
+  baseline 0.247 and instruction 0.397, i.e. 1.60× [1.31, 2.05], delta +0.149,
+  28 of 57 floor tasks converted. With our own baseline tracking 0.24, 2.6×
+  would demand 0.65 absolute. `PARITY_BARS` is now `instruction: 1.6` and
+  `experience: None` (the paper ran no Sonnet experience arm, so it is
+  reported, not gated), amended in the spec before any learning-arm episode
+  existed; the summary still reports the delta and floor conversion beside
+  the paper's Sonnet numbers.
+- **A tool call the model closed one brace short cost the full baseline
+  five of its first 37 episodes.** On a wrapper tool whose own `arguments`
+  field is a JSON-encoded string, Sonnet wrote the escaped inner object
+  correctly and then closed one brace short; the shim's retry did the same;
+  the raw JSON was served back as assistant text and the customer simulator
+  played along, so the episode ran to the 60-step cap at two CLI calls per
+  turn and scored a spurious fail. `claude_shim` now balances the braces a
+  near-JSON reply is short of — counting only braces outside string
+  literals, never removing anything, and only after a plain parse failed —
+  so the call is served without a retry. The five contaminated cells were
+  re-run on the fixed shim under tau2's `--auto-resume`; the 32 clean ones
+  stand.
+- **The between-trial dream would have timed out a quarter of the way
+  through the first full trial.** Under `--distill trial` one
+  `memory_dream(action="run")` drains every pending signal of the trial in a
+  single synchronous tool call — 97 rule-mode signals at the shim's measured
+  7-12 s each, 12-20 minutes — against the MCP client's default 300 s read
+  timeout, so the adapter would have raised mid-arm while the daemon kept
+  dreaming. `evals/taubench_adapter.py` now builds the client with a
+  two-hour read timeout (`DREAM_READ_TIMEOUT_S`, of the httpx flavour the
+  installed `mcp` uses), and `check_dream_result` treats the daemon's
+  single-flight `{"skipped": "dream_in_progress"}` — which carries no
+  `error` key — as the failed dream it is for the next trial, stopping the
+  run instead of reporting an unconsolidated store as a learning arm.
+
+### Fixed (2026-09-08 — `used_ids` credited only the last search that served an id, so the earlier ones read as negatives)
+- **An agent naming a memory it used credited only the most recent search
+  that had served it; every earlier search in the session that served the
+  same memory stayed unlabelled, and the replay either dropped those events
+  or — when they carried any other label — scored the memory as a miss in
+  them.** `memory_outcome(used_ids=)` (2026-09-05) reused the
+  dereference rule — `memory_get`/`memory_reinforce` credit the most recent
+  serving event, which is right for a fetch that follows one query — but an
+  outcome follows a session and names ids, not queries.
+  `evals/retrieval_replay.py` keys labels per event, drops an event with no
+  label and scores an unlabelled served id in a labelled event as a miss,
+  and `evals/retrieval_telemetry_review.py` counts an unlabelled event
+  against the Phase-1 target, so the rule lost a positive the agent asserted
+  and could turn it into a negative it never did. Measured on the live log
+  the same day (`evals/results/retrieval-uses-multiserve-20260908.json`,
+  read-only, 2,648 events / 74 sessions): none of the 13 labels on record
+  had a second serving event in its window, but 720 of 2,487 (session,
+  entry) pairs — 29% — are served by more than one event in their session,
+  628 of them within the hour, so under a many-searches-then-one-outcome
+  cadence the bias is structural. An `outcome` label now credits **every**
+  event in the session window that served the id (new
+  `PostgresStorage.credit_retrieval_uses`); `get`/`reinforce` are unchanged.
+  Both harnesses read the table as before. The widening needs an identity:
+  with no session id (44% of logged events that day) "same session" would
+  mean every other NULL-session event in the window — other sessions,
+  possibly other agents — so a session-less outcome keeps the most-recent
+  rule (reviewer finding, same day).
+- **"No search served this id" was also the answer when a search had —
+  under a different session id.** The tier-3 active-session pointer vs the
+  `X-PL-Session` header, or a pointer TTL lapse, can put the search and the
+  outcome under different identities, and 44% of logged events carry no
+  session id at all. The result now splits the miss:
+  `used_ids_served_elsewhere` (an event in the window served it under
+  another session id — the label needs the same identity) beside
+  `used_ids_unmatched` (nothing in the window served it). The probe is
+  bounded to the window on purpose: index-backed at 0.05 ms against a 3.9 ms
+  sequential scan unbounded (same artifact), which grows with the 365-day
+  retention.
+- **One statement, one transaction** for the whole list — fifty ids used to
+  be fifty storage round trips under the service lock, each re-resolving
+  the writer. The per-id three-way report survives (credited / unmatched /
+  served-elsewhere); a failure of the single statement is reported as
+  `used_ids_errors` for every id and makes no unmatched claim, since it is a
+  fact about the database and not about what the searches served.
+- **`memory.retrieval_log.use_window_seconds` (default 3600, unchanged) is
+  now documented as an invariant** on the `used_ids` parameter, the config
+  comment and the memory-model guide: an outcome credits only searches made
+  under the same session identity inside the window, so a harness keeps one
+  session per episode and logs the outcome before the window lapses.
+- **`used_ids=[]` stays equivalent to omitting the parameter.** The label is
+  positive-only; a real "used none" signal would need an event-level
+  negative (a column or a sentinel row — a schema change) and a replay that
+  scores unlabelled events as all-negative, both decided with real
+  τ-bench-style data in hand rather than now. An intentionally empty list
+  reports `used_ids_reason: "empty: no label written (used_ids is
+  positive-only)"` instead of calling the ids unusable. No schema bump.
+
 ### Added (2026-09-07 — Cognee can be measured on our own instrument; unattended runs get a heartbeat ledger)
 - **`evals/cognee_adapter.py`** runs Cognee against BEAM on the same
   instrument as `beam_adapter.py` — same chats, same `[session N, turn M]`
@@ -280,8 +7376,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   — `retrieval-telemetry-review-20260904.json` measured 0.074% of events
   carrying any downstream signal. `memory_outcome` now takes an optional
   **`used_ids`**: the entry ids the caller actually reasoned from. Each id
-  credits the most recent search in the session window that served it,
-  writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
+  credits the most recent search in the session window that served it
+  (widened to every serving search in the window on 2026-09-08 — see that
+  entry), writing the ordinary `retrieval_uses` row under `used_via="outcome"` — the
   table `retrieval_replay.py` and `retrieval_telemetry_review.py` already
   read, so both pick the new via up with no harness change. The convention
   already requires an outcome at task end; this makes the call carry the one
@@ -1738,7 +8835,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (rag 0.6947, hybrid 0.7326, cortex 0.3158 over the 475 unleaked rows)
   beside the all-500 headline they are not.
 
-
 ### Changed (2026-09-04 — the abstention headline is bounded by the no-memory floor)
 - **README and `evals/README.md` presented BEAM-100K abstention (fact
   spine 0.950 vs naive RAG 0.775) as "the one decisive win".** The
@@ -1930,7 +9026,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `dbname=pseudolife_memory`, a trailing slash, and an upper-cased name each
   walked through onto the live bank. It now compares case-insensitively and
   parses the keyword form too.
-
 
 ### Added (2026-09-04 — offline retrieval replay and graph ablation harnesses; eval-only)
 - **`evals/retrieval_telemetry_review.py`, `evals/retrieval_replay.py` and
@@ -2745,14 +9840,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     test latches on forever; measured on the live bank it would fire on
     1470/5153 current facts (28.5%). Keyed on `last_confirmed` it fires on
     1264 (24.5%) and — unlike the bare test — is cleared by re-asserting or
-    re-confirming the slot.
+    re-confirming the slot. *(Both figures are retired: see the
+    historical-contract note below, and `ops/measure_reverify_population.py`
+    for the current ones — 1981 and 1668 of 6015 on 2026-09-11.)*
   - **`re_verify` is deliberately PASSIVE**, exactly as it is on lessons: it
-    does NOT gate the `correct_with` affordance. At ~25% of a mature bank,
-    routing it into a call whose served note says to run a correction NOW
-    would be a standing instruction to rewrite a quarter of the cortex every
-    session. The active, targeted affordance is `derived_flagged`, which
-    fires only on an explicit correction.
-  - **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
+    does NOT gate the `correct_with` affordance. At ~25% of a mature bank
+    (retired figure, superseded by schema v39 — re-measured 2026-09-11 at
+    27.7%), routing it into a call whose served note says to run a correction
+    NOW would be a standing instruction to rewrite a quarter of the cortex
+    every session. The active, targeted affordance is `derived_flagged`,
+    which fires only on an explicit correction.
+  - **Historical contract, superseded by schema v39:** correction warnings
+    now survive source deletion; ordinary deletion alone is not a semantic
+    correction. Automatic contradiction-based source retirement was also
+    removed on 2026-09-11. The original behavior below describes this release.
+    **`re_verify` is BEST-EFFORT, and the docs now say so.** It is derived
     at read time from evidence that still exists, so losing the evidence
     loses the flag: `memory_traces.entry_id` is `ON DELETE CASCADE`, a
     true-drop capacity eviction hard-deletes the entry row (every eviction
@@ -5626,7 +12728,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ScrubJay-style auto-perishability stays shelved (class granularity is
   not the binding error); the measured next lever is a serving-side
   staleness policy, under its own preregistration.
-
 
 ### Added (2026-08-08 — retention-interval eval harness: the freshness machinery gets its first eval)
 - **`evals/retention_interval_eval.py`** (preregistration
@@ -9311,8 +16412,7 @@ subsection, silently dissolving the release boundary for twelve days.)
   NOTICE added, pyproject + README updated). Apache-2.0 keeps the same
   permissive terms and adds an explicit patent grant.
 - **Optional PDF extra: PyMuPDF → pypdfium2** (`pip install .[pdf]`).
-  PyMuPDF is AGPL-3.0, which conflicts with permissive distribution and any
-  future commercial/hosted offering; pypdfium2 (Chromium PDFium bindings,
+  PyMuPDF uses AGPL-3.0; pypdfium2 (Chromium PDFium bindings,
   Apache-2.0/BSD-3) fills the same higher-quality-extraction slot. The core
   pypdf fallback is unchanged.
 

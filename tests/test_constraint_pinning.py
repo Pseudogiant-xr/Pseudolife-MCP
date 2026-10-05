@@ -5,7 +5,7 @@ AHEAD of cosine ranking instead of competing on similarity (schema v35).
 
 - ``memory_search``'s cortex block (``service.cortex_search``): a constraint
   fact is in scope when its slot's ``entity_norm`` occurs as a
-  separator-bounded run inside ``_norm_key(query)`` — the query NAMES the
+  word-bounded run inside ``_norm_key(query)`` — the query NAMES the
   entity;
 - ``memory_recall``: a constraint fact is in scope when its entity is a
   SEED of the walk (hop 0 — the entities the query itself resolved to);
@@ -25,6 +25,7 @@ import pytest
 
 from tests.helpers import pg_reachable as _pg_reachable
 from tests.helpers import reload_mcp_filemode
+from tests.pg_defaults import default_admin_url
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 QUERY = "what is the payments-db host"
@@ -57,6 +58,7 @@ def _seed(svc):
                      support="user")                      # constraint, out of scope
 
 
+@pytest.mark.real_model
 def test_in_scope_constraint_outranks_a_higher_cosine_fact(svc):
     _seed(svc)
     out = svc.cortex_search(QUERY, top_k=5, min_score=0.0)["entries"]
@@ -94,6 +96,7 @@ def test_unlabelled_bank_is_served_byte_identically(svc):
     assert not any("pinned" in e for e in with_pins["entries"])
 
 
+@pytest.mark.real_model
 def test_knob_off_restores_plain_ranking(svc):
     _seed(svc)
     svc.config.memory.cortex.pin_constraints = False
@@ -105,6 +108,7 @@ def test_knob_off_restores_plain_ranking(svc):
     assert not any("pinned" in e for e in out)
 
 
+@pytest.mark.real_model
 def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
     """Peer review major (2026-09-02): the first cut let >= k in-scope
     constraints displace the ENTIRE ranked block. Pins now get at most
@@ -125,6 +129,7 @@ def test_pins_take_at_most_half_the_budget_best_cosine_first(svc):
     assert not any(e.get("pinned") for e in out[2:])
 
 
+@pytest.mark.real_model
 def test_pins_respect_the_callers_relevance_floor(svc):
     """memory_search passes guard_min_score so weak facts are never
     asserted as canonical; a pin must clear the same floor — pinning is
@@ -148,6 +153,61 @@ def test_scope_test_is_separator_insensitive_and_word_bounded():
     assert not _entity_in_query("db", "what is the payments-database host")
     assert not _entity_in_query("payments-db", "what is the payments host")
     assert not _entity_in_query("", "anything")
+
+
+def test_scope_test_treats_punctuation_as_a_boundary():
+    """A task names an entity mid-sentence, so the bounded match must end
+    at ``?``, ``,`` or a possessive ``'s`` as well as at whitespace and
+    ``._-/``. Found 2026-09-27: each of the first three queries named
+    "bench server" and none pinned its rule."""
+    from pseudolife_memory.service import _entity_in_query
+    assert _entity_in_query("bench server", "should I start the bench server?")
+    assert _entity_in_query("bench server", "start the bench server, then run")
+    assert _entity_in_query("bench server", "the bench server's config")
+    assert _entity_in_query("bench server", "the bench server’s config")
+    assert _entity_in_query("bench server", "(bench server): up?")
+    assert _entity_in_query("bench server", "is 'bench server' up")
+    assert _entity_in_query("host:port", "what is the host:port?")
+    # The separator folding and the word bound are unchanged.
+    assert _entity_in_query("payments db", "payments-db")
+    assert not _entity_in_query("db", "what is the payments-database host")
+    assert not _entity_in_query("bench", "the benchmark server?")
+
+
+def test_scope_test_does_not_split_contractions():
+    """An apostrophe inside a word is not a boundary, except before a
+    possessive s: "Don" is not named by "don't", only by "Don's"."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("Don", "don't start the bench server")
+    assert not _entity_in_query("Don", "don’t start it")
+    assert not _entity_in_query("brien", "ask o'brien first")
+    assert _entity_in_query("Don", "ask Don's team first")
+    assert _entity_in_query("bench servers", "the bench servers' configs")
+
+
+def test_scope_test_is_word_bounded_on_both_sides():
+    """Neither end of the entity may touch a word character: "db" is not
+    named by "mydb" (leading side) or "dbx" (trailing side)."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("db", "the mydb host")
+    assert not _entity_in_query("server", "is the webserver up?")
+    assert not _entity_in_query("db", "the payments-dbx host")
+    assert not _entity_in_query("bench", "the benchmark server?")
+
+
+def test_scope_test_treats_combining_marks_as_part_of_a_word():
+    """A combining mark (a Devanagari vowel sign or virama, a decomposed
+    accent) is not alphanumeric in Python, but it belongs to the letter
+    before it: the entity must not end or start next to one."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("राम",          # राम
+                                "रामायण "
+                                "कब")                  # रामायण कब
+    assert not _entity_in_query("मान",          # मान
+                                "सम्मान")  # सम्मान
+    assert not _entity_in_query("jose", "josé said")       # NFD josé
+    assert _entity_in_query("राम",
+                            "राम कब?")  # राम कब?
 
 
 def test_mcp_search_cortex_block_carries_labels_and_pins(tmp_path, monkeypatch):
@@ -187,7 +247,8 @@ def recall_svc(tmp_path_factory):
     """One PG-backed service with a small graph: payments-db (seed) runs-on
     host-a (hop 1). Both carry six facts with the constraint written LAST,
     so record order alone would drop it behind the per-entity cap (5)."""
-    if not _pg_reachable("postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"):
+    import os
+    if not _pg_reachable(os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()):
         pytest.skip("bench Postgres not reachable")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service

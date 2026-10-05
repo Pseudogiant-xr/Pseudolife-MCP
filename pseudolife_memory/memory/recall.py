@@ -7,23 +7,100 @@ docs/specs/2026-06-23-memcot-live-wiring-design.md.
 """
 from __future__ import annotations
 
+import functools
 import json  # noqa: E402
 import os  # noqa: E402
 import re
 import time
+import unicodedata
 import urllib.request  # noqa: E402
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from pseudolife_memory.utils import no_redirect
+
+
+# Boundaries for _mentions. A dot AFTER a name is a boundary unless a word
+# character follows it, so "the bench server." names "bench server" but
+# "node" does not match inside "node.js" (nor "v1" inside "v1.2"). A dot
+# BEFORE a name always blocks it, so a dotfile path (".env",
+# ".claude/settings.json") does not name the entity its stem spells. An
+# apostrophe glued to a word on both sides is part of that word ("don't"
+# does not name "Don"), except before a possessive "s" ("the bench
+# server's config" names "bench server") — the pin-scope test's rule.
+_APOS = "'’"
+_MENTION_BEFORE = rf"(?<![\w.])(?<!\w[{_APOS}])"
+_MENTION_AFTER = rf"(?!\w)(?!\.\w)(?![{_APOS}](?!s(?!\w))\w)"
+# Separators inside a NAME match any run of each other, so "payments db"
+# and "payments-db" name the same entity (the run cortex._norm_key folds,
+# less the dot: "node.js" stays literal). The text is not folded, so "_"
+# in the text is still part of a word.
+_NAME_SEP = r"[\s_\-/]+"
+
+
+# re's own cache holds 512 patterns, so a larger vocabulary recompiled every
+# name on every seeding. 8192 compiled patterns measured ~12 MB (tracemalloc,
+# 2026-09-27, three-token names); past it this degrades to recompiling.
+@functools.lru_cache(maxsize=8192)
+def _mention_re(name: str) -> re.Pattern[str]:
+    pieces = re.split(f"({_NAME_SEP})", name)
+    # re.split with a group alternates text, separator, text, ...; only a
+    # separator between two non-empty runs is internal to the name.
+    body = "".join(
+        _NAME_SEP if i % 2 and pieces[i - 1] and pieces[i + 1]
+        else re.escape(p)
+        for i, p in enumerate(pieces))
+    return re.compile(_MENTION_BEFORE + body + _MENTION_AFTER, re.IGNORECASE)
+
+
+# re's \w leaves out combining marks (Unicode category M: a decomposed
+# accent, a Devanagari vowel sign or virama), though each belongs to the
+# letter before it; service._scope_word_char counts them as word characters.
+# Putting all 299 mark ranges into the lookarounds instead measured ~67 ms
+# and ~35 KB per compiled name, against ~0.6 ms and ~0.9 KB without
+# (2026-09-27, 2000 two-token names), so a match is re-checked instead with
+# the marks just outside it read as the letter "a" (not "s", which after an
+# apostrophe would pass as a possessive). _MARK_REACH covers the widest
+# lookaround above: an apostrophe, an "s" and the character after it.
+_MARK_REACH = 3
+
+
+def _marks_as_letters(s: str) -> str:
+    if s.isascii():
+        return s
+    return "".join("a" if unicodedata.category(c)[0] == "M" else c for c in s)
+
+
+def _mark_bounded(pattern: re.Pattern[str], text: str, i: int, j: int) -> bool:
+    """Does the match ``text[i:j]`` still hold when every combining mark
+    within reach outside it counts as a word character?"""
+    before = _marks_as_letters(text[max(0, i - _MARK_REACH):i])
+    after = _marks_as_letters(text[j:j + _MARK_REACH])
+    return pattern.match(before + text[i:j] + after, len(before)) is not None
+
 
 def _mentions(text: str, name: str) -> bool:
-    """Word-boundary, case-insensitive membership (hyphens are boundaries, so
-    'k8s' does not match 'k8s-prod'). Canonical package copy of the bench's
-    value_present."""
+    """Word-bounded, case-insensitive: does ``text`` name ``name``?
+
+    Hyphens are boundaries, so 'k8s' matches 'k8s-prod cluster' (as the
+    pin-scope test ``service._entity_in_query`` also treats them). A
+    trailing dot bounds only when no word character follows it, a leading
+    dot never does, an apostrophe inside a word bounds only a possessive
+    's', and the name's own separators fold (see the constants above). A
+    combining mark counts as part of the word it sits on, as it does for
+    ``_entity_in_query``. Began as a copy of ``ladder_sweep.value_present``,
+    whose any-adjacent-dot exclusion missed a name a sentence ends on;
+    that scorer is left as it is, since changing it would move the
+    scores it has already produced."""
     if not text or not name:
         return False
-    return re.search(r"(?<![\w.])" + re.escape(name) + r"(?![\w.])",
-                     text, re.IGNORECASE) is not None
+    pattern = _mention_re(name)
+    m = pattern.search(text)
+    while m is not None:
+        if _mark_bounded(pattern, text, *m.span()):
+            return True
+        m = pattern.search(text, m.start() + 1)
+    return False
 
 
 @dataclass
@@ -408,7 +485,7 @@ def simple_complete(dream_cfg, prompt: str) -> str:
             headers["Authorization"] = f"Bearer {key}"
         req = urllib.request.Request(base.rstrip("/") + "/chat/completions",
                                      data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=30.0) as resp:
+        with no_redirect.urlopen(req, timeout=30.0) as resp:
             data = json.loads(resp.read())
         return data["choices"][0]["message"]["content"] or ""
     except Exception:

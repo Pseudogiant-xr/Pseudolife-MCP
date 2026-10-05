@@ -32,6 +32,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
+import embedder_stamp  # noqa: E402 — stdlib only, keeps this module light
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 ARMS = ("rag", "cortex", "hybrid")
 # The per-arm fields the answer phase writes. Any key ending in one of
@@ -212,6 +215,16 @@ def aggregate(rows_by_tag: dict[str, list[dict]]) -> dict:
             "std": statistics.stdev(accs) if len(accs) >= 2
             else None,
         }
+    # Which embedder built the contexts these replicates judged. Absent for
+    # rows written before stamping, so a legacy agg keeps its shape.
+    # Replicates are copies of one file, so its row counts come from one
+    # replicate; only replicates that disagree merge across all of them.
+    per_replicate = [embedder_stamp.merge_rows(judged[t]) for t in tags]
+    embedder = (per_replicate[0] if per_replicate and all(
+        m == per_replicate[0] for m in per_replicate)
+        else embedder_stamp.merge_rows(all_rows))
+    if embedder:
+        out[embedder_stamp.KEY] = embedder
     return out
 
 
@@ -257,9 +270,14 @@ def make_baseline(agg: dict, commit: str,
         margin = max(floor, 2 * (a["std"] or 0.0))
         arms[arm] = {"mean": a["mean"], "std": a["std"],
                      "margin": round(margin, 4)}
-    return {"established_at": datetime.now().isoformat(timespec="seconds"),
-            "commit": commit, "n_replicates": agg["n_replicates"],
-            "arms": arms}
+    baseline = {"established_at": datetime.now().isoformat(timespec="seconds"),
+                "commit": commit, "n_replicates": agg["n_replicates"],
+                "arms": arms}
+    # The precision the baseline was measured at, so a later gate-check on
+    # a host that resolves cpu_dtype differently can say so.
+    if agg.get(embedder_stamp.KEY):
+        baseline[embedder_stamp.KEY] = agg[embedder_stamp.KEY]
+    return baseline
 
 
 def nondeterminism_warnings(agg: dict) -> list[str]:
@@ -285,6 +303,24 @@ def nondeterminism_warnings(agg: dict) -> list[str]:
                 f"accuracies {a.get('accuracies')}) — judge server is not "
                 f"reproducible; expected the q8_0 config, not turboq")
     return out
+
+
+def embedder_warnings(a: dict, b: dict, a_label: str = "a",
+                      b_label: str = "b") -> list[str]:
+    """Why two aggs (or an agg and a baseline) embedded at different
+    precisions, if they did.
+
+    The embedder's cpu_dtype "auto" resolves to bf16 on a CPU with native
+    bf16 and fp32 elsewhere, so the same command embeds differently on
+    another host. Same spirit as ``nondeterminism_warnings``: a caveat on
+    the verdict, never a failure — bf16 and fp32 scored every gate arm
+    identically on 2026-09-23, evidence in
+    evals/results/embedder-cpu-bf16-probe-20260923.json. A side with no
+    stamp predates stamping and is unknown, never a mismatch.
+    """
+    return embedder_stamp.precision_warnings(
+        a.get(embedder_stamp.KEY), b.get(embedder_stamp.KEY),
+        a_label=a_label, b_label=b_label)
 
 
 def gate_verdict(agg: dict, baseline: dict) -> list[str]:
@@ -360,10 +396,12 @@ def cmd_compare(args) -> int:
                                      args.results_dir))
         sys.exit(f"compare: no judged '{args.arm}' arm in these results "
                  f"(available: {', '.join(judged_arms(rows))})")
+    result_a = f"{args.extractor}/{args.tag or '(untagged)'}"
+    result_b = f"{b_extractor}/{args.b_tag or '(untagged)'}"
     result.update({
         "arm": args.arm,
-        "a": f"{args.extractor}/{args.tag or '(untagged)'}",
-        "b": f"{b_extractor}/{args.b_tag or '(untagged)'}",
+        "a": result_a,
+        "b": result_b,
         "a_mean": a_agg["arms"][args.arm]["mean"],
         "a_std": a_agg["arms"][args.arm]["std"],
         "b_mean": b_agg["arms"][args.arm]["mean"],
@@ -372,7 +410,15 @@ def cmd_compare(args) -> int:
         # persisted artifact that omits it cannot be re-derived later.
         "permutations": args.permutations,
         "seed": args.seed,
+        "a_embedder": a_agg.get(embedder_stamp.KEY, embedder_stamp.UNKNOWN),
+        "b_embedder": b_agg.get(embedder_stamp.KEY, embedder_stamp.UNKNOWN),
+        "embedder_warnings": embedder_warnings(a_agg, b_agg,
+                                               a_label=result_a,
+                                               b_label=result_b),
     })
+    # stderr: stdout stays the one JSON document scripts and tests parse.
+    for w in result["embedder_warnings"]:
+        print(f"WARNING {w}", file=sys.stderr)
     if args.out:
         args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result))
@@ -397,6 +443,12 @@ def cmd_gate_check(args) -> int:
     agg = aggregate({t: load_rows(p) for t, p in found.items()})
     for w in nondeterminism_warnings(agg):
         print(f"WARNING {w}")
+    print(embedder_stamp.summary_line(
+        ("run", agg.get(embedder_stamp.KEY)),
+        ("baseline", baseline.get(embedder_stamp.KEY))))
+    for w in embedder_warnings(agg, baseline, a_label="run",
+                               b_label="baseline"):
+        print(f"WARNING {w}")
     failures = gate_verdict(agg, baseline)
     if failures:
         print("REGRESSION GATE: FAIL")
@@ -418,6 +470,10 @@ def cmd_baseline(args) -> int:
     # spread into every future margin, so warn at the point the number is
     # frozen — not only when a later run is compared against it.
     for w in nondeterminism_warnings(agg):
+        print(f"WARNING {w}")
+    # A baseline whose own rows mix precisions freezes that mix into every
+    # later comparison.
+    for w in embedder_warnings(agg, {}, a_label="baseline run"):
         print(f"WARNING {w}")
     try:
         commit = subprocess.run(
@@ -497,6 +553,9 @@ def cmd_agg(args) -> int:
     for arm, a in agg["arms"].items():
         std = f"{a['std']:.4f}" if a["std"] is not None else "-"
         print(f"{arm:<10}{a['mean']:>8.4f}{std:>8}  {a['accuracies']}")
+    print(embedder_stamp.summary_line(("run", agg.get(embedder_stamp.KEY))))
+    for w in embedder_warnings(agg, {}, a_label="run"):
+        print(f"WARNING {w}")
     print(f"wrote {_agg_path(base).name}")
     return 0
 

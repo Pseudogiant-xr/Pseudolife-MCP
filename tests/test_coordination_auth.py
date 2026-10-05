@@ -1,0 +1,133 @@
+"""Mailbox authentication is separate from fail-open memory attribution."""
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
+
+
+def service(enabled=True, allowed=None):
+    return SimpleNamespace(config=SimpleNamespace(coordination=SimpleNamespace(
+        enabled=enabled, allowed_principals=allowed or [], audit_retention_days=90)),
+        _lock=nullcontext(), _storage=object(), _ensure_init=lambda: None,
+        _hlc=SimpleNamespace(tick=lambda: (100, 1)))
+
+
+def test_no_bearer_configuration_cannot_authenticate_mail(monkeypatch):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="authentication_required"):
+        dispatch(service(allowed=["default"]), "register", {}, headers={})
+
+
+@pytest.mark.parametrize("headers,allowed", [
+    ({"authorization": "Bearer wrong"}, ["default"]),
+    ({"authorization": "Bearer fixture-secret"}, []),
+    ({"authorization": "Bearer fixture-secret", "x-pl-writer": "allowed"}, ["allowed"]),
+])
+def test_unmatched_bearer_or_principal_cannot_register(monkeypatch, headers, allowed):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="unauthorized|principal_not_allowed"):
+        dispatch(service(allowed=allowed), "register", {}, headers=headers)
+
+
+def _default_service():
+    from pseudolife_memory.utils.config import CoordinationConfig
+    svc = service()
+    svc.config.coordination = CoordinationConfig()
+    return svc
+
+
+def test_default_config_admits_the_singular_token_principal_only(monkeypatch):
+    """Maintainer decision 2026-09-25: a token-map principal is a separately
+    trusted identity and stays off the board until an operator lists it."""
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "map-secret:editor")
+    with pytest.raises(ValueError, match="principal_not_allowed"):
+        dispatch(_default_service(), "update", {},
+                 headers={"authorization": "Bearer map-secret"})
+    # The singular token passes the principal gate and stops at the next
+    # one: an update still needs a registered instance.
+    with pytest.raises(ValueError, match="instance_authentication_required"):
+        dispatch(_default_service(), "update", {},
+                 headers={"authorization": "Bearer fixture-secret"})
+
+
+def test_default_config_still_requires_bearer_authentication(monkeypatch):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="authentication_required"):
+        dispatch(_default_service(), "register", {}, headers={})
+
+
+def test_model_send_never_accepts_sender_override(monkeypatch):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    headers = {"authorization": "Bearer fixture-secret", "x-pl-agent": "own",
+               "x-pl-agent-key": "private-fixture"}
+    with pytest.raises(ValueError, match="unexpected_parameter"):
+        dispatch(service(allowed=["default"]), "send", {
+            "sender_id": "peer", "to": "target", "text": "hello", "request_id": "r1",
+        }, headers=headers)
+
+
+def test_disabled_feature_does_not_initialize_storage():
+    from pseudolife_memory.coordination import dispatch
+    svc = service(enabled=False)
+    svc._ensure_init = lambda: pytest.fail("disabled coordination initialized storage")
+    assert dispatch(svc, "receive", {}, headers={}) == {"enabled": False}
+
+
+def test_identity_comes_from_instance_headers(monkeypatch):
+    from pseudolife_memory import coordination
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    seen = []
+    class Store:
+        def __init__(self, storage):
+            pass
+        def prune(self, *, audit_retention_days):
+            return {}
+        def send(self, principal, agent_id, credential, **kwargs):
+            seen.append((principal, agent_id, credential, kwargs))
+            return {"message_id": "m1", "status": "queued"}
+    monkeypatch.setattr(coordination, "_store", lambda svc: Store(None))
+    headers = {"authorization": "Bearer fixture-secret", "x-pl-agent": "own",
+               "x-pl-agent-key": "private-fixture"}
+    out = coordination.dispatch(service(allowed=["default"]), "send", {
+        "to": "peer", "text": "hello", "request_id": "r1"}, headers=headers)
+    assert out == {"message_id": "m1", "status": "queued"}
+    assert seen == [("default", "own", "private-fixture",
+                     {"to": "peer", "text": "hello", "request_id": "r1", "hlc": "100:1"})]
+
+
+def test_missing_send_arguments_are_a_validation_error(monkeypatch):
+    from pseudolife_memory.coordination import dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="missing_parameter"):
+        dispatch(service(allowed=["default"]), "send", {}, headers={
+            "authorization": "Bearer fixture-secret", "x-pl-agent": "a",
+            "x-pl-agent-key": "private"})
+
+
+def test_wake_caps_are_configurable_and_bounded():
+    from pseudolife_memory.utils.config import CoordinationConfig, WakeConfig, _dict_to_dataclass
+    wake = CoordinationConfig().wake
+    assert (wake.per_recipient_per_hour, wake.urgent_per_sender_per_hour, wake.nightly_total,
+            wake.fan_out_stagger_seconds, wake.active_seconds) == (20, 6, 200, 30, 60)
+    loaded = _dict_to_dataclass(CoordinationConfig, {"wake": {"nightly_total": 50}})
+    assert loaded.wake == WakeConfig(nightly_total=50)
+    for bad in ({"per_recipient_per_hour": -1}, {"nightly_total": -1}, {"fan_out_stagger_seconds": "30"},
+                {"urgent_per_sender_per_hour": True}, {"active_seconds": 0},
+                {"per_recipient_per_hour": 2.0}):
+        with pytest.raises(ValueError, match="coordination.wake"):
+            WakeConfig(**bad)
+    # A cap of 0 is allowed: it rings nobody.
+    assert WakeConfig(per_recipient_per_hour=0, urgent_per_sender_per_hour=0, nightly_total=0,
+                      fan_out_stagger_seconds=0).nightly_total == 0

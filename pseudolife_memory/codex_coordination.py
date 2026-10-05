@@ -1,0 +1,500 @@
+"""Codex thread metadata to private, resumable coordination identities."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import aclosing
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import uuid
+
+from .coordination_identity import default_digest_dir, digest_path_for
+
+
+def thread_id_from_meta(meta) -> str | None:
+    """Return an authoritative-looking canonical Codex thread UUID.
+
+    Codex injects ``_meta.threadId`` at the MCP transport boundary.  Rejecting
+    every other shape keeps model-controlled arguments and inherited process
+    environment out of coordination identity selection.
+    """
+    if not isinstance(meta, dict):
+        return None
+    candidate = meta.get("threadId")
+    if not isinstance(candidate, str):
+        return None
+    try:
+        parsed = uuid.UUID(candidate)
+    except (ValueError, AttributeError):
+        return None
+    canonical = str(parsed)
+    return canonical if candidate == canonical else None
+
+
+# Codex's per-turn metadata is a few hundred bytes (0.158.0, 2026-09-29); a
+# JSON string past this is not read at all.
+MAX_TURN_METADATA = 8192
+
+
+def _canonical_uuid(candidate) -> str | None:
+    if not isinstance(candidate, str):
+        return None
+    try:
+        canonical = str(uuid.UUID(candidate))
+    except (ValueError, AttributeError):
+        return None
+    return canonical if candidate == canonical else None
+
+
+def parent_thread_from_meta(meta, thread_id) -> str | None:
+    """The parent thread of a Codex native subagent, or ``None``.
+
+    Codex 0.158.0 (CLI and desktop, measured 2026-09-29) puts
+    ``x-codex-turn-metadata`` beside ``threadId`` in every tools/call
+    ``_meta``; a child spawned with ``collaboration.spawn_agent`` carries
+    ``thread_source: "subagent"``, its own ``thread_id`` and the spawning
+    thread's ``parent_thread_id``. Only that shape counts: the metadata's
+    thread must be ``thread_id`` (the transport thread the caller already
+    validated), the parent a different canonical UUID. Any
+    ``subagent_kind`` is accepted, since every kind is a model-spawned child
+    of that parent; a user's fork of a conversation carries no subagent
+    source and stays a peer. Anything malformed is ignored: the call goes
+    on without a link, never with an error."""
+    if not isinstance(meta, dict) or thread_id is None:
+        return None
+    turn = meta.get("x-codex-turn-metadata")
+    if isinstance(turn, str):
+        if len(turn) > MAX_TURN_METADATA:
+            return None
+        try:
+            turn = json.loads(turn)
+        except ValueError:
+            return None
+    if not isinstance(turn, dict) or turn.get("thread_source") != "subagent":
+        return None
+    if _canonical_uuid(turn.get("thread_id")) != thread_id:
+        return None
+    parent = _canonical_uuid(turn.get("parent_thread_id"))
+    return parent if parent is not None and parent != thread_id else None
+
+
+def default_state_dir() -> Path:
+    configured = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    codex_home = os.environ.get("CODEX_HOME")
+    root = Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
+    return root / "pseudolife" / "agents"
+
+
+def state_path_for_thread(state_dir: Path, url: str, token: str,
+                          thread_id: str) -> Path:
+    """Build an opaque path scoped by bank, principal token, and thread."""
+    token_hash = hashlib.sha256(token.encode("utf-8")).digest()
+    namespace = hashlib.sha256(
+        url.rstrip("/").encode("utf-8") + b"\0" + token_hash).hexdigest()[:32]
+    thread_hash = hashlib.sha256(thread_id.encode("ascii")).hexdigest()
+    return Path(state_dir) / namespace / f"{thread_hash}.json"
+
+
+def _reject_symlink_ancestors(path: Path) -> None:
+    current = path.absolute()
+    while True:
+        if current.is_symlink():
+            raise OSError("coordination state path has a symbolic-link ancestor")
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
+def _prepare_private_dir(root: Path, namespace: Path) -> None:
+    _reject_symlink_ancestors(root)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _reject_symlink_ancestors(root)
+    namespace.mkdir(mode=0o700, parents=False, exist_ok=True)
+    _reject_symlink_ancestors(namespace)
+    if not root.is_dir() or not namespace.is_dir():
+        raise OSError("coordination state directory is not a private directory")
+    if os.name != "nt":
+        root.chmod(0o700)
+        namespace.chmod(0o700)
+
+
+class CodexCoordinationRegistry:
+    """Lazily attach one adapter for each validated Codex thread ID."""
+
+    def __init__(self, url: str, token: str, *, state_dir=None,
+                 adapter_factory=None, startup_seconds: float = 3.0,
+                 retry_seconds: float = 5.0,
+                 max_threads: int = 128, clock=None, delivery_url=None,
+                 delivery_token=None, delivery_factory=None, provider=None,
+                 digest_dir=None, doorbell=None):
+        self.url = url
+        self.token = token if provider is None else None
+        self.provider = provider
+        self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
+        self.digest_dir = Path(digest_dir) if digest_dir is not None else default_digest_dir()
+        self._adapter_factory = adapter_factory
+        self._startup_seconds = startup_seconds
+        self._retry_seconds = retry_seconds
+        self._max_threads = max_threads
+        self._clock = clock or time.monotonic
+        self._delivery_url = delivery_url
+        self._delivery_token = delivery_token
+        self._delivery_factory = delivery_factory
+        # Optional ``codex queue`` doorbell (codex_doorbell.CodexDoorbell) for
+        # threads the WebSocket bridge does not reach.
+        self._doorbell = doorbell
+        self._adapters: dict[str, object] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._retry_after: dict[str, float] = {}
+        self._retry_generations: dict[str, object] = {}
+        self._failure_hints: dict[str, str] = {}
+        self._provider_unavailable = False
+        self._deliveries: dict[str, object] = {}
+        self._delivery_tasks: dict[str, asyncio.Task] = {}
+        self._delivery_failed: set[str] = set()
+        self._entry_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
+        self._startups: set[asyncio.Task] = set()
+        self._closing = False
+        self._closed = False
+        self._failure_reported = False
+        self._capacity_reported = False
+        self._delivery_setup_reported = False
+        # v55: one reader of Codex's session_index.jsonl for every thread.
+        self._thread_names = None
+
+    def _thread_name_reader(self, thread_id):
+        """What a thread's adapter asks for the name Codex shows (v55), or
+        ``None`` when PSEUDOLIFE_BOARD_HARNESS_NAMES turns the readers off."""
+        from .harness_names import CodexThreadNames, harness_names_enabled
+        if not harness_names_enabled():
+            return None
+        if self._thread_names is None:
+            self._thread_names = CodexThreadNames()
+        names = self._thread_names
+        return lambda: names.name(thread_id)
+
+    def _factory(self):
+        if self._adapter_factory is not None:
+            return self._adapter_factory
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        return CoordinationAdapter
+
+    def _delivery_class(self):
+        if self._delivery_factory is not None:
+            return self._delivery_factory
+        from pseudolife_memory.codex_delivery import CodexDelivery
+        return CodexDelivery
+
+    async def _verified_delivery(self, thread_id: str):
+        if not self._delivery_url or not self._delivery_token:
+            return None
+        delivery = None
+        try:
+            candidate = self._delivery_class()(
+                self._delivery_url, self._delivery_token, thread_id)
+            delivery = await asyncio.wait_for(
+                candidate.__aenter__(), timeout=self._startup_seconds)
+            await asyncio.wait_for(
+                delivery.verify(), timeout=self._startup_seconds)
+            return delivery
+        except asyncio.CancelledError:
+            if delivery is not None:
+                try:
+                    await delivery.__aexit__(None, None, None)
+                except Exception:  # noqa: BLE001 - preserve cancellation
+                    pass
+            raise
+        except Exception:  # noqa: BLE001 - verified push is optional
+            if delivery is not None:
+                try:
+                    await delivery.__aexit__(None, None, None)
+                except Exception:  # noqa: BLE001 - best-effort failed setup cleanup
+                    pass
+            if not self._delivery_setup_reported:
+                print("pseudolife-mcp: Codex live delivery unavailable; using pull "
+                      "coordination.", file=sys.stderr)
+                self._delivery_setup_reported = True
+            return None
+
+    async def _pump_delivery(self, thread_id: str, adapter, delivery) -> None:
+        failed = False
+        try:
+            async with aclosing(adapter.inbox()) as inbox:
+                async for event in inbox:
+                    await delivery.deliver(event)
+            failed = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - stop after an uncertain host result
+            failed = True
+        finally:
+            if failed:
+                self._delivery_failed.add(thread_id)
+                print("pseudolife-mcp: live Codex delivery stopped; pull remains "
+                      "available through memory_message receive.", file=sys.stderr)
+                try:
+                    await adapter.downgrade_to_pull()
+                except Exception:  # noqa: BLE001 - local pull mode is already set
+                    pass
+                # The ambiguous snapshot is covered: never queue an alternate
+                # for it. Later independently eligible arrivals retain a listener.
+                if self._doorbell is not None and not self._closing:
+                    try:
+                        self._doorbell.watch(thread_id, adapter, shown=True)
+                    except Exception:  # noqa: BLE001 - pull coordination remains available
+                        pass
+            try:
+                await delivery.__aexit__(None, None, None)
+            except Exception:  # noqa: BLE001 - shutdown is best effort
+                pass
+            if self._deliveries.get(thread_id) is delivery:
+                self._deliveries.pop(thread_id, None)
+            if not failed:
+                self._delivery_failed.discard(thread_id)
+
+    def unread_hint(self, thread_id: str, adapter) -> str | None:
+        if thread_id in self._delivery_failed:
+            return ("Coordination: live Codex delivery stopped; use memory_message "
+                    "receive for pull delivery.")
+        if adapter is None:
+            if self._provider_unavailable:
+                return "Coordination: credential source is unavailable; saved identity was preserved."
+            if thread_id in self._failure_hints:
+                return self._failure_hints[thread_id]
+            if thread_id not in self._locks and len(self._locks) >= self._max_threads:
+                return ("Coordination: registry capacity reached; ordinary memory "
+                        "remains available.")
+            return ("Coordination: identity attachment unavailable; ordinary memory "
+                    "remains available.")
+        # adapter_factory is an injection seam; an adapter without the gated
+        # form falls back to the raw digest.
+        deliver = getattr(adapter, "deliver_hint", None)
+        return deliver() if deliver is not None else adapter.unread_hint
+
+    def note_call(self, thread_id: str, name: str, arguments, *,
+                  succeeded: bool = False) -> None:
+        """A tool call from an attached thread, as it starts and when it
+        succeeds, for the doorbell's view of which threads are active and
+        which have read their mail."""
+        if self._doorbell is not None:
+            try:
+                self._doorbell.note_call(thread_id, name, arguments, succeeded=succeeded)
+            except Exception:  # noqa: BLE001 - never fail or error the user's tool call
+                pass
+
+    async def get(self, thread_id: str, *, snapshot=None, parent_thread=None):
+        """The adapter for ``thread_id``, attached on first use.
+        ``parent_thread`` (from ``parent_thread_from_meta``) is registered
+        with a native subagent's new address, linking it to its parent; an
+        attached thread keeps what it registered with."""
+        canonical = thread_id_from_meta({"threadId": thread_id})
+        if canonical is None:
+            return None
+        if parent_thread is not None and (
+                thread_id_from_meta({"threadId": parent_thread}) is None
+                or parent_thread == canonical):
+            parent_thread = None
+        if self.provider is not None and snapshot is None:
+            try:
+                snapshot = self.provider.snapshot()
+            except Exception:
+                self._provider_unavailable = True
+                return None
+            self._provider_unavailable = False
+        startup = asyncio.current_task()
+        async with self._entry_lock:
+            if self._closing:
+                return None
+            self._startups.add(startup)
+        try:
+            return await self._get_started(canonical, snapshot, parent_thread)
+        finally:
+            async with self._entry_lock:
+                self._startups.discard(startup)
+
+    async def _verified_existing(self, thread_id, adapter, snapshot):
+        if self.provider is None:
+            return adapter
+        try:
+            await asyncio.wait_for(adapter.validate_snapshot(snapshot), self._startup_seconds)
+            self._failure_hints.pop(thread_id, None)
+            return adapter
+        except Exception as error:
+            self._note_failure(thread_id, error)
+            return None
+
+    def _note_failure(self, thread_id, error):
+        if getattr(error, "code", None) == "bank_identity_mismatch":
+            hint = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential."
+        elif getattr(error, "code", None) in {"credential_unavailable", "credential_changed"}:
+            hint = "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes."
+        else:
+            hint = "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire."
+        self._failure_hints[thread_id] = hint
+
+    async def _get_started(self, thread_id: str, snapshot=None, parent_thread=None):
+        if snapshot is not None and self._retry_generations.get(thread_id) != snapshot.generation:
+            self._retry_after.pop(thread_id, None)
+        existing = self._adapters.get(thread_id)
+        if existing is not None:
+            return await self._verified_existing(thread_id, existing, snapshot)
+        if self._clock() < self._retry_after.get(thread_id, 0):
+            return None
+        async with self._entry_lock:
+            existing = self._adapters.get(thread_id)
+            if existing is not None:
+                return await self._verified_existing(thread_id, existing, snapshot)
+            if self._clock() < self._retry_after.get(thread_id, 0):
+                return None
+            lock = self._locks.get(thread_id)
+            if lock is None:
+                if len(self._locks) >= self._max_threads:
+                    if not self._capacity_reported:
+                        print("pseudolife-mcp: coordination registry capacity reached; "
+                              "memory proxy remains active.", file=sys.stderr)
+                        self._capacity_reported = True
+                    return None
+                lock = self._locks[thread_id] = asyncio.Lock()
+        async with lock:
+            existing = self._adapters.get(thread_id)
+            if existing is not None:
+                return await self._verified_existing(thread_id, existing, snapshot)
+            if self._clock() < self._retry_after.get(thread_id, 0):
+                return None
+            delivery = None
+            candidate_adapter = None
+            try:
+                token = snapshot.token if self.provider is not None else self.token
+                options = {}
+                if self.provider is not None:
+                    from .coordination_identity import bound_state_path
+
+                    path = bound_state_path(self.state_dir, self.url, thread_id)
+                    options = {"provider": self.provider, "initial_snapshot": snapshot,
+                               "legacy_state_path": state_path_for_thread(
+                                   self.state_dir, self.url, token, thread_id)}
+                else:
+                    path = state_path_for_thread(self.state_dir, self.url, token, thread_id)
+                if parent_thread is not None:
+                    options["parent_thread"] = parent_thread
+                _prepare_private_dir(self.state_dir, path.parent)
+                delivery = await self._verified_delivery(thread_id)
+                candidate_adapter = self._factory()(
+                    self.url, token, state_path=path, **options,
+                    wake_enabled=delivery is not None,
+                    delivery_transport="codex",
+                    # The Codex prompt hook receives the thread id as its
+                    # session_id and reads the digest under the same name.
+                    digest_path=digest_path_for(thread_id, self.digest_dir),
+                    # A ring reaches a Codex thread only through the doorbell
+                    # (v49): without one the daemon must answer no_path.
+                    ring_path=self._doorbell is not None,
+                    label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "codex"),
+                    project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
+                    task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""),
+                    episode=thread_id,
+                    harness_name=self._thread_name_reader(thread_id))
+                adapter = await asyncio.wait_for(
+                    candidate_adapter.__aenter__(), timeout=self._startup_seconds)
+            except asyncio.CancelledError:
+                if candidate_adapter is not None:
+                    try:
+                        await candidate_adapter.__aexit__(None, None, None)
+                    except Exception:  # noqa: BLE001 - preserve cancellation
+                        pass
+                if delivery is not None:
+                    try:
+                        await delivery.__aexit__(None, None, None)
+                    except Exception:  # noqa: BLE001 - preserve cancellation
+                        pass
+                raise
+            except Exception as error:  # noqa: BLE001 - memory must survive optional coordination
+                if candidate_adapter is not None:
+                    try:
+                        await candidate_adapter.__aexit__(None, None, None)
+                    except Exception:  # noqa: BLE001 - failed startup cleanup
+                        pass
+                if delivery is not None:
+                    try:
+                        await delivery.__aexit__(None, None, None)
+                    except Exception:  # noqa: BLE001 - best-effort failed attach cleanup
+                        pass
+                self._retry_after[thread_id] = self._clock() + self._retry_seconds
+                if snapshot is not None:
+                    self._retry_generations[thread_id] = snapshot.generation
+                self._note_failure(thread_id, error)
+                if not self._failure_reported:
+                    print("pseudolife-mcp: coordination unavailable; memory proxy remains "
+                          "active. Check the daemon's coordination setting, authentication "
+                          "and private adapter state.", file=sys.stderr)
+                    self._failure_reported = True
+                return None
+            self._adapters[thread_id] = adapter
+            if delivery is not None:
+                self._deliveries[thread_id] = delivery
+                self._delivery_tasks[thread_id] = asyncio.create_task(
+                    self._pump_delivery(thread_id, adapter, delivery))
+            elif self._doorbell is not None:
+                # A bridged thread is woken by the bridge itself.
+                try:
+                    self._doorbell.watch(thread_id, adapter)
+                except Exception:  # noqa: BLE001 - memory must survive optional coordination
+                    pass
+            self._retry_after.pop(thread_id, None)
+            self._retry_generations.pop(thread_id, None)
+            self._failure_hints.pop(thread_id, None)
+            self._failure_reported = False
+            return adapter
+
+    async def aclose(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            async with self._entry_lock:
+                self._closing = True
+                current = asyncio.current_task()
+                startups = [task for task in self._startups if task is not current]
+            for task in startups:
+                task.cancel()
+            if startups:
+                await asyncio.gather(*startups, return_exceptions=True)
+
+            if self._doorbell is not None:
+                try:
+                    await self._doorbell.aclose()
+                except Exception:  # noqa: BLE001 - shutdown is best effort
+                    pass
+            delivery_tasks = list(self._delivery_tasks.values())
+            self._delivery_tasks.clear()
+            for task in delivery_tasks:
+                task.cancel()
+            if delivery_tasks:
+                await asyncio.gather(*delivery_tasks, return_exceptions=True)
+            deliveries = list(self._deliveries.values())
+            self._deliveries.clear()
+            for delivery in deliveries:
+                try:
+                    await delivery.__aexit__(None, None, None)
+                except Exception:  # noqa: BLE001 - shutdown is best effort
+                    pass
+            adapters = list(self._adapters.values())
+            self._adapters.clear()
+            self._locks.clear()
+            self._retry_after.clear()
+            self._retry_generations.clear()
+            self._failure_hints.clear()
+            self._delivery_failed.clear()
+            for adapter in reversed(adapters):
+                try:
+                    await adapter.__aexit__(None, None, None)
+                except Exception:  # noqa: BLE001 - shutdown is best effort
+                    pass
+            self._closed = True

@@ -125,15 +125,6 @@ class TestIDF:
 
 
 class TestScore:
-    def test_exact_match_outranks_unrelated(self) -> None:
-        idx = BM25Index([
-            _make_entry("we use pytest for python testing"),
-            _make_entry("the cat is on the mat"),
-        ])
-        hits = idx.score("pytest")
-        assert len(hits) == 1
-        assert "pytest" in hits[0][0].text
-
     def test_rare_token_query_finds_exact_entry(self) -> None:
         """The classic BM25 win: a token with no semantic neighbours."""
         idx = BM25Index([

@@ -58,6 +58,36 @@ def test_pointer_persists_and_clear_only_if_owner(pg_service):
     assert svc._storage.get_meta("active_session_pointer") is None
 
 
+def test_rest_and_mcp_fact_writes_persist_same_identity(pg_service, monkeypatch):
+    import json
+    from pseudolife_memory import mcp_server, writer_context
+    from pseudolife_memory.web.api import build_console_app
+    from tests.asgi_helpers import call, stub_mcp
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "test-token:named-writer")
+    monkeypatch.setattr(mcp_server, "service", pg_service)
+    headers = {"authorization": "Bearer test-token", "x-pl-writer": "spoofed",
+               "x-pl-session": "named-session"}
+    binding = writer_context.bind_request_headers(headers)
+    try:
+        mcp_server.memory_fact_set("mcp-project", "state", "ready")
+    finally:
+        writer_context.unbind_request_headers(binding)
+    app = build_console_app(stub_mcp, None, lambda: {}, pg_service,
+                            token_map={"test-token": "named-writer"})
+    status, raw = call(app, "POST", "/api/facts/set",
+                       headers=[(k.encode(), v.encode()) for k, v in headers.items()]
+                       + [(b"content-type", b"application/json")],
+                       body=json.dumps({"entity": "rest-project", "attribute": "state",
+                                        "value": "ready"}).encode())
+    assert status == 200, raw
+    rows = pg_service._storage.conn.execute(
+        "SELECT entity, writer_id, session_id FROM facts WHERE entity IN (%s, %s)",
+        ("mcp-project", "rest-project")).fetchall()
+    assert sorted(rows) == [("mcp-project", "named-writer", "named-session"),
+                            ("rest-project", "named-writer", "named-session")]
+
+
 # ── Pointer TTL (finding 4, 2026-07-19): a crashed client that never fires
 # SessionEnd must not attract other clients' tier-3 writes forever ───────────
 
@@ -103,6 +133,7 @@ def test_pointer_legacy_shape_hydration_from_meta(pg_service, tmp_path):
 
     pg_service._storage.set_meta(
         "active_session_pointer", {"session_id": "preTtlSess"})  # no "ts"
+    pg_service._storage.close()  # the first daemon exits, releasing the bank
     svc2 = MemoryService(data_dir=tmp_path / "second")
     try:
         svc2._ensure_init()  # env still points at the test PG (fixture-set)
@@ -265,6 +296,76 @@ def test_outcome_with_header_and_handle(pg_service):
     assert len(sigs) == 1
 
 
+# Without a handle a signal takes the CALLER's open episode. It used to take
+# the process-wide current_id — just the root someone started last — so with
+# several sessions on one daemon it landed on whichever session started most
+# recently (the retrieval-log attribution bug, 2026-09-25).
+
+
+def _two_started_roots(svc):
+    a = svc.episode_start_session("own-key-A", "session A")
+    b = svc.episode_start_session("own-key-B", "session B")
+    assert svc._cms.episodes.current_id == b["id"]   # B started last
+    return a, b
+
+
+def test_outcome_without_handle_lands_on_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.record_outcome(task="own outcome", outcome="success")
+    finally:
+        reset_writer_context(tok)
+    svc.record_outcome(task="anonymous outcome", outcome="success")
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["own outcome"] == a["id"]
+    assert sigs["anonymous outcome"] is None      # no identity -> no episode
+
+
+def test_outcome_with_bad_handle_degrades_to_callers_episode(pg_service):
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        res = svc.record_outcome(task="bad handle outcome", outcome="success",
+                                 episode="ffffffffffff")
+    finally:
+        reset_writer_context(tok)
+    assert res["episode_warning"] == "unknown or closed episode handle"
+    sigs = {s["task"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)}
+    assert sigs["bad handle outcome"] == a["id"]
+
+
+def test_correction_signal_lands_on_callers_episode(pg_service):
+    """A user-tier supersession emits a correction signal; it follows the
+    same rule as record_outcome — the handle's root when one is passed,
+    else the caller's open episode."""
+    svc = pg_service
+    a, _ = _two_started_roots(svc)
+    tok = set_writer_context("w", "own-key-A")
+    try:
+        svc.cortex_write("server", "port", "8080", support="user")
+        svc.cortex_write("server", "port", "9090", support="user")
+    finally:
+        reset_writer_context(tok)
+    # Header session B, handle A: the handle wins attribution, as it does
+    # for record_outcome (test_outcome_with_header_and_handle).
+    tok = set_writer_context("w", "own-key-B")
+    try:
+        svc.cortex_write("widget", "color", "blue", support="user")
+        svc.cortex_write("widget", "color", "red", support="user",
+                         episode=a["id"][:12])
+    finally:
+        reset_writer_context(tok)
+    corr = {s["about"]: s["episode_id"]
+            for s in svc._storage.pending_signals(limit=100)
+            if s["outcome"] == "correction"}
+    assert corr == {"server": a["id"], "widget": a["id"]}
+
+
 # ── Task 5: hook endpoints — register on start, close on end (identity
 # tier 3, spec 2026-07-18) ────────────────────────────────────────────────
 
@@ -276,7 +377,7 @@ def test_hook_start_registers_and_advertises(pg_service):
     assert "Session episode:" in text
     # Spec 2026-08-10 (tier-2 promotion): the handle is advertised as
     # always-pass, not conditional on concurrency.
-    assert "every memory write" in text
+    assert "every memory tool that accepts it" in text
     assert "when running concurrent sessions" not in text
     assert pg_service._resolve_writer()[1] == "claudeSess1"
     # idempotent on resume
@@ -472,6 +573,7 @@ def test_tombstone_survives_daemon_restart(pg_service, tmp_path):
     svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
     assert ep["id"] not in svc._cms.episodes.episodes       # close+sweep, one pass
     from pseudolife_memory.service import MemoryService
+    svc._storage.close()  # the first daemon exits, releasing the bank
     svc2 = MemoryService(data_dir=tmp_path / "restart")
     svc2._ensure_init()
     res = svc2.store("write after restart", source="t", episode=ep["id"][:12])
@@ -495,6 +597,27 @@ def test_tombstone_recreation_preserves_agent_title(pg_service):
     assert "episode_warning" not in res
     root = svc._cms.episodes.episodes[ep["id"]]
     assert root.title == "PseudoLife - deferred benchmark"
+
+
+def test_handle_title_rewrites_existing_entry_stamps(pg_service):
+    """Naming a session by handle must rewrite the denormalised
+    ``episode_title`` on entries already stored under it — in memory and in
+    the DB row — exactly as the header-session path does. The handle path
+    set only ``root.title``, so every entry stored before the rename kept
+    the generic ``session - <date> <time>`` stamp (found 2026-09-25)."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyST", "session - 2026-09-25 10:00")
+    handle = ep["id"][:12]
+    svc.store("work stored before the rename", source="t", episode=handle)
+    out = svc.set_session_title("X - y", episode=handle)
+    assert out["ok"] and out["id"] == ep["id"]
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "work stored before the rename"]
+    assert found and found[0].episode_id == ep["id"]
+    assert found[0].episode_title == "X - y"
+    row = next(r for r in svc._storage.load_entries()
+               if r["id"] == found[0].db_id)
+    assert row["episode_title"] == "X - y"
 
 
 def test_tombstone_recreation_respects_handle_window(pg_service, monkeypatch):
@@ -598,8 +721,8 @@ def test_hook_resume_touch_survives_the_next_reaper_sweep(pg_service):
     assert resumed["id"] == ep["id"]
     root = svc._cms.episodes.episodes[ep["id"]]
     assert root.ended_at is None               # resumed, not forked
-    # Outcome-only return: no episode handle (attributes via the current
-    # pointer the resume just moved), so neither a band entry nor a
+    # Outcome-only return: no episode handle and no session identity (the
+    # signal attributes to no episode), so neither a band entry nor a
     # handle-path touch is written — the resume itself must protect.
     svc.record_outcome(task="t", outcome="success")
     svc.reap_idle_sessions(7_200)
@@ -731,6 +854,207 @@ def test_episode_lifecycle_empty_handle_degrades_like_none(pg_service):
     closed = svc.episode_end(episode="")
     assert closed.get("id") == sub["id"]
     svc.set_active_session(None)
+
+
+# ── Handle-less lifecycle calls on a hook-registered root (2026-09-25) ──────
+# Since the stdio shim sends Claude Code's own session id as X-PL-Session, a
+# handle-less lifecycle call resolves to the root the SessionStart hook
+# registered, not to a throwaway shim root. Neither may fork that root nor
+# close it.
+
+
+def test_session_title_after_a_reap_reopens_the_session_root(pg_service):
+    """A title set without a handle after the idle reaper closed the root
+    reopens that root (as a store would) instead of opening a second one."""
+    svc = pg_service
+    started = svc.episode_start_session("title-key", "session - 2026-09-25 10:00")
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    tok = set_writer_context("w", "title-key")
+    try:
+        out = svc.set_session_title("PseudoLife-MCP - one root per session")
+    finally:
+        reset_writer_context(tok)
+    assert out == {"ok": True, "id": started["id"],
+                   "title": "PseudoLife-MCP - one root per session"}
+    with svc._lock:
+        roots = [e for e in svc._cms.episodes.episodes.values()
+                 if e.session_key == "title-key" and e.parent_id is None]
+    assert [(e.id, e.ended_at) for e in roots] == [(started["id"], None)]
+
+
+def test_handleless_episode_end_pops_sub_episodes_but_never_the_session_root(
+        pg_service):
+    """memory_episode_end closes the current sub-episode; the session root
+    belongs to the hook lifecycle and the idle reaper, with or without a
+    handle."""
+    svc = pg_service
+    root = svc.episode_start_session("pop-key", "session - 2026-09-25 10:00")
+    tok = set_writer_context("w", "pop-key")
+    try:
+        sub = svc.episode_start("a sub-task")
+        assert svc.episode_end().get("id") == sub["id"]
+        assert svc.episode_end() == {}
+    finally:
+        reset_writer_context(tok)
+    with svc._lock:
+        assert svc._cms.episodes.episodes[root["id"]].ended_at is None
+
+
+# ── /clear and in-session /resume: a stale header beside a fresh handle
+# (2026-09-25) ────────────────────────────────────────────────────────────────
+# /clear gives the Claude Code session a new id (S2): SessionEnd closes the old
+# root R1 (pruning it when empty) and SessionStart registers R2 under S2 and
+# advertises its handle. The stdio shim keeps the id it was launched with (S1)
+# as its X-PL-Session header. A call that passes R2's handle lands on R2 and
+# must leave S1 alone: no reopened R1, no fresh empty root under S1. The header
+# stays the identity stamp (identity and target episode are separable).
+
+import re as _re
+
+import pytest
+
+_S1 = "11111111-1111-4111-8111-111111111111"
+_S2 = "22222222-2222-4222-8222-222222222222"
+
+
+def _clear_the_session(svc, *, captured_before_clear):
+    """Hook root R1 under S1, SessionEnd for S1, hook root R2 under S2.
+    Returns ``(r1_id, r2_id, r2_handle)``, the handle as the hook
+    advertised it."""
+    from pseudolife_memory.web.session_hook import (
+        hook_session_end, hook_session_start)
+    first = hook_session_start(svc, session_id=_S1, source="startup")
+    r1_handle = _re.search(r"Session episode: (\w+)", first).group(1)
+    if captured_before_clear:
+        tok = set_writer_context("claude-code", _S1)
+        try:
+            svc.store("Before the clear: the build cache lives on drive D.",
+                      source="t", episode=r1_handle)
+        finally:
+            reset_writer_context(tok)
+    with svc._lock:
+        r1 = svc._session_root_locked(_S1).id
+    hook_session_end(svc, session_id=_S1)
+    second = hook_session_start(svc, session_id=_S2, source="clear")
+    r2_handle = _re.search(r"Session episode: (\w+)", second).group(1)
+    with svc._lock:
+        r2 = svc._session_root_locked(_S2).id
+    assert r2 != r1 and r2.startswith(r2_handle)
+    return r1, r2, r2_handle
+
+
+def _s1_episodes(svc):
+    with svc._lock:
+        return {e.id: e.ended_at for e in svc._cms.episodes.episodes.values()
+                if e.session_key == _S1}
+
+
+@pytest.mark.parametrize("captured_before_clear", [True, False],
+                         ids=["r1-kept", "r1-pruned"])
+def test_store_with_the_new_handle_after_clear_leaves_the_old_session_alone(
+        pg_service, captured_before_clear):
+    """R1 kept (it captured an entry): the store used to reopen it within the
+    session resume window. R1 pruned (it was empty): the store used to open
+    a new empty root under S1 that lingered until the idle reaper and the
+    sweep. Either way the entry itself already landed on R2."""
+    svc = pg_service
+    _, r2, handle = _clear_the_session(
+        svc, captured_before_clear=captured_before_clear)
+    before = _s1_episodes(svc)
+    tok = set_writer_context("claude-code", _S1)     # the shim's launch id
+    try:
+        res = svc.store("After the clear: the deploy window is Tuesday noon.",
+                        source="t", episode=handle)
+    finally:
+        reset_writer_context(tok)
+    assert res["stored"] is True and "episode_warning" not in res
+    # S1's durable session record (v43) keeps the close SessionEnd stamped;
+    # a reopened R1 cleared it, as if S1 had never ended.
+    ended = svc._storage.conn.execute(
+        "SELECT ended_at IS NOT NULL, end_reason FROM client_sessions "
+        "WHERE session_key = %s", (_S1,)).fetchone()
+    assert tuple(ended) == (True, "end")
+    assert _s1_episodes(svc) == before
+    entry = next(e for band in svc._cms.bands for e in band.entries
+                 if e.text.startswith("After the clear"))
+    assert entry.episode_id == r2
+    svc.set_active_session(None)
+
+
+@pytest.mark.parametrize("captured_before_clear", [True, False],
+                         ids=["r1-kept", "r1-pruned"])
+def test_episode_hint_after_clear_reads_the_handle_root(
+        pg_service, captured_before_clear):
+    """The untitled-session hint describes the root the entry landed on (the
+    handle's), not whatever the stale header session holds, and names that
+    handle: a title call without it would reopen R1 under the stale header
+    and overwrite R1's title."""
+    svc = pg_service
+    _, _, handle = _clear_the_session(
+        svc, captured_before_clear=captured_before_clear)
+    before = _s1_episodes(svc)
+    tok = set_writer_context("claude-code", _S1)
+    try:
+        first = svc.store("After the clear: the deploy window is Tuesday noon.",
+                          source="t", episode=handle)
+        named = svc.set_session_title("PseudoLife-MCP - clear follow-up",
+                                      episode=handle)
+        second = svc.store("After the clear: release tags are signed with SSH.",
+                           source="t", episode=handle)
+    finally:
+        reset_writer_context(tok)
+    assert "memory_session_title" in first.get("episode_hint", "")
+    assert f"episode='{handle}'" in first["episode_hint"]
+    assert named["ok"] is True
+    assert second["stored"] is True and "episode_hint" not in second
+    assert _s1_episodes(svc) == before
+    svc.set_active_session(None)
+
+
+def test_episode_start_with_the_new_handle_after_clear_leaves_the_old_session_alone(
+        pg_service):
+    """Pin: a resolved handle already anchors the nest (and its session key)
+    to the handle's root without opening one for the header session."""
+    svc = pg_service
+    _, r2, handle = _clear_the_session(svc, captured_before_clear=True)
+    before = _s1_episodes(svc)
+    tok = set_writer_context("claude-code", _S1)
+    try:
+        sub = svc.episode_start("a sub-task after the clear", episode=handle)
+    finally:
+        reset_writer_context(tok)
+    assert (sub["parent_id"], sub["session_key"]) == (r2, _S2)
+    assert _s1_episodes(svc) == before
+    svc.set_active_session(None)
+
+
+def test_session_end_that_matches_no_root_writes_no_episode_rows(
+        pg_service, monkeypatch):
+    """A SessionEnd (or a shim exit) for a session with no open root (reaped,
+    already ended, or never written) changes nothing, so it must not re-upsert
+    every episode row under the service lock. A close that matched still
+    writes through."""
+    svc = pg_service
+    svc.episode_start_session("someone-else", "session - 2026-09-25 10:00")
+    upserted: list[str] = []
+    real_upsert = svc._storage.upsert_episode
+
+    def counting_upsert(row):
+        upserted.append(row["id"])
+        return real_upsert(row)
+
+    monkeypatch.setattr(svc._storage, "upsert_episode", counting_upsert)
+    assert svc.episode_end_session("never-opened", run_dream=False) == {}
+    assert upserted == []
+    mine = svc.episode_start_session("mine", "session - 2026-09-25 10:05")
+    tok = set_writer_context("w", "mine")
+    try:
+        svc.store("Mine: the nightly backup runs at 02:00.", source="t")
+    finally:
+        reset_writer_context(tok)
+    upserted.clear()
+    assert svc.episode_end_session("mine", run_dream=False)["id"] == mine["id"]
+    assert mine["id"] in upserted
 
 
 def test_transport_session_fallback_retired(monkeypatch):

@@ -12,6 +12,8 @@ import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
+pytestmark = pytest.mark.real_model
+
 
 @pytest.fixture()
 def svc(pg_conn, pg_url, tmp_path):  # noqa: F811

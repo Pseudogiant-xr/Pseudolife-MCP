@@ -47,6 +47,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -112,9 +113,19 @@ def _git_head() -> str:
 
 
 def guard_dsn(dsn: str) -> None:
-    db = re.sub(r"\?.*$", "", dsn).rsplit("/", 1)[-1]
-    if db in FORBIDDEN_DBS:
-        sys.exit(f"refusing to run against {db!r} — restore a dedicated "
+    """Refuse the live and shared-bench banks by name, in any DSN spelling
+    libpq accepts and regardless of case. The name comes from libpq's own
+    parser, shared with the test/bench resets (storage/schema.py); the
+    rsplit('/') this replaced let a ``dbname=`` keyword DSN, a trailing
+    slash or an upper-cased name through (2026-09-23)."""
+    from pseudolife_memory.storage.schema import (
+        dsn_database_name, is_production_database,
+    )
+
+    db = dsn_database_name(dsn)
+    if db is None or is_production_database(db, extra=FORBIDDEN_DBS):
+        target = repr(db) if db else "a database the DSN leaves implicit"
+        sys.exit(f"refusing to run against {target} — restore a dedicated "
                  "replay copy instead (see the module docstring)")
 
 
@@ -454,6 +465,16 @@ def main(argv: list[str] | None = None) -> int:
         b = json.loads(Path(args.combine[0]).read_text(encoding="utf-8"))
         a = json.loads(Path(args.combine[1]).read_text(encoding="utf-8"))
         report = combine(b, a)
+        # The arms can run on different hosts, where cpu_dtype "auto"
+        # resolves differently: carry each arm's embedder and say so.
+        report["embedder"] = {
+            side: arm.get("embedder", embedder_stamp.UNKNOWN)
+            for side, arm in (("before", b), ("after", a))}
+        report["embedder_warnings"] = embedder_stamp.precision_warnings(
+            {"arm": b.get("embedder")}, {"arm": a.get("embedder")},
+            a_label="before", b_label="after")
+        for w in report["embedder_warnings"]:
+            print(f"WARNING {w}", file=sys.stderr)
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(json.dumps({k: report[k] for k in
                           ("n_questions", "deltas", "structural_identity",
@@ -492,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         "source_db": re.sub(r"\?.*$", "", args.dsn).rsplit("/", 1)[-1],
         "top_k": args.top_k,
         "caps": applied,
+        "embedder": embedder_stamp.describe(svc),
         "hub_degree_p95": hub_threshold,
         "elapsed_s": round(time.perf_counter() - t0, 1),
         "summary": summarize(rows),

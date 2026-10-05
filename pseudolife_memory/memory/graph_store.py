@@ -27,10 +27,11 @@ class PostgresNetworkxGraphStore:
     # ── writes (delegate to the hub's edge/relation tables) ─────────────
     def upsert_edge(self, src_id: int, relation: str, dst_id: int, *,
                     confidence: float = 0.8, origin: str | None = None,
-                    revive: bool = True) -> dict:
+                    revive: bool = True, source_entry_ids=None) -> dict | None:
         return self._st.upsert_edge(src_id, relation, dst_id,
                                     confidence=confidence, origin=origin,
-                                    revive=revive)
+                                    revive=revive,
+                                    source_entry_ids=source_entry_ids)
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
         return self._st.supersede_edge(src_id, relation, dst_id)

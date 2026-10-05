@@ -76,6 +76,7 @@ from bank_dumps import (  # noqa: E402
     BANKS_ROOT, digest_texts, haystack_texts, resolve_dump_dir,
 )
 from ladder_sweep import DISTRACTORS, PAIRS, value_present  # noqa: E402
+import embedder_stamp  # noqa: E402
 
 TOP_K = 6
 MULTIPLIERS = (1, 4)
@@ -275,7 +276,8 @@ def main() -> int:
                 "text cannot move these numbers — haystack_digest above "
                 "identifies the text itself."),
         },
-        "embedder": {"dim": dim, "model": EmbeddingConfig().model_name},
+        "embedder": {"dim": dim, "model": EmbeddingConfig().model_name,
+                     **(embedder_stamp.describe(embedder) or {})},
         "top_k": TOP_K,
         "reranker_available": reranker is not None,
         "cells": cells,

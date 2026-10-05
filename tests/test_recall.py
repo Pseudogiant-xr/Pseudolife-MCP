@@ -61,6 +61,146 @@ def test_mechanical_seeds_fall_back_to_hits_when_query_bare():
     assert seeds == ["alpha", "beta"]
 
 
+def test_mentions_sentence_final_period_is_a_boundary():
+    # "start the bench server." names "bench server"; "?" and "," already did.
+    assert rc._mentions("start the bench server.", "bench server")
+    assert rc._mentions("Restart k8s. Then check.", "k8s")
+    assert rc._mentions("is it the bench server?", "bench server")
+    # ...but a dot glued to a word on both sides is part of a name.
+    assert not rc._mentions("we deploy node.js here", "node")
+    assert not rc._mentions("we deploy node.js here", "js")
+    assert rc._mentions("we deploy node.js here", "node.js")
+    assert rc._mentions("we deploy node.js.", "node.js")
+    assert not rc._mentions("pinned to v1.2 today", "v1")
+    assert rc._mentions("i like c++.", "c++")    # metacharacters escaped
+    assert not rc._mentions("axb here", "a.b")   # "." is not a wildcard
+
+
+def test_mentions_a_dot_before_a_name_still_blocks_it():
+    # Only the TRAILING dot changed: a dotfile path in a hit text does not
+    # name the entity its stem happens to spell.
+    assert not rc._mentions("see .env file", "env")
+    assert not rc._mentions("edit .claude/settings.json", "claude")
+    assert not rc._mentions("activate .venv first", "venv")
+
+
+def test_mentions_folds_the_names_own_separators():
+    # The same run of separators _entity_in_query folds, so memory_recall
+    # seeds the entity memory_search's pin scope already treats as named.
+    assert rc._mentions("payments-db host", "payments db")
+    assert rc._mentions("the payments db host", "payments-db")
+    assert rc._mentions("the payments_db host", "payments-db")
+    assert rc._mentions("the payments / db host", "payments db")
+    assert not rc._mentions("the payments database host", "payments db")
+    # The TEXT's boundaries are not folded: "_" stays part of a word.
+    assert not rc._mentions("see pseudolife_memory/recall.py", "pseudolife")
+    # Only INTERNAL separators fold; a leading one stays literal.
+    assert rc._mentions("GET /api now", "/api")
+    assert not rc._mentions("GET api now", "/api")
+    assert not rc._mentions("GET -api now", "/api")
+
+
+def test_mentions_contraction_is_not_a_boundary_but_possessive_is():
+    assert not rc._mentions("don't do it", "don")
+    assert not rc._mentions("don’t do it", "don")
+    assert not rc._mentions("ask o'brien", "brien")
+    assert not rc._mentions("ask o’brien", "brien")
+    assert rc._mentions("the bench server's config", "bench server")
+    assert rc._mentions("the bench server’s config", "bench server")
+    assert rc._mentions("Don's laptop", "don")
+    # Only a whole-word 's' is possessive: "o'sullivan" does not name "o".
+    assert not rc._mentions("ask o'sullivan", "o")
+
+
+def test_mentions_hyphen_is_a_boundary():
+    # Pinned as documented behavior (the docstring used to claim the
+    # opposite): a hyphenated compound names each hyphen-bounded run.
+    assert rc._mentions("k8s-prod cluster", "k8s")
+    assert rc._mentions("k8s-prod cluster", "k8s-prod")
+
+
+def _nfd(s):
+    import unicodedata
+    return unicodedata.normalize("NFD", s)
+
+
+def test_mentions_treats_combining_marks_as_part_of_a_word():
+    """A combining mark (a decomposed accent, a Devanagari vowel sign or
+    virama) is not ``\\w`` to Python's ``re``, but it belongs to the letter
+    before it: a name must not end or start next to one."""
+    assert not rc._mentions(_nfd("the café server"), "cafe")
+    assert not rc._mentions(_nfd("josé said"), "jose")
+    assert not rc._mentions("हिंदी text", "हि")       # sign after the name
+    assert not rc._mentions("रामायण कब", "राम")       # vowel sign after
+    assert not rc._mentions("सम्मान", "मान")          # virama before
+    # A mark that is the name's own last character is still the name.
+    assert rc._mentions("हि text", "हि")
+    assert rc._mentions("राम कब?", "राम")
+    assert rc._mentions(_nfd("the café server"), _nfd("café"))
+    assert rc._mentions(_nfd("meet at the café."), _nfd("café"))
+
+
+def test_mentions_nfc_control_keeps_matching():
+    """Precomposed letters were already word characters; nothing moves."""
+    assert rc._mentions("the café server", "café")
+    assert rc._mentions("meet at the café.", "café")
+    assert rc._mentions("the café's menu", "café")
+    assert not rc._mentions("the café server", "caf")
+    assert not rc._mentions("the café server", "cafe")
+
+
+@pytest.mark.parametrize("text,name", [
+    ("the café server", "cafe"),     # mark right after the name
+    ("josé said", "jose"),
+    ("ask é'brien", "brien"),        # mark before a glued apostrophe
+    ("ask don'ṡ note", "don"),       # 's' + dot above is not possessive 's
+    ("the café server", "the"),      # far from any mark: unchanged
+    ("see the josé file", "file"),
+])
+def test_mentions_same_verdict_for_nfd_and_nfc_text(text, name):
+    """An ASCII name is the same under NFD, so decomposing the text around
+    it must not change whether the text names it."""
+    import unicodedata
+    nfc = unicodedata.normalize("NFC", text)
+    assert rc._mentions(_nfd(text), name) == rc._mentions(nfc, name)
+
+
+def test_mentions_mark_after_a_dot_or_apostrophe_blocks_like_a_letter():
+    assert not rc._mentions("deploy node.\u0301x", "node")
+    assert rc._mentions("deploy node. next", "node")
+    # A mark is not a possessive "s", so it glues the apostrophe.
+    assert not rc._mentions("ask don'\u0301 now", "don")
+
+
+def test_mentions_keeps_looking_past_a_mark_bounded_candidate():
+    assert rc._mentions(_nfd("josé met jose"), "jose")
+    assert rc._mentions("सम्मान and मान", "मान")
+    # The next clean match can overlap the rejected one.
+    assert rc._mentions("\u0301a a a", "a a")
+
+
+@pytest.mark.parametrize("entity,query", [
+    ("cafe", _nfd("the café server")),
+    ("jose", _nfd("josé said")),
+    ("हि", "हिंदी text"),
+    ("राम", "रामायण कब"),
+    ("मान", "सम्मान"),
+    ("हि", "हि text"),
+    ("राम", "राम कब?"),
+])
+def test_mentions_agrees_with_pin_scope_test_on_combining_marks(entity, query):
+    """recall._mentions and service._entity_in_query share one boundary
+    rule; on mark-bounded names they must give the same answer."""
+    from pseudolife_memory.service import _entity_in_query
+    assert rc._mentions(query, entity) == _entity_in_query(entity, query)
+
+
+def test_mechanical_seeds_query_ending_in_a_period():
+    c = rc.MechanicalController()
+    assert c.seed_entities("start the bench server.", ["unrelated hit"],
+                           ["bench server", "unrelated"]) == ["bench server"]
+
+
 def test_run_recall_reaches_two_hop_terminal():
     svc = _two_hop()
     st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],
@@ -159,23 +299,32 @@ def test_parse_name_list_tolerates_noise():
 # PG-backed integration tests (require bench Postgres on 127.0.0.1:5433)
 # ---------------------------------------------------------------------------
 
-_ADMIN = os.environ.get(
-    "PSEUDOLIFE_BENCH_ADMIN_URL",
-    "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-)
+from tests.helpers import pg_reachable as _pg_reachable
+from tests.pg_defaults import default_admin_url
+
+_ADMIN = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
+
+# Probed lazily and once, behind a fixture, rather than in a collection-time
+# skipif: the probe is auth-aware now (a reachable server that rejects the
+# password raises), and an import-time raise would take the pure-logic tests
+# above down with it. Same shape as test_memcot_bench.
+_PG_REACHABLE: bool | None = None
 
 
 def _pg_up() -> bool:
-    try:
-        import psycopg
-        with psycopg.connect(_ADMIN, connect_timeout=3):
-            return True
-    except Exception:
-        return False
+    global _PG_REACHABLE
+    if _PG_REACHABLE is None:
+        _PG_REACHABLE = _pg_reachable(_ADMIN)
+    return _PG_REACHABLE
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_bridges_two_hop_on_real_service(tmp_path):
+@pytest.fixture()
+def bench_pg() -> None:
+    if not _pg_up():
+        pytest.skip("bench Postgres not reachable")
+
+
+def test_recall_bridges_two_hop_on_real_service(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service  # reuse isolated bench DB
     svc = build_service(tmp_path)
@@ -192,8 +341,8 @@ def test_recall_bridges_two_hop_on_real_service(tmp_path):
     assert any(e["dst"] == "jdk-21" for e in out["edges"])
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_low_confidence_when_query_names_no_entity(tmp_path):
+@pytest.mark.real_model
+def test_recall_low_confidence_when_query_names_no_entity(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -291,8 +440,7 @@ def _seed_two_communities(svc):
     svc.graph_relate("alpha-cache", "relates-to", "beta-svc")
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_refresh_graph_insight_persists_and_is_stable(tmp_path):
+def test_refresh_graph_insight_persists_and_is_stable(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -311,8 +459,7 @@ def test_refresh_graph_insight_persists_and_is_stable(tmp_path):
     assert before == after
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_neighborhood_carries_community(tmp_path):
+def test_graph_neighborhood_carries_community(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -341,8 +488,7 @@ def test_recall_config_hub_defaults():
     assert c.expand_budget == 0
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_graph_relation_filter(tmp_path, monkeypatch):
+def test_memory_graph_relation_filter(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
@@ -355,8 +501,7 @@ def test_memory_graph_relation_filter(tmp_path, monkeypatch):
     assert rels == {"depends-on"}                 # runs-on filtered out
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_path_service_shortest_path(tmp_path):
+def test_graph_path_service_shortest_path(bench_pg, tmp_path):
     # The memory_path MCP tool was folded into memory_graph(to=...); the
     # Console still reaches this via /api/graph/path -> service.graph_path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -368,8 +513,7 @@ def test_graph_path_service_shortest_path(tmp_path):
     assert out["path"] == ["mp-a", "mp-b", "mp-c"] and out["hops"] == 2
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
+def test_memory_recall_tool_delegates(bench_pg, monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
@@ -452,8 +596,7 @@ def _seed_hub_graph(svc):
         svc.graph_relate(head, "depends-on", "shared-config")
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
+def test_recall_hub_gating_keeps_gold_drops_blast_radius(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -466,8 +609,7 @@ def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
     assert "order-service" not in names           # hub not expanded through
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
+def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -482,20 +624,7 @@ def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
 # MCP tool tests: memory_digest / memory_communities (Task 7)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_graph_digest_service(tmp_path):
-    # digest left the MCP surface (Console-only via /api/graph/digest).
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
-    svc = build_service(tmp_path)
-    _seed_two_communities(svc)
-    svc._refresh_graph_insight()  # noqa: SLF001
-    out = svc.graph_digest()
-    assert out["available"] is True and "god_nodes" in out["digest"]
-
-
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_communities_service(tmp_path):
+def test_communities_service(bench_pg, tmp_path):
     # communities left the MCP surface (Console-only via /api/graph/communities).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
@@ -508,8 +637,7 @@ def test_communities_service(tmp_path):
     assert "members" in members
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
+def test_dream_run_refreshes_digest_with_no_backlog(bench_pg, tmp_path):
     # A dream with no memory backlog must still recompute the graph digest, so
     # manual graph edits (cleanup / direct graph_relate) are reflected promptly.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -523,8 +651,7 @@ def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
     assert svc._storage.load_communities()["assignment"]  # communities persisted
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_dream_writes_fact_traces(tmp_path):
+def test_dream_writes_fact_traces(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
@@ -546,8 +673,7 @@ def test_dream_writes_fact_traces(tmp_path):
     assert st.facts_for_entry(eid)
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
+def test_memory_get_and_reinforce_roundtrip(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
@@ -572,11 +698,11 @@ def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
     assert srv.memory_reinforce(eid)["reinforced"] is True
     after = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
     assert after == before + 1
-    assert srv.memory_get(9_000_001) == {"found": False, "faded": True}
+    assert srv.memory_get(9_000_001) == {"found": False, "faded": True,
+                                         "note": srv._FADED_NOTE}
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_reinforcements_loads_into_entry(tmp_path):
+def test_reinforcements_loads_into_entry(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.storage.sync import row_to_entry
@@ -590,8 +716,7 @@ def test_reinforcements_loads_into_entry(tmp_path):
     assert row_to_entry(row).reinforcements == 3
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_surfaces_reinforcements(tmp_path):
+def test_memory_get_surfaces_reinforcements(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -604,8 +729,7 @@ def test_memory_get_surfaces_reinforcements(tmp_path):
     assert "access_count" in got
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_get_syncs_access_count_no_clobber(tmp_path):
+def test_memory_get_syncs_access_count_no_clobber(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -630,8 +754,7 @@ def test_memory_get_syncs_access_count_no_clobber(tmp_path):
     assert st.conn.execute("SELECT access_count FROM entries WHERE id=%s", (eid,)).fetchone()[0] == db_before + 1
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_reinforce_syncs_in_memory(tmp_path):
+def test_reinforce_syncs_in_memory(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     svc = build_service(tmp_path)
@@ -682,8 +805,7 @@ def recall_cap_service(tmp_path_factory):
     return svc, base_query
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_caps_payload_non_verbose(monkeypatch,
+def test_memory_recall_caps_payload_non_verbose(bench_pg, monkeypatch,
                                                 recall_cap_service):
     import pseudolife_memory.mcp_server as srv
     svc, base_query = recall_cap_service
@@ -721,8 +843,7 @@ def test_memory_recall_caps_payload_non_verbose(monkeypatch,
     assert len(json.dumps(out)) < len(json.dumps(raw)) // 2
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
+def test_memory_recall_verbose_keeps_full_texts(bench_pg, monkeypatch,
                                                 recall_cap_service):
     # verbose=True is the escape hatch: entity/edge counts still cap the
     # payload, but supporting text content must NOT be truncated.
@@ -992,8 +1113,7 @@ def test_fanout_caps_are_exposed_in_the_console_config_registry():
         assert row["group"] == "Recall"
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_service_recall_passes_the_caps_through(tmp_path, monkeypatch):
+def test_service_recall_passes_the_caps_through(bench_pg, tmp_path, monkeypatch):
     """The knobs are useless if ``service.recall`` doesn't hand them to the
     walk — the seam every other recall config item is wired through."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))

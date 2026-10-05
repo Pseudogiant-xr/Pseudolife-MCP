@@ -73,6 +73,9 @@ def entry_to_row(entry: MemoryEntry) -> dict[str, Any]:
         # v35 write-time labels; nullable, NULL = unlabelled.
         "authority": entry.authority,
         "distortion_tolerance": entry.distortion_tolerance,
+        # v38: an in-memory entry is new/pending unless an old loader
+        # deliberately preserved the None migration marker.
+        "dream_state": getattr(entry, "dream_state", "pending"),
     }
 
 
@@ -97,6 +100,7 @@ def row_to_entry(row: dict[str, Any], device: str = "cpu") -> MemoryEntry:
         # v35; pre-v35 rows carry no key -> None (unlabelled).
         authority=row.get("authority"),
         distortion_tolerance=row.get("distortion_tolerance"),
+        dream_state=row.get("dream_state"),
     )
 
 
@@ -237,7 +241,7 @@ def sync_cortex_slots(cortex: CortexStore, storage) -> int:
     if meta_dirty:
         storage.meta_set(_CORTEX_LOG_KEY,
                          cortex.supersession_log[-SUPERSESSION_LOG_CAP:])
-        storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+        storage.advance_dream_cursor(cortex.dream_cursor)
         cortex.meta_dirty = False
     return len(rows)
 
@@ -259,7 +263,7 @@ def snapshot_cortex(cortex: CortexStore, storage) -> int:
     storage.replace_facts(rows)
     storage.meta_set(_CORTEX_LOG_KEY,
                      cortex.supersession_log[-SUPERSESSION_LOG_CAP:])
-    storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+    storage.advance_dream_cursor(cortex.dream_cursor)
     # A full snapshot persists everything — outstanding dirty marks are moot.
     cortex.dirty_slots.clear()
     cortex.meta_dirty = False

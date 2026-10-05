@@ -77,11 +77,15 @@ def test_all_tools_registered() -> None:
         "memory_search",
         "memory_recent",
         "memory_supersede",
+        "memory_reinstate",
         "memory_stats",
         "memory_toolset",
         "document_ingest",
         "document_search",
         "re_evidence",
+        # Agent coordination.
+        "memory_agents",
+        "memory_message",
         # Episodes + consolidation.
         "memory_session_title",
         "memory_episode_start",
@@ -149,6 +153,7 @@ def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monk
     explained = _invoke("memory_search", {"query": "gadget port", "explain": True})
     assert "trace" not in plain
     assert "trace" in explained and isinstance(explained["trace"], dict)
+    assert "tiers" in explained["trace"]
 
 
 def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
@@ -213,16 +218,18 @@ def test_get_neighbors_tool_is_gone() -> None:
 
 
 _EXPECTED_MINIMAL = sorted([
-    # The 9-tool eager surface for minimal-tier clients (Claude Desktop).
+    # The 10-tool eager surface for minimal-tier clients (Claude Desktop).
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
     "memory_set_add", "memory_set_remove",
-    "memory_outcome", "memory_session_title", "memory_toolset",
+    "memory_outcome", "memory_lesson_search", "memory_session_title",
+    "memory_toolset",
 ])
 
 _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
+    "memory_agents", "memory_message",
     "memory_fact_resolve", "memory_graph", "memory_recall",
     "memory_graph_relate", "memory_world_search", "memory_world_set",
-    "memory_lesson_search", "document_search", "document_ingest",
+    "document_search", "document_ingest",
     "memory_stats", "memory_get", "memory_episode_start", "memory_episode_end",
     "re_evidence",
 ])
@@ -244,6 +251,16 @@ def test_visible_tool_names_per_tier() -> None:
     assert sorted(mod._visible_tool_names("minimal")) == _EXPECTED_MINIMAL
     assert sorted(mod._visible_tool_names("core")) == _EXPECTED_CORE
     assert mod._visible_tool_names("full") == set(mod._TOOL_TIERS)
+
+
+def test_lesson_search_is_visible_at_minimal() -> None:
+    """The served session-start rule says to recall with memory_search AND
+    memory_lesson_search, and memory_outcome (minimal) writes the lessons,
+    yet minimal-tier sessions could not read them back without an expand.
+    Moved to minimal by maintainer decision, 2026-10-05."""
+    from pseudolife_memory import mcp_server as mod
+    assert mod._TOOL_TIERS["memory_lesson_search"] == "minimal"
+    assert "memory_lesson_search" in mod._visible_tool_names("minimal")
 
 
 def test_tier_map_env_parsed(tmp_path: Path, monkeypatch) -> None:
@@ -274,15 +291,30 @@ def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
 def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, caplog) -> None:
     import importlib
     import logging
+    import threading
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("PSEUDOLIFE_DREAM_BASE_URL", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_DREAM_MODEL", raising=False)
     import pseudolife_memory.mcp_server as mod
     importlib.reload(mod)
+    was_running = {t for t in threading.enumerate() if t.name == "pl-dream"}
+
+    class _NeverStarted:  # the warning is the subject, not the thread
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(mod.threading, "Thread", _NeverStarted)
     with caplog.at_level(logging.WARNING, logger="pseudolife-mcp"):
         mod.start_dream_sweep()   # dream enabled by default, no extractor configured
     msgs = " ".join(r.getMessage().lower() for r in caplog.records)
     assert "extractor" in msgs and "cortex" in msgs
+    # No live sweep may outlive the test: it would wake mid-suite and sweep
+    # whatever mcp_server.service some later test had patched in.
+    started = {t for t in threading.enumerate() if t.name == "pl-dream"}
+    assert started <= was_running, "a real pl-dream thread was left running"
 
 
 def test_start_dream_sweep_starts_for_retrieval_log_when_dream_disabled(
@@ -402,7 +434,8 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
     leak the store's own add_member/remove_member vocabulary at the MCP
     boundary — service.cortex_write remaps it to name memory_set_add /
     memory_set_remove (Task 4), and the generic async-offload wrapper turns
-    the ValueError into this surface's uniform {error, message} shape."""
+    the ValueError into this surface's MCP tool error: ``isError`` with
+    ``{error: invalid_argument, message}``, never the Python class name."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
@@ -410,9 +443,11 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
 
     _invoke("memory_set_add",
            {"entity": "project", "attribute": "tags", "member": "rust"})
-    out = _invoke("memory_fact_set",
-                 {"entity": "project", "attribute": "tags", "value": "go"})
-    assert out["error"] == "ValueError"
+    result = asyncio.run(mod.mcp.call_tool(
+        "memory_fact_set", {"entity": "project", "attribute": "tags", "value": "go"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument"
     assert out["message"] == (
         "slot holds a set; use memory_set_add / memory_set_remove")
 
@@ -481,6 +516,7 @@ def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
     assert "candidates" in got
 
 
+@pytest.mark.real_model
 def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
@@ -509,18 +545,6 @@ def test_memory_stats_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     stats = _invoke("memory_stats", {})
     assert "bands" in stats
     assert stats["total_memories"] >= 1
-
-
-def test_memory_search_explain_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "Trace dispatch fact", "source": "t"})
-    out = _invoke("memory_search", {"query": "Trace dispatch", "top_k": 3, "explain": True})
-    assert "trace" in out
-    assert "tiers" in out["trace"]
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +596,7 @@ def test_memory_episode_summary_via_mcp_dispatch(
     assert out["found"] is True and out["id"] == ep["id"]
 
 
+@pytest.mark.real_model
 def test_memory_consolidation_candidates_via_mcp_dispatch(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -735,9 +760,39 @@ def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatc
     out = _invoke("memory_search", {"query": "widget port"})
     assert out["count"] >= 1
     e = out["entries"][0]
-    assert set(e) == {"id", "text", "source", "tags", "score"}
+    assert set(e) == {"id", "text", "source", "tags", "score", "date"}
     for noise in _ENTRY_NOISE + ("superseded", "superseded_by_text"):
         assert noise not in e
+
+
+def test_compact_entries_carry_their_write_date(
+        tmp_path: Path, monkeypatch) -> None:
+    """A hit's age is a signal agents act on, and compact entries had
+    dropped it with the rest of the bookkeeping. In the 2026-09-23
+    review's used_ids labels, status notes were used 51% of the time when
+    under 3 days old and 24% at 3-14 days, and knowledge entries decayed
+    the same way. ``date`` is the entry's write date, the local
+    YYYY-MM-DD that ``replaced_by.at`` already uses. It is omitted rather
+    than invented when the stamp is missing."""
+    from datetime import datetime
+
+    mod = _reload_mod(tmp_path, monkeypatch)
+    ts = 1_790_000_000.0
+    e = mod._compact_entry({"id": 1, "text": "t", "source": "s", "tags": [],
+                            "score": 0.5, "timestamp": ts})
+    assert e["date"] == datetime.fromtimestamp(ts).date().isoformat()
+    assert "timestamp" not in e
+    for missing in (None, 0):
+        assert "date" not in mod._compact_entry(
+            {"id": 2, "text": "t", "timestamp": missing})
+    _invoke("memory_store", {"text": "the widget port is 9191",
+                             "source": "notes"})
+    stored = mod.service.recent(n=1)["entries"][0]["timestamp"]
+    written = datetime.fromtimestamp(stored).date().isoformat()
+    for tool, args in (("memory_search", {"query": "widget port"}),
+                       ("memory_recent", {"n": 5})):
+        hit = _invoke(tool, args)["entries"][0]
+        assert hit["date"] == written, tool
 
 
 def test_memory_search_verbose_restores_full_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -759,16 +814,210 @@ def test_memory_search_explain_implies_verbose_entries(tmp_path: Path, monkeypat
         assert k in e, f"explain entry missing {k!r}"
 
 
-def test_compact_search_keeps_supersession_signal(tmp_path: Path, monkeypatch) -> None:
-    """superseded_by_text changes answers — it must survive compaction."""
+@pytest.mark.real_model
+def test_compact_search_serves_a_replacement_pointer(tmp_path: Path, monkeypatch) -> None:
+    """A superseded hit keeps its flag and gains a short dated pointer to
+    the note recorded as replacing it — never the replacement's full text.
+    About 4 in 10 legacy links point at an unrelated note (2026-09-23
+    review), so the full text must not ride along as if it were the
+    answer; ``verified`` says whether an explicit correction made the link.
+    ``verbose`` still serves the whole text."""
+    import re
+
     _reload_mod(tmp_path, monkeypatch)
     _invoke("memory_store", {"text": "the api key lives in .env", "source": "notes"})
     _invoke("memory_supersede", {"old_text": "the api key lives in .env",
                                  "new_text": "the api key lives in the vault now"})
-    out = _invoke("memory_search", {"query": "where does the api key live"})
-    old = next(e for e in out["entries"] if e["text"] == "the api key lives in .env")
-    assert old["superseded"] is True
-    assert old["superseded_by_text"] == "the api key lives in the vault now"
+    for tool, args in (("memory_search", {"query": "where does the api key live"}),
+                       ("memory_recent", {"n": 5})):
+        out = _invoke(tool, args)
+        old = next(e for e in out["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded"] is True, tool
+        assert "superseded_by_text" not in old, tool
+        rb = old["replaced_by"]
+        assert list(rb) == ["id", "at", "preview", "verified", "current"], tool
+        assert rb["preview"] == "the api key lives in the vault now", tool
+        assert rb["verified"] is True, tool     # memory_supersede = explicit
+        assert rb["current"] is True, tool      # the vault note is live
+        assert rb["id"] is None, tool           # file mode: no row ids
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rb["at"]), tool
+        full = _invoke(tool, {**args, "verbose": True})
+        old = next(e for e in full["entries"]
+                   if e["text"] == "the api key lives in .env")
+        assert old["superseded_by_text"] == "the api key lives in the vault now"
+        assert "replaced_by" not in old, tool
+
+
+def test_memory_search_docstring_does_not_trust_replacement_text() -> None:
+    """The docstring used to tell agents to prefer the (uncapped)
+    replacement text. It must now describe the pointer honestly: an
+    unverified link may point at an unrelated note, and chains are never
+    followed (161 live entries chain up to 44 links into one note)."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "superseded_by_text" not in doc
+    assert "replaced_by" in doc and "verified: false" in doc
+    assert "Never follow chains" in doc
+    # False is "not confirmed", never proof of a detector link: an evicted
+    # or ambiguous successor and a custom-source consolidation read false
+    # too (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in doc
+    assert "marks a retired auto-detector link" not in doc
+
+
+def test_replacement_pointer_marks_a_chain_link_not_current(
+        tmp_path: Path, monkeypatch) -> None:
+    """``replaced_by.current`` says whether the replacement is itself still
+    live. The 2026-09-23 review found the recorded successor itself
+    superseded in 529 of 730 served superseded slots; without the flag an
+    agent could not see that ``memory_get`` on it lands on a chain link.
+    The service never walks the chain, so the first link names the middle
+    note (not the end of the chain) and says it is not current."""
+    _reload_mod(tmp_path, monkeypatch)
+    v1, v2, v3 = ("the api key lives in .env",
+                  "the api key lives in the vault now",
+                  "the api key lives in the secrets manager now")
+    _invoke("memory_store", {"text": v1, "source": "notes"})
+    _invoke("memory_supersede", {"old_text": v1, "new_text": v2})
+    _invoke("memory_supersede", {"old_text": v2, "new_text": v3})
+    for tool, args in (("memory_search", {"query": "where does the api key live"}),
+                       ("memory_recent", {"n": 5})):
+        by_text = {e["text"]: e for e in _invoke(tool, args)["entries"]}
+        first, middle = by_text[v1]["replaced_by"], by_text[v2]["replaced_by"]
+        assert (first["preview"], first["current"]) == (v2, False), tool
+        assert (middle["preview"], middle["current"]) == (v3, True), tool
+
+
+def test_memory_search_docstring_explains_replacement_currency() -> None:
+    """The pointer's ``current`` flag is only actionable if the served
+    contract says what to do when it is false: the replacement is itself
+    a chain link, and chains are never followed, so search again."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "current: false" in doc and "search again" in doc
+
+
+def test_memory_search_docstring_is_truthful_about_low_confidence() -> None:
+    """``low_confidence`` is ``no entries AND no cortex fact`` at the shipped
+    floor 0. Search nearly always serves entries, and the one search in
+    1,072 real agent searches that served none still served facts, so the
+    flag fired on none of them
+    (evals/results/serving-policy-replay-20260925-r3.json). It cannot tell
+    an absent answer from a present one either: in-domain absent-answer
+    probes score like real hits. The description used to promise "no confident match, prefer
+    abstaining" and called the cortex block "the current, deduped answer";
+    both overstate what is served."""
+    from pseudolife_memory import mcp_server
+
+    doc = " ".join((mcp_server.memory_search.__doc__ or "").split())
+    assert "prefer abstaining" not in doc
+    assert "the current, deduped answer" not in doc
+    assert "only when nothing matched" in doc
+    assert "may bear on" in doc
+
+
+_LIVE_GET = {"found": True, "entry_id": 5, "text": "port is 5433",
+             "source": "correction", "reinforcements": 0,
+             "explicit_reinforcements": 0, "access_count": 1,
+             "consolidated_into": []}
+
+
+def test_memory_get_on_a_live_entry_is_byte_identical(
+        tmp_path: Path, monkeypatch) -> None:
+    """A live entry's ``memory_get`` payload is exactly the service's —
+    the supersession fields appear only on a superseded entry."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(_LIVE_GET))
+    assert _invoke("memory_get", {"entry_id": 5}) == _LIVE_GET
+
+
+def test_memory_get_on_a_superseded_entry_serves_the_pointer(
+        tmp_path: Path, monkeypatch) -> None:
+    """Dereferencing ``replaced_by.id`` must say when the target is itself
+    superseded, with the same pointer search serves — never the uncapped
+    replacement text (PR #336 review finding 4: "never follow chains" was
+    not actionable while ``memory_get`` hid the state)."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    long_text = "port is 5434 " * 20
+    superseded = {**_LIVE_GET, "text": "port is 5432", "source": "notes",
+                  "superseded": True, "superseded_at": 1_790_000_000.0,
+                  "superseded_by_text": long_text, "superseded_by_id": 9,
+                  "supersession_verified": True,
+                  "superseded_by_current": False}
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(superseded))
+    out = _invoke("memory_get", {"entry_id": 5})
+    rb = out.pop("replaced_by")
+    assert out == {**_LIVE_GET, "text": "port is 5432", "source": "notes",
+                   "superseded": True}
+    assert rb == mod._compact_entry(superseded)["replaced_by"]
+    assert list(rb) == ["id", "at", "preview", "verified", "current"]
+    assert (rb["id"], rb["verified"], rb["current"]) == (9, True, False)
+    assert rb["preview"] == long_text[:120] + "…"
+
+
+def test_memory_get_on_a_superseded_entry_without_replacement_text(
+        tmp_path: Path, monkeypatch) -> None:
+    """A row retired before replacement text was recorded (pre-schema-v5)
+    is still flagged superseded but has nothing to point at — the same
+    rule ``_compact_entry`` applies — and no raw service key leaks."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    legacy = {**_LIVE_GET, "superseded": True,
+              "superseded_at": 1_790_000_000.0, "superseded_by_text": None,
+              "superseded_by_id": None, "supersession_verified": False,
+              "superseded_by_current": False}
+    monkeypatch.setattr(mod.service, "get_entry",
+                        lambda entry_id: dict(legacy))
+    assert _invoke("memory_get", {"entry_id": 5}) == {
+        **_LIVE_GET, "superseded": True}
+
+
+def test_memory_get_faded_payload_is_unchanged(
+        tmp_path: Path, monkeypatch) -> None:
+    """The service payload is unchanged; the MCP result adds the note that
+    names the possible causes (2026-10-05, refusal notes)."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    assert _invoke("memory_get", {"entry_id": 123}) == {
+        "found": False, "faded": True, "note": mod._FADED_NOTE}
+    assert mod.service.get_entry(123) == {"found": False, "faded": True}
+
+
+def test_memory_episode_summary_serves_compact_entries_with_the_pointer(
+        tmp_path: Path, monkeypatch) -> None:
+    """``recent_entries`` are compacted exactly as ``memory_recent``
+    compacts its entries: no uncapped ``superseded_by_text``, the
+    ``replaced_by`` pointer instead, and none of the bookkeeping keys.
+    ``memory_recent(episodes=[id], verbose=true)`` keeps the full dicts.
+    The summary's own keys are untouched."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    ep = _invoke("memory_episode_start", {"title": "supersede session"})
+    old, new = "the api key lives in .env", "the api key lives in the vault now"
+    _invoke("memory_store", {"text": old, "source": "notes"})
+    _invoke("memory_supersede", {"old_text": old, "new_text": new})
+    raw = mod.service.episode_summary(ep["id"])
+    out = _invoke("memory_episode_summary", {"id": ep["id"]})
+    assert {k: v for k, v in out.items() if k != "recent_entries"} == {
+        k: v for k, v in raw.items() if k != "recent_entries"}
+    assert out["recent_entries"] == [
+        mod._compact_entry(e) for e in raw["recent_entries"]]
+    by_text = {e["text"]: e for e in out["recent_entries"]}
+    assert set(by_text) == {old, new}
+    assert "superseded_by_text" not in by_text[old]
+    rb = by_text[old]["replaced_by"]
+    assert (rb["preview"], rb["verified"], rb["current"]) == (new, True, True)
+    for e in out["recent_entries"]:
+        assert not set(e) & set(_ENTRY_NOISE)
+
+
+def test_memory_episode_summary_missing_id_is_unchanged(
+        tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    assert _invoke("memory_episode_summary", {"id": "no-such-id"}) == {
+        "found": False, "id": "no-such-id"}
 
 
 def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monkeypatch) -> None:
@@ -776,7 +1025,7 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
     _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
                              "tags": ["probe"]})
     compact = _invoke("memory_recent", {"n": 5})["entries"][0]
-    assert set(compact) == {"id", "text", "source", "tags"}
+    assert set(compact) == {"id", "text", "source", "tags", "date"}
     full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
     for k in _ENTRY_NOISE + ("superseded",):
         assert k in full, f"verbose entry missing {k!r}"
@@ -1082,11 +1331,13 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
     fed the FULL registry, not the filtered view. v2: the transport filter
     never touches the MCPServer tool registry, so a hidden tool's call-time
     input validation must still fire after a filtered list."""
-    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
     asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
-    with pytest.raises(ToolError, match="valid integer"):
-        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    result = asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument" and out["param"] == "n"
+    assert "valid integer" in out["message"]
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
@@ -1301,6 +1552,31 @@ def test_memory_outcome_unusable_used_ids_still_records_the_outcome(
     assert out["recorded"] is True
     assert out["used_ids_reason"] == "no usable entry ids"
     assert out["used_ids_ignored"] == 1
+
+
+@pytest.mark.parametrize("empty", [[], ""])
+def test_memory_outcome_empty_used_ids_is_reported_as_empty_not_garbage(
+        tmp_path: Path, monkeypatch, empty) -> None:
+    """``used_ids=[]`` is equivalent to omitting it — the label is
+    positive-only, so "used none" writes nothing (decision 2026-09-08; a
+    real negative would need an event-level mark, i.e. a schema change).
+    But an intentionally empty list is not garbage, and the reason must
+    not say the ids were unusable."""
+    mod = _reload_mod(tmp_path, monkeypatch)
+    seen: dict = {}
+
+    def _fake(task, outcome, **kw):
+        seen.update(kw)
+        return {"recorded": True, "signal_id": 1}
+
+    monkeypatch.setattr(mod.service, "record_outcome", _fake)
+    out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
+                                     "used_ids": empty})
+    assert seen["used_ids"] is None
+    assert out["recorded"] is True
+    assert out["used_ids_reason"] == (
+        "empty: no label written (used_ids is positive-only)")
+    assert "used_ids_ignored" not in out
 
 
 def test_parse_used_ids_caps_a_runaway_list() -> None:

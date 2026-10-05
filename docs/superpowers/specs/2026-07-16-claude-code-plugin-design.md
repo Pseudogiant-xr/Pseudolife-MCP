@@ -11,9 +11,17 @@ than adding a parallel path.
   plugin entries may `source: "./plugin"` inside the same repo.
 - Plugin `.mcp.json` supports `{"type": "http", "url": ...}` — identical to
   `claude mcp add --transport http`.
-- Hook commands run in **PowerShell by default on Windows**, `sh -c` on Unix;
-  a per-hook `"shell": "bash"` selects Git Bash on Windows (our users have
-  git). One bash-syntax command therefore works on all platforms.
+- Hook commands run in `sh -c` on Unix and, on Windows, in **Git Bash when
+  Claude Code finds one** (`CLAUDE_CODE_GIT_BASH_PATH`, then the default Git
+  for Windows directories, then the `git` on PATH), falling back to
+  PowerShell only when it finds none; a per-hook `"shell"` field can force
+  either. One bash-syntax command therefore works on every platform that
+  has Git for Windows. *Corrected 2026-09-28: this bullet first said
+  PowerShell was the Windows default and `"shell": "bash"` the opt-in.
+  Measured on Claude Code 2.1.280, the plugin's Bash commands ran under
+  `C:\Program Files\Git\bin\bash.exe` with no `shell` field and with every
+  Git directory removed from PATH. The `commandWindows` field the plugin's
+  hooks.json carries is Codex's; Claude Code ignores it.*
 - **SessionStart hook stdout is injected into context as-is** (10,000-char
   cap). No JSON wrapping needed.
 - Plugins **cannot** ship a CLAUDE.md — a SessionStart hook is the only

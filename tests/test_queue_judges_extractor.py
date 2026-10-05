@@ -40,7 +40,8 @@ def wire():
         state["bodies"].append(json.loads(req.data.decode()))
         return _Resp()
 
-    with mock.patch("urllib.request.urlopen", fake_urlopen):
+    with mock.patch("pseudolife_memory.utils.no_redirect.urlopen",
+                    fake_urlopen):
         yield state
 
 
@@ -214,6 +215,7 @@ def test_judge_request_records_the_served_model(wire):
             return json.dumps({"model": "really-served-x",
                                "choices": [{"message": {"content": '{"verdicts": []}'}}]}).encode()
 
-    with mock.patch("urllib.request.urlopen", lambda req, timeout=None: _Resp()):
+    with mock.patch("pseudolife_memory.utils.no_redirect.urlopen",
+                    lambda req, timeout=None: _Resp()):
         ex.judge_junk([_JUNK])
     assert ex.served_model == "really-served-x"

@@ -20,6 +20,7 @@ the contract:
 from __future__ import annotations
 
 import json
+import hashlib
 import zipfile
 from contextlib import contextmanager
 
@@ -30,8 +31,10 @@ from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
     REHUB_SCHEMA_VERSION,
     SCHEMA_META_VERSION,
+    assert_disposable_database,
     ensure_schema,
 )
+from pseudolife_memory.storage.postgres import PostgresStorage
 from pseudolife_memory.transfer_cli import (
     _MUST_BE_EMPTY,
     EXCLUDED_TABLES,
@@ -40,7 +43,7 @@ from pseudolife_memory.transfer_cli import (
     perform_export,
     perform_import,
 )
-from tests.pg_fixtures import pg_url  # noqa: F401  (fixture)
+from tests.pg_fixtures import await_background_dreams, pg_url  # noqa: F401  (fixture)
 
 _DIM = 1024
 # Messy leading components on purpose: all-0/1 vectors round-trip exactly
@@ -57,13 +60,18 @@ def _bank(pg_url):
     truncated, and leaked backends from other suites reaped — managed
     explicitly (NOT the pg_conn fixture) so tests can CLOSE it before
     import runs: perform_import refuses a database other connections hold,
-    and the fixture connection would trip that guard.
+    and the fixture connection would trip that guard. Same order as
+    ``pg_conn``: wait for this process's dream threads, THEN reap — a
+    dream killed mid-flight reconnects and can deadlock the truncate.
     """
+    await_background_dreams()
     with psycopg.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the reap below
         conn.execute("SET search_path TO public")
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND backend_type = 'client backend' AND usename = current_user"
         )
         conn.commit()
         ensure_schema(conn)
@@ -73,6 +81,7 @@ def _bank(pg_url):
 
 
 def _truncate_all(conn) -> None:
+    assert_disposable_database(conn)
     conn.execute(
         "TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
         + " RESTART IDENTITY CASCADE"
@@ -115,6 +124,44 @@ def _seed_bank(conn) -> None:
         "'replaced by entry one')",
         ("seed entry two pasted\u2028line\u0085sep\u2029end", _VEC),
     )
+    reinstate_request = {
+        "entry_id": 2,
+        "operation_id": "11111111-2222-4333-8444-555555555555",
+        "expected_text_sha256": hashlib.sha256(
+            "seed entry two pasted\u2028line\u0085sep\u2029end".encode()
+        ).hexdigest(),
+        "expected_source_sha256": hashlib.sha256(b"").hexdigest(),
+        "expected_superseded_at": 170.0,
+        "expected_superseded_by_text_sha256": hashlib.sha256(
+            b"replaced by entry one"
+        ).hexdigest(),
+        "evidence_packet_sha256": hashlib.sha256(
+            b"synthetic transfer evidence"
+        ).hexdigest(),
+        "reviewer_ids": ["reviewer-a", "reviewer-b"],
+        "reason": "preserve synthetic replay evidence",
+        "decided_by": "synthetic-principal",
+    }
+    operation_id, request_sha256, request = (
+        PostgresStorage._reinstatement_request(**reinstate_request)
+    )
+    cur.execute(
+        "INSERT INTO entry_reinstatement_decisions "
+        "(operation_id, entry_id, request_sha256, entry_text_sha256, "
+        "entry_source_sha256, prior_superseded_at, "
+        "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+        "evidence_packet_sha256, reviewer_ids, reason, decided_by, "
+        "decided_at) VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, "
+        "%s, %s::jsonb, %s, %s, 171.0)",
+        (operation_id, 2, request_sha256,
+         request["expected_text_sha256"],
+         request["expected_source_sha256"], 170.0,
+         "replaced by entry one",
+         request["expected_superseded_by_text_sha256"],
+         request["evidence_packet_sha256"],
+         json.dumps(request["reviewer_ids"]), request["reason"],
+         request["decided_by"]),
+    )
     cur.execute(
         "INSERT INTO entities (canonical, display, etype, created_at) "
         "VALUES ('widget', 'Widget', 'artifact', 100.0), "
@@ -144,6 +191,7 @@ def _seed_bank(conn) -> None:
         "VALUES (1, 'uses', 2, 0.9, 'agent', 110.0, 110.0, 110.0, "
         "1750000000000, 4, 'seed-writer', 'sess-1', 1)"
     )
+    cur.execute("INSERT INTO edge_evidence (edge_id, entry_id) VALUES (1, 1)")
     cur.execute(
         "INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, "
         "similarity, rationale, source, created_at, status) "
@@ -237,7 +285,13 @@ def _seed_bank(conn) -> None:
     )
     cur.execute(
         "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, "
-        "created_at) VALUES ('widget', 'color', 1, 152.0)"
+        "created_at) VALUES ('widget', 'color', 1, 152.0), "
+        "('widget', 'color', 2, 152.5)"
+    )
+    cur.execute(
+        "INSERT INTO memory_trace_invalidations "
+        "(entity_norm, attribute_norm, source_entry_id, invalidated_at, cause) "
+        "VALUES ('widget', 'color', 2, 170.0, 'source_superseded')"
     )
     cur.execute(
         "INSERT INTO entity_sources (entity_id, source, count, origin, "
@@ -320,6 +374,7 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
     assert result["path"] == out
     assert result["counts"]["entries"] == 2
     assert result["counts"]["facts"] == 3
+    assert result["counts"]["edge_evidence"] == 1
 
     with _bank(pg_url):
         pass  # truncate back to empty, then release the connection
@@ -359,6 +414,186 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
             continue
         assert after[table] == before[table], f"{table} did not roundtrip"
 
+    storage = PostgresStorage(pg_url)
+    try:
+        replay = storage.reinstate_entry(**{
+            "entry_id": 2,
+            "operation_id": "11111111-2222-4333-8444-555555555555",
+            "expected_text_sha256": hashlib.sha256(
+                "seed entry two pasted\u2028line\u0085sep\u2029end".encode()
+            ).hexdigest(),
+            "expected_source_sha256": hashlib.sha256(b"").hexdigest(),
+            "expected_superseded_at": 170.0,
+            "expected_superseded_by_text_sha256": hashlib.sha256(
+                b"replaced by entry one"
+            ).hexdigest(),
+            "evidence_packet_sha256": hashlib.sha256(
+                b"synthetic transfer evidence"
+            ).hexdigest(),
+            "reviewer_ids": ["reviewer-a", "reviewer-b"],
+            "reason": "preserve synthetic replay evidence",
+            "decided_by": "synthetic-principal",
+        })
+        assert replay["idempotent_replay"] is True
+        assert replay["current_state"] == "retired_again"
+    finally:
+        storage.close()
+
+
+def test_import_advances_entry_ids_past_deleted_invalidation_sources(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        conn.execute("DELETE FROM entries WHERE id = 2")
+    archive = tmp_path / "deleted-source.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, archive)
+
+    with psycopg.connect(pg_url) as conn:
+        retained_source_id = conn.execute(
+            "SELECT MAX(source_entry_id) FROM memory_trace_invalidations"
+        ).fetchone()[0]
+        new_id = conn.execute(
+            "INSERT INTO entries (band, text, embedding, ts) "
+            "VALUES ('flat', 'post-import entry', %s::vector, 999.0) "
+            "RETURNING id",
+            (_VEC,),
+        ).fetchone()[0]
+    assert new_id > retained_source_id
+
+
+def test_import_advances_entry_ids_past_reinstatement_audit_targets(
+    pg_url, tmp_path,
+):
+    """A reinstated entry that was later deleted keeps its ID retired: the
+    audit's replay reports on ``entry_id``, so a reused ID would answer for
+    an unrelated entry."""
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        audited_id = conn.execute(
+            "SELECT GREATEST("
+            "  COALESCE((SELECT MAX(id) FROM entries), 0), "
+            "  COALESCE((SELECT MAX(source_entry_id) "
+            "            FROM memory_trace_invalidations), 0)) + 50"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE entry_reinstatement_decisions SET entry_id = %s",
+            (audited_id,),
+        )
+    archive = tmp_path / "deleted-reinstated.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, archive)
+
+    with psycopg.connect(pg_url) as conn:
+        new_id = conn.execute(
+            "INSERT INTO entries (band, text, embedding, ts) "
+            "VALUES ('flat', 'post-import entry', %s::vector, 999.0) "
+            "RETURNING id",
+            (_VEC,),
+        ).fetchone()[0]
+    assert new_id > audited_id
+
+
+def test_old_export_without_invalidation_member_backfills_surviving_pairs(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+    current = tmp_path / "current.zip"
+    old = tmp_path / "old.zip"
+    perform_export(pg_url, current)
+
+    def remove_v39_member(blobs):
+        blobs.pop("memory_trace_invalidations.jsonl")
+        manifest = json.loads(blobs["manifest.json"])
+        manifest["schema_version"] = 38
+        manifest["counts"].pop("memory_trace_invalidations", None)
+        blobs["manifest.json"] = json.dumps(manifest).encode()
+
+    _rewrite_zip(current, old, remove_v39_member)
+    with _bank(pg_url):
+        pass
+    result = perform_import(pg_url, old)
+    assert result["counts"]["memory_trace_invalidations"] == 1
+    with psycopg.connect(pg_url) as conn:
+        rows = conn.execute(
+            "SELECT entity_norm, attribute_norm, source_entry_id, "
+            "invalidated_at, cause FROM memory_trace_invalidations"
+        ).fetchall()
+    assert rows == [("widget", "color", 2, 170.0, "source_superseded")]
+
+
+def test_current_export_empty_invalidation_member_is_authoritative(
+    pg_url, tmp_path,
+):
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+    current = tmp_path / "current.zip"
+    empty = tmp_path / "empty-events.zip"
+    perform_export(pg_url, current)
+
+    def empty_v39_member(blobs):
+        blobs["memory_trace_invalidations.jsonl"] = b""
+        manifest = json.loads(blobs["manifest.json"])
+        manifest["counts"]["memory_trace_invalidations"] = 0
+        blobs["manifest.json"] = json.dumps(manifest).encode()
+
+    _rewrite_zip(current, empty, empty_v39_member)
+    with _bank(pg_url):
+        pass
+    perform_import(pg_url, empty)
+    with psycopg.connect(pg_url) as conn:
+        count = conn.execute(
+            "SELECT count(*) FROM memory_trace_invalidations"
+        ).fetchone()[0]
+    assert count == 0
+
+
+_SPELLING_FLAG = "curation_listing_spelling_v2"
+
+
+def _spelling_flag(pg_url):
+    with psycopg.connect(pg_url) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = %s", (_SPELLING_FLAG,)).fetchone()
+    return row[0] if row else None
+
+
+@pytest.mark.parametrize("exported_flag", [None, {"copied": 2, "at": 160.0}])
+def test_import_leaves_the_curation_spelling_flag_to_the_export(
+        pg_url, tmp_path, exported_flag):
+    # A daemon started on the fresh target sets the one-time carry-over flag
+    # of folded curation dismissals (curation_safety.migrate_folded_
+    # dismissals) with nothing to carry. An export from before that flag
+    # existed brings folded dismissals the next start must still carry over;
+    # one that carries the flag has already been through it.
+    from pseudolife_memory.curation_safety import _LISTING_SPELLING_META
+    assert _LISTING_SPELLING_META == _SPELLING_FLAG
+
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+        conn.execute(
+            "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+            "('lesson:ci-cd-deploy|approach', 'lesson:release-train|pitfall', 150.0)")
+        if exported_flag is not None:
+            conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                         (_SPELLING_FLAG, json.dumps(exported_flag)))
+    archive = tmp_path / "bank.zip"
+    perform_export(pg_url, archive)
+
+    with _bank(pg_url) as conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                     (_SPELLING_FLAG, json.dumps({"copied": 0, "at": 900.0})))
+    perform_import(pg_url, archive)
+    assert _spelling_flag(pg_url) == exported_flag
+
 
 def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
     with _bank(pg_url) as conn:
@@ -371,11 +606,26 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO dream_runs (started_at, cursor_before, status) "
             "VALUES (171.0, 0.0, 'running')"
         )
+        # v44: what an outcome's used_ids became is serving-history
+        # telemetry, like retrieval_events: the signal travels, the column
+        # does not.
+        conn.execute(
+            "UPDATE outcome_signals SET used_ids = "
+            "'{\"credited\": [1], \"unmatched\": [], "
+            "\"served_elsewhere\": []}'::jsonb")
         # An extension schema marker (the `*_schema_version` convention) is
         # build-owned like schema_version itself and must not travel.
         conn.execute(
             "INSERT INTO meta (key, value) VALUES "
             "('sampleext_schema_version', '\"v34-sampleext\"'::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES "
+            "('dream_ack_secret_v1', '\"bank-local-secret\"'::jsonb), "
+            "('coordination_hlc_highwater', '[10000, 1]'::jsonb), "
+            "('coordination_bank_id', '\"11111111-1111-4111-8111-111111111111\"'::jsonb), "
+            "('writer_lease_epoch', '7'::jsonb) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
         conn.commit()
@@ -395,7 +645,19 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert "rehub_schema_version" not in meta_keys
         assert "sampleext_schema_version" not in meta_keys
         assert "active_session_pointer" not in meta_keys
+        assert "dream_ack_secret_v1" not in meta_keys
+        assert "coordination_hlc_highwater" not in meta_keys
+        assert "coordination_bank_id" not in meta_keys
+        # The writer-lease handover counter belongs to the target bank: an
+        # imported value could move it backwards under a writer that
+        # remembers a higher one.
+        assert "writer_lease_epoch" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
+        signals = [json.loads(line) for line in
+                   zf.read("outcome_signals.jsonl").decode().split("\n")
+                   if line]
+        assert [s["task"] for s in signals] == ["seed task"]
+        assert "used_ids" not in signals[0]
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["format_version"] == 1
         assert manifest["schema_version"] == SCHEMA_META_VERSION
@@ -404,10 +666,14 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert set(manifest["excluded_tables"]) == set(EXCLUDED_TABLES)
 
 
-def test_import_skips_extension_markers_injected_into_the_archive(pg_url, tmp_path):
+@pytest.mark.parametrize("key,value", [
+    ("sampleext_schema_version", "v34-sampleext"),
+    ("coordination_bank_id", "11111111-1111-4111-8111-111111111111"),
+])
+def test_import_skips_bank_local_meta_injected_into_the_archive(pg_url, tmp_path, key, value):
     """The import-side guard is load-bearing on its own: an archive carrying
-    a build-owned extension marker (hand-edited, or exported by a build that
-    predates the suffix rule) must not plant it in the target bank."""
+    build-owned or bank-local metadata (hand-edited, or exported by an older
+    build) must not replace the target bank's authority."""
     with _bank(pg_url) as conn:
         _seed_bank(conn)
     out = tmp_path / "bank.zip"
@@ -416,22 +682,23 @@ def test_import_skips_extension_markers_injected_into_the_archive(pg_url, tmp_pa
     hacked = tmp_path / "hacked.zip"
 
     def add_marker(blobs):
-        row = json.dumps(
-            {"key": "sampleext_schema_version", "value": "v34-sampleext"})
+        row = json.dumps({"key": key, "value": value})
         blobs["meta.jsonl"] = blobs["meta.jsonl"] + (row + "\n").encode()
 
     _rewrite_zip(out, hacked, add_marker)
 
-    with _bank(pg_url):
-        pass  # truncate back to empty, then release the connection
+    with _bank(pg_url) as conn:
+        if key == "coordination_bank_id":
+            conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb)",
+                         (key, json.dumps("22222222-2222-4222-8222-222222222222")))
 
     perform_import(pg_url, hacked)
 
     with psycopg.connect(pg_url) as conn:
         conn.execute("SET search_path TO public")
-        cur = conn.execute(
-            "SELECT count(*) FROM meta WHERE key = 'sampleext_schema_version'")
-        assert cur.fetchone()[0] == 0
+        row = conn.execute("SELECT value FROM meta WHERE key = %s", (key,)).fetchone()
+        assert row == (("22222222-2222-4222-8222-222222222222",)
+                       if key == "coordination_bank_id" else None)
 
 
 def test_import_refuses_a_nonempty_bank(pg_url, tmp_path):

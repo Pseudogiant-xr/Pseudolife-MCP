@@ -287,7 +287,8 @@ class TestFlatRebuildWiring:
     embedder; proves the flat path writes the wabl JSONLs + the survival
     artifact, with the survivor sets actually differing between arms."""
 
-    def _write_setup(self, tmp_path, monkeypatch):
+    def _write_setup(self, tmp_path, monkeypatch, dump_embedder=None,
+                     served_embedder=None):
         import gzip
         import json
         monkeypatch.setattr(abl, "RESULTS_DIR", tmp_path)
@@ -303,7 +304,8 @@ class TestFlatRebuildWiring:
                     "question_ts": 2000.0, "search_time": 1500.0,
                     "turns_stored": 3,
                     "query_emb": [1.0, 0.0, 0.0, 0.0],
-                    "bands": bands, "live_replay_rag": []}
+                    "bands": bands, "live_replay_rag": [],
+                    **({"embedder": dump_embedder} if dump_embedder else {})}
 
         # Flat arm kept an entry ("kept-only-by-flat") that the continuum
         # arm evicted — the write-side difference under test.
@@ -318,7 +320,8 @@ class TestFlatRebuildWiring:
         served = {"question_id": "q1", "question": "what colour?",
                   "contexts": {"rag": "shared",
                                "cortex": "facts",
-                               "hybrid": "facts\n\nRelevant memories:\nshared"}}
+                               "hybrid": "facts\n\nRelevant memories:\nshared"},
+                  **({"embedder": served_embedder} if served_embedder else {})}
         (tmp_path / "longmemeval-ku-x-y.jsonl").write_text(
             json.dumps(served) + "\n", encoding="utf-8")
 
@@ -349,3 +352,18 @@ class TestFlatRebuildWiring:
         assert stats["n_questions"] == 1
         assert stats["questions"][0]["continuum_survivors"] == 1
         assert stats["questions"][0]["flat_survivors"] == 2
+
+    def test_rebuilt_rows_record_the_replay_embedder(self, tmp_path,
+                                                     monkeypatch, capsys):
+        """The rebuilt rag + hybrid raw blocks are the replay's ranking over
+        vectors its embedder wrote into the dump; the cortex block is still
+        the served run's. Both provenances land on the row."""
+        fp32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
+        bf16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
+        self._write_setup(tmp_path, monkeypatch, dump_embedder=bf16,
+                          served_embedder={"extract": fp32})
+        assert abl.main(["rebuild", "--dataset", "x", "--extractor", "y",
+                         "--src-tag", "", "--band-preset", "flat"]) == 0
+        capsys.readouterr()
+        rows = abl.load_rows(tmp_path / "longmemeval-ku-x-y-wabl-flat-wall.jsonl")
+        assert rows[0]["embedder"] == {"extract": fp32, "band_ablation": bf16}

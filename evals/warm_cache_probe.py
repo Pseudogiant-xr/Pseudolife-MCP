@@ -15,6 +15,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "evals"))
 
 import ladder_sweep as ls                                  # noqa: E402
+import embedder_stamp                                      # noqa: E402
 
 # dream.py imports json function-locally, so the only common seam in this
 # isolated probe process is stdlib json.dumps itself — filtered narrowly to
@@ -34,6 +35,7 @@ def one_pass(label):
     row = {"label": label, "gold": out.get("gold_recoverable"),
            "stale": out.get("stale_leak"),
            "claims": (out.get("consolidation") or {}).get("claims")}
+    embedder_stamp.carry(out, row)
     print(json.dumps(row), flush=True)
     return row
 

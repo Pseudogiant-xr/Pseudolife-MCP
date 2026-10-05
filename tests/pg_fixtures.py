@@ -2,11 +2,18 @@
 
 Resolution order for the test server:
 
-1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector).
+1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector;
+   refused if it names a production bank — see
+   ``storage.schema.assert_disposable_database``).
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic
-suites stay runnable anywhere.
+suites stay runnable anywhere, unless PSEUDOLIFE_REQUIRE_TEST_POSTGRES=1
+requires database coverage (as in the full CI lanes). A server that IS reachable
+but rejects the credentials is different: that is a misconfiguration, and the PG-backed
+tests ERROR instead of skipping (``tests/pg_defaults.py``) — after the
+2026-09-14 password rotation the suite skipped ~1000 tests with exit 0.
+The dev container's password itself is read from ``ops/.env``.
 
 Without the env override, each pytest process gets its own private
 database (``pseudolife_memory_test_<pid>``), dropped at interpreter
@@ -15,6 +22,17 @@ backend on its database before truncating, so two concurrent suite runs
 sharing one database would terminate each other's live connections
 (AdminShutdown on a different victim set every run). A private database
 scopes the reaper to this run's own leaked backends.
+
+The reaper has a second, in-process victim: the daemon thread
+``episode_end_session`` / ``reap_idle_sessions`` fire for the
+end-of-session dream. It outlives the test that fired it, so the next
+test's ``pg_conn`` terminates it mid-dream; ``PostgresStorage.conn`` then
+reconnects on the thread's next query and its reads interleave with the
+fixture's TRUNCATE lock order (CI run 35556355319, 2026-09-21: deadlock
+between the TRUNCATE and the reconnected dream backend on ONE worker's
+private database). ``pg_conn`` therefore waits for every live dream
+thread in this process before it reaps — see
+``wait_for_background_dreams``.
 """
 
 from __future__ import annotations
@@ -22,15 +40,24 @@ from __future__ import annotations
 import atexit
 import os
 import sys
+import threading
+import time as _time
 
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-_DEFAULT_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
+from tests.pg_defaults import (  # noqa: E402
+    own_run_pid, run_suffix,
+    PostgresAuthError, PostgresSetupError, PostgresUnavailableError, RedactedUrl,
+    auth_failure_message, conninfo_dbname, conninfo_with_dbname,
+    default_admin_url, is_auth_failure, is_server_unavailable,
+    redacted_error_text, setup_failure_message,
+)
+
 # Per-run private database — see module docstring. A fixed name here would
 # reintroduce the concurrent-run reaper crossfire.
-_TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
+_TEST_DB = f"pseudolife_memory_test_{run_suffix()}"
 
 # The truncate list. Was a hand-maintained copy of the FK-free tables
 # CASCADE cannot reach — which is a list that has to be re-derived on every
@@ -40,16 +67,22 @@ _TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
 # tests/test_bench_reset_tables.py.
 from pseudolife_memory.storage.schema import (  # noqa: E402
     BENCH_RESET_TABLES as _ALL_TABLES,
+    assert_disposable_database,
+    refuse_production_database,
+)
+from pseudolife_memory.service_dream import (  # noqa: E402
+    SESSION_END_DREAM_THREAD_NAME,
 )
 
 
 def _admin_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Point at the server's postgres db for admin ops.
-        base, _, _db = url.rpartition("/")
-        return base + "/postgres"
-    return _DEFAULT_ADMIN
+        url = RedactedUrl(url)
+        # Point at the server's postgres db for admin ops. psycopg parses both
+        # URI and keyword DSNs; only dbname changes, so TLS/options survive.
+        return RedactedUrl(conninfo_with_dbname(url, "postgres"))
+    return RedactedUrl(default_admin_url())
 
 
 def _with_worker_suffix(db: str) -> str:
@@ -68,23 +101,37 @@ def _with_worker_suffix(db: str) -> str:
     return f"{db}_{worker}" if worker else db
 
 
+def _override_db_name(url: str) -> str:
+    """The override's database name, refused if it is a production bank.
+
+    Checked on the base name, before any xdist suffix: a single-process run
+    (the full-suite form, every single-file run) would use it verbatim, and
+    the bundled stack's server also hosts the production bank.
+    """
+    db = conninfo_dbname(url)
+    refuse_production_database(db)
+    return db
+
+
 def _target_db_name() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        return _with_worker_suffix(url.rsplit("/", 1)[1].split("?")[0])
+        url = RedactedUrl(url)
+        return _with_worker_suffix(_override_db_name(url))
     return _TEST_DB
 
 
 def resolve_test_db_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Explicit override: returned verbatim (single-process) and
-        # provisioning stays pg_url's job (CI relies on that) — no
-        # connection attempts from a mere resolve. Under an xdist worker
-        # the database name gets the worker id appended; see
-        # _with_worker_suffix for why.
-        base, _, db = url.rpartition("/")
-        return f"{base}/{_with_worker_suffix(db)}"
+        url = RedactedUrl(url)
+        # Explicit override: its endpoint, credentials and options stay
+        # unchanged in a single process, and provisioning stays pg_url's job
+        # (CI relies on that) — no connection attempts from a mere resolve.
+        # Under an xdist worker the database name gets the worker id appended;
+        # see _with_worker_suffix for why.
+        db = _with_worker_suffix(_override_db_name(url))
+        return RedactedUrl(conninfo_with_dbname(url, db))
     # Best-effort creation so direct consumers (daemon/shim fixtures,
     # single-file runs) get an existing per-run database without depending
     # on pg_url having run first; their own reachability probes handle the
@@ -93,7 +140,9 @@ def resolve_test_db_url() -> str:
         ensure_test_db()
     except Exception:  # noqa: BLE001
         pass
-    return _DEFAULT_ADMIN.rsplit("/", 1)[0] + f"/{_TEST_DB}"
+    # RedactedUrl: dozens of tests take pg_url as a parameter, and pytest
+    # prints every frame's arguments in a failure report (2026-09-20 review).
+    return RedactedUrl(conninfo_with_dbname(default_admin_url(), _TEST_DB))
 
 
 def _pid_alive(pid: int) -> bool:
@@ -115,14 +164,16 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _prune_dead_run_dbs(conn) -> None:
+def _prune_dead_run_dbs(conn, *, namespace: str | None = None) -> None:
     """Drop private DBs leaked by hard-killed runs (atexit never fired).
 
-    Only names carrying a pid suffix whose process is gone — a live
-    concurrent run's database matches the pattern but its pid is alive,
-    so it is never touched (its connection count may legitimately be
-    zero between PG-backed tests, which is why liveness is checked on
-    the pid, not on pg_stat_activity).
+    Only names carrying a pid suffix of this process namespace whose
+    process is gone — a live concurrent run's database matches the pattern
+    but its pid is alive, so it is never touched (its connection count may
+    legitimately be zero between PG-backed tests, which is why liveness is
+    checked on the pid, not on pg_stat_activity). Another namespace's run
+    (WSL beside Windows) has a pid this process cannot see, so it is left
+    alone (pg_defaults.PID_NAMESPACE).
     """
     rows = conn.execute(
         "SELECT datname FROM pg_database "
@@ -130,10 +181,10 @@ def _prune_dead_run_dbs(conn) -> None:
         "   OR datname LIKE 'pseudolife_memory_bench_%'"
     ).fetchall()
     for (name,) in rows:
-        suffix = name.rsplit("_", 1)[1]
-        if not suffix.isdigit() or int(suffix) == os.getpid():
+        pid = own_run_pid(name.rsplit("_", 1)[1], namespace=namespace)
+        if pid is None or pid == os.getpid():
             continue
-        if _pid_alive(int(suffix)):
+        if _pid_alive(pid):
             continue
         try:
             conn.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
@@ -149,29 +200,40 @@ def _drop_run_db() -> None:
         pass
 
 
-# Memo per (admin url, db name): None = created OK, str = failure message.
-# Keyed, not a plain flag, so a test that toggles the env override cannot
-# poison provisioning of the other target for the rest of the process.
-_ensure_state: dict[tuple[str, str], str | None] = {}
+# Memo per (admin url, db name): None = created OK, else (exception class,
+# message) to raise afresh. PostgresUnavailableError is the sole skip signal;
+# auth and every reachable setup failure error. Keyed, not a plain flag, so a
+# test that toggles the env override cannot poison provisioning of the other
+# target for the rest of the process. The RedactedUrl key keeps --showlocals
+# and cached failures from rendering credentials.
+_ensure_state: dict[tuple[str, str], tuple[type[RuntimeError], str] | None] = {}
 
 
 def ensure_test_db() -> None:
     """Create the run's test database if missing (memoized per target).
 
-    Raises on an unreachable server — callers translate that into a
-    skip. ``resolve_test_db_url()`` calls this too (default-URL path),
-    so single-file runs work on a fresh server without depending on
+    Raises ``PostgresUnavailableError`` only when no server answered — callers
+    translate that into a skip. Authentication and reachable setup failures
+    are errors, because skipping either would make the run falsely green.
+    ``resolve_test_db_url()`` calls this too (default-URL path), so
+    single-file runs work on a fresh server without depending on
     ``pg_url`` having run first.
     """
     overridden = bool(os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL"))
     db_name = _target_db_name()
-    key = (_admin_url(), db_name)
+    admin = RedactedUrl(_admin_url())
+    key = (admin, db_name)
     if key in _ensure_state:
-        if _ensure_state[key] is not None:
-            raise RuntimeError(_ensure_state[key])
+        memo = _ensure_state[key]
+        if memo is not None:
+            # A FRESH exception each time: re-raising one stored object
+            # would append this frame to its traceback on every PG test.
+            cls, message = memo
+            raise cls(message)
         return
+    refusal = None
     try:
-        with psycopg.connect(_admin_url(), connect_timeout=3, autocommit=True) as conn:
+        with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
             if not overridden:
                 _prune_dead_run_dbs(conn)
             row = conn.execute(
@@ -179,22 +241,135 @@ def ensure_test_db() -> None:
             ).fetchone()
             if row is None:
                 conn.execute(f'CREATE DATABASE "{db_name}"')
-            if not overridden:
+            elif not overridden:
+                # An override's database is the caller's, who may grant a
+                # login that does not own it; only a per-run name can be a
+                # dead owner run's leftover.
+                refusal = _foreign_owner_refusal(conn, db_name)
+            if not overridden and refusal is None:
                 atexit.register(_drop_run_db)
     except Exception as exc:  # noqa: BLE001
-        _ensure_state[key] = f"no test Postgres reachable: {exc}"
-        raise RuntimeError(_ensure_state[key]) from exc
+        if is_auth_failure(exc):
+            memo = (
+                PostgresAuthError,
+                auth_failure_message(admin.host, exc, admin),
+            )
+        elif is_server_unavailable(exc):
+            detail = redacted_error_text(exc, admin)
+            memo = (
+                PostgresUnavailableError,
+                f"no test Postgres reachable at {admin.host}: {detail}",
+            )
+        else:
+            memo = (
+                PostgresSetupError,
+                setup_failure_message(admin.host, exc, admin),
+            )
+        _ensure_state[key] = memo
+        # `from None`: psycopg's frames carry the full conninfo (password
+        # included) as a rendered argument; the FATAL text is in the message.
+        raise memo[0](memo[1]) from None
+    if refusal is not None:
+        _ensure_state[key] = (PostgresSetupError, refusal)
+        raise PostgresSetupError(refusal)
     _ensure_state[key] = None
+
+
+def _foreign_owner_refusal(conn, db_name: str) -> str | None:
+    """The one-line refusal when the run's existing database belongs to a
+    role this login does not hold, else ``None``. A hard-killed run as the
+    bank owner leaves ``pseudolife_memory_test_<pid>``; the test login
+    cannot drop it (the pruner's DROP fails), and a run that reuses the pid
+    would reuse it and fail on every reset, as its tables are the owner's
+    (review, 2026-10-04)."""
+    row = conn.execute(
+        "SELECT pg_has_role(current_user, datdba, 'USAGE'), "
+        "pg_get_userbyid(datdba), current_user "
+        "FROM pg_database WHERE datname = %s", (db_name,)).fetchone()
+    if row is None or row[0]:
+        return None
+    _, owner, user = row
+    return (f"the test database {db_name} already exists and belongs to {owner}, "
+            f"not {user}: a leftover of an earlier run as {owner} whose name this "
+            f"run reuses. Fix: drop it as {owner} "
+            f'(DROP DATABASE "{db_name}" WITH (FORCE)), then run again.')
+
+
+# Join budget for a live dream thread. A hang detector, not a wait: with no
+# extractor endpoint in the environment (conftest scrubs the PSEUDOLIFE_DREAM_*
+# selection variables, so the dream takes the no-op extractor) one cycle ran
+# in 26 ms locally and well under a second on the CI runner (2026-09-21,
+# CI run 35556355319). Anything near this budget is a hung dream.
+DREAM_WAIT_BUDGET_SECONDS = 60.0
+
+# Thread idents already reported as stragglers. A thread stuck past the
+# budget once is not re-joined on every later PG test — that would turn one
+# hung dream into a full budget plus a failure per remaining test.
+_reported_stragglers: set[int] = set()
+
+
+def wait_for_background_dreams(
+    timeout: float = DREAM_WAIT_BUDGET_SECONDS,
+) -> list[threading.Thread]:
+    """Join every live end-of-session dream thread in this process.
+
+    ``episode_end_session`` / ``reap_idle_sessions`` start a daemon thread
+    per fired dream (``_fire_and_forget_dream``) and return at once, so
+    the thread routinely outlives the test that fired it. Reaping backends
+    while it runs terminates its connection mid-dream; the storage layer
+    reconnects on the next query and that fresh transaction can deadlock
+    the fixture's TRUNCATE (see the module docstring). Threads are matched
+    by the name the service pins, so every ``MemoryService`` instance in
+    the process is covered, whichever fixture built it. The join budget
+    is shared across threads; whatever is still alive when it runs out is
+    returned so the caller can fail loudly instead of racing it. A thread
+    reported once is returned again without a second wait.
+    """
+    deadline = _time.monotonic() + timeout
+    stragglers: list[threading.Thread] = []
+    for thread in threading.enumerate():
+        if (thread.name != SESSION_END_DREAM_THREAD_NAME
+                or thread is threading.current_thread()):
+            continue
+        if thread.ident not in _reported_stragglers:
+            thread.join(max(0.0, deadline - _time.monotonic()))
+        if thread.is_alive():
+            _reported_stragglers.add(thread.ident)
+            stragglers.append(thread)
+    return stragglers
+
+
+def await_background_dreams() -> None:
+    """The wait every reap-then-truncate setup runs first: block until this
+    process's dream threads finish, and fail the test on a hung one rather
+    than race it. Shared by ``pg_conn`` and tests/test_transfer_cli.py's
+    hand-managed bank connection."""
+    stragglers = wait_for_background_dreams()
+    if stragglers:
+        pytest.fail(
+            f"{len(stragglers)} end-of-session dream thread(s) still running "
+            f"after {DREAM_WAIT_BUDGET_SECONDS:g}s; reaping them would race "
+            "this setup's TRUNCATE")
+
+
+def _skip_or_raise(exc: BaseException) -> None:
+    """The one branch every PG fixture takes on a failed probe: an absent
+    server skips only when database coverage is optional."""
+    if (isinstance(exc, PostgresUnavailableError)
+            and os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1"):
+        pytest.skip(str(exc))
+    raise exc
 
 
 @pytest.fixture(scope="session")
 def pg_url() -> str:
-    """Session fixture: ensure the test database exists; skip if no server."""
+    """Session fixture: ensure the test database exists; skip if no server,
+    ERROR if the server rejected the credentials."""
     try:
         ensure_test_db()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(str(exc))
-    return resolve_test_db_url()
+        _skip_or_raise(exc)
+    return RedactedUrl(resolve_test_db_url())
 
 
 @pytest.fixture()
@@ -225,12 +400,31 @@ def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
 @pytest.fixture()
 def pg_conn(pg_url):
     """Per-test connection with schema ensured and all tables truncated."""
+    yield from _pg_conn_session(pg_url)
+
+
+def _pg_conn_session(pg_url):
+    """The ``pg_conn`` body as a plain generator: wait for this process's
+    background dreams, reap leaked backends, ensure the schema, truncate,
+    re-seed the schema_version row, yield the connection. Separate from the
+    fixture so tests/test_pg_fixture_dream_wait.py can run one setup pass
+    on demand and pin that the wait happens BEFORE the first connection."""
     from pseudolife_memory.storage.schema import (
         SCHEMA_META_VERSION,
         ensure_schema,
     )
 
+    # BEFORE the reap: a dream thread the previous test fired is this
+    # process's own live backend. Killing it mid-dream makes the storage
+    # layer reconnect, and that fresh transaction can deadlock the TRUNCATE
+    # below (module docstring).
+    await_background_dreams()
+
     with psycopg.connect(pg_url) as conn:
+        # FIRST, before the reap below kills anyone's connections: the
+        # server, not the DSN, says which database this is — and it must not
+        # be a production bank (tests/test_disposable_database_guard.py).
+        assert_disposable_database(conn)
         # Pin to public BEFORE any schema/truncate work — mirrors
         # PostgresStorage.__init__. The DB role `pseudolife` can clash with
         # schema names, so the default ("$user", public) search_path could
@@ -240,13 +434,15 @@ def pg_conn(pg_url):
         conn.commit()
         # Reap leaked backends from tests that built a MemoryService /
         # PostgresStorage and never closed it. Such a connection holds locks on
-        # the public tables, so the TRUNCATE below would block and hit
-        # lock_timeout. Safe: this database is private to this pytest process
+        # the public tables, so the TRUNCATE below would block indefinitely
+        # (this connection sets no lock_timeout; only PostgresStorage does).
+        # Safe: this database is private to this pytest process
         # (see module docstring), so only this run's own leftovers die here.
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                "AND backend_type = 'client backend' AND usename = current_user"
             )
         conn.commit()
         ensure_schema(conn)

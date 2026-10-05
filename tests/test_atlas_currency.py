@@ -132,13 +132,13 @@ def test_extractor_size_figure_matches_authoritative_doc(atlas: dict) -> None:
     """README.md is the authoritative site for the extractor-sidecar image
     size (currently ~11.8 GB, measured 2026-08-20 — retired the earlier
     ~9 GB / ~10.4 GB / ~12.6 GB figures). The atlas must quote the same
-    figure, not a retired one, wherever it states the sonnet-only
+    figure, not a retired one, wherever it states the claude-only
     lighter-by size."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     match = re.search(r"~([\d.]+ GB) lighter", readme)
     assert match, (
         "README.md no longer states a '~N GB lighter' figure for "
-        "sonnet-only — update this test's authoritative source"
+        "claude-only — update this test's authoritative source"
     )
     canonical = match.group(1)
     atlas_text = json.dumps(atlas)
@@ -177,5 +177,5 @@ def test_atlas_tool_counts_and_console_panels_match_code(atlas: dict) -> None:
     atlas_text = json.dumps(atlas, ensure_ascii=False)
     assert f"{tool_count} tools" in atlas_text
     assert f"core = {core_count} of {tool_count} tools" in atlas_text
-    assert f"{tool_count} tools → service.*" in atlas_text
+    assert f"{tool_count} tools → service / coordination / RE evidence" in atlas_text
     assert "RE Evidence" in atlas_text

@@ -15,14 +15,244 @@ for standalone use.
 from __future__ import annotations
 
 import logging
+import math
+import re
+from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any
 
+from pseudolife_memory.dream_token import (
+    MAX_ENTRY_IDS,
+    issue_commit_token,
+    public_generation,
+    verify_commit_token,
+)
+from pseudolife_memory.memory.cortex import _norm_key
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
 from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
                                              content_tokens)
 
 logger = logging.getLogger(__name__)
+
+# Name of the daemon thread ``_fire_and_forget_dream`` starts. Pinned here
+# because the PG test fixtures wait for live threads of this name before
+# reaping backends (tests/pg_fixtures.py): a dream that outlives its test
+# reconnects after the reap and can deadlock the next test's TRUNCATE.
+SESSION_END_DREAM_THREAD_NAME = "session-end-dream"
+
+
+class DreamStallTracker:
+    """In-memory record of whether live dreams are being served.
+
+    On 2026-08-11 the primary extractor's CLI login had expired for over a
+    day and ten dream runs served silently from the fallback; with no
+    fallback the dream holds its cursor and simply stops. Nothing said so.
+    This keeps the evidence ``dream_status``, ``/health``, the session-start
+    line and the board notices read.
+
+    A failed extraction (``extractor_failed`` from ``dream_run``, except a
+    write-phase hold, which is the database), a run whose per-memory retry
+    set aside every memory it pulled, or a dream the fallback served in
+    ``auto`` mode is a primary failure; the second in
+    a row opens the stall (one is noise: the first probe after a restart
+    fails spuriously, see ``_probe_primary``). A dream the primary served
+    that pulled entries is a success and closes it, keeping the closed
+    record with ``recovered_at``. Skipped, errored and empty-pull runs say
+    nothing about the extractor and change nothing. ``check_overdue`` covers
+    a primary that never answers at all: a due backlog no dream has served
+    for ``OVERDUE_SWEEPS`` sweep intervals.
+
+    Process-local by design: a daemon restart forgets the stall, and the
+    next two failed sweeps re-open it. Thread-safe; never takes the service
+    lock.
+    """
+
+    FAILURES_TO_STALL = 2
+    OVERDUE_SWEEPS = 3
+
+    def __init__(self, clock=None) -> None:
+        import threading
+        import time
+
+        self._lock = threading.Lock()
+        self.notify_lock = threading.Lock()
+        self.clock = clock or time.time
+        self.failures = 0
+        self.first_failure_at: float | None = None
+        self.reason: str | None = None
+        self.last_error: str | None = None
+        self.last_success_at: float | None = None
+        self.due_since: float | None = None
+        # Set by the sweep's tick; ``dream_status`` evaluates the overdue
+        # rule only once a sweep is running (embedded mode never sweeps).
+        self.sweep_interval: float | None = None
+        self.stall: dict | None = None
+        self.last_stall: dict | None = None
+        # When the open incident's last notice was delivered (None: not
+        # announced), and a closed announced incident whose recovery notice
+        # is still owed.
+        self.notice_at: float | None = None
+        self.clear_owed: dict | None = None
+        # Across incidents: when the last begin/repeat/escalate went out and
+        # whether it named a hard stall, so a flapping extractor announces
+        # at most once per repeat window (PR #456 review) while a warning
+        # that turns into a hard stall is still announced at once.
+        self.last_notice_at: float | None = None
+        self.announced_hard: bool | None = None
+
+    @staticmethod
+    def _hard(record: dict) -> bool:
+        return record.get("reason") != "served_by_fallback"
+
+    def _open(self, since: float) -> None:
+        if self.stall is None:
+            # A new incident: a recovery nobody received is stale now.
+            self.clear_owed = None
+        self.stall = {"since": since, "reason": self.reason,
+                      "consecutive_failures": self.failures,
+                      "last_error": self.last_error,
+                      "last_success_at": self.last_success_at}
+
+    def record(self, result: dict, *, served_by_fallback: bool) -> None:
+        """Account one ``dream_run_auto`` result."""
+        if result.get("skipped") or result.get("error"):
+            return
+        pulled = result.get("pulled") or 0
+        with self._lock:
+            now = self.clock()
+            err = result.get("extractor_error") or {}
+            if result.get("extractor_failed"):
+                if result.get("hold_phase") == "write":
+                    return              # the database, not the extractor
+                reason = err.get("reason") or "extractor_error"
+                error = err.get("error") or "extraction failed"
+            elif pulled > 0 and (result.get("quarantined") or 0) >= pulled:
+                # Every pulled memory was set aside by the per-memory retry:
+                # the extractor failed again, whatever ``extractor_failed``
+                # says (a one-memory backlog otherwise read as a recovery).
+                reason = err.get("reason") or "extractor_error"
+                error = err.get("error") or "every pulled memory failed extraction"
+            elif served_by_fallback:
+                reason, error = "served_by_fallback", "primary health probe failed"
+            elif pulled > 0:
+                self._succeed(now)
+                return
+            else:
+                return
+            self.failures += 1
+            if self.first_failure_at is None:
+                self.first_failure_at = now
+            self.reason, self.last_error = reason, error
+            if self.stall is not None or self.failures >= self.FAILURES_TO_STALL:
+                self._open(self.stall["since"] if self.stall else self.first_failure_at)
+
+    def _succeed(self, now: float) -> None:
+        self.last_success_at = now
+        self.failures = 0
+        self.first_failure_at = self.reason = self.last_error = None
+        self.due_since = None
+        if self.stall is not None:
+            self.last_stall = {**self.stall, "recovered_at": now}
+            if self.notice_at is not None:
+                self.clear_owed = self.last_stall
+            self.stall = None
+            self.notice_at = None
+
+    def check_overdue(self, *, backlog: int, min_batch: int, would_fire: bool,
+                      interval: float) -> None:
+        with self._lock:
+            now = self.clock()
+            if not (would_fire and backlog >= min_batch):
+                self.due_since = None
+                return
+            if self.due_since is None:
+                self.due_since = now
+            if (self.stall is None
+                    and now - self.due_since > self.OVERDUE_SWEEPS * float(interval)):
+                self.reason = self.reason or "extractor_unreachable"
+                self.last_error = (self.last_error
+                                   or "no dream succeeded while the backlog was due")
+                self._open(self.due_since)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {"stall": dict(self.stall) if self.stall else None,
+                    "last_stall": dict(self.last_stall) if self.last_stall else None}
+
+    def take_notice(self, repeat_seconds: float) -> tuple[str, dict] | None:
+        """The notice due now, if any. While a stall is open: ``begin`` for
+        an incident not yet announced, ``repeat`` while an announced one
+        lasts, each at most once per ``repeat_seconds`` counted across
+        incidents; ``escalate`` at once when a fallback warning becomes a
+        hard stall (an unannounced incident after an announced warning
+        begins at once too). After it: ``clear``, only for an announced
+        incident. Nothing is marked until :meth:`mark_noticed`, so an
+        undelivered notice stays owed."""
+        with self._lock:
+            now = self.clock()
+            if self.stall is not None:
+                hard = self._hard(self.stall)
+                window_open = (self.last_notice_at is None
+                               or now - self.last_notice_at >= repeat_seconds)
+                escalating = hard and self.announced_hard is False
+                if self.notice_at is not None:
+                    if escalating:
+                        return "escalate", dict(self.stall)
+                    return ("repeat", dict(self.stall)) if window_open else None
+                if window_open or escalating:
+                    return "begin", dict(self.stall)
+                return None
+            if self.clear_owed is not None:
+                return "clear", dict(self.clear_owed)
+            return None
+
+    def mark_noticed(self, kind: str) -> None:
+        with self._lock:
+            if kind == "clear":
+                self.clear_owed = None
+            elif self.stall is not None:
+                self.notice_at = self.last_notice_at = self.clock()
+                self.announced_hard = self._hard(self.stall)
+
+
+def _stall_tracker(service) -> DreamStallTracker:
+    """The service's tracker; created on first use for stand-ins that
+    borrow ``dream_run_auto`` without ``MemoryService.__init__``."""
+    tracker = getattr(service, "_dream_stall_tracker", None)
+    if tracker is None:
+        tracker = service._dream_stall_tracker = DreamStallTracker()
+    return tracker
+
+
+@contextmanager
+def _staged_slot(lessons, task: str, aspect: str):
+    """Undo one staged lesson write when its body raises.
+
+    A tolerated claim's savepoint rolls back the SQL half of the write; the
+    store write that preceded it is plain RAM and would otherwise be
+    published — and synced — without the graph state it was meant to commit
+    with. ``LessonStore.write_fact`` touches exactly one slot: it marks the
+    slot dirty, may append record(s), and may mutate the record currently at
+    the slot in place. Restoring those three is the whole undo.
+    """
+    key = (_norm_key(task), _norm_key(aspect))
+    appended_from = len(lessons.records)
+    index = lessons._current.get(key)
+    before = deepcopy(lessons.records[index]) if index is not None else None
+    was_dirty = key in lessons.dirty_slots
+    try:
+        yield
+    except BaseException:
+        del lessons.records[appended_from:]
+        if before is not None:
+            lessons.records[index] = before
+            lessons._current[key] = index
+        else:
+            lessons._current.pop(key, None)
+        if not was_dirty:
+            lessons.dirty_slots.discard(key)
+        raise
 
 
 class DreamOps:
@@ -31,11 +261,26 @@ class DreamOps:
     # Post-pass caps: screen at most this many freshly-minted entities per
     # cycle, one best-match proposal each — the queue stays reviewable.
     _ALIAS_SCAN_MAX = 20
+    # Entity display name -> embedding, kept between alias screens so each
+    # screen encodes only names it has not seen. Capped at 4,096 names
+    # (<= 16 MB at 1,024 dims); the live bank held ~2,050 entity names on
+    # 2026-09-23, ~8 MB. Replaced per instance on first write.
+    _ALIAS_MEMO_MAX = 4096
+    _alias_name_memo: dict | None = None
     _INFER_CURSOR_KEY = "outcome_inference_cursor"
     _DIGEST_CURSOR_KEY = "session_digest_cursor"
 
+    def _dream_display_cursor(self) -> float:
+        """Return a JSON-safe display cursor even for corrupt metadata."""
+        try:
+            value = float(self._cms.dream_display_cursor)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
     def _link_dream_relations(self, relations: list[dict], *,
-                              batch_sources: set[str] | None = None) -> int:
+                              batch_sources: set[str] | None = None,
+                              batch_entries: list[dict] | None = None) -> int:
         """Upsert dream-extracted (src,relation,dst) edges. Closed-vocab
         (resolve_relation; unknown -> related-to), entities resolved alias-aware
         and pinned to the Postgres hub, self-loops dropped, origin='agent'.
@@ -122,14 +367,21 @@ class DreamOps:
                 continue
             # revive=False: a dream re-assertion must not resurrect an edge
             # a human (or deep-dream) superseded — removals stay sticky.
-            self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
+            evidence_ids = [int(e["db_id"]) for e in (batch_entries or [])
+                            if e.get("db_id") is not None
+                            and raw_src.casefold() in e["text"].casefold()
+                            and raw_dst.casefold() in e["text"].casefold()]
+            edge = self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
                                     confidence=conf, origin="agent",
-                                    revive=False)
-            n += 1
+                                    revive=False,
+                                    source_entry_ids=evidence_ids)
+            if edge is not None:
+                n += 1
         return n
 
     def _dream_extract_relations(self, extractor, texts: list[str],
-                                 batch_sources: set[str] | None = None) -> int:
+                                 batch_sources: set[str] | None = None,
+                                 batch_entries: list[dict] | None = None) -> int:
         """Gated, best-effort graph-from-text for one dream batch: run the LLM
         relations call UNLOCKED (slow network), then write edges LOCKED. A
         failure logs and returns 0 — it must never break fact consolidation or
@@ -149,7 +401,8 @@ class DreamOps:
             rels = rel_fn(texts, registry)
             with self._lock:
                 return self._link_dream_relations(
-                    rels, batch_sources=batch_sources)
+                    rels, batch_sources=batch_sources,
+                    batch_entries=batch_entries)
         except Exception as exc:  # noqa: BLE001 — best-effort; never break the dream
             logger.warning("dream relation extraction failed (%s); claims kept",
                            exc)
@@ -283,14 +536,36 @@ class DreamOps:
                 # infer_outcomes_stage).
                 existing = any(
                     e.source == "digest" and e.episode_id == rid
+                    and e.superseded_at is None
                     for band in self._cms.bands for e in band.entries)
-                if cur["ts"] > cand["ended_at"] or existing:
+                queued = rid in cur.get("regenerate", [])
+                if (cur["ts"] > cand["ended_at"] and not queued) or existing:
+                    continue
+                em = self._cms.episodes
+                root = em.episodes.get(rid)
+                subtree = {rid} | {e.id for e in em.episodes.values()
+                                   if em._descends_from(e, rid)}
+                if (root is None or self._episode_inference_context(
+                        root, subtree) != cand["context"]):
+                    # Extraction ran unlocked: a forget may have changed
+                    # its input. Keep this root queued even if a later
+                    # candidate advances the cursor in this same pass.
+                    cur["regenerate"] = sorted(
+                        set(cur.get("regenerate", [])) | {rid})
+                    # Rotate invalidated contexts behind untouched roots and
+                    # earlier deferrals; even a cap of one makes progress.
+                    cur["context_deferred"] = [
+                        e for e in cur.get("context_deferred", []) if e != rid
+                    ] + [rid]
+                    self._save_digest_cursor(cur)
                     continue
                 if digest is None:             # malformed: bounded retry
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:
                         cur["retry"].pop(rid, None)
-                        cur["ts"] = cand["ended_at"]
+                        for key in ("regenerate", "context_deferred"):
+                            cur[key] = [e for e in cur.get(key, []) if e != rid]
+                        cur["ts"] = max(cur["ts"], cand["ended_at"])
                         self._save_digest_cursor(cur)
                         logger.warning(
                             "session digest: advancing past episode %s "
@@ -322,7 +597,9 @@ class DreamOps:
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:
                         cur["retry"].pop(rid, None)
-                        cur["ts"] = cand["ended_at"]
+                        for key in ("regenerate", "context_deferred"):
+                            cur[key] = [e for e in cur.get(key, []) if e != rid]
+                        cur["ts"] = max(cur["ts"], cand["ended_at"])
                         self._save_digest_cursor(cur)
                         logger.warning(
                             "session digest: advancing past episode %s "
@@ -337,16 +614,57 @@ class DreamOps:
                     break                      # keep episode order
                 written += 1
                 cur["retry"].pop(rid, None)
-                cur["ts"] = cand["ended_at"]
+                for key in ("regenerate", "context_deferred"):
+                    cur[key] = [e for e in cur.get(key, []) if e != rid]
+                cur["ts"] = max(cur["ts"], cand["ended_at"])
                 self._save_digest_cursor(cur)
         return {"scanned": scanned, "written": written}
+
+    def _pending_lesson_signals(self, limit, since_ts):
+        """Rotate eligible capped batches without acknowledging failed work.
+
+        The cursor is process-local: a restart begins with the oldest signal
+        once. Every completed extraction attempt advances it, including empty
+        or invalid results, so those cannot monopolize the next sweep.
+        """
+        after = getattr(self, "_lesson_signal_cursor", None)
+        if limit is None:
+            after = None  # an uncapped sweep can offer every eligible signal
+        selected = self._storage.pending_signals(limit=limit, since_ts=since_ts,
+                                                 after=after)
+        if after is not None and len(selected) < limit:
+            wrapped = self._storage.pending_signals(
+                limit=limit - len(selected), since_ts=since_ts)
+            seen = {s["id"] for s in selected}
+            selected += [s for s in wrapped if s["id"] not in seen]
+        if selected:
+            # Keep input order oldest-first, but advance by cyclic traversal,
+            # including any wrap. A small backlog still gets one full batch.
+            last = selected[-1]
+            self._lesson_selected_cursor = (last["created_at"], last["id"])
+        # A signal whose credited entries are all gone (forgotten or evicted)
+        # must not poison a clustered route. Keep it pending, and rotate past
+        # it without paying for extraction. One surviving credited entry is
+        # enough, as for lesson retirement; a superseded entry is kept
+        # history and still counts. The commit transaction rechecks sources
+        # for later races.
+        from pseudolife_memory.storage.postgres import (
+            signal_source_ids, signal_sources_survive)
+        dependencies = {s["id"]: signal_source_ids(s) for s in selected}
+        existing_ids = {i for i in set().union(*dependencies.values())
+                        if self._storage.get_entry(i) is not None}
+        eligible = [s for s in selected
+                    if signal_sources_survive(dependencies[s["id"]], existing_ids)]
+        return sorted(eligible, key=lambda s: (s["created_at"], s["id"]))
 
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
 
-        Single-writer: an extractor with no ``extract_lessons`` (the no-op / a
-        plain regex floor) writes nothing and leaves the signals pending. Old
-        signals are pruned by retention so the log can't grow unbounded.
+        Extraction runs outside the lock. Selected inputs are revalidated before
+        staged lessons, graph changes and handled acknowledgements commit in one
+        transaction. Empty/failed routes stay pending and are re-offered for
+        ``signal_retry_days``; after that they are kept but not offered, and
+        retention deletes them later.
         """
         import time as _t
         cfg = self.config.memory.lessons
@@ -354,11 +672,25 @@ class DreamOps:
             return {"signals": 0, "lessons": 0, "skipped": "no-storage"}
         if not (cfg.enabled and cfg.synthesize_in_dream):
             return {"signals": 0, "lessons": 0, "skipped": "disabled"}
-        cutoff = _t.time() - cfg.signal_retention_days * 86400
+        now = _t.time()
+        cutoff = now - cfg.signal_retention_days * 86400
+        # Retry eligibility is bounded apart from retention, so a cap-full
+        # batch that never lands cannot hold newer signals back for the whole
+        # retention window (see LessonsConfig.signal_retry_days).
+        retry_days = cfg.signal_retry_days
+        since = now - retry_days * 86400 if retry_days > 0 else None
+        # One sweep drains at most ``synthesis_max_signals``: the whole batch
+        # commits under the service lock, so an unbounded backlog would set
+        # the length of a single daemon pause. The remainder stays pending
+        # for the next sweep.
+        cap = limit if limit is not None else (cfg.synthesis_max_signals or None)
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=limit)
+            signals = self._pending_lesson_signals(cap, since)
+            selected_cursor = getattr(self, "_lesson_selected_cursor", None)
+            if not signals:
+                self._lesson_signal_cursor = selected_cursor
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(
@@ -366,57 +698,239 @@ class DreamOps:
         fn = getattr(extractor, "extract_lessons", None)
         if fn is None:
             return {"signals": len(signals), "lessons": 0, "skipped": "no-extractor"}
+        # Rule mode (2026-09-08): signals under the rule contract go to
+        # extract_rules (one situation-specific rule per signal, verbatim
+        # values); the rest keep the clustering path. An extractor without
+        # extract_rules folds them back onto the clustering path rather than
+        # stranding them pending, and the report says so.
+        from pseudolife_memory.memory.dream import is_rule_signal
+        rule_mode = bool(getattr(cfg, "rule_mode", False))
+        rule_sigs = [s for s in signals if is_rule_signal(s, rule_mode)]
+        plain = [s for s in signals if not is_rule_signal(s, rule_mode)]
+        rules_fn = getattr(extractor, "extract_rules", None)
+        rules_fallback = 0
+        if rule_sigs and rules_fn is None:
+            logger.warning("extractor has no extract_rules; %d rule signal(s) "
+                           "synthesised under the clustering prompt",
+                           len(rule_sigs))
+            rules_fallback = len(rule_sigs)
+            plain, rule_sigs = list(signals), []
+        rule_failed_ids: set = set()
+        rule_empty_ids: set = set()
+        errors: list[str] = []
+        plain_claims, rule_claims = [], []
         try:
-            claims = fn(signals)
+            # Give the extractor copies: its annotations must not change the
+            # input snapshot used for durable row revalidation.
+            plain_claims = list(fn(deepcopy(plain))) if plain else []
         except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
-            logger.warning("lesson synthesis failed (%s); leaving signals pending", exc)
-            return {"signals": len(signals), "lessons": 0, "error": str(exc)}
-        # Bitemporal event time: the synthesised lesson became *true* when its
-        # underlying outcomes were observed, not when the dream wrote it. Claims
-        # don't map 1:1 to signals, so use the earliest contributing signal's
-        # created_at as the batch valid_time (None → store defaults to tx_time).
-        created = [s["created_at"] for s in signals if s.get("created_at")]
-        batch_valid_time = min(created) if created else None
-        written = 0
-        deduped = 0
+            errors.append(f"plain extraction: {exc}")
+        if rule_sigs:
+            try:
+                rule_claims = list(rules_fn(deepcopy(rule_sigs)))
+                rule_ids = {s["id"] for s in rule_sigs}
+                rule_failed_ids = rule_ids.intersection(
+                    getattr(extractor, "last_rule_failed_ids", None) or ())
+                rule_empty_ids = rule_ids.intersection(
+                    getattr(extractor, "last_rule_empty_ids", None) or ())
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"rule extraction: {exc}")
+                rule_failed_ids = {s["id"] for s in rule_sigs}
+        with self._lock:
+            self._lesson_signal_cursor = selected_cursor
+        plain_handled = [s["id"] for s in plain] if plain_claims else []
+        rule_handled = [s["id"] for s in rule_sigs
+                        if s["id"] not in rule_failed_ids | rule_empty_ids]
+        # Rule extractors promise one result per handled signal. If a custom
+        # extractor omits outputs without identifying empty/failed inputs, the
+        # unmatched results cannot safely acknowledge any of that route.
+        if len(rule_claims) != len(rule_handled):
+            errors.append("rule extraction did not identify every unhandled signal")
+            rule_claims, rule_handled = [], []
+        claims = plain_claims + rule_claims
+        # Per-claim acknowledgement map, mirroring those two derivations: a
+        # rule claim is the sole output of one signal (same order), so its
+        # signal is acknowledged only if it writes. Clustering claims do not
+        # map to single signals — that route is acknowledged as a whole once
+        # any of its claims lands.
+        claim_signals = [None] * len(plain_claims) + list(rule_handled)
+        # Source identity comes only from immutable input snapshots. Clustering
+        # has no exact contributor map, so label its route's lineage as coarse.
+        from pseudolife_memory.storage.postgres import signal_source_ids
+        by_id = {s["id"]: s for s in signals}
+
+        def lineage(sid):
+            sources = plain if sid is None else [by_id[sid]]
+            provenance = {"lineage:batch"} if sid is None else set()
+            for source in sources:
+                provenance.add(f"signal:{source['id']}")
+                if source.get("episode_id"):
+                    provenance.add(f"episode:{source['episode_id']}")
+                provenance.update(f"entry:{i}" for i in signal_source_ids(source))
+            if sources and all(s.get("origin") == "inferred" for s in sources):
+                provenance.add("inferred")
+            times = [s["created_at"] for s in sources if s.get("created_at") is not None]
+            return provenance, min(times) if times else None
+        out = {"signals": len(signals), "lessons": 0, "deduped": 0}
+        if rule_sigs:
+            out["rule_signals"] = len(rule_sigs)
+        if rule_failed_ids:
+            out["rules_failed"] = len(rule_failed_ids)
+        if rule_empty_ids:
+            out["rules_empty"] = len(rule_empty_ids)
+        if rules_fallback:
+            out["rules_fallback"] = rules_fallback
+        if errors:
+            out["error"] = "; ".join(errors)
+        if not claims:
+            return out
         dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
                           or 0.0)
-        for c in claims:
+        from pseudolife_memory.storage.sync import sync_lesson_slots
+        with self._lock:
+            self._ensure_init()
+            written = deduped = write_errors = plain_landed = 0
+            handled_ids: list = []
+            failed_rule_ids: set = set()
+            writes_finished = False
             try:
-                if dedup_thr and self._synthesized_lesson_duplicate(
-                        c["task"], c.get("aspect", "lesson"), c["lesson"],
-                        c.get("polarity", "+"), dedup_thr):
-                    deduped += 1
-                    logger.info("lesson synthesis dedup: %r near-duplicates "
-                                "an existing lesson; skipped", c.get("task"))
-                    continue
-                self.lesson_write(
-                    c["task"], c.get("aspect", "lesson"), c["lesson"],
-                    about=c.get("about"), outcome=c.get("outcome", "success"),
-                    polarity=c.get("polarity", "+"),
-                    confidence=(0.4 if all_inferred
-                                else float(c.get("confidence", 0.6))),
-                    origin=c.get("origin", "agent"),
-                    provenance=(set(c.get("provenance") or [])
-                                | ({"inferred"} if all_inferred else set())),
-                    valid_time=batch_valid_time)
-                written += 1
+                # Claim embeddings are pure CPU work with no transaction
+                # state. Computed inside the batch they held an open
+                # PostgreSQL transaction — on the one shared connection —
+                # for a model pass per claim; the dedup gate and the write
+                # embed the same text. Still inside this try: a malformed
+                # claim must fail the batch, never the dream.
+                embeddings = [
+                    self._embedder.encode_single(
+                        f"{c['task']} {c.get('aspect', 'lesson')} {c['lesson']}".strip())
+                    for c in claims]
+                source_status = {sid: False for sid in plain_handled + rule_handled}
+                with self._storage.lesson_synthesis_transaction(
+                        signals, source_status=source_status) as current:
+                    if not current:
+                        out["skipped"] = "signals-changed"
+                        return out
+                    plain_current = all(source_status[sid] for sid in plain_handled)
+                    if not any(plain_current if sid is None else source_status[sid]
+                               for sid in claim_signals):
+                        out["skipped"] = "signals-changed"
+                        return out
+                    staged = deepcopy(self._lessons)
+                    # A prior failed explicit write may be dirty in RAM. It
+                    # can justify dedup only if its lesson AND graph state
+                    # become durable in this same acknowledged transaction.
+                    for rec in staged.records:
+                        if rec.key in staged.dirty_slots and rec.status == "current":
+                            self._link_lesson_graph(rec.entity, rec.about, rec.polarity)
+                    for c, emb, sid in zip(claims, embeddings, claim_signals):
+                        if not (plain_current if sid is None else source_status[sid]):
+                            if sid is not None:
+                                failed_rule_ids.add(sid)
+                            continue
+                        aspect = c.get("aspect", "lesson")
+                        provenance, valid_time = lineage(sid)
+                        try:
+                            if dedup_thr and aspect != "rule" and self._lesson_duplicate_locked(
+                                    staged, c["task"], aspect, c["lesson"],
+                                    c.get("polarity", "+"), dedup_thr,
+                                    embedding=emb):
+                                deduped += 1
+                            else:
+                                # One savepoint per claim. PostgreSQL aborts
+                                # the whole transaction on the first error,
+                                # so without this a single claim whose graph
+                                # write raises killed the batch — and the
+                                # extractor re-derived that same claim from
+                                # the same signals on every later sweep.
+                                with _staged_slot(staged, c["task"], aspect), \
+                                        self._storage.savepoint():
+                                    action, rec = self._write_lesson_locked(
+                                        staged, c["task"], aspect, c["lesson"],
+                                        embedding=emb,
+                                        about=c.get("about"),
+                                        outcome=c.get("outcome", "success"),
+                                        polarity=c.get("polarity", "+"),
+                                        confidence=(0.4 if all_inferred
+                                                    else float(c.get("confidence", 0.6))),
+                                        origin=c.get("origin", "agent"),
+                                        provenance=provenance,
+                                        valid_time=valid_time)
+                                    source_ids = sorted(
+                                        int(p.removeprefix("entry:"))
+                                        for p in provenance if p.startswith("entry:"))
+                                    if action == "confirmed":
+                                        # Re-deriving adds supporting sources only to
+                                        # a lesson that already has lineage. A legacy
+                                        # or explicit lesson never gains one.
+                                        known = self._storage.lesson_lineage_sources(
+                                            *rec.key, rec.value, rec.asserted_at)
+                                        source_ids = ([i for i in source_ids if i not in known]
+                                                      if known else [])
+                                    elif action not in ("inserted", "superseded"):
+                                        source_ids = []  # stale: nothing was written
+                                    if source_ids:
+                                        # This server-written audit is the trust boundary:
+                                        # legacy/model provenance tokens alone are not
+                                        # evidence of a source dependency. Commit it
+                                        # with the lesson and acknowledgement.
+                                        self._storage.record_store_decision(
+                                            "lesson", *rec.key, "lineage",
+                                            decided_by="lesson_synthesis",
+                                            reason="verified_dependencies",
+                                            record={"lesson": rec.value,
+                                                    "asserted_at": rec.asserted_at,
+                                                    "source_entry_ids": source_ids},
+                                            now=now)
+                                written += 1
+                        except Exception as exc:  # noqa: BLE001 — bounded per-claim tolerance
+                            write_errors += 1
+                            if sid is not None:
+                                failed_rule_ids.add(sid)
+                            logger.warning("lesson claim failed (%s): %r", exc, c)
+                            continue
+                        if sid is None:
+                            plain_landed += 1
+                    # A route is acknowledged only for work that landed: the
+                    # clustering route once any of its claims did, a rule
+                    # signal only if its own claim did.
+                    handled_ids = list(plain_handled) if plain_landed else []
+                    handled_ids += [i for i in rule_handled
+                                    if i not in failed_rule_ids]
+                    sync_lesson_slots(staged, self._storage)
+                    consumed = self._storage.consume_signals(handled_ids)
+                    if consumed != len(handled_ids):
+                        raise RuntimeError("lesson acknowledgement count changed")
+                    writes_finished = True
+                self._lessons = staged
+                out.update(lessons=written, deduped=deduped)
+                if write_errors:
+                    out["write_errors"] = write_errors
             except Exception as exc:  # noqa: BLE001
-                logger.warning("lesson write skipped (%s): %s", exc, c)
-        if written or deduped:
-            # A fully-deduped batch is HANDLED, not failed — leaving its
-            # signals pending would re-synthesize the same near-duplicates
-            # every sweep, forever bouncing off the gate.
-            with self._lock:
-                self._storage.consume_signals([s["id"] for s in signals])
-        else:
-            # Nothing landed (empty extraction or every write failed): leave
-            # the signals pending so the next sweep retries — they are the
-            # only feeder for procedural memory. Retention pruning bounds
-            # the retry window.
-            logger.info("lesson synthesis wrote nothing; leaving %d signals "
-                        "pending", len(signals))
-        return {"signals": len(signals), "lessons": written, "deduped": deduped}
+                self._persist_errors += 1
+                errors.append(str(exc))
+                out["error"] = "; ".join(errors)
+                if write_errors:
+                    out["write_errors"] = write_errors
+                if writes_finished:
+                    # COMMIT may have reached the server despite an exception
+                    # reaching us. Never autosave old RAM over that outcome.
+                    self._lesson_synthesis_recovery = (signals, handled_ids)
+                    try:
+                        if self._recover_lesson_synthesis() == "consumed":
+                            out.update(lessons=written, deduped=deduped)
+                    except Exception as recovery_exc:  # noqa: BLE001
+                        out["error"] += f"; {recovery_exc}"
+                        out["reconciliation_required"] = True
+                        # The latch now STAYS set: lesson reads and the
+                        # lesson snapshot fail until a later recheck
+                        # succeeds or the daemon restarts. /health mirrors
+                        # it as lesson_reconciliation_required.
+                        logger.error(
+                            "lesson commit reconciliation required (%s): lesson "
+                            "reads and the lesson snapshot are blocked until it "
+                            "resolves or the daemon restarts", recovery_exc)
+                logger.warning("lesson batch failed (%s); retry or durable reconciliation required", exc)
+        return out
 
     def prune_dream_runs(self) -> int:
         """Retention for the v27 dream-run journal: keep the newest
@@ -442,31 +956,123 @@ class DreamOps:
                 "runs": [{k: v for k, v in r.items() if v is not None}
                          for r in runs]}
 
+    def _pending_dream_entries(self, limit: int | None = None) -> list[MemoryEntry]:
+        """Return eligible pending entries in deterministic pull order."""
+        assert self._cms is not None
+        cfg = self.config.memory.dream
+        excluded = set(cfg.exclude_sources or [])
+        allowed = set(cfg.eligible_sources) if cfg.eligible_sources else None
+        rows: list[MemoryEntry] = []
+        for band in self._cms.bands:
+            for entry in band.entries:
+                if entry.dream_state != "pending":
+                    continue
+                if allowed is not None:
+                    if entry.source not in allowed:
+                        continue
+                elif entry.source in excluded:
+                    continue
+                rows.append(entry)
+        # Type-homogeneous tie-break. A resident can hold ``db_id=None`` in
+        # PostgreSQL mode — ``cms.store`` seats the entry in the band before
+        # its write-through insert — so an int-or-str key raised TypeError
+        # on the first tied timestamp, taking dream_status down with it.
+        # Both components are always comparable: file-mode entries have no
+        # db_id at all (0 for every row, ordered by dream_id), PostgreSQL
+        # entries have a unique one.
+        rows.sort(key=lambda entry: (
+            entry.timestamp,
+            entry.db_id if entry.db_id is not None else 0,
+            entry.dream_id or "",
+        ))
+        return rows if limit is None else rows[:max(0, int(limit))]
+
+    def _retry_dream_tracking(self) -> None:
+        """Re-attempt a dream-tracking initialization that failed transiently.
+
+        The initialization runs once from ``_ensure_init``, so before this
+        a storage blip at boot disabled the dream until the daemon was
+        restarted. Only a transient failure is retried: a corrupt bank
+        secret, an unusable legacy cursor or an invalid checkpoint is the
+        bank's own data, and re-running the same pass over the same bytes
+        fails identically — those stay latched so ``/health`` keeps
+        reporting them instead of burning a transaction per call.
+        Caller holds the service lock."""
+        if self._dream_tracking_error and self._dream_tracking_retryable:
+            self._initialize_dream_tracking()
+
+    def _persist_pending_rows(self, rows: list[MemoryEntry],
+                              ) -> tuple[list[MemoryEntry], int]:
+        """Give every pending resident a storage row before it is named in a
+        commit token, and drop the ones that still cannot get one.
+
+        ``cms.store`` seats the entry in the band BEFORE its write-through
+        insert, so a failed insert leaves a resident with ``db_id=None``.
+        The pull used to refuse the WHOLE batch on one of those — one lost
+        insert stalled every dream until restart. Re-flushing heals the
+        common case; an entry that still cannot be persisted is excluded
+        from this pull (it stays pending and is retried next sweep) rather
+        than holding the rest of the backlog hostage. Returns the pullable
+        rows and the number excluded. Caller holds the service lock."""
+        assert self._cms is not None
+        unpersisted = [entry for entry in rows if entry.db_id is None]
+        if not unpersisted:
+            return rows, 0
+        try:
+            healed = self._cms.flush_unpersisted_entries(unpersisted)
+            if healed:
+                logger.warning(
+                    "dream pull re-flushed %d pending entr%s that never "
+                    "reached storage", healed, "y" if healed == 1 else "ies")
+        except Exception as exc:  # noqa: BLE001 — a skip beats a stalled dream
+            logger.warning("dream pull could not persist %d pending entry/ies "
+                           "(%s); excluding them from this pull",
+                           len(unpersisted), exc)
+        pullable = [entry for entry in rows if entry.db_id is not None]
+        skipped = len(rows) - len(pullable)
+        if skipped:
+            logger.warning(
+                "dream pull skipped %d unpersisted pending entr%s; they stay "
+                "pending for the next sweep", skipped,
+                "y" if skipped == 1 else "ies")
+        return pullable, skipped
+
     def dream_pull(self, limit: int = 20) -> dict[str, Any]:
-        """Recent episodic conversation turns not yet consolidated (timestamp >
-        cortex.dream_cursor), oldest-first, capped at ``limit``. The gateway
-        runs LLM/regex extraction over these, then calls ``dream_commit``."""
+        """Pull exact pending entries and issue their signed commit token."""
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
-            cfg = self.config.memory.dream
-            excluded = set(cfg.exclude_sources or [])
-            allowed = set(cfg.eligible_sources) if cfg.eligible_sources else None
-            cursor = self._cortex.dream_cursor
-            rows: list[MemoryEntry] = []
-            for band in self._cms.bands:
-                for e in band.entries:
-                    if allowed is not None:
-                        if e.source not in allowed:
-                            continue
-                    elif e.source in excluded:
-                        continue
-                    if e.timestamp <= cursor:
-                        continue
-                    rows.append(e)
-            rows.sort(key=lambda e: e.timestamp)
-            rows = rows[: max(0, int(limit))]
-            return {
+            cursor = self._dream_display_cursor()
+            if self._dream_tracking_error:
+                code = self._dream_tracking_error.split(":", 1)[0]
+                return {"error": code, "detail": self._dream_tracking_error,
+                        "cursor": cursor, "count": 0, "entries": []}
+            rows = self._pending_dream_entries(min(int(limit), MAX_ENTRY_IDS))
+            backend = "postgres" if self._storage is not None else "file"
+            skipped_unpersisted = 0
+            if backend == "postgres":
+                rows, skipped_unpersisted = self._persist_pending_rows(rows)
+            ids = [e.db_id if backend == "postgres" else e.dream_id for e in rows]
+            if any(identity is None for identity in ids):
+                return {"error": "dream_ack_missing_entries",
+                        "detail": "pending file entry has no identity",
+                        "cursor": cursor, "count": 0, "entries": []}
+            secret = self._cms.dream_ack_secret
+            if not secret:
+                return {"error": "dream_ack_initialization_failed",
+                        "detail": "dream acknowledgement secret is unavailable",
+                        "cursor": cursor, "count": 0, "entries": []}
+            display_timestamp = max(
+                (e.timestamp for e in rows), default=cursor)
+            token = issue_commit_token(
+                secret=secret,
+                backend=backend,
+                generation=public_generation(secret),
+                entry_ids=ids,
+                display_timestamp=display_timestamp,
+            ) if rows else None
+            response = {
                 "cursor": cursor,
                 "count": len(rows),
                 "entries": [
@@ -475,6 +1081,7 @@ class DreamOps:
                         "timestamp": e.timestamp,
                         "episode_id": e.episode_id,
                         "db_id": e.db_id,
+                        "dream_id": e.dream_id if self._storage is None else None,
                         # dream_run stamps relation-minted entities with the
                         # batch's sources — dropping this field silently
                         # disables that (2026-07-19 regression).
@@ -488,18 +1095,125 @@ class DreamOps:
                     for e in rows
                 ],
             }
+            if token is not None:
+                response["commit_token"] = token
+            if skipped_unpersisted:
+                response["skipped_unpersisted"] = skipped_unpersisted
+            return response
 
-    def dream_commit(self, cursor: float) -> dict[str, Any]:
-        """Advance the dream cursor (monotonic) and persist it with the cortex."""
+    def dream_commit(self, commit_token: str) -> dict[str, Any]:
+        """Durably acknowledge exactly the entries named by a signed token."""
         with self._lock:
             self._ensure_init()
-            assert self._cortex is not None
-            c = float(cursor or 0.0)
-            if c > self._cortex.dream_cursor:
-                self._cortex.dream_cursor = c
-                self._cortex.meta_dirty = True   # cursor rides the meta sync
-                self._save_cortex()
-            return {"dream_cursor": self._cortex.dream_cursor}
+            assert self._cms is not None and self._cortex is not None
+            if self._dream_tracking_error:
+                code = self._dream_tracking_error.split(":", 1)[0]
+                return {"error": code, "detail": self._dream_tracking_error}
+            secret = self._cms.dream_ack_secret
+            backend = "postgres" if self._storage is not None else "file"
+            try:
+                payload = verify_commit_token(
+                    commit_token,
+                    secret=secret or "",
+                    backend=backend,
+                    generation=public_generation(secret or ""),
+                )
+            except ValueError as exc:
+                return {"error": "invalid_dream_commit_token", "detail": str(exc)}
+
+            try:
+                if self._storage is not None:
+                    result = self._storage.acknowledge_dream_entries(
+                        list(payload.entry_ids), payload.display_timestamp)
+                    acknowledged = set(result["acknowledged_ids"])
+                    missing = set(result.get("missing_ids") or ())
+                    # The resident copy of a vanished row is retired too.
+                    # Its row can never be pulled again, but the resident
+                    # can — leaving it pending would re-enter it into every
+                    # pull from here on, for a batch that no longer exists.
+                    settled = acknowledged | missing
+                    for band in self._cms.bands:
+                        for entry in band.entries:
+                            if entry.db_id in settled:
+                                entry.dream_state = "acknowledged"
+                    cursor = float(result["dream_cursor"])
+                    newly = int(result["newly_acknowledged"])
+                else:
+                    by_id = {
+                        entry.dream_id: entry
+                        for band in self._cms.bands
+                        for entry in band.entries
+                    }
+                    # Same reading as the PostgreSQL path: an entry that is
+                    # no longer resident cannot be pulled again, so it is
+                    # reported, not raised over.
+                    missing = [identity for identity in payload.entry_ids
+                               if identity not in by_id]
+                    present = [identity for identity in payload.entry_ids
+                               if identity in by_id]
+                    invalid = [
+                        identity for identity in present
+                        if by_id[identity].dream_state
+                        not in ("pending", "acknowledged")
+                    ]
+                    if invalid:
+                        raise ValueError(
+                            f"dream_ack_invalid_states: {invalid}")
+                    newly_ids = [
+                        identity for identity in present
+                        if by_id[identity].dream_state == "pending"
+                    ]
+                    cursor = max(
+                        self._cms.dream_display_cursor,
+                        payload.display_timestamp,
+                    )
+                    if newly_ids or cursor > self._cms.dream_display_cursor:
+                        # Claim files must be durable before the CMS checkpoint
+                        # can publish their input entries as acknowledged.
+                        self._save_cortex()
+                        self._cms.save(
+                            self.config.memory.save_dir,
+                            dream_state_overrides={
+                                identity: "acknowledged"
+                                for identity in present
+                            },
+                            dream_ack_secret=secret,
+                            dream_display_cursor=cursor,
+                        )
+                    for identity in present:
+                        by_id[identity].dream_state = "acknowledged"
+                    acknowledged = present
+                    newly = len(newly_ids)
+                self._cms.dream_display_cursor = cursor
+                self._cortex.dream_cursor = cursor
+                if missing:
+                    logger.warning(
+                        "dream commit: %d pulled entr%s no longer exist(s); "
+                        "acknowledging the remaining %d", len(missing),
+                        "y" if len(missing) == 1 else "ies", len(acknowledged))
+                response = {
+                    "dream_cursor": cursor,
+                    "acknowledged": len(acknowledged),
+                    "newly_acknowledged": newly,
+                }
+                if missing:
+                    response["missing"] = len(missing)
+                return response
+            except ValueError as exc:
+                code = str(exc).split(":", 1)[0]
+                if code not in {
+                    "dream_ack_missing_entries", "dream_ack_invalid_states",
+                }:
+                    code = "dream_ack_rejected"
+                return {"error": code, "detail": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - retry is safe
+                # _save_cortex already counts its PersistenceError. Storage
+                # acknowledgement and CMS checkpoint failures are counted here.
+                from pseudolife_memory.service import PersistenceError
+                if not isinstance(exc, PersistenceError):
+                    self._persist_errors += 1
+                logger.error("Dream acknowledgement was not confirmed: %s", exc)
+                return {"error": "dream_ack_persist_failed", "detail": str(exc)}
 
     def _resolve_dream_slot(self, entity: str, attribute: str) -> tuple[str, str]:
         """Map a dreamed claim's (entity, attribute) onto an existing current slot
@@ -557,15 +1271,24 @@ class DreamOps:
         auto-folded). Complements ``_propose_write_dedup``: paraphrase
         coreference ("production extractor sidecar" ~ "Pseudolife-MCP default
         extractor sidecar") shares almost no tokens but embeds close.
+
+        Names are read under the service lock, embedded OUTSIDE it, and
+        proposals filed under it again: encoding ~1,000-2,050 existing names
+        while holding the lock froze the daemon 55-171 s per new-entity
+        dream (2026-09-23 lock-stalls review). Names an earlier screen
+        embedded come from ``_alias_name_memo``, not the model. Proposals
+        are filed only between entities that still exist in the graph; the
+        screen never mints one.
         Returns the number of proposals filed; never raises."""
         import time as _t
         try:
             thr = float(self.config.memory.dream.alias_candidate_min_cosine)
             if thr <= 0 or not new_entities:
                 return 0
+            import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
-            filed = 0
+            from pseudolife_memory.memory.graph_review import merge_veto
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -581,12 +1304,51 @@ class DreamOps:
                             existing[k] = r.entity
                 if not existing:
                     return 0
+            new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
+            ex_items = list(existing.items())
+            # Unlocked until the filing block. The embedder is built once
+            # per process and never replaced, and dream_run's single-flight
+            # guard makes this the memo's only writer.
+            memo = self._alias_name_memo or {}
+            names = list(dict.fromkeys(
+                [d for _, d in new_items] + [d for _, d in ex_items]))
+            missing = [n for n in names if n not in memo]
+            if missing:
+                fresh = self._embedder.encode(missing)     # normalized
+                memo.update((n, v.clone()) for n, v in zip(missing, fresh))
+            # Keep exactly this screen's names, capped: a retired or renamed
+            # entity's vector drops out, and past the cap the tail is
+            # re-encoded each screen rather than growing the memo.
+            self._alias_name_memo = {n: memo[n]
+                                     for n in names[:self._ALIAS_MEMO_MAX]}
+            sims = (torch.stack([memo[d] for _, d in new_items])
+                    @ torch.stack([memo[d] for _, d in ex_items]).T)
+            matches = []
+            for i, (_, disp) in enumerate(new_items):
+                j = int(sims[i].argmax())
+                score = float(sims[i][j])
+                if score < thr:
+                    continue
+                target = ex_items[j][1]
+                pair = tuple(sorted((norm_name(disp), norm_name(target))))
+                if pair[0] == pair[1]:
+                    continue
+                if variant_conflict(disp, target):
+                    continue    # size/quant/version mismatch: never a merge
+                if merge_veto(disp, target):
+                    # The name-shape vetoes the write-dedup filing applies:
+                    # numbered siblings ('PR #368' / 'PR #364') embed at
+                    # 0.989 and were 36 of this screen's 524 rejected
+                    # proposals in the 2026-09-29 triage, none accepted.
+                    continue
+                matches.append((disp, target, pair, score))
+            if not matches:
+                return 0
+            filed = 0
+            with self._lock:
+                if self._storage is None:
+                    return 0
                 dismissed = frozenset(self._storage.dismissed_pairs())
-                new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
-                ex_items = list(existing.items())
-                new_emb = self._embedder.encode([d for _, d in new_items])
-                ex_emb = self._embedder.encode([d for _, d in ex_items])
-                sims = new_emb @ ex_emb.T          # encode() normalizes
                 # Fold direction is evidence-ranked like _propose_write_dedup:
                 # the thin side folds into the evidence-bearing side. Filing
                 # (new, existing) verbatim made the reviewer's only accept
@@ -600,19 +1362,24 @@ class DreamOps:
                     return deg.get(eid, 0) + fct.get(eid, 0)
 
                 now = _t.time()
-                for i, (_, disp) in enumerate(new_items):
-                    j = int(sims[i].argmax())
-                    score = float(sims[i][j])
-                    if score < thr:
+                for disp, target, pair, score in matches:
+                    if pair in dismissed:
                         continue
-                    target = ex_items[j][1]
-                    pair = tuple(sorted((norm_name(disp), norm_name(target))))
-                    if pair[0] == pair[1] or pair in dismissed:
+                    # Find, never create. Fact writes mint their subject's
+                    # node (since 2026-06-11), so a name with no node is one
+                    # the graph never kept or has dropped: an entity deleted
+                    # (graph_delete_entity, an accepted junk review, the deep
+                    # dream's junk sweep) whose facts survive -- possibly
+                    # while these names were embedded outside the lock -- a
+                    # junk-shaped subject, an older fact, or a claim that
+                    # wrote nothing. Re-minting resurrected deleted entities
+                    # and queued merges against them (Codex review of #338).
+                    # find_entity follows aliases, so an endpoint merged away
+                    # resolves to its survivor.
+                    a = self._storage.find_entity(norm_name(disp))
+                    b = self._storage.find_entity(norm_name(target))
+                    if a is None or b is None:
                         continue
-                    if variant_conflict(disp, target):
-                        continue    # size/quant/version mismatch: never a merge
-                    a = self._resolve_or_create_entity(disp)
-                    b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
                         continue                    # already aliased/merged
                     # The name-keyed check above misses a display-enriched
@@ -658,6 +1425,9 @@ class DreamOps:
                           limit: int | None = None) -> dict[str, Any]:
         cap = int(limit if limit is not None else self.config.memory.dream.max_batch)
         pulled = self.dream_pull(limit=cap)
+        if pulled.get("error"):
+            return {"pulled": 0, "claims": 0, "error": pulled["error"],
+                    "detail": pulled.get("detail", "")}
         entries = pulled["entries"]
         if not entries:
             # No new memories to consolidate, but outcome signals may still be
@@ -744,13 +1514,28 @@ class DreamOps:
         constraint_idx: dict[int, dict] = {}
         carried: set[int] = set()
         constraint_misses: list[dict] = []
+        # Set when the isolation pass set aside every memory it pulled.
+        isolation_error: dict | None = None
 
-        def _held(reason: str, exc: Exception) -> dict[str, Any]:
+        def _held(reason: str, exc: Exception, *,
+                  phase: str = "extract") -> dict[str, Any]:
+            from pseudolife_memory.memory.dream import classify_extractor_error
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
                            "next sweep", reason, exc)
+            # Only an extraction-phase hold describes the extractor. A write
+            # hold is the database (a psycopg password error once read as an
+            # expired CLI login, PR #456 review): no extractor_error, and the
+            # dream-stall record ignores it.
+            extractor_error = {}
+            if phase == "extract":
+                why, error = classify_extractor_error(exc)
+                # Sanitized: a reason and a fixed-vocabulary error, never
+                # the exception text.
+                extractor_error = {"extractor_error": {"reason": why, "error": error}}
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
                     "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
+                    "hold_phase": phase, **extractor_error,
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
                     "span_flagged": span_flagged,
@@ -786,7 +1571,7 @@ class DreamOps:
         # undated with its verbatim phrase (design amendment 2026-08-04).
         batch_has_date = bool(_DATE_LIKE_RE.search(batch_text))
         batch_key = tuple(e.get("db_id") if e.get("db_id") is not None
-                          else e["text"][:200] for e in entries)
+                          else e["dream_id"] for e in entries)
         # (claim, source entry db_id, source entry dict-or-None). The entry
         # dict travels beside the id because file mode has no db_id and the
         # quarantine's eligibility/witness derivation reads entry metadata
@@ -826,6 +1611,7 @@ class DreamOps:
             # outage, not a poison pill: hold the cursor and retry next sweep.
             succeeded = 0
             failed_keys: list[Any] = []
+            last_isolated: Exception = exc
             for e, key in zip(entries, batch_key):
                 try:
                     e_vocab, e_kf = self._dream_hints([e["text"]],
@@ -838,12 +1624,20 @@ class DreamOps:
                     logger.warning("dream: entry %s failed isolated "
                                    "extraction (%s)", key, exc2)
                     failed_keys.append(key)
+                    last_isolated = exc2
                     continue
                 succeeded += 1
                 pairs.extend((c, e.get("db_id"), e) for c in e_claims)
             if succeeded == 0 and len(entries) > 1:
                 return _held("all entries failed the isolation pass "
                              "(outage, not poison)", exc)
+            if succeeded == 0:
+                # A lone memory set aside: the run returns as if served, but
+                # the extractor failed again. The dream-stall record counts
+                # it as a failure and reads why from here (PR #456 review).
+                from pseudolife_memory.memory.dream import classify_extractor_error
+                why, error = classify_extractor_error(last_isolated)
+                isolation_error = {"reason": why, "error": error}
             quarantined = len(failed_keys)
             for key in failed_keys:
                 logger.warning("dream: quarantining entry %s (fails alone "
@@ -1379,17 +2173,39 @@ class DreamOps:
             healed = self._dream_reflush_stale(entries)
             if healed:
                 return _held(f"claim write failed ({healed} stale entry id(s) "
-                             "re-flushed; mapping repaired)", exc)
-            return _held("claim write failed", exc)
-        newest = max(e["timestamp"] for e in entries)
-        self.dream_commit(newest)
+                             "re-flushed; mapping repaired)", exc, phase="write")
+            return _held("claim write failed", exc, phase="write")
+        acknowledgement = self.dream_commit(pulled["commit_token"])
+        if acknowledgement.get("error"):
+            _finish_run("failed", None)
+            return {
+                "pulled": len(entries), "claims": sum(tally.values()),
+                **tally,
+                "cursor": self._dream_display_cursor(),
+                "acknowledgement_failed": True,
+                "error": acknowledgement["error"],
+                "detail": acknowledgement.get("detail", ""),
+                "relations": 0, "traces": traces_n,
+                "literal_flagged": literal_flagged,
+                "literal_dropped": literal_dropped,
+                "span_flagged": span_flagged,
+                "span_parked": span_parked,
+                "quarantine_parked": qt_parked,
+                "quarantine_held": qt_held,
+                "quarantine_promoted": qt_promoted,
+                "events_inserted": events_inserted,
+                "events_duplicate": events_duplicate,
+                "events_pass_failed": events_pass_failed,
+            }
+        newest = acknowledgement["dream_cursor"]
         # Stamp `committed` HERE — before relations/lessons/graph — so a
         # failure in that bookkeeping block cannot mislabel a run whose
         # cortex writes and cursor advance really did happen.
         _finish_run("committed", newest)
         relations_n = self._dream_extract_relations(
             extractor, texts,
-            batch_sources={e["source"] for e in entries if e.get("source")})
+            batch_sources={e["source"] for e in entries if e.get("source")},
+            batch_entries=entries)
         # After relations linking, so paraphrase entities the relations pass
         # just created resolve to their graph nodes instead of re-creating.
         alias_candidates = self._propose_dream_alias_candidates(
@@ -1436,7 +2252,8 @@ class DreamOps:
                 "constraint_verbatim": len(carried),
                 "constraint_misses": constraint_misses,
                 "traces": traces_n, "sources_attributed": sources_attributed,
-                "quarantined": quarantined, "retyped": retyped}
+                "quarantined": quarantined, "retyped": retyped,
+                **({"extractor_error": isolation_error} if isolation_error else {})}
 
     def _carrier_slot_eligible(self, entity: str, attribute: str) -> bool:
         """A carrier may land only on a slot that is EMPTY or already holds a
@@ -1641,6 +2458,7 @@ class DreamOps:
 
         counts = {"reverted": 0, "skipped": 0, "partial": 0}
         details: list[dict[str, Any]] = []
+        rollback_started = _time.time()
 
         def _prev_stance(row: dict) -> str | None:
             # v29: the journal's fixed columns carry no stance (spec
@@ -1696,9 +2514,28 @@ class DreamOps:
                 return "reverted"
             return "partial:value_not_restored"
 
+        def _restore_contender(row: dict) -> str | None:
+            # A write that made a parked contender's value current settled
+            # that contender (2026-09-25), and the journal has no contender
+            # column: re-park it once the write is reverted, or the pending
+            # review item is lost where it used to survive the run. Two
+            # windows: the run's own, and this rollback's, because unwinding
+            # a run that wrote the same value twice re-settles the contender
+            # through _rewrite_prev before the earlier row is reached.
+            args = (row["entity"], row["attribute"], row["new_value"] or "")
+            with self._lock:
+                rec = (self._cortex.restore_settled_contender(
+                           *args, since=float(target["started_at"]),
+                           until=(None if target.get("finished_at") is None
+                                  else float(target["finished_at"])))
+                       or self._cortex.restore_settled_contender(
+                           *args, since=rollback_started))
+            return rec.value if rec is not None else None
+
         for row in reversed(journal):
             action = row["action"]
             outcome = "skipped:no_reversal"
+            restored = None
             try:
                 if action == "contested":
                     cands = self._cortex.contenders_for(
@@ -1728,8 +2565,10 @@ class DreamOps:
                                 row["entity"], row["attribute"])
                         outcome = ("reverted" if res is not None
                                    else "skipped:already_gone")
+                        restored = _restore_contender(row)
                     elif action == "superseded":
                         outcome = _rewrite_prev(row)
+                        restored = _restore_contender(row)
                     elif action == "quarantine_promoted":
                         # Reversal of a two-man promotion: restore the
                         # previous current (the promoted value stays in
@@ -1768,6 +2607,7 @@ class DreamOps:
                                 outcome = _rewrite_prev(row)
                             else:
                                 outcome = "partial:set_retained"
+                        restored = _restore_contender(row)
                     elif action == "member_removed":
                         res = self.set_add(
                             row["entity"], row["attribute"],
@@ -1790,9 +2630,12 @@ class DreamOps:
                 outcome = f"partial:error:{type(exc).__name__}"
             bucket = outcome.split(":", 1)[0]
             counts[bucket] = counts.get(bucket, 0) + 1
-            details.append({"seq": row["seq"], "entity": row["entity"],
-                            "attribute": row["attribute"],
-                            "action": action, "outcome": outcome})
+            detail = {"seq": row["seq"], "entity": row["entity"],
+                      "attribute": row["attribute"],
+                      "action": action, "outcome": outcome}
+            if restored is not None:
+                detail["contender_restored"] = restored
+            details.append(detail)
         with self._lock:
             self._save_cortex()
             self._storage.mark_dream_run_rolled_back(
@@ -1819,7 +2662,74 @@ class DreamOps:
         }
         result = self.dream_run(extractor, limit=limit)
         result["extractor"] = which
+        # A fallback dream counts against the primary only when the probe
+        # chose it (auto mode); a forced fallback is the operator's choice.
+        from pseudolife_memory.memory.dream import resolve_endpoints
+        forced = resolve_endpoints(self.config.memory.dream)["mode"] == "fallback"
+        _stall_tracker(self).record(
+            result, served_by_fallback=which == "fallback" and not forced)
+        notify = getattr(self, "dream_stall_notify", None)
+        if notify is not None:
+            notify()
         return result
+
+    def dream_stall_state(self) -> dict:
+        """``{"stall": record | None, "last_stall": record | None}`` without
+        the service lock, for /health and the session-start hook."""
+        return _stall_tracker(self).snapshot()
+
+    def dream_stall_tick(self, status: dict) -> None:
+        """The sweep's stall step, after its ``dream_status``: arm and apply
+        the overdue rule, then post any notice that is due. Never raises."""
+        try:
+            cfg = self.config.memory.dream
+            tracker = _stall_tracker(self)
+            tracker.sweep_interval = float(cfg.sweep_interval_seconds)
+            tracker.check_overdue(backlog=int(status.get("backlog") or 0),
+                                  min_batch=int(cfg.min_batch),
+                                  would_fire=bool(status.get("would_fire")),
+                                  interval=tracker.sweep_interval)
+        except Exception:  # noqa: BLE001 — never kill the sweep
+            logger.warning("dream stall check failed", exc_info=True)
+        self.dream_stall_notify()
+
+    def dream_stall_notify(self) -> dict | None:
+        """Post the board notice a stall owes (``memory.dream.stall_notice``),
+        rate-limited by the tracker: a begin or repeat at most once per
+        ``stall_repeat_hours`` across incidents, an escalation at once when
+        a fallback warning turns into a hard stall, one clear for an
+        announced incident. A notice nobody received stays owed. Skips
+        silently where the board cannot carry it (disabled, no Postgres).
+        Must be called without the service lock held. Never raises."""
+        try:
+            cfg = self.config.memory.dream
+            if not getattr(cfg, "stall_notice", True):
+                return None
+            tracker = _stall_tracker(self)
+            # One notifier at a time (the sweep and a manual dream can both
+            # get here), so a notice cannot be taken twice before marking.
+            if not tracker.notify_lock.acquire(blocking=False):
+                return None
+            try:
+                due = tracker.take_notice(float(cfg.stall_repeat_hours) * 3600.0)
+                if due is None:
+                    return None
+                kind, record = due
+                from pseudolife_memory import coordination
+                from pseudolife_memory.memory.dream import dream_stall_notice_text
+                sent = coordination.daemon_notice(
+                    self, dream_stall_notice_text(kind, record))
+                # Delivered means someone received it: a notice sent to
+                # nobody stays owed for whoever attaches before the next
+                # sweep (PR #456 review).
+                if sent is not None and sent.get("recipients", 0) > 0:
+                    tracker.mark_noticed(kind)
+                return sent
+            finally:
+                tracker.notify_lock.release()
+        except Exception:  # noqa: BLE001 — a notice must never break a dream
+            logger.warning("dream stall notice failed", exc_info=True)
+            return None
 
     def _dream_reflush_stale(self, entries: list[dict]) -> int:
         """After a claim/trace write failure, verify the pulled batch's
@@ -1851,16 +2761,19 @@ class DreamOps:
         SessionStart nudge hook."""
         import time as _t
         cfg = self.config.memory.dream
-        backlog = self.dream_pull(limit=10**9)["count"]
-
         with self._lock:
             self._ensure_init()
+            self._retry_dream_tracking()
             assert self._cms is not None and self._cortex is not None
+            backlog = (
+                0 if self._dream_tracking_error
+                else len(self._pending_dream_entries())
+            )
             latest = max(
                 (e.timestamp for b in self._cms.bands for e in b.entries),
                 default=0.0,
             )
-            cursor = self._cortex.dream_cursor
+            cursor = self._dream_display_cursor()
 
             lessons_cfg = self.config.memory.lessons
             from pseudolife_memory.memory.dream import resolve_endpoints
@@ -1882,7 +2795,7 @@ class DreamOps:
                 digest_pending = digest_retry = 0
 
         idle = (_t.time() - latest) if latest else 0.0
-        would_fire = bool(cfg.enabled and (
+        would_fire = bool(not self._dream_tracking_error and cfg.enabled and (
             backlog >= cfg.min_batch
             or (backlog >= 1 and idle >= cfg.idle_seconds)
             or infer_pending >= 1
@@ -1893,8 +2806,16 @@ class DreamOps:
             # digest progress at broken cadence (pre-PR review, 2026-08-27).
             or (digest_pending >= 1 and backlog == 0)
         ))
+        tracker = _stall_tracker(self)
+        if tracker.sweep_interval:
+            # Only once a sweep runs: the embedded mode never sweeps, so a
+            # due backlog there is not a stalled extractor.
+            tracker.check_overdue(backlog=backlog, min_batch=int(cfg.min_batch),
+                                  would_fire=would_fire,
+                                  interval=tracker.sweep_interval)
+        stall_state = tracker.snapshot()
         from pseudolife_memory.memory.dream import _status_extractor_fields
-        return {"backlog": backlog, "idle_seconds": idle,
+        result = {"backlog": backlog, "idle_seconds": idle,
                 "dream_cursor": cursor, "would_fire": would_fire,
                 "infer_outcomes": {"pending": infer_pending,
                                    "retry_pending": retry_pending},
@@ -1905,8 +2826,19 @@ class DreamOps:
                 # user. Computed outside the lock above — deep_dream_need
                 # takes the (non-reentrant) service lock itself.
                 "deep_dream": self.deep_dream_need(),
+                # Review-queue health: pending counts, judge modes and an
+                # attention flag. Also outside the lock; never raises.
+                "review_queue": self.review_queue_health(),
+                # Dream-stall signal: null while dreams are served; see
+                # DreamStallTracker. ``last_stall`` is the latest closed one.
+                "stall": stall_state["stall"],
+                "last_stall": stall_state["last_stall"],
                 **_status_extractor_fields(
                     cfg, getattr(self, "_last_dream_extractor", None))}
+        if self._dream_tracking_error:
+            result["error"] = self._dream_tracking_error.split(":", 1)[0]
+            result["detail"] = self._dream_tracking_error
+        return result
 
     def _fire_and_forget_dream(self) -> None:
         """Run one dream cycle in a daemon thread so SessionEnd never blocks on
@@ -1919,7 +2851,7 @@ class DreamOps:
             except Exception:  # noqa: BLE001 — background best-effort
                 logger.warning("session-end dream failed", exc_info=True)
 
-        threading.Thread(target=_run, name="session-end-dream",
+        threading.Thread(target=_run, name=SESSION_END_DREAM_THREAD_NAME,
                          daemon=True).start()
 
     def _load_infer_cursor(self) -> dict:
@@ -1948,7 +2880,7 @@ class DreamOps:
             if e.id in subtree and e.id != root.id and e.title:
                 lines.append(f"Sub-task: {e.title}")
         entries = [en for band in self._cms.bands for en in band.entries
-                   if en.episode_id in subtree]
+                   if en.episode_id in subtree and en.source != "digest"]
         entries.sort(key=lambda en: en.timestamp)
         for en in entries:
             mark = " [superseded]" if en.superseded_at else ""
@@ -1993,8 +2925,12 @@ class DreamOps:
         raw = self._storage.get_meta(self._DIGEST_CURSOR_KEY) \
             if self._storage else None
         if isinstance(raw, dict):
-            return {"ts": float(raw.get("ts", 0.0)),
-                    "retry": dict(raw.get("retry", {}))}
+            cur = {"ts": float(raw.get("ts", 0.0)),
+                   "retry": dict(raw.get("retry", {}))}
+            for key in ("regenerate", "context_deferred"):
+                if key in raw:
+                    cur[key] = list(raw[key])
+            return cur
         return {"ts": 0.0, "retry": {}}
 
     def _save_digest_cursor(self, cur: dict) -> None:
@@ -2005,7 +2941,8 @@ class DreamOps:
             self, *, limit: int | None = None) -> list[dict]:
         """Caller MUST hold the lock. Closed session roots past the digest
         cursor with >=1 subtree entry and no existing digest entry, oldest
-        first, capped at ``digest_max_per_cycle`` (bounds the backfill)."""
+        first, with invalidated contexts rotated behind other eligible roots;
+        capped at ``digest_max_per_cycle`` (bounds the backfill)."""
         assert self._cms is not None
         if self._storage is None:
             return []
@@ -2016,12 +2953,16 @@ class DreamOps:
         counts = self._episode_entry_counts()
         digested = {e.episode_id for band in self._cms.bands
                     for e in band.entries
-                    if e.source == "digest" and e.episode_id}
+                    if e.source == "digest" and e.episode_id
+                    and e.superseded_at is None}
+        regenerate = set(cur.get("regenerate", []))
+        deferred = {rid: i for i, rid in enumerate(cur.get("context_deferred", []))}
         roots = sorted(
             (e for e in em.episodes.values()
              if e.parent_id is None and e.session_key
-             and e.ended_at is not None and e.ended_at > cur["ts"]),
-            key=lambda e: e.ended_at)
+             and e.ended_at is not None
+             and (e.ended_at > cur["ts"] or e.id in regenerate)),
+            key=lambda e: (deferred.get(e.id, -1), e.ended_at))
         out: list[dict] = []
         for root in roots:
             if root.id in digested:
@@ -2066,15 +3007,24 @@ class DreamOps:
 
     def _contested_facts(self) -> list[dict]:
         """Contested cortex facts shaped for graph_insight.suggest_questions.
-        Mirrors how cortex_search detects contention: current_records() +
-        contenders_for(). CortexRecord exposes .entity/.attribute/.value."""
+        Same pairing as cortex_search (each current record against its
+        slot's contenders), but contenders are bucketed by slot in one pass
+        like ``cortex_dump``: one ``contenders_for`` scan per current record
+        was quadratic and held the service lock 42-78 s on every dream
+        (7,162-fact live bank, 2026-09-23)."""
         out = []
         with self._lock:
             self._ensure_init()
             if self._cortex is None:
                 return out
+            parked: dict[tuple[str, str], list] = {}
+            for c in self._cortex.records:
+                if c.status == "contested":
+                    parked.setdefault(c.key, []).append(c)
+            if not parked:
+                return out
             for r in self._cortex.current_records():
-                conts = self._cortex.contenders_for(r.entity, r.attribute)
+                conts = parked.get(r.key)
                 if conts:
                     out.append({
                         "entity": r.entity, "attribute": r.attribute, "value": r.value,
@@ -2481,6 +3431,77 @@ class DreamOps:
                        reason=f"{days:.1f} days since the last deep apply")
         return out
 
+    # The judge-mode knobs the review_queue block reports, by config name.
+    _REVIEW_QUEUE_JUDGE_FIELDS = (
+        "judges_enabled", "judge_mode", "link_judge_mode", "junk_judge_mode",
+        "curation_judge_mode", "candidate_judge_mode")
+
+    def review_queue_health(self) -> dict[str, Any]:
+        """Cheap health signal for the review queues, beside
+        ``deep_dream_need`` in ``dream_status``: pending rows per queue
+        (merge, junk, link), the ages of the oldest pending merge and of the
+        oldest one no judge has recorded a verdict on, each judge's
+        configured mode, and ``attention: {needed, reasons}`` for the merge
+        queue. The curation
+        duplicate listing is not counted: it is recomputed from slot
+        embeddings on demand and capped at ``curation_top_k`` per store, so
+        it cannot pile up. Never raises: a failure is an ``error`` field.
+
+        From 2026-09-11 to 09-29 the merge judge sat in "shadow" and the
+        pending merge queue grew from ~100 rows to 1,016 while nothing
+        reported it; see the ``review_queue_alert_*`` thresholds."""
+        import time as _t
+        quiet = {"needed": False, "reasons": []}
+        try:
+            cfg = self.config.memory.deep_dream
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"available": False, "reason": "no_storage",
+                            "attention": quiet}
+                counts = self._storage.review_queue_counts()
+            judges = {k: getattr(cfg, k) for k in self._REVIEW_QUEUE_JUDGE_FIELDS}
+            merge = counts["merge"]
+            now = _t.time()
+
+            def _age(ts):
+                return None if ts is None else round(max(0.0, now - ts) / 86400.0, 2)
+            age = _age(counts["oldest_merge_at"])
+            unjudged_age = _age(counts["oldest_unjudged_merge_at"])
+            reasons: list[str] = []
+            if cfg.review_queue_alert_pending and merge >= cfg.review_queue_alert_pending:
+                reasons.append(f"{merge} merge proposals pending "
+                               f"(alert at {cfg.review_queue_alert_pending})")
+            # Only "auto-reject" and "auto" apply merge verdicts; every
+            # other mode (off, shadow) leaves the queue for a human. A
+            # judge configured to drain is only draining if it runs, so in
+            # those modes the age rule reads the oldest row no judge has
+            # recorded a verdict on: a missing or failing judge endpoint
+            # leaves rows unjudged and trips it, while rows the judge has
+            # seen and left for a human fall to the count rule.
+            draining = (cfg.judges_enabled
+                        and cfg.judge_mode in ("auto-reject", "auto"))
+            judge = (cfg.judge_mode if cfg.judges_enabled
+                     else "disabled (judges_enabled false)")
+            waited = unjudged_age if draining else age
+            if (cfg.review_queue_alert_age_days and waited is not None
+                    and waited >= cfg.review_queue_alert_age_days
+                    and merge >= cfg.review_queue_alert_min_pending):
+                what = ("unjudged merge proposal" if draining
+                        else "pending merge proposal")
+                reasons.append(
+                    f"oldest {what} {waited:.0f} days old "
+                    f"({merge} pending) while the merge judge is {judge}")
+            return {"pending": {"merge": merge, "junk": counts["junk"],
+                                "link": counts["link"]},
+                    "oldest_merge_age_days": age,
+                    "oldest_unjudged_merge_age_days": unjudged_age,
+                    "judges": judges,
+                    "attention": {"needed": bool(reasons), "reasons": reasons}}
+        except Exception as exc:  # noqa: BLE001 — a status block never raises
+            logger.warning("review-queue health failed: %s", exc)
+            return {"error": f"{type(exc).__name__}: {exc}", "attention": quiet}
+
     def deep_dream_tick(self) -> dict[str, Any]:
         """Sweep-tick automation of the deep dream's MECHANICAL half: when
         the need signal fires, run ``deep_dream(apply=True)`` — rescore,
@@ -2519,8 +3540,12 @@ class DreamOps:
             return extractor if hasattr(extractor, method) else None
         from pseudolife_memory.memory.dream import OpenAICompatExtractor
         if cfg.judge_url:
+            import os
             ex = OpenAICompatExtractor(
                 cfg.judge_url, model or cfg.judge_model or "judge",
+                # judge_url's own key, env-only like the second endpoint's
+                # (PSEUDOLIFE_JUDGE_SECOND_API_KEY); never the dream key.
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_API_KEY") or None,
                 # Explicit, not the constructor default: the judge endpoint
                 # follows the same config knob as the dream extractor, so a
                 # default change can never silently alter this shipped payload.
@@ -2541,29 +3566,163 @@ class DreamOps:
                 extra_body=ex.extra_body)
         return ex if hasattr(ex, method) else None
 
-    def _judge_enrich(self, pending: list[dict]) -> list[dict]:
+    def _judge_second_extractor(self):
+        """The merge judge's second-opinion endpoint, or None to reuse the
+        first opinion's extractor. ``judge_second_url`` builds an endpoint
+        of its own serving ``judge_second_model`` (so the two opinions can
+        come from different providers), authenticated only by
+        ``PSEUDOLIFE_JUDGE_SECOND_API_KEY``; without it,
+        ``judge_second_model`` is swapped onto the first opinion's
+        endpoint. Read per call, so both are live knobs."""
+        cfg = self.config.memory.deep_dream
+        if cfg.judge_second_url:
+            import os
+
+            from pseudolife_memory.memory.dream import OpenAICompatExtractor
+            dream_cfg = self.config.memory.dream
+            return OpenAICompatExtractor(
+                cfg.judge_second_url, cfg.judge_second_model or "judge",
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_SECOND_API_KEY") or None,
+                # The same budget as judge_url's endpoint (see above).
+                max_tokens=dream_cfg.extractor_max_tokens,
+                timeout_seconds=dream_cfg.extractor_timeout_seconds)
+        if cfg.judge_second_model:
+            return self._judge_extractor(None, model=cfg.judge_second_model)
+        return None
+
+    # A dated snapshot of the requested model (``gpt-4o`` served as
+    # ``gpt-4o-2024-08-06``) is the model that was asked for.
+    _DATED_SNAPSHOT = re.compile(r"-(\d{8}|\d{4}-\d{2}-\d{2})")
+
+    @classmethod
+    def _served_model_mismatch(cls, ex) -> tuple[str, str] | None:
+        """``(requested, served)`` when a judge endpoint reported serving a
+        model other than the one it was asked for: the Codex shim answers
+        any non-gpt-*/codex-* name with its launch default, so from
+        2026-09-03 to 2026-09-11 ``judge_second_model: claude-fable-5`` was
+        served by the first opinion's model and nothing said so. A
+        launch-default alias (``judge`` / ``extractor`` / ``bench``) asks
+        for whatever the endpoint serves, so it never mismatches."""
+        requested = getattr(ex, "model", None)
+        served = getattr(ex, "served_model", None)
+        if (not requested or not served
+                or requested in ("judge", "extractor", "bench")
+                or served == requested
+                or (served.startswith(requested)
+                    and cls._DATED_SNAPSHOT.fullmatch(served[len(requested):]))):
+            return None
+        return requested, served
+
+    def _report_served_model(self, out: dict, opinion: str, ex) -> None:
+        """Count and log a served-model mismatch on the judge result. It
+        never blocks a verdict; the auto gates judge distinctness on the
+        served names themselves (:meth:`_second_opinion_distinct`)."""
+        mismatch = self._served_model_mismatch(ex)
+        if mismatch is None:
+            return
+        requested, served = mismatch
+        logger.warning("deep-dream judge: %s opinion asked for model %s but "
+                       "the endpoint served %s", opinion, requested, served)
+        out["served_model_mismatch"] += 1
+        out["served_model_mismatches"].append(
+            {"opinion": opinion, "requested": requested, "served": served})
+
+    @staticmethod
+    def _second_opinion_distinct(review, row, ex, ex2, model2: str) -> bool:
+        """Whether a merge row's second vote came from a different model
+        than its first, as the two-vote auto gates require. Distinct only
+        when both served identities are known and differ, the second
+        opinion came from another endpoint object, and neither its stamp
+        (the served name) nor its configured name equals the first
+        opinion's stamp: rows judged before served names were stamped carry
+        the CONFIGURED name, and a second endpoint that served the first's
+        model under another requested name is one opinion asked twice."""
+        first_model = row.get("judge_model") or ""
+        first_served = review.observed(row)
+        served2 = getattr(ex2, "served_model", None)
+        configured2 = getattr(ex2, "model", None)
+        return bool(first_served and served2 and first_served != served2
+                    and ex2 is not ex and first_model != model2
+                    and not (configured2 and first_model == configured2))
+
+    def _judge_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the merge-judge evidence pack (caller
+        holds the lock); :meth:`_judge_enrich_from` builds the pack from
+        them with the lock released. Entry TEXTS only: nothing in the pack
+        reads an embedding, and decoding them was most of the read."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "traces": self._storage.traces_by_entity_norm(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts()}
+
+    def _judge_enrich_from(self, pending: list[dict], evidence: dict) -> list[dict]:
         """The merge-judge evidence pack for ``pending`` rows — the same
         snippets/scopes/degree the review surfaces show, with the
-        ``low_differential`` stamp."""
+        ``low_differential`` stamp. Pure over ``evidence``: no lock."""
         cfg = self.config.memory.deep_dream
-        with self._lock:
-            g = self._storage.load_graph()
-            scope_map = self._storage.entity_sources_map()
-            traces = self._storage.traces_by_entity_norm()
-            entries = self._storage.load_entries()
-            fact_counts = self._storage.entity_fact_counts()
+        g = evidence["graph"]
         from pseudolife_memory.memory import graph_consolidation as gc
+        # Mentions for the rows' own entities only (each entity resolves
+        # independently of the others). The graph-wide pass was ~1.1 s of
+        # every ~1.3 s enrichment: 7,473 entities, live bank, 2026-09-23.
+        ids = {eid for p in pending for eid in (p.get("entity_id"), p.get("into_id"))}
         _, mentions = gc.entity_context_vectors(
-            g["entities"], entries, traces,
+            [e for e in g["entities"] if e["id"] in ids],
+            evidence["entries"], evidence["traces"],
             min_mentions=cfg.min_entity_mentions,
-            max_fallback_mentions=cfg.max_fallback_mentions or None)
+            max_fallback_mentions=cfg.max_fallback_mentions or None,
+            with_vectors=False)
         # Built at the JUDGE's cap, not the review surface's: the
         # 2026-09-02 panel judged 305/309 merge snippets clipped to 240
         # chars at build time and lost guidance in three folds.
         return self._enrich_merge_proposals(
-            pending, g["entities"], g["edges"], entries, traces,
-            mentions, scope_map, cfg.max_context_snippets,
-            cfg.judge_snippet_max_chars, True, fact_counts=fact_counts)
+            pending, g["entities"], g["edges"], evidence["entries"],
+            evidence["traces"], mentions, evidence["scopes"],
+            cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
+            fact_counts=evidence["facts"])
+
+    # Upper bound on one page, so a single request's response size and
+    # snippet work stay bounded however large the queue grows.
+    _EVIDENCE_PAGE_MAX = 100
+
+    def merge_proposal_evidence(self, *, offset: int = 0,
+                                limit: int = 25) -> dict[str, Any]:
+        """One page of pending merge proposals with the merge judge's own
+        evidence pack (``_judge_enrich_from``), for reviewers outside the
+        daemon: ``memory_dream(action="deep")`` cuts its lists at 40 items,
+        so a large queue had no bounded way to be read with its evidence.
+        Rows are in queue order (``pending_entity_proposals``). ``group`` is
+        computed over the WHOLE queue — the pack alone would compute it per
+        page and split an accept-at-most-one decision across pages. Offsets
+        shift as rows are settled or new proposals are filed; read the queue
+        before settling it."""
+        offset = max(0, int(offset))
+        limit = min(max(1, int(limit)), self._EVIDENCE_PAGE_MAX)
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"error": "no_storage"}
+            pending = [p for p in self._storage.pending_entity_proposals()
+                       if p.get("kind") == "merge"]
+            page = pending[offset:offset + limit]
+            evidence = self._judge_evidence_locked(page) if page else None
+        items = self._judge_enrich_from(page, evidence) if page else []
+        if items:
+            from pseudolife_memory.memory.graph_review import shared_pair_groups
+            display = {e["id"]: e["display"]
+                       for e in evidence["graph"]["entities"]}
+            groups = shared_pair_groups(
+                [(p["entity_id"], p["into_id"]) for p in pending])
+            group_of = {p["id"]: g for p, g in zip(pending, groups)}
+            for item in items:
+                g = group_of.get(item["id"])
+                item["group"] = display.get(g) if g is not None else None
+        end = offset + len(page)
+        return {"kind": "merge", "total": len(pending), "offset": offset,
+                "limit": limit,
+                "next_offset": end if end < len(pending) else None,
+                "items": items}
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:
@@ -2578,7 +3737,7 @@ class DreamOps:
         already is). False = the snapshot could not be written, so the
         caller must refuse the apply."""
         if "snapshot" not in state:
-            state["snapshot"] = self._write_graph_snapshot()
+            state["snapshot"] = self._write_graph_snapshot_locked()
         return state["snapshot"] is not None
 
     @staticmethod
@@ -2598,6 +3757,85 @@ class DreamOps:
                                  "note": "model returned no verdict",
                                  **leave_fields})
 
+    @staticmethod
+    def _relate_needs_relation(verdicts: list[dict]) -> None:
+        """A ``relate`` naming no relation is a plain reject (the parser
+        guarantees one; this holds the rule for any other extractor)."""
+        for v in verdicts:
+            if v["verdict"] == "relate" and not v.get("relation"):
+                v["verdict"] = "reject"
+
+    def _file_relate_link(self, out: dict, row: dict, e: dict,
+                          votes: list[tuple]) -> None:
+        """After an APPLIED automatic merge reject, file the relate vote's
+        relation as a link proposal: a pending row the link judge settles
+        through its own gates, never an edge. ``votes`` are the applying
+        ``(verdict, relation, confidence)``; of two relate votes the more
+        confident wins (the first on a tie). The relation reads FROM ->
+        INTO as the judge was shown them (``e``, the signed pack, whose
+        sides are oriented by current evidence), so the link is filed with
+        that orientation, by entity id. Caller holds the lock.
+
+        Files nothing when the relation is not a registered one (the filing
+        gate would silently file it as related-to), or when an edge or any
+        link proposal already joins the pair: an accepted link changes both
+        sides' evidence, so reconsideration reopens the reject and the
+        judge sees the pair again — without this the loop would stack one
+        edge per relation it names."""
+        relates = [(conf, rel) for verdict, rel, conf in votes
+                   if verdict == "relate" and rel]
+        if not relates:
+            return
+        conf, relation = max(relates, key=lambda item: item[0])
+        if relation not in {r["name"] for r in self._graph.load_relations()}:
+            return
+        g = self._storage.load_graph()
+        disp = {ent["id"]: ent["display"] for ent in g["entities"]}
+        stored = (row["entity_id"], row["into_id"])
+        shown = (e["from"]["display"], e["into"]["display"])
+        if shown[0] == shown[1]:
+            return          # the orientation cannot be told apart
+        if shown == (disp.get(stored[0]), disp.get(stored[1])):
+            src_id, dst_id = stored
+        elif shown == (disp.get(stored[1]), disp.get(stored[0])):
+            dst_id, src_id = stored
+        else:
+            return
+        pair = {src_id, dst_id}
+        if any({edge["src_id"], edge["dst_id"]} == pair for edge in g["edges"]):
+            return
+        if self._storage.conn.execute(
+                "SELECT 1 FROM edge_proposals WHERE (src_id=%s AND dst_id=%s) "
+                "OR (src_id=%s AND dst_id=%s) LIMIT 1",
+                (src_id, dst_id, dst_id, src_id)).fetchone():
+            return
+        res = self._graph_propose_links_locked([{
+            "src_id": src_id, "dst_id": dst_id,
+            "src": disp[src_id], "dst": disp[dst_id], "relation": relation,
+            "rationale": (f"merge judge: relate ({relation}) {conf:.2f} on "
+                          f"merge proposal #{row['id']}, rejected as distinct")}],
+            source="merge-judge-relate", _by_id=True)
+        out["relate_links_filed"] += int(res.get("proposed") or 0)
+
+    def _file_relate_link_isolated(self, out: dict, row: dict, e: dict,
+                                   votes: list[tuple]) -> None:
+        """:meth:`_file_relate_link` in a savepoint of its own: the link is a
+        side effect of an applied reject, so a filing that fails rolls back
+        only itself, never the reject or the rest of the batch. Caller
+        holds the lock, inside the reject's transaction."""
+        try:
+            with self._storage.transaction():
+                self._file_relate_link(out, row, e, votes)
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning("deep-dream judge: relate link for merge proposal "
+                           "#%s not filed: %s", row.get("id"), exc)
+            out["relate_link_errors"] = out.get("relate_link_errors", 0) + 1
+
+    def review_rejudge(self, queue="all", *, limit=32):
+        """Queue a bounded set of pending opinions for the next judge sweep."""
+        from pseudolife_memory.memory.review_judgments import requeue
+        return requeue(self, queue, limit)
+
     def deep_dream_judge(self, extractor=None, *,
                          limit: int | None = None,
                          second_extractor=None) -> dict[str, Any]:
@@ -2608,8 +3846,10 @@ class DreamOps:
         ``judge_reject_min_confidence``. Second opinion
         (``judge_second_opinion``): rows already carrying a first verdict
         but still pending are re-judged once in a fresh batch (optionally
-        ``judge_second_model``); two rejects at mean confidence >=
-        ``judge_reject_min_confidence_2`` apply, and in ``auto`` mode two
+        ``judge_second_model``, on ``judge_second_url`` when set); two
+        rejects from DIFFERENT models (since 2026-09-30, the rule below) at
+        mean confidence >= ``judge_reject_min_confidence_2`` apply, and in
+        ``auto`` mode two
         accepts on a non-low-differential row at mean >=
         ``judge_accept_min_confidence`` fold the entity — the only path
         that ever auto-applies an accept, and only when the two opinions
@@ -2619,8 +3859,13 @@ class DreamOps:
         second vote is not independent enough to authorize a fold). Name
         vetoes (``merge_veto``, ``variant_conflict``) hold at apply time
         too. Disagreement stamps ``split`` on the note and leaves the row
-        for a human. ``second_extractor`` is the test hook for the second
-        opinion's endpoint. Never raises into the sweep timer."""
+        for a human. When the configuration makes the second opinion the
+        first model again (no ``judge_second_url``; ``judge_second_model``
+        empty or the first's configured name) the pass is skipped with no
+        model call (``second_opinion_skipped_same_model``), in every mode.
+        ``second_extractor`` is the test hook for the second opinion's
+        endpoint; passing either extractor keeps the pass. Never raises
+        into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -2628,24 +3873,67 @@ class DreamOps:
         if cfg.judge_mode not in ("shadow", "auto-reject", "auto"):
             return {"judged": 0, "skipped": "disabled"}
         try:
+            from pseudolife_memory.memory.graph_review import (
+                MERGE_REJECT_CLASS, merge_verdict_class, merge_verdict_token,
+                relate_note, relate_relations)
+            from pseudolife_memory.memory.review_decisions import (
+                has_active_decisions, refresh_proposal_terminals)
+            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             with self._lock:
                 self._ensure_init()
                 if self._storage is None:
                     return {"judged": 0, "skipped": "no_storage"}
                 pending = [p for p in self._storage.pending_entity_proposals()
                            if p.get("kind") == "merge"]
-            first = [p for p in pending if not p.get("judge_verdict")]
-            second = ([p for p in pending
-                       if p.get("judge_verdict") and not p.get("judge2_verdict")]
-                      if cfg.judge_second_opinion else [])
-            if not first and not second:
+                has_terminals = has_active_decisions(self._storage, "merge")
+            if not pending and not has_terminals:
                 return {"judged": 0}
             ex = self._judge_extractor(extractor)
             if ex is None:
                 return {"judged": 0, "skipped": "no_judge_extractor"}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
+            from pseudolife_memory.memory.review_judgments import ReviewJudgments, observed_model
+            current_model = observed_model(ex)
+            with self._lock:
+                review = ReviewJudgments(self, "merge", ex, pending, current_model)
+                reconsidered = refresh_proposal_terminals(review, limit=cap)
+                review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "merge"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
+                pending = review.refresh()
+            first = [p for p in pending if not p.get("judge_verdict")]
+            awaiting = ([p for p in pending
+                         if p.get("judge_verdict") and not p.get("judge2_verdict")]
+                        if cfg.judge_second_opinion else [])
+            # A second opinion the CONFIGURATION already makes the first
+            # model again (no judge_second_url, and judge_second_model empty
+            # or the first endpoint's configured name) can authorize nothing
+            # in any mode, and in shadow it is the same model's opinion
+            # twice, so no call is spent on it: the rows keep waiting and
+            # the batch goes to first opinions (maintainer decision
+            # 2026-09-30). A distinct model or endpoint by configuration
+            # still gets its call; a substitution only the served name
+            # reveals is caught per row by _second_opinion_distinct. No
+            # config field changes, so no review fingerprint moves.
+            same_model_second = (
+                extractor is None and second_extractor is None
+                and not cfg.judge_second_url
+                and (not cfg.judge_second_model
+                     or cfg.judge_second_model == getattr(ex, "model", None)))
+            second = [] if same_model_second else awaiting
+            skipped = len(awaiting) if same_model_second else 0
+            if not first and not second:
+                idle = {"judged": 0, "reconsideration": reconsidered}
+                if skipped:
+                    idle["second_opinion_skipped_same_model"] = skipped
+                return idle
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
+                   "second_opinion_skipped_same_model": skipped,
+                   "auto_reject_refused_same_model": 0,
+                   "relate_links_filed": 0,
+                   "served_model_mismatch": 0, "served_model_mismatches": [],
+                   "reconsideration": reconsidered,
                    "model": getattr(ex, "model", None) or type(ex).__name__,
                    "mode": cfg.judge_mode}
             # Second opinions first: these rows were judged on an EARLIER
@@ -2655,10 +3943,8 @@ class DreamOps:
                 if second_extractor is not None:
                     ex2 = second_extractor
                 else:
-                    ex2 = (self._judge_extractor(
-                               None, model=cfg.judge_second_model)
-                           if cfg.judge_second_model and extractor is None
-                           else ex) or ex
+                    ex2 = (self._judge_second_extractor()
+                           if extractor is None else None) or ex
                 from pseudolife_memory.memory.graph_consolidation import (
                     variant_conflict)
                 from pseudolife_memory.memory.graph_review import merge_veto
@@ -2666,14 +3952,42 @@ class DreamOps:
                 logger.info("deep-dream judge: second opinion on %d pending "
                             "merge proposal(s) (mode %s)", len(batch),
                             cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                # The signed packs: validate() re-checks exactly the
+                # evidence the model is shown.
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
                               "snippet_chars": cfg.judge_snippet_max_chars}
                              for i, e in enumerate(enriched)]
-                verdicts = ex2.judge_merges(proposals)
+                second_observed = observed_model(ex2)
+                try:
+                    verdicts = ex2.judge_merges(proposals)
+                except Exception as exc:  # noqa: BLE001 — see below
+                    # With judge_second_url the two opinions fail apart: a
+                    # second endpoint that is down or refuses its key must
+                    # not end the tick before any first opinion runs. The
+                    # rows stay waiting; their batch share goes to first
+                    # opinions this tick. On the first opinion's own
+                    # endpoint (same URL AND same key: judge_url has its own
+                    # key, so a keyless second call to its URL can 401 where
+                    # the first would not) the first call would fail the
+                    # same way after a second timeout, so that failure ends
+                    # the tick as before.
+                    if ex2 is ex or (getattr(ex2, "base_url", None) is not None
+                                     and getattr(ex2, "base_url", None)
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex2, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
+                        raise
+                    logger.warning("deep-dream judge: second opinion failed, "
+                                   "first opinions continue: %s", exc)
+                    out["second_opinion_error"] = str(exc)
+                    second = []
+            if second:
                 self._stamp_skipped(verdicts, proposals)
+                self._relate_needs_relation(verdicts)
+                self._report_served_model(out, "second", ex2)
                 model2 = self._model_name(ex2)
                 now = _t.time()
                 with self._lock:
@@ -2687,99 +4001,117 @@ class DreamOps:
                     # proposal's entity ids, never through names.
                     canon_by_id = {e["id"]: e["canonical"]
                                    for e in self._storage.load_graph()["entities"]}
-                # Same-model detection must survive rows judged before this
-                # build (stamped with the CONFIGURED name) and a shared
-                # extractor (ex2 is ex): distinct only when the second
-                # opinion came from another endpoint object AND its served
-                # and configured names both differ from the first stamp.
-                same_endpoint = ex2 is ex
-                configured2 = getattr(ex2, "model", None)
+                # Both two-vote gates need the votes from DIFFERENT models
+                # (_second_opinion_distinct): the same model mostly repeats
+                # itself, and two rejects from one model authorized rejects
+                # until the merge judge went back to shadow on 2026-09-11.
                 snap: dict = {}
-                for v in verdicts:
-                    e = enriched[v["n"] - 1]
-                    row = batch[v["n"] - 1]
-                    v1, c1 = row.get("judge_verdict"), float(row.get("judge_confidence") or 0.0)
-                    v2, c2 = v["verdict"], float(v["confidence"])
-                    # The first opinion's note is the prefix; the verdict
-                    # tail (and any refusal reason appended below) must
-                    # survive the 400-char cap, so the prefix is what gets
-                    # truncated.
-                    note1 = (row.get("judge_note") or "")[:160]
-                    tag = ("split" if v1 != v2 else "agree")
-                    note = f"{note1} | 2nd ({model2}): {v2} {c2:.2f} [{tag}]"
-                    with self._lock:
-                        ok = self._storage.set_entity_proposal_second_judgment(
-                            e["id"], verdict=v2, confidence=c2, model=model2,
-                            at=now, note=note)
-                    if not ok:
-                        continue
-                    out["second_opinions"] += 1
-                    mean = (c1 + c2) / 2.0
-                    if (v1 == v2 == "reject"
-                            and cfg.judge_mode in ("auto-reject", "auto")
-                            and mean >= cfg.judge_reject_min_confidence_2):
-                        res = self.graph_reject_entity_proposal(
-                            e["id"], decided_by="dream-judge")
-                        if res.get("rejected"):
-                            out["auto_rejected"] += 1
-                    elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
-                            and e.get("low_differential") is False
-                            and mean >= cfg.judge_accept_min_confidence):
-                        a_name = e["from"]["display"] or ""
-                        b_name = e["into"]["display"] or ""
-                        pair = tuple(sorted((
-                            canon_by_id.get(row["entity_id"], ""),
-                            canon_by_id.get(row["into_id"], ""))))
-                        if pair in dismissed:
-                            # An earlier verdict (relate / dismiss_pair)
-                            # settled these as distinct; the pending merge
-                            # row is moot — close it instead of folding
-                            # over a human's decision.
-                            res = self.graph_reject_entity_proposal(
-                                e["id"], decided_by="dream-judge")
-                            out["auto_rejected"] += bool(res.get("rejected"))
-                            out["auto_accept_refused"] = out.get(
-                                "auto_accept_refused", 0) + 1
-                            continue
-                        first_model = row.get("judge_model") or ""
-                        if (same_endpoint or first_model == model2
-                                or (configured2 and first_model == configured2)):
-                            reason = "auto-accept needs a distinct second model"
-                        elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
-                            # The accept gate's evidence holds no analyzer-
-                            # filed rows (2026-09-02 panel: write-dedup 56,
-                            # dream-alias 4, token-subset 3); unmeasured
-                            # class stays pending with the verdicts attached.
-                            reason = "auto-accept refused: analyzer-filed rows are unmeasured"
-                        elif merge_veto(a_name, b_name) is not None:
-                            reason = "auto-accept refused: name veto"
-                        elif variant_conflict(a_name, b_name):
-                            reason = "auto-accept refused: variant conflict"
-                        elif not self._snapshot_once(snap):
-                            reason = "auto-accept refused: graph snapshot failed"
-                        else:
-                            reason = None
-                        if reason is not None:
-                            with self._lock:
-                                self._storage.set_entity_proposal_second_judgment(
-                                    e["id"], verdict=v2, confidence=c2,
-                                    model=model2, at=now,
-                                    note=f"{note} | {reason}"[:400])
-                            out["auto_accept_refused"] = out.get(
-                                "auto_accept_refused", 0) + 1
-                            continue
-                        res = self.graph_accept_entity_merge(
-                            e["id"], decided_by="dream-judge")
-                        if res.get("accepted"):
-                            out["auto_accepted"] += 1
-            if first:
-                batch = first[:cap]
-                # Announce the batch BEFORE the enrichment + model call: the
-                # completion line alone let the 2026-08-31 forensics misplace
-                # a ~50s window inside this (mostly lock-free) phase.
+                with self._lock:
+                    review.validate(batch, response_extractor=ex2, expected_model=second_observed)
+                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in (*MERGE_REJECT_CLASS, "keep")):
+                        with self._storage.transaction():
+                            e = enriched[v["n"] - 1]
+                            row = batch[v["n"] - 1]
+                            v1, c1 = row.get("judge_verdict"), float(row.get("judge_confidence") or 0.0)
+                            v2, c2 = v["verdict"], float(v["confidence"])
+                            # The first opinion's note is the prefix; the verdict
+                            # tail (and any refusal reason appended below) must
+                            # survive the 400-char cap, so the prefix is what gets
+                            # truncated. A relate vote's relation rides in both
+                            # (graph_review.relate_relations reads them back).
+                            note1 = (row.get("judge_note") or "")[:160]
+                            # "split" is a disagreement about the MERGE: reject
+                            # vs relate is agreement that the pair is distinct.
+                            tag = ("split" if merge_verdict_class(v1) != merge_verdict_class(v2)
+                                   else "agree")
+                            token2 = merge_verdict_token(v2, v.get("relation"))
+                            note = f"{note1} | 2nd ({model2}): {token2} {c2:.2f} [{tag}]"
+                            if not review.current(row, first_opinion=True):
+                                continue
+                            ok = self._storage.set_entity_proposal_second_judgment(
+                                e["id"], verdict=v2, confidence=c2, model=model2,
+                                at=now, note=note)
+                            if not ok:
+                                continue
+                            out["second_opinions"] += 1
+                            mean = (c1 + c2) / 2.0
+                            if (merge_verdict_class(v1) == merge_verdict_class(v2) == "reject"
+                                    and cfg.judge_mode in ("auto-reject", "auto")
+                                    and mean >= cfg.judge_reject_min_confidence_2):
+                                if not self._second_opinion_distinct(
+                                        review, row, ex, ex2, model2):
+                                    self._storage.set_entity_proposal_second_judgment(
+                                        e["id"], verdict=v2, confidence=c2,
+                                        model=model2, at=now,
+                                        note=f"{note} | auto-reject needs a "
+                                             f"distinct second model"[:400])
+                                    out["auto_reject_refused_same_model"] += 1
+                                    continue
+                                res = review.apply(row, self.graph_reject_entity_proposal,
+                                    e["id"], decided_by="dream-judge")
+                                if res.get("rejected"):
+                                    out["auto_rejected"] += 1
+                                    rel1 = relate_relations(row.get("judge_note"))[0]
+                                    self._file_relate_link_isolated(out, row, e, [
+                                        (v1, rel1, c1),
+                                        (v2, v.get("relation"), c2)])
+                            elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
+                                    and e.get("low_differential") is False
+                                    and mean >= cfg.judge_accept_min_confidence):
+                                a_name = e["from"]["display"] or ""
+                                b_name = e["into"]["display"] or ""
+                                pair = tuple(sorted((
+                                    canon_by_id.get(row["entity_id"], ""),
+                                    canon_by_id.get(row["into_id"], ""))))
+                                if pair in dismissed:
+                                    # An earlier verdict (relate / dismiss_pair)
+                                    # settled these as distinct; the pending merge
+                                    # row is moot — close it instead of folding
+                                    # over a human's decision.
+                                    res = review.apply(row, self.graph_reject_entity_proposal,
+                                        e["id"], decided_by="dream-judge")
+                                    out["auto_rejected"] += bool(res.get("rejected"))
+                                    out["auto_accept_refused"] = out.get(
+                                        "auto_accept_refused", 0) + 1
+                                    continue
+                                if not self._second_opinion_distinct(
+                                        review, row, ex, ex2, model2):
+                                    reason = "auto-accept needs a distinct second model"
+                                elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
+                                    # The accept gate's evidence holds no analyzer-
+                                    # filed rows (2026-09-02 panel: write-dedup 56,
+                                    # dream-alias 4, token-subset 3); unmeasured
+                                    # class stays pending with the verdicts attached.
+                                    reason = "auto-accept refused: analyzer-filed rows are unmeasured"
+                                elif merge_veto(a_name, b_name) is not None:
+                                    reason = "auto-accept refused: name veto"
+                                elif variant_conflict(a_name, b_name):
+                                    reason = "auto-accept refused: variant conflict"
+                                elif not self._snapshot_once(snap):
+                                    reason = "auto-accept refused: graph snapshot failed"
+                                    review.retry(row)
+                                else:
+                                    reason = None
+                                if reason is not None:
+                                    self._storage.set_entity_proposal_second_judgment(
+                                        e["id"], verdict=v2, confidence=c2,
+                                        model=model2, at=now,
+                                        note=f"{note} | {reason}"[:400])
+                                    out["auto_accept_refused"] = out.get(
+                                        "auto_accept_refused", 0) + 1
+                                    continue
+                                res = review.apply(row, self.graph_accept_entity_merge,
+                                    e["id"], decided_by="dream-judge")
+                                if res.get("accepted"):
+                                    out["auto_accepted"] += 1
+            if first and cap > len(second[:cap]):
+                batch = first[:cap - len(second[:cap])]
+                # Announce the batch BEFORE the model call: the completion
+                # line alone let the 2026-08-31 forensics misplace a ~50s
+                # window inside this (lock-free) phase.
                 logger.info("deep-dream judge: judging %d pending merge "
                             "proposal(s) (mode %s)", len(batch), cfg.judge_mode)
-                enriched = self._judge_enrich(batch)
+                enriched = review.rows(batch)
                 proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
                               "reason": e.get("reason"), "score": e.get("score"),
                               "low_differential": e.get("low_differential"),
@@ -2787,26 +4119,41 @@ class DreamOps:
                              for i, e in enumerate(enriched)]
                 verdicts = ex.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
+                self._relate_needs_relation(verdicts)
+                self._report_served_model(out, "first", ex)
                 model = self._model_name(ex, out["model"])
                 out["model"] = model
                 now = _t.time()
-                for v in verdicts:
-                    e = enriched[v["n"] - 1]
-                    with self._lock:
-                        ok = self._storage.set_entity_proposal_judgment(
-                            e["id"], verdict=v["verdict"],
-                            confidence=v["confidence"], note=v["note"] or None,
-                            model=model, at=now)
-                    if not ok:
-                        continue
-                    out["judged"] += 1
-                    if (cfg.judge_mode in ("auto-reject", "auto")
-                            and v["verdict"] == "reject"
-                            and v["confidence"] >= cfg.judge_reject_min_confidence):
-                        res = self.graph_reject_entity_proposal(
-                            e["id"], decided_by="dream-judge")
-                        if res.get("rejected"):
-                            out["auto_rejected"] += 1
+                with self._lock:
+                    review.validate(batch)
+                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in (*MERGE_REJECT_CLASS, "keep")):
+                        with self._storage.transaction():
+                            e = enriched[v["n"] - 1]
+                            row = batch[v["n"] - 1]
+                            if not review.current(row):
+                                continue
+                            note = v["note"] or None
+                            if v["verdict"] == "relate":
+                                note = relate_note(v.get("relation"), note)
+                            ok = self._storage.set_entity_proposal_judgment(
+                                e["id"], verdict=v["verdict"],
+                                confidence=v["confidence"], note=note,
+                                model=model, at=now)
+                            if ok:
+                                review.record(row)
+                            if not ok:
+                                continue
+                            out["judged"] += 1
+                            if (cfg.judge_mode in ("auto-reject", "auto")
+                                    and v["verdict"] in MERGE_REJECT_CLASS
+                                    and v["confidence"] >= cfg.judge_reject_min_confidence):
+                                res = review.apply(row, self.graph_reject_entity_proposal,
+                                    e["id"], decided_by="dream-judge")
+                                if res.get("rejected"):
+                                    out["auto_rejected"] += 1
+                                    self._file_relate_link_isolated(out, row, e, [
+                                        (v["verdict"], v.get("relation"),
+                                         v["confidence"])])
             out["pending_unjudged"] = max(0, len(first) - out["judged"])
             return out
         except Exception as exc:  # noqa: BLE001 — the judge must never kill the sweep
@@ -2815,18 +4162,26 @@ class DreamOps:
 
     # ── link judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_link_proposals(self, pending: list[dict]) -> list[dict]:
+    def _link_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the link-judge evidence pack (caller
+        holds the lock); entry texts only, as for the merge pack."""
+        return {"graph": self._storage.load_graph(),
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts()}
+
+    def _enrich_link_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending edge proposals: each side's live
         edges and scopes, the detector's rationale, and the notes naming
-        BOTH entities (per-side notes when nothing names both)."""
+        BOTH entities (per-side notes when nothing names both). Pure over
+        ``evidence``: no lock."""
         from pseudolife_memory.memory import graph_consolidation as gc
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        with self._lock:
-            g = self._storage.load_graph()
-            scope_map = self._storage.entity_sources_map()
-            entries = self._storage.load_entries()
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         outs: dict[int, list[str]] = {}
         ins: dict[int, list[str]] = {}
@@ -2843,17 +4198,16 @@ class DreamOps:
             src = e.get("source")
             return (f"[{src}] " if src else "") + str(e.get("text", ""))[:cap]
 
-        entry_tokens = None
+        # Tokenized once per pack, not once per row: validate() builds the
+        # judged batch's pack under the service lock.
+        tokens = [_token_set(e.get("text", "")) for e in entries] if pending else []
 
         def mentions_of(display, k=2):
-            nonlocal entry_tokens
             want = _token_set(display)
             if not want:
                 return []
-            if entry_tokens is None:
-                entry_tokens = [(e, _token_set(e.get("text", ""))) for e in entries]
             found = []
-            for e, toks in entry_tokens:
+            for e, toks in zip(entries, tokens):
                 if want <= toks:
                     found.append(stamp(e))
                     if len(found) >= k:
@@ -2863,7 +4217,7 @@ class DreamOps:
         rows = []
         for i, p in enumerate(pending):
             both = [t[:cap] for t in gc.shared_mention_entries(
-                entries, p["src"], p["dst"], limit=3)]
+                entries, p["src"], p["dst"], limit=3, tokens=tokens)]
             rows.append({
                 "n": i + 1, "src": p["src"], "relation": p["relation"],
                 "dst": p["dst"], "rationale": p.get("rationale"),
@@ -2892,78 +4246,113 @@ class DreamOps:
         if mode not in ("shadow", "auto"):
             return {"judged": 0, "skipped": "disabled"}
         try:
+            from pseudolife_memory.memory.review_decisions import (
+                has_active_decisions, refresh_proposal_terminals)
+            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             with self._lock:
                 self._ensure_init()
                 if self._storage is None:
                     return {"judged": 0, "skipped": "no_storage"}
-                pending = [p for p in self._storage.pending_proposals()
-                           if not p.get("judge_verdict")]
-            if not pending:
+                pending = self._storage.pending_proposals()
+                has_terminals = has_active_decisions(self._storage, "link")
+            if not pending and not has_terminals:
                 return {"judged": 0}
             ex = self._judge_extractor(extractor, method="judge_links")
             if ex is None:
                 return {"judged": 0, "skipped": "no_judge_extractor"}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            from pseudolife_memory.memory.review_judgments import ReviewJudgments, observed_model
+            current_model = observed_model(ex)
+            with self._lock:
+                review = ReviewJudgments(self, "link", ex, pending, current_model)
+                reconsidered = refresh_proposal_terminals(review, limit=cap)
+                review.pending = self._storage.pending_proposals()
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
+                pending = [p for p in review.refresh() if not p.get("judge_verdict")]
+            if not pending:
+                return {"judged": 0, "reconsideration": reconsidered}
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream link judge: judging %d pending link "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_link_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_links(rows)
             self._stamp_skipped(verdicts, rows, relation=None)
             model = self._model_name(ex)
             judged = applied = 0
             now = _t.time()
-            for v in verdicts:
-                p = batch[v["n"] - 1]
-                with self._lock:
-                    ok = self._storage.set_proposal_judgment(
-                        p["id"], verdict=v["verdict"], confidence=v["confidence"],
-                        note=v.get("note"), model=model,
-                        relation=v.get("relation"), at=now)
-                if not ok:
-                    continue
-                judged += 1
-                if mode != "auto":
-                    continue
-                conf = float(v["confidence"])
-                if v["verdict"] == "accept" and conf >= cfg.link_accept_min_confidence:
-                    res = self.graph_accept_proposal(p["id"], decided_by="dream-judge")
-                    applied += bool(res.get("accepted"))
-                # A retype is recorded, never auto-written: the first ladder
-                # run scored the judge's relation choice at 0/1 on retypes
-                # (and 6/10 on candidate proposals), so the corrected edge
-                # waits for a reviewer — the verdict and judge_relation are
-                # on the row for the Console / an agent to apply.
-                elif v["verdict"] == "reject" and conf >= cfg.link_reject_min_confidence:
-                    res = self.graph_reject_proposal(p["id"], decided_by="dream-judge")
-                    applied += bool(res.get("rejected"))
+            with self._lock:
+                review.validate(batch)
+                for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                    with self._storage.transaction():
+                        p = batch[v["n"] - 1]
+                        if not review.current(p):
+                            continue
+                        ok = self._storage.set_proposal_judgment(
+                            p["id"], verdict=v["verdict"], confidence=v["confidence"],
+                            note=v.get("note"), model=model,
+                            relation=v.get("relation"), at=now)
+                        if ok:
+                            review.record(p)
+                        if not ok:
+                            continue
+                        judged += 1
+                        if mode != "auto":
+                            continue
+                        conf = float(v["confidence"])
+                        if v["verdict"] == "accept" and conf >= cfg.link_accept_min_confidence:
+                            res = review.apply(p, self.graph_accept_proposal,
+                                               p["id"], decided_by="dream-judge")
+                            applied += bool(res.get("accepted"))
+                        # A retype is recorded, never auto-written: the first ladder
+                        # run scored the judge's relation choice at 0/1 on retypes
+                        # (and 6/10 on candidate proposals), so the corrected edge
+                        # waits for a reviewer — the verdict and judge_relation are
+                        # on the row for the Console / an agent to apply.
+                        elif v["verdict"] == "reject" and conf >= cfg.link_reject_min_confidence:
+                            res = review.apply(p, self.graph_reject_proposal,
+                                               p["id"], decided_by="dream-judge")
+                            applied += bool(res.get("rejected"))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(pending) - judged),
-                    "model": model, "mode": mode}
+                    "model": model, "mode": mode, "reconsideration": reconsidered}
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream link judge failed: %s", exc)
             return {"judged": 0, "error": str(exc)}
 
     # ── junk judge (2026-09-02) ───────────────────────────────────────────
 
-    def _enrich_junk_proposals(self, pending: list[dict]) -> list[dict]:
+    def _junk_evidence_locked(self, pending: list[dict]) -> dict:
+        """The storage reads behind the junk-judge evidence pack for
+        ``pending`` (caller holds the lock); entry texts only, as for the
+        merge pack."""
+        g = self._storage.load_graph()
+        canon = {e["id"]: e["canonical"] for e in g["entities"]}
+        return {"graph": g,
+                "scopes": self._storage.entity_sources_map(),
+                "entries": self._storage.load_entry_texts(),
+                "facts": self._storage.entity_fact_counts(),
+                "fact_texts": self._storage.current_fact_counts_by_entity_text(),
+                "fact_rows": {p["entity_id"]: self._storage.entity_fact_rows(
+                    p["entity_id"], canon.get(p["entity_id"], ""))
+                    for p in pending}}
+
+    def _enrich_junk_proposals_from(self, pending: list[dict],
+                                    evidence: dict) -> list[dict]:
         """Evidence pack for pending junk proposals: detector class, live
         degree and edges (with origin), fact count and text, whether the
-        node is a lesson-minted object, scopes, mentioning notes."""
+        node is a lesson-minted object, scopes, mentioning notes. Pure over
+        ``evidence`` (read for these rows): no lock."""
         from pseudolife_memory.graph import degree_counts, norm_name as _nn
         from pseudolife_memory.memory.graph_review import _token_set
         cfg = self.config.memory.deep_dream
         cap = cfg.snippet_max_chars
-        with self._lock:
-            g = self._storage.load_graph()
-            scope_map = self._storage.entity_sources_map()
-            entries = self._storage.load_entries()
-            fact_counts = self._storage.entity_fact_counts()
-            fact_texts = self._storage.current_fact_counts_by_entity_text()
-            fact_rows = {p["entity_id"]: self._storage.entity_fact_rows(
-                p["entity_id"], next((e["canonical"] for e in g["entities"]
-                                      if e["id"] == p["entity_id"]), ""))
-                for p in pending}
+        g = evidence["graph"]
+        scope_map = evidence["scopes"]
+        entries = evidence["entries"]
+        fact_counts = evidence["facts"]
+        fact_texts = evidence["fact_texts"]
+        fact_rows = evidence["fact_rows"]
         disp = {e["id"]: e["display"] for e in g["entities"]}
         canon = {e["id"]: e["canonical"] for e in g["entities"]}
         deg = degree_counts(g["edges"])
@@ -3035,56 +4424,79 @@ class DreamOps:
         if mode not in ("shadow", "auto"):
             return {"judged": 0, "skipped": "disabled"}
         try:
+            from pseudolife_memory.memory.review_decisions import (
+                has_active_decisions, refresh_proposal_terminals)
+            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             with self._lock:
                 self._ensure_init()
                 if self._storage is None:
                     return {"judged": 0, "skipped": "no_storage"}
                 pending = [p for p in self._storage.pending_entity_proposals()
-                           if p.get("kind") == "junk" and not p.get("judge_verdict")]
-            if not pending:
+                           if p.get("kind") == "junk"]
+                has_terminals = has_active_decisions(self._storage, "junk")
+            if not pending and not has_terminals:
                 return {"judged": 0}
             ex = self._judge_extractor(extractor, method="judge_junk")
             if ex is None:
                 return {"judged": 0, "skipped": "no_judge_extractor"}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = pending[:cap]
+            from pseudolife_memory.memory.review_judgments import ReviewJudgments, observed_model
+            current_model = observed_model(ex)
+            with self._lock:
+                review = ReviewJudgments(self, "junk", ex, pending, current_model)
+                reconsidered = refresh_proposal_terminals(review, limit=cap)
+                review.pending = [p for p in self._storage.pending_entity_proposals() if p.get("kind") == "junk"]
+                review.prepare(cap)
+            review.sign()
+            with self._lock:
+                pending = [p for p in review.refresh() if not p.get("judge_verdict")]
+            if not pending:
+                return {"judged": 0, "reconsideration": reconsidered}
+            batch = pending[:cap]      # the cap prepare() signed for
             logger.info("deep-dream junk judge: judging %d pending junk "
                         "proposal(s) (mode %s)", len(batch), mode)
-            rows = self._enrich_junk_proposals(batch)
+            rows = review.rows(batch)
             verdicts = ex.judge_junk(rows)
             self._stamp_skipped(verdicts, rows)
             model = self._model_name(ex)
             judged = applied = 0
             now = _t.time()
             snap: dict = {}
-            for v in verdicts:
-                p = batch[v["n"] - 1]
-                r = rows[v["n"] - 1]
-                with self._lock:
-                    ok = self._storage.set_entity_proposal_judgment(
-                        p["id"], verdict=v["verdict"], confidence=v["confidence"],
-                        note=v.get("note"), model=model, at=now)
-                if not ok:
-                    continue
-                judged += 1
-                if mode != "auto":
-                    continue
-                conf = float(v["confidence"])
-                if v["verdict"] == "keep" and conf >= cfg.junk_keep_min_confidence:
-                    res = self.graph_reject_entity_proposal(
-                        p["id"], decided_by="dream-judge")
-                    applied += bool(res.get("rejected"))
-                elif (v["verdict"] == "delete"
-                        and conf >= cfg.junk_delete_min_confidence
-                        and r["degree"] <= cfg.junk_max_auto_degree
-                        and r["facts"] <= 1
-                        and self._snapshot_once(snap)):
-                    res = self.graph_accept_entity_junk(
-                        p["id"], decided_by="dream-judge")
-                    applied += bool(res.get("accepted"))
+            with self._lock:
+                review.validate(batch)
+                for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                    with self._storage.transaction():
+                        p = batch[v["n"] - 1]
+                        r = rows[v["n"] - 1]
+                        if not review.current(p):
+                            continue
+                        ok = self._storage.set_entity_proposal_judgment(
+                            p["id"], verdict=v["verdict"], confidence=v["confidence"],
+                            note=v.get("note"), model=model, at=now)
+                        if ok:
+                            review.record(p)
+                        if not ok:
+                            continue
+                        judged += 1
+                        if mode != "auto":
+                            continue
+                        conf = float(v["confidence"])
+                        if v["verdict"] == "keep" and conf >= cfg.junk_keep_min_confidence:
+                            res = review.apply(p, self.graph_reject_entity_proposal,
+                                p["id"], decided_by="dream-judge")
+                            applied += bool(res.get("rejected"))
+                        elif (v["verdict"] == "delete"
+                                and conf >= cfg.junk_delete_min_confidence
+                                and r["degree"] <= cfg.junk_max_auto_degree
+                                and r["facts"] <= 1):
+                            if not self._snapshot_once(snap):
+                                review.retry(p)
+                                continue
+                            res = review.apply(p, self.graph_accept_entity_junk,
+                                p["id"], decided_by="dream-judge")
+                            applied += bool(res.get("accepted"))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(pending) - judged),
-                    "model": model, "mode": mode}
+                    "model": model, "mode": mode, "reconsideration": reconsidered}
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream junk judge failed: %s", exc)
             return {"judged": 0, "error": str(exc)}
@@ -3094,133 +4506,353 @@ class DreamOps:
     def deep_dream_judge_curation(self, extractor=None, *,
                                   limit: int | None = None) -> dict[str, Any]:
         """Judge a bounded batch of the lesson/world duplicate listings
-        (pairs without a memo younger than ``curation_rejudge_days``),
-        recording every verdict in ``curation_judgments``. ``auto-distinct``
-        applies distinct verdicts at/above
-        ``curation_distinct_min_confidence`` as a (reversible) dismissal;
-        ``auto`` additionally applies duplicate verdicts at/above
-        ``curation_forget_min_confidence``: the survivor is re-written with
-        the judge's fold (lessons only) and the loser forgotten. Never
-        raises into the sweep."""
+        whose content-and-policy-bound memo is absent or expired. Automatic
+        distinct dismissals are bound to the two record versions; changed
+        inputs become visible again while human dismissals stay permanent.
+        ``auto`` only retires exact lesson text or equivalent cited
+        world facts, through the atomic curation path. Never raises into the
+        sweep."""
         import time as _t
+        from pseudolife_memory.curation_safety import (
+            apply_auto_distinct, capture_pair_evidence,
+            can_auto_fold, curation_bound_action,
+            curation_bound_observed_model,
+            curation_judgment_bindings, curation_judgment_saved,
+            curation_judgment_state, curation_observed_model,
+            curation_policy_fingerprint, record_bound_curation_judgment,
+            has_auto_dismissals, refresh_auto_dismissals,
+            settle_curation_judgment_action,
+            snapshot_record)
+        from pseudolife_memory.memory.review_judgments import (
+            last_response_identity, record_response_identity)
+        from pseudolife_memory.service import _slot_key
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
             return {"judged": 0, "skipped": "judges_disabled"}
         mode = cfg.curation_judge_mode
         if mode not in ("shadow", "auto-distinct", "auto"):
             return {"judged": 0, "skipped": "disabled"}
+        cap = max(1, int(limit if limit is not None else cfg.judge_batch))
+        reopened_auto_dismissals = 0
         try:
             with self._lock:
                 self._ensure_init()
                 if self._storage is None:
                     return {"judged": 0, "skipped": "no_storage"}
+                reopened_auto_dismissals = refresh_auto_dismissals(
+                    self, locked=True)
+                automatic_markers = has_auto_dismissals(self._storage)
                 dismissed = self._storage.dismissed_pairs()
                 lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
                 world_recs = self._curation_records("world", cfg.snippet_max_chars)
-                # The judge reads FULL values: the 2026-09-02 panel judged
-                # 240-char clipped values and lost guidance in three
-                # "duplicate" folds — a destructive queue never gets
-                # truncated evidence.
-                full = {store: {r["key"]: r["value"]
-                                for r in self._curation_records(store, 0)}
-                        for store in ("lesson", "world")}
+                # Capture every field, not only the displayed snippet. The
+                # immutable pair is the evidence later memoized and rechecked
+                # under row locks before an automatic decision can land.
+                full = {
+                    "lesson": {_slot_key(*r.key): snapshot_record("lesson", r)
+                               for r in self._lessons.current_records()},
+                    "world": {_slot_key(*r.key): snapshot_record("world", r)
+                              for r in self._world.current_records()},
+                }
                 memo = {"lesson": self._storage.curation_judgments("lesson"),
                         "world": self._storage.curation_judgments("world")}
+                bindings = curation_judgment_bindings(self._storage)
+                first_store = self._storage.get_meta(
+                    "curation_judge_first_store") or "lesson"
+            ex = requested_policy = pre_observed_model = None
+            scheduling_observed_model = last_observed_model = None
+            if automatic_markers:
+                # Closed automatic pairs are absent from the listing. Resolve
+                # policy only when a marker exists; the common empty path does
+                # not construct or probe an extractor.
+                ex = self._judge_extractor(
+                    extractor, method="judge_slot_pairs")
+                if ex is None:
+                    return {"judged": 0,
+                            "skipped": "no_judge_extractor",
+                            "reopened_auto_dismissals":
+                                reopened_auto_dismissals}
+                requested_policy = curation_policy_fingerprint(self, ex)
+                pre_observed_model = curation_observed_model(ex)
+                with self._lock:
+                    last_observed_model = last_response_identity(
+                        self, "curation", requested_policy)
+                    scheduling_observed_model = (
+                        pre_observed_model or last_observed_model)
+                    reopened_auto_dismissals += refresh_auto_dismissals(
+                        self, locked=True,
+                        requested_policy=requested_policy,
+                        observed_model=pre_observed_model,
+                        response_observed_model=last_observed_model,
+                        check_policy=True, limit=cap)
+                    dismissed = self._storage.dismissed_pairs()
             lesson_dups, world_dups = self._slot_duplicate_listings(
                 lesson_recs, world_recs, dismissed)
+            candidates = [("lesson", c) for c in lesson_dups]
+            candidates += [("world", c) for c in world_dups]
+            evidence = {}
+            for store, pair in candidates:
+                left = full[store].get(pair["a_key"])
+                right = full[store].get(pair["b_key"])
+                if left is not None and right is not None:
+                    evidence[(store, pair["a_key"], pair["b_key"])] = \
+                        capture_pair_evidence(store, left, right)
+            candidates = [
+                (store, pair, evidence[(store, pair["a_key"], pair["b_key"])])
+                for store, pair in candidates
+                if (store, pair["a_key"], pair["b_key"]) in evidence]
+            if not candidates:
+                return {"judged": 0,
+                        "reopened_auto_dismissals": reopened_auto_dismissals}
+            if ex is None:
+                ex = self._judge_extractor(
+                    extractor, method="judge_slot_pairs")
+                if ex is None:
+                    return {"judged": 0,
+                            "skipped": "no_judge_extractor",
+                            "reopened_auto_dismissals":
+                                reopened_auto_dismissals}
+                requested_policy = curation_policy_fingerprint(self, ex)
+                # This may probe ``/models``. Resolve it once, outside the
+                # non-reentrant service lock, rather than once per pair.
+                pre_observed_model = curation_observed_model(ex)
+                with self._lock:
+                    last_observed_model = last_response_identity(
+                        self, "curation", requested_policy)
+                    scheduling_observed_model = (
+                        pre_observed_model or last_observed_model)
+            assert requested_policy is not None
             now = _t.time()
             horizon = float(cfg.curation_rejudge_days) * 86400.0
 
-            def fresh(store, pair):
+            def state(store, pair, pair_evidence):
                 key = tuple(sorted((pair["a_key"], pair["b_key"])))
-                m = memo[store].get(key)
-                return m is not None and (now - float(m["judged_at"])) < horizon
+                judgment = memo[store].get(key)
+                prior_observed = curation_bound_observed_model(
+                    bindings, pair_evidence)
+                prior_action = curation_bound_action(bindings, pair_evidence)
+                # Identity becoming observable later is not an implicit retry
+                # signal for a decision explicitly deferred after an unknown
+                # response. Evidence, requested policy, or review_rejudge can
+                # invalidate that settled state deliberately.
+                observed = (prior_observed
+                            if prior_action == "deferred_identity_unknown"
+                            else scheduling_observed_model or prior_observed)
+                policy = curation_policy_fingerprint(
+                    self, ex, observed_model=observed)
+                judgment_state = curation_judgment_state(
+                    judgment, bindings, pair_evidence, policy,
+                    now=now, horizon=horizon)
+                known_identity_changed = (
+                    prior_observed is not None
+                    and any(model is not None and model != prior_observed
+                            for model in (pre_observed_model,
+                                          last_observed_model)))
+                if (prior_action != "deferred_identity_unknown"
+                        and known_identity_changed):
+                    # Either positive observation can invalidate. A cached
+                    # pre-call probe must not mask a newer actual response.
+                    return "stale"
+                if (judgment_state == "pending"
+                        and (not pre_observed_model or not prior_observed
+                             or pre_observed_model != prior_observed)):
+                    # Historical identity can make a settled memo reusable,
+                    # but cannot authorize a delayed automatic action.
+                    return "stale"
+                return judgment_state
 
-            todo = [("lesson", c) for c in lesson_dups if not fresh("lesson", c)]
-            todo += [("world", c) for c in world_dups if not fresh("world", c)]
-            if not todo:
-                return {"judged": 0}
-            ex = self._judge_extractor(extractor, method="judge_slot_pairs")
-            if ex is None:
-                return {"judged": 0, "skipped": "no_judge_extractor"}
-            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
-            batch = todo[:cap]
-            logger.info("deep-dream curation judge: judging %d duplicate "
-                        "listing(s) (mode %s)", len(batch), mode)
-            def side(store, c, k):
-                d = dict(c[k])
-                d["value"] = full[store].get(c[f"{k}_key"], d.get("value"))
-                return d
-            rows = [{"n": i + 1, "store": store, "similarity": c.get("similarity"),
-                     "a": side(store, c, "a"), "b": side(store, c, "b"),
-                     "a_key": c["a_key"], "b_key": c["b_key"]}
-                    for i, (store, c) in enumerate(batch)]
-            verdicts = ex.judge_slot_pairs(rows)
-            self._stamp_skipped(verdicts, rows, keep=None, fold=None)
-            model = self._model_name(ex)
-            judged = applied = 0
+            classified = [(store, pair, pair_evidence,
+                           state(store, pair, pair_evidence))
+                          for store, pair, pair_evidence in candidates]
+            order = ([first_store, "world" if first_store == "lesson" else "lesson"]
+                     if first_store in ("lesson", "world")
+                     else ["lesson", "world"])
+
+            def interleave(pending, stale):
+                pending_by_store = {
+                    store: [item for item in pending if item[0] == store]
+                    for store in ("lesson", "world")}
+                stale_by_store = {
+                    store: [item for item in stale if item[0] == store]
+                    for store in ("lesson", "world")}
+                out = []
+                while (any(pending_by_store.values())
+                       or any(stale_by_store.values())):
+                    for store in order:
+                        # Resume first within each store, then let the other
+                        # store take its turn.  A failing lesson action must
+                        # not consume a cap=1 sweep forever while fresh world
+                        # evidence waits (and vice versa).
+                        if pending_by_store[store]:
+                            out.append(("pending",
+                                        pending_by_store[store].pop(0)))
+                        elif stale_by_store[store]:
+                            out.append(("stale", stale_by_store[store].pop(0)))
+                return out
+
+            pending_actions = [item[:3] for item in classified
+                               if item[3] == "pending"]
+            todo = [item[:3] for item in classified if item[3] == "stale"]
+            if not todo and not pending_actions:
+                return {"judged": 0,
+                        "reopened_auto_dismissals": reopened_auto_dismissals}
+            scheduled = interleave(pending_actions, todo)[:cap]
+            replay_batch = [item for state, item in scheduled
+                            if state == "pending"]
+            batch = [item for state, item in scheduled if state == "stale"]
+            selected = [item for _state, item in scheduled]
+            next_store = "world" if selected[-1][0] == "lesson" else "lesson"
+            with self._lock:
+                self._storage.set_meta("curation_judge_first_store", next_store)
+            if batch:
+                logger.info("deep-dream curation judge: judging %d duplicate "
+                            "listing(s) (mode %s)", len(batch), mode)
+            rows = [
+                {"n": i + 1, "store": store,
+                 "similarity": pair.get("similarity"),
+                 "a": pair_evidence.a, "b": pair_evidence.b,
+                 "a_key": pair["a_key"], "b_key": pair["b_key"]}
+                for i, (store, pair, pair_evidence) in enumerate(batch)]
+            verdicts = ex.judge_slot_pairs(rows) if rows else []
+            if rows:
+                self._stamp_skipped(verdicts, rows, keep=None, fold=None)
+            # Requested payload policy must stay fixed across the call. The
+            # response's served identity is then added to the durable binding.
+            with self._lock:
+                if curation_policy_fingerprint(self, ex) != requested_policy:
+                    return {"judged": 0, "reason": "policy_changed",
+                            "reopened_auto_dismissals":
+                                reopened_auto_dismissals}
+            observed_model = curation_observed_model(ex)
+            with self._lock:
+                if curation_policy_fingerprint(self, ex) != requested_policy:
+                    return {"judged": 0, "reason": "policy_changed",
+                            "reopened_auto_dismissals":
+                                reopened_auto_dismissals}
+                record_response_identity(
+                    self, "curation", requested_policy, observed_model)
+            if (pre_observed_model is not None
+                    and observed_model != pre_observed_model):
+                return {"judged": 0, "applied": 0,
+                        "reason": "served_model_changed",
+                        "observed_before": pre_observed_model,
+                        "observed_after": observed_model,
+                        "reopened_auto_dismissals":
+                            reopened_auto_dismissals}
+            model = observed_model or self._model_name(ex)
+            bound_policy = curation_policy_fingerprint(
+                self, ex, observed_model=observed_model)
+            response_served_model = getattr(ex, "served_model", None)
+            judged = applied = deferred_identity_unknown = 0
+            actions = []
+            for store, c, pair_evidence in replay_batch:
+                key = tuple(sorted((c["a_key"], c["b_key"])))
+                saved = memo[store][key]
+                actions.append((store, c, pair_evidence, {
+                    "verdict": saved["verdict"], "keep": saved.get("keep"),
+                    "fold": saved.get("fold"),
+                    "confidence": saved.get("confidence") or 0.0,
+                    "note": saved.get("note"),
+                }))
             for v in verdicts:
-                store, c = batch[v["n"] - 1]
-                with self._lock:
-                    self._storage.record_curation_judgment(
-                        store, c["a_key"], c["b_key"], verdict=v["verdict"],
-                        keep=v.get("keep"), fold=v.get("fold"),
-                        confidence=v["confidence"], note=v.get("note"),
-                        model=model, at=now)
-                judged += 1
+                store, c, pair_evidence = batch[v["n"] - 1]
                 conf = float(v["confidence"])
+                wants_action = (
+                    v["verdict"] == "distinct"
+                    and mode in ("auto-distinct", "auto")
+                    and conf >= cfg.curation_distinct_min_confidence
+                ) or (
+                    v["verdict"] == "duplicate" and mode == "auto"
+                    and conf >= cfg.curation_forget_min_confidence)
+                defer_for_identity = wants_action and observed_model is None
+                with self._lock:
+                    ok = record_bound_curation_judgment(
+                        self, pair_evidence, verdict=v,
+                        policy_fingerprint=bound_policy,
+                        model=model, observed_model=observed_model, at=now,
+                        requested_policy_fingerprint=requested_policy,
+                        action_state=("deferred_identity_unknown"
+                                      if defer_for_identity else
+                                      "pending" if wants_action else "settled"),
+                        locked=True)
+                if not ok:
+                    continue
+                judged += 1
+                deferred_identity_unknown += defer_for_identity
+                if wants_action and not defer_for_identity:
+                    actions.append((store, c, pair_evidence, v))
+
+            policy_guard = lambda: (
+                observed_model is not None
+                and curation_policy_fingerprint(self, ex) == requested_policy
+                and getattr(ex, "served_model", None) == response_served_model)
+            for store, c, pair_evidence, v in actions:
+                conf = float(v["confidence"])
+                # Evaluated under the apply's service lock: review_rejudge
+                # deletes the saved opinion under that lock, and an opinion
+                # it forgot while this tick ran unlocked must not be acted on.
+                guard = (lambda pair_evidence=pair_evidence: policy_guard()
+                         and curation_judgment_saved(self, pair_evidence))
                 if (v["verdict"] == "distinct" and mode in ("auto-distinct", "auto")
                         and conf >= cfg.curation_distinct_min_confidence):
-                    res = self.curation_dismiss_duplicate(
-                        store, c["a"]["entity"], c["a"]["attribute"],
-                        c["b"]["entity"], c["b"]["attribute"])
+                    res = apply_auto_distinct(
+                        self, pair_evidence, policy_guard=guard,
+                        settle_judgment=True)
                     applied += bool(res.get("dismissed"))
                 elif (v["verdict"] == "duplicate" and mode == "auto"
                         and conf >= cfg.curation_forget_min_confidence):
+                    if not can_auto_fold(pair_evidence, v).allowed:
+                        with self._lock:
+                            settle_curation_judgment_action(
+                                self._storage, pair_evidence, "manual")
+                        continue
                     applied += bool(self._apply_slot_duplicate(
                         store, c, v.get("keep"), v.get("fold"),
-                        reason=v.get("note") or None))
+                        reason=v.get("note") or None,
+                        evidence=pair_evidence, policy_guard=guard,
+                        settle_judgment=True))
             return {"judged": judged, "applied": applied,
                     "pending_unjudged": max(0, len(todo) - judged),
+                    "deferred_identity_unknown": deferred_identity_unknown,
+                    "reopened_auto_dismissals": reopened_auto_dismissals,
                     "model": model, "mode": mode}
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream curation judge failed: %s", exc)
-            return {"judged": 0, "error": str(exc)}
+            return {"judged": 0, "error": str(exc),
+                    "reopened_auto_dismissals": reopened_auto_dismissals}
 
     def _apply_slot_duplicate(self, store: str, pair: dict, keep: str | None,
                               fold: str | None, *,
-                              reason: str | None = None) -> bool:
-        """Settle a ratified duplicate listing: fold the judge's carry-over
-        into the surviving LESSON slot (world facts are cited values and
-        are never concatenated), then RETIRE the loser (``decided_by``
-        ``dream-judge``, the judge's note as the reason) — reversible
-        through ``lesson_restore`` / ``world_restore``."""
+                              reason: str | None = None,
+                              evidence=None, policy_guard=None,
+                              settle_judgment: bool = False) -> bool:
+        """Settle only the deterministic safe duplicate classes atomically.
+
+        Judge-authored fold prose is never written. The selected record stays
+        byte-for-byte unchanged; the duplicate's complete evidence remains in
+        its retired row and audit. World facts require equivalent citations.
+        Survivor write, loser retirement and audit commit together.
+        """
+        from pseudolife_memory.curation_safety import (
+            apply_slot_duplicate, capture_pair_evidence)
         if keep not in ("a", "b"):
             return False
-        survivor = pair["a"] if keep == "a" else pair["b"]
-        loser = pair["b"] if keep == "a" else pair["a"]
-        if store == "lesson":
-            if fold:
-                with self._lock:
-                    self._ensure_init()
-                    from pseudolife_memory.service import _slot_key
-                    full = {_slot_key(*r.key): r
-                            for r in self._lessons.current_records()}
-                key = pair["a_key"] if keep == "a" else pair["b_key"]
-                rec = full.get(key)
-                if rec is not None and fold not in rec.value:
-                    self.lesson_write(
-                        rec.entity, rec.attribute,
-                        f"{rec.value.rstrip()} Also: {fold}",
-                        about=rec.about, outcome=rec.outcome,
-                        polarity=rec.polarity, confidence=rec.confidence,
-                        origin="agent")
-            out = self.lesson_forget(loser["entity"], loser["attribute"],
-                                     decided_by="dream-judge", reason=reason)
-        else:
-            out = self.world_forget(loser["entity"], loser["attribute"],
-                                    decided_by="dream-judge", reason=reason)
-        return bool(out.get("removed"))
+        if evidence is None:
+            with self._lock:
+                self._ensure_init()
+                source = self._lessons if store == "lesson" else self._world
+                by_key = {_slot_key(*r.key): r for r in source.current_records()}
+                left = by_key.get(pair.get("a_key"))
+                right = by_key.get(pair.get("b_key"))
+                if left is None or right is None:
+                    return False
+                evidence = capture_pair_evidence(store, left, right)
+        result = apply_slot_duplicate(
+            self, evidence,
+            verdict={"verdict": "duplicate", "keep": keep, "fold": fold},
+            reason=reason, policy_guard=policy_guard,
+            settle_judgment=settle_judgment)
+        return bool(result.get("applied"))
 
     # ── Step-C candidate judge (2026-09-02) ───────────────────────────────
 
@@ -3248,6 +4880,36 @@ class DreamOps:
             return {"judged": 0, "skipped": "disabled"}
         try:
             mark = None
+            from pseudolife_memory.memory.review_judgments import (
+                fingerprint, judging_policy, candidate_generation, candidate_current,
+                candidate_inputs, observed_model, last_response_identity,
+                record_response_identity)
+            from pseudolife_memory.memory.dream import _CANDIDATE_JUDGE_SYSTEM_PROMPT
+            from pseudolife_memory.memory.review_decisions import (
+                record_candidate_dismissal, refresh_candidate_dismissals,
+                candidate_evidence_fingerprints)
+            ex = self._judge_extractor(extractor, method="judge_candidates")
+            if ex is None:
+                return {"judged": 0, "skipped": "no_judge_extractor"}
+            current_model = observed_model(ex)
+            policy = fingerprint(judging_policy(self, ex, _CANDIDATE_JUDGE_SYSTEM_PROMPT))
+            cap = max(1, int(limit if limit is not None else cfg.judge_batch))
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"judged": 0, "skipped": "no_storage"}
+                last_model = last_response_identity(self, "candidate", policy)
+                memo_model = current_model or last_model
+                reconsidered = refresh_candidate_dismissals(
+                    self, policy_fingerprint=policy,
+                    served_model=current_model, last_response_model=last_model, limit=cap)
+                # After the refresh: a reopen deletes a dismissed pair, an
+                # input of the full generation only.
+                inputs = candidate_inputs(self)
+            decision_generation = candidate_generation(
+                self, decision_inputs=False, inputs=inputs)
+            generation = candidate_generation(self, inputs=inputs)
+            del inputs
             if candidates is None:
                 with self._lock:
                     self._ensure_init()
@@ -3256,31 +4918,63 @@ class DreamOps:
                     mark = self._storage.get_meta("deep_last_apply")
                     done = self._storage.get_meta("deep_candidates_judged")
                 if mark is None or (done and done.get("ts") == mark.get("ts")
-                                    and done.get("complete")):
-                    return {"judged": 0, "reason": "no_new_apply"}
+                                    and done.get("complete")
+                                    and done.get("policy") == policy
+                                    and all(not model or done.get("served_model") == model
+                                            for model in (current_model, last_model))
+                                    and done.get("generation") == generation):
+                    return {"judged": 0, "reason": "no_new_apply", "reconsideration": reconsidered}
                 candidates = self.deep_dream(apply=False).get("candidates", [])
             with self._lock:
                 self._ensure_init()
                 memo = self._storage.get_meta("deep_candidate_verdicts") or {}
             pairs = dict(memo.get("pairs") or {})
+            read_keys = set(pairs)
             now = _t.time()
             horizon = float(cfg.candidate_rejudge_days) * 86400.0
 
             def key(c):
                 return "|".join(sorted((_nn(c["src"]), _nn(c["dst"]))))
 
-            todo = [c for c in candidates
-                    if key(c) not in pairs
-                    or (now - float(pairs[key(c)].get("ts", 0))) >= horizon]
+            with self._lock:
+                inputs = candidate_inputs(self)
+            if candidate_generation(self, inputs=inputs) != generation:
+                return {"judged": 0, "reason": "stale_evidence"}
+            source_evidence = dict(zip(
+                (key(c) for c in candidates),
+                candidate_evidence_fingerprints(self, candidates, inputs=inputs)))
+            del inputs
+
+            def signature(c):
+                return fingerprint({"candidate": c, "policy": policy,
+                                    "evidence": source_evidence[key(c)]})
+
+            def fresh(c):
+                return (key(c) in pairs
+                        and (now - float(pairs[key(c)].get("ts", 0))) < horizon
+                        and pairs[key(c)].get("fingerprint") == signature(c)
+                        and (all(not model or pairs[key(c)].get("memo_model", pairs[key(c)].get("served_model")) == model
+                                 for model in (current_model, last_model))
+                             if pairs[key(c)].get("complete")
+                             else bool(current_model) and all(
+                                 not model or pairs[key(c)].get("served_model") == model
+                                 for model in (current_model, last_model))))
+
+            todo = [c for c in candidates if not fresh(c)
+                    or not pairs[key(c)].get("complete")]
             if not todo:
                 if mark is not None:
                     with self._lock:
-                        self._storage.set_meta("deep_candidates_judged",
-                                               {"ts": mark["ts"], "complete": True})
-                return {"judged": 0, "reason": "all_judged"}
-            ex = self._judge_extractor(extractor, method="judge_candidates")
-            if ex is None:
-                return {"judged": 0, "skipped": "no_judge_extractor"}
+                        live = (self._storage.get_meta("deep_candidate_verdicts")
+                                or {}).get("pairs") or {}
+                        # review_rejudge may have forgotten an opinion since
+                        # the read; its complete=False must stand.
+                        if all(key(c) in live for c in candidates):
+                            self._storage.set_meta("deep_candidates_judged",
+                                                   {"ts": mark["ts"], "complete": True,
+                                                    "policy": policy, "generation": generation,
+                                                    "served_model": memo_model})
+                return {"judged": 0, "reason": "all_judged", "reconsideration": reconsidered}
             cap = max(1, int(limit if limit is not None else cfg.judge_batch))
             chunk = todo[:cap]
             logger.info("deep-dream candidate judge: judging %d of %d unjudged "
@@ -3290,59 +4984,199 @@ class DreamOps:
                      "src_snippets": c.get("src_snippets") or [],
                      "dst_snippets": c.get("dst_snippets") or []}
                     for i, c in enumerate(chunk)]
-            verdicts = ex.judge_candidates(rows)
+            new_rows, new_indices, verdicts, replayed = [], [], [], {}
+            for row, candidate in zip(rows, chunk):
+                saved = pairs.get(key(candidate), {})
+                if fresh(candidate) and saved.get("reply") and current_model:
+                    replayed[row["n"]] = saved
+                    verdicts.append({**saved["reply"], "n": row["n"]})
+                else:
+                    new_indices.append(row["n"])
+                    new_rows.append({**row, "n": len(new_rows) + 1})
+            if new_rows:
+                new_verdicts = ex.judge_candidates(new_rows)
+                response_model = getattr(ex, "served_model", None)
+                with self._lock:
+                    record_response_identity(self, "candidate", policy, response_model)
+                if current_model and response_model != current_model:
+                    return {"judged": 0, "reason": "changed_judge_identity",
+                            "reconsideration": reconsidered}
+                current_model = response_model
+                memo_model = response_model or memo_model
+                self._stamp_skipped(new_verdicts, new_rows, relation=None, src=None,
+                                    dst=None, rationale=None)
+                verdicts += [{**v, "n": new_indices[v["n"] - 1]} for v in new_verdicts]
             self._stamp_skipped(verdicts, rows, relation=None, src=None,
                                 dst=None, rationale=None)
             model = self._model_name(ex)
             judged = proposed = dismissed = left = 0
-            for v in verdicts:
-                c = chunk[v["n"] - 1]
-                judged += 1
-                conf = float(v["confidence"])
-                pairs[key(c)] = {"verdict": v["verdict"], "confidence": conf,
-                                 "ts": now, "mode": mode}
-                if mode != "auto":
-                    left += 1                 # shadow: memo only
-                    continue
-                if (v["verdict"] == "propose" and v.get("relation")
-                        and conf >= cfg.candidate_min_confidence):
-                    res = self.graph_propose_links(
-                        [{"src": v.get("src") or c["src"],
-                          "relation": v["relation"],
-                          "dst": v.get("dst") or c["dst"],
-                          "similarity": c.get("similarity"),
-                          "rationale": v.get("rationale")}],
-                        source="deep-dream-judge")
-                    proposed += int(res.get("proposed", 0))
-                elif (v["verdict"] == "dismiss"
-                        and conf >= cfg.candidate_min_confidence):
-                    res = self.graph_dismiss_duplicate(c["src"], c["dst"])
-                    dismissed += bool(res.get("dismissed"))
-                else:
-                    left += 1
-            # Bounded memo: newest 500 pairs.
-            if len(pairs) > 500:
-                keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
-                pairs = dict(keep)
-            remaining = max(0, len(todo) - len(chunk))
             with self._lock:
+                if policy != fingerprint(
+                        judging_policy(self, ex, _CANDIDATE_JUDGE_SYSTEM_PROMPT)):
+                    return {"judged": 0, "reason": "stale_evidence"}
+                # The lock was released for the model call: merge into the
+                # LIVE memo, so an opinion review_rejudge forgot meanwhile
+                # stays forgotten instead of being written back.
+                pairs = dict((self._storage.get_meta("deep_candidate_verdicts")
+                              or {}).get("pairs") or {})
+                forgotten = read_keys - set(pairs)
+                decision_evidence = candidate_evidence_fingerprints(self, chunk)
+                entity_ids = {}
+                for entity in self._storage.load_graph()["entities"]:
+                    entity_ids.setdefault(entity["canonical"], entity["id"])
+                    entity_ids.setdefault(_nn(entity["display"] or ""), entity["id"])
+                changed_entities = set()
+                for v in verdicts:
+                    c = chunk[v["n"] - 1]
+                    if v["n"] in replayed and pairs.get(key(c)) != replayed[v["n"]]:
+                        continue    # the saved reply was forgotten or replaced
+                    endpoints = {c.get(field + "_id") or entity_ids.get(_nn(c[field]))
+                                 for field in ("src", "dst")}
+                    if (source_evidence[key(c)] != decision_evidence[v["n"] - 1]
+                            or endpoints & changed_entities):
+                        pairs.pop(key(c), None)
+                        continue
+                    judged += 1
+                    conf = float(v["confidence"])
+                    pairs[key(c)] = {"verdict": v["verdict"], "confidence": conf,
+                                     "ts": now, "mode": mode, "fingerprint": signature(c),
+                                     "model": model, "served_model": current_model, "memo_model": memo_model,
+                                     "reply": dict(v), "complete": False}
+                    # Each completed opinion survives a later failure in the batch.
+                    if len(pairs) > 500:
+                        pairs = dict(sorted(pairs.items(),
+                                            key=lambda kv: -float(kv[1].get("ts", 0)))[:500])
+                    self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
+                    if mode != "auto" or not current_model:
+                        pairs[key(c)]["complete"] = True
+                        self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
+                        left += 1                 # shadow: memo only
+                        continue
+                    with self._storage.transaction():
+                        if (v["verdict"] == "propose" and v.get("relation")
+                                and conf >= cfg.candidate_min_confidence):
+                            if {_nn(v.get("src") or c["src"]), _nn(v.get("dst") or c["dst"])} != {
+                                    _nn(c["src"]), _nn(c["dst"])}:
+                                pairs[key(c)]["complete"] = True
+                                left += 1
+                                continue
+                            res = self._graph_propose_links_locked(
+                                [{"src": v.get("src") or c["src"],
+                                  "relation": v["relation"],
+                                  "dst": v.get("dst") or c["dst"],
+                                  "similarity": c.get("similarity"),
+                                  "rationale": v.get("rationale")}],
+                                source="deep-dream-judge",
+                                _review_guard=lambda: candidate_current(
+                                    self, c))
+                            proposed += int(res.get("proposed", 0))
+                            if res.get("proposed"):
+                                # A new pending relation changes incident evidence
+                                # for later rows sharing either endpoint.
+                                changed_entities.update(endpoints)
+                            pairs[key(c)]["complete"] = not res.get("error") and res.get("reason") != "stale_review"
+                        elif (v["verdict"] == "dismiss"
+                                and conf >= cfg.candidate_min_confidence):
+                            res = self._graph_dismiss_duplicate_locked(c["src"], c["dst"],
+                                _review_guard=lambda: candidate_current(
+                                    self, c))
+                            dismissed += bool(res.get("dismissed"))
+                            pairs[key(c)]["complete"] = bool(res.get("dismissed"))
+                            if res.get("dismissed"):
+                                record_candidate_dismissal(
+                                    self, c, decision_fingerprint=signature(c),
+                                    policy_fingerprint=policy,
+                                    generation_fingerprint=decision_generation,
+                                    served_model=current_model,
+                                    evidence_fingerprint=decision_evidence[v["n"] - 1])
+                        else:
+                            left += 1
+                            pairs[key(c)]["complete"] = True
+                        self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
+                # Bounded memo: newest 500 pairs.
+                if len(pairs) > 500:
+                    keep = sorted(pairs.items(), key=lambda kv: -float(kv[1].get("ts", 0)))[:500]
+                    pairs = dict(keep)
+                # A candidate outside this slice whose opinion was forgotten
+                # during the call is unjudged again.
+                todo_keys = {key(c) for c in todo}
+                remaining = max(0, len(todo) - len(chunk)) + sum(
+                    not pairs.get(key(c), {}).get("complete") for c in chunk) + sum(
+                    key(c) in forgotten and key(c) not in todo_keys for c in candidates)
                 self._storage.set_meta("deep_candidate_verdicts", {"pairs": pairs})
                 if mark is not None:
                     self._storage.set_meta(
                         "deep_candidates_judged",
-                        {"ts": mark["ts"], "complete": remaining == 0})
+                        {"ts": mark["ts"], "complete": remaining == 0,
+                         "policy": policy, "generation": generation,
+                         "served_model": memo_model})
             return {"judged": judged, "proposed": proposed,
                     "dismissed": dismissed, "left": left,
-                    "remaining": remaining, "model": model, "mode": mode}
+                    "remaining": remaining, "model": model, "mode": mode,
+                    "reconsideration": reconsidered}
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream candidate judge failed: %s", exc)
             return {"judged": 0, "error": str(exc)}
 
     # ── apply-time mechanical additions (2026-09-02) ──────────────────────
 
+    def analyzer_duplicate_tick(self) -> dict[str, Any]:
+        """File one bounded analyzer slice on every ordinary sweep tick.
+
+        The deep apply still performs its full graph pass. This lighter path
+        advances a durable entity-id cursor and compares at most
+        ``judge_batch`` anchors against the graph, so quiet banks do not wait
+        for the deep-dream threshold and a regular tick never does an all-pairs
+        scan. Proposal uniqueness makes a retry after a cursor-write failure
+        harmless.
+        """
+        import time as _t
+
+        cfg = self.config.memory.deep_dream
+        if not cfg.judges_enabled:
+            return {"fired": False, "reason": "judges_disabled"}
+        cap = max(1, int(cfg.judge_batch))
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"fired": False, "reason": "no_storage"}
+            reconciled = self._storage.reconcile_analyzer_proposals(limit=cap)
+            if not cfg.analyzer_file_duplicates:
+                return {"fired": False, "reason": "disabled", "reconciled": reconciled}
+            g = self._storage.load_graph()
+            entities = sorted(g["entities"], key=lambda e: e["id"])
+            if not entities:
+                return {"fired": True, "anchors": 0, "filed": 0,
+                        "reconciled": reconciled}
+            cursor = self._storage.get_meta("analyzer_duplicate_cursor")
+            after = int(cursor.get("entity_id", 0)) \
+                if isinstance(cursor, dict) else 0
+            later = [e for e in entities if e["id"] > after]
+            anchors = later[:cap]
+            if len(anchors) < cap:
+                selected = {e["id"] for e in anchors}
+                anchors.extend(e for e in entities
+                               if e["id"] not in selected)
+                anchors = anchors[:cap]
+            anchor_ids = {e["id"] for e in anchors}
+            dismissed = self._storage.dismissed_pairs()
+            lesson_refs = self._storage.lesson_entity_ids()
+            fact_counts = self._storage.entity_fact_counts()
+            prop_keys = self._storage.entity_proposal_keys()
+            filed = self._file_analyzer_duplicates(
+                entities, g["edges"], dismissed, lesson_refs, fact_counts,
+                set(), prop_keys, _t.time(),
+                anchor_ids=anchor_ids, max_filed=cap)
+            self._storage.set_meta(
+                "analyzer_duplicate_cursor", {"entity_id": anchors[-1]["id"]})
+        return {"fired": True, "anchors": len(anchors), "filed": filed,
+                "reconciled": reconciled}
+
     def _file_analyzer_duplicates(self, entities, edges, dismissed, lesson_refs,
                                   fact_counts, excluded: set[int],
-                                  prop_keys: set[tuple], now: float) -> int:
+                                  prop_keys: set[tuple], now: float, *,
+                                  anchor_ids=None,
+                                  max_filed: int | None = None) -> int:
         """File graph_review's live duplicate findings into the queues.
         Caller holds the lock. A pair the merge queue already holds (any
         status — the write-dedup detector files most fresh mints first, and
@@ -3357,7 +5191,8 @@ class DreamOps:
         alive = [e for e in entities if e["id"] not in excluded]
         findings = duplicate_candidates(
             alive, dismissed=dismissed,
-            lesson_ids=lesson_only_ids(edges, lesson_refs))
+            lesson_ids=lesson_only_ids(edges, lesson_refs),
+            anchor_ids=anchor_ids)
         if not findings:
             return 0
         by_display = {e["display"]: e["id"] for e in alive}
@@ -3396,6 +5231,8 @@ class DreamOps:
                     "merge", frm, into, f.get("score"),
                     f"analyzer-duplicate: jaccard {f.get('score')}", now)
             filed += pid is not None
+            if max_filed is not None and filed >= max(0, int(max_filed)):
+                break
         return filed
 
     def _unreachable_orphans(self, entries, mentions, facts_by_norm,
@@ -3446,6 +5283,10 @@ class DreamOps:
         return deleted
 
     def _write_graph_snapshot(self) -> str | None:
+        with self._lock:
+            return self._write_graph_snapshot_locked()
+
+    def _write_graph_snapshot_locked(self) -> str | None:
         """Timestamped JSON dump of the five graph tables the apply path is
         about to mutate — a targeted undo artifact (pg_dump backups remain the
         real recovery path). Keeps the newest ``snapshot_keep`` files under
@@ -3455,8 +5296,7 @@ class DreamOps:
         import time as _t
         keep = max(1, int(self.config.memory.deep_dream.snapshot_keep))
         try:
-            with self._lock:
-                tables = self._storage.dump_graph_tables()
+            tables = self._storage.dump_graph_tables()
             d = self.data_dir / "graph_snapshots"
             d.mkdir(parents=True, exist_ok=True)
             name = _t.strftime("graph-%Y%m%d-%H%M%S", _t.gmtime()) + ".json"
@@ -3599,7 +5439,8 @@ class DreamOps:
         def ev(eid):
             return deg.get(eid, 0) + facts.get(eid, 0)
 
-        from pseudolife_memory.memory.graph_review import shared_pair_groups
+        from pseudolife_memory.memory.graph_review import (
+            add_relate_relations, shared_pair_groups)
         rows = [p for p in pending if p.get("kind") == "merge"]
         oriented = [self._fold_direction(p["entity_id"], p["into_id"], ev)
                     for p in rows]
@@ -3643,5 +5484,6 @@ class DreamOps:
                 row["judge2"] = {"verdict": p["judge2_verdict"],
                                  "confidence": p.get("judge2_confidence"),
                                  "model": p.get("judge2_model")}
+            add_relate_relations(row, p)
             out.append(row)
         return out

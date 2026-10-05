@@ -70,3 +70,16 @@ def test_resolve_tier_precedence():
     assert resolve_tier("claude-desktop", **kw) == "full"
     # other principals untouched by that override
     assert resolve_tier("hermes-box", **kw) == "core"
+
+
+def test_resolve_tier_falls_back_to_the_stored_tier_after_the_map():
+    """Spec 2026-10-02: a stored principal's row may set its default tier,
+    consulted after PSEUDOLIFE_MCP_TIER_MAP and before the env default."""
+    stored = {"laptop": "minimal", "desk": "minimal"}.get
+    kw = dict(state=PrincipalTierState(), tier_map={"desk": "full"}, default_tier="core",
+              stored_tier=stored)
+    assert resolve_tier("laptop", **kw) == "minimal"
+    assert resolve_tier("desk", **kw) == "full"        # the environment map wins
+    assert resolve_tier("other", **kw) == "core"
+    kw["state"].set("laptop", "full")
+    assert resolve_tier("laptop", **kw) == "full"      # an override still wins

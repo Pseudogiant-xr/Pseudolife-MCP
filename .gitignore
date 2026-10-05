@@ -1,5 +1,10 @@
 # Local compose env overrides (machine-specific volume names etc.) — never committed.
 .env
+# ...and every copy of it (ops/.env holds the DB password and principal
+# tokens; a timestamped backup matched neither `.env` nor `*.bak`). Only the
+# template is tracked. Guarded by tests/test_release_ux.py.
+ops/.env*
+!ops/.env.example
 
 # Machine-local compose overrides (e.g. fine-tuned GGUF mounts over the baked
 # extractor default) — referencing personal files from the tracked compose file
@@ -12,6 +17,7 @@ __pycache__/
 *$py.class
 *.egg-info/
 .pytest_cache/
+ci-results/
 .venv/
 venv/
 build/
@@ -69,3 +75,12 @@ evals/results/*-gate*.summary.json
 # the Cognee adapter's own venv (evals/cognee_adapter.py) — Cognee's
 # dependency tree stays out of the bench venv
 .venv-cognee/
+
+# Learning-on-the-Job (tau-bench) adapter: pinned upstream checkouts and its
+# own Python 3.12 venv (evals/taubench_adapter.py, evals/taubench_pseudolife/)
+/reference/
+/.venv-taubench/
+/local/
+
+# Console source toolchain (its build output under pseudolife_memory/web/static/ is tracked)
+frontend/node_modules/

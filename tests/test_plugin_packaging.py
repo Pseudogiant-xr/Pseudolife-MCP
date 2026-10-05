@@ -56,13 +56,68 @@ def test_marketplace_manifest_points_at_plugin_dir():
     assert len(entry.get("description", "")) <= 200
 
 
-def test_plugin_manifest_version_matches_pyproject():
-    """The release version-cut touches this file too (CLAUDE.md checklist)."""
+MARKETPLACE_URL = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+
+
+def test_every_marketplace_add_uses_the_https_url():
+    """Claude Code records an owner/repo shorthand as a `github` source and
+    refreshes it over SSH, so on a host with no GitHub key or known_hosts
+    entry every later `marketplace update` failed and plugin updates stopped
+    (homelab box, 2026-10-04). The repo is public: every place that tells a
+    user, or the installer, to add the marketplace names the HTTPS git URL.
+    CHANGELOG.md and dated design specs are history and keep what they said."""
+    paths = [ROOT / "README.md", ROOT / "plugin" / "README.md",
+             ROOT / "llms.txt", ROOT / "llms-full.txt",
+             ROOT / "ops" / "install.sh", ROOT / "ops" / "install.ps1"]
+    for folder in ("docs/guide", "docs/i18n", "examples"):
+        paths += sorted((ROOT / folder).rglob("*.md"))
+    seen = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"(?<!codex )plugin marketplace add\s+(\S+)", text):
+            source = match.group(1).strip("\"'`")
+            if source.startswith("$"):
+                continue  # an installer's variable, pinned below
+            seen += 1
+            assert source == MARKETPLACE_URL, (
+                f"{path.relative_to(ROOT)}: `marketplace add {source}` — use {MARKETPLACE_URL}")
+    assert seen >= 8, "regex sanity: the README, plugin README, guides and i18n doors carry it"
+    assert f'CLAUDE_PLUGIN_MARKETPLACE_SOURCE="{MARKETPLACE_URL}"' in _read("ops/install.sh")
+    assert f'$claudePluginMarketplaceSource = "{MARKETPLACE_URL}"' in _read("ops/install.ps1")
+
+
+def test_plugin_manifest_carries_no_version():
+    """Claude Code keys its plugin cache folder by the manifest version, and
+    with none it uses the marketplace commit instead. A pinned version made
+    every plugin change on master land on the SAME folder the running
+    sessions use: `claude plugin update` answered "already at the latest
+    version", and replacing the folder in place failed with EPERM while a
+    session ran its hooks, after the updater had already uninstalled the
+    plugin (2026-09-30). Without a version each commit installs beside the
+    last, so an update never touches what a session loaded."""
     manifest = json.loads(_read("plugin/.claude-plugin/plugin.json"))
     assert manifest["name"] == "pseudolife-memory"
+    assert "version" not in manifest
+    mp = json.loads(_read(".claude-plugin/marketplace.json"))
+    assert all("version" not in p for p in mp["plugins"])
+
+
+def test_plugin_release_matches_pyproject():
+    """The release the hooks report to the daemon (the version handshake)
+    lives beside the manifest, not in it. The release version-cut touches
+    this file (.claude/skills/release-procedure/SKILL.md)."""
+    release = json.loads(_read("plugin/release.json"))
     version = re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"),
                         re.M).group(1)
-    assert manifest["version"] == version
+    assert release == {"version": version}
+
+
+def test_plugin_tree_ships_no_top_level_dot_entry_but_its_manifest():
+    """Claude Code keeps its bookkeeping in a cache folder's top-level dot
+    entries (.in_use, .orphaned_at, ...), and the updater skips them when it
+    compares the cache with the marketplace clone. That hides nothing only
+    while the plugin itself ships no other top-level dot entry."""
+    assert sorted(p.name for p in (ROOT / "plugin").iterdir() if p.name.startswith(".")) == [".claude-plugin"]
 
 
 def test_package_version_matches_pyproject():
@@ -167,7 +222,7 @@ def test_plugin_hook_wiring():
     assert "memory_stats" in script
     assert "before treating memory as offline" in script
     assert re.search(r"^exit 0\s*$", script, re.M)  # must never block session start
-    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionStart"])
+    _assert_curl_fits_hook_budget(script, [groups[0]])
     # Pin bearer-token forwarding in the actual curl call
     assert '"${AUTH[@]}"' in script
     # Pin query-string construction and forwarding to curl (session_id/source)
@@ -188,15 +243,24 @@ def test_plugin_hook_wiring_session_end():
     script = _read("plugin/hooks/session-end.sh")
     assert "/api/hook/session-end" in script
     assert "curl" in script and "--max-time" in script
-    # Same transient-stall retry contract as session-start.sh.
-    assert re.search(r"--retry\s+\d+", script), \
-        "retry count must be set; retry flags without --retry <n> are no-ops"
-    assert "--retry-delay" in script
+    # Preserve the existing two-second Codex request opportunity and leave
+    # one second within its cap for local work. Claude's plugin deadline is
+    # independently capped at 1.5 seconds and can stop the script earlier.
+    budget = min(h["timeout"] for g in groups for h in g["hooks"])
+    budgets = re.findall(r"CURL_BUDGET=\(([^)]*)\)", script)
+    assert budgets and '"${CURL_BUDGET[@]}"' in script
+    for options in budgets:
+        assert "--retry" not in options
+        max_time = float(re.search(r"--max-time\s+([\d.]+)", options).group(1))
+        assert max_time == 2
+        connect_time = re.search(r"--connect-timeout\s+([\d.]+)", options)
+        assert connect_time, "SessionEnd must bound connection setup explicitly"
+        assert 0 < float(connect_time.group(1)) <= max_time
+        assert max_time + 1 <= min(budget, 3)
     # Banned on the command itself (comments may name it to explain why):
     # it breaks option parsing outright on curl < 7.71, common on LTS hosts.
     assert not any("--retry-all-errors" in ln for ln in script.splitlines()
                    if not ln.lstrip().startswith("#"))
-    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionEnd"])
     assert "-X POST" in script
     # Pin bearer-token forwarding in the actual curl invocation
     assert '"${AUTH[@]}"' in script
@@ -208,66 +272,122 @@ def test_plugin_hook_wiring_session_end():
 
 
 def test_plugin_hook_wiring_user_prompt_submit():
-    """UserPromptSubmit must echo the static mid-session discipline line —
-    including the recall-before-review clause (recall the target area, then
-    compare memory against the files and correct drift both ways). Static by
-    design: the hook fires on every user turn, so no daemon round-trip and no
-    network dependency, and it must never block a turn."""
+    """UserPromptSubmit carries the per-turn memory-change note, not a static
+    line (maintainer decision 2026-09-26): user-prompt-submit.sh sources
+    session-start.sh in its `memory-changes` mode, which makes one bounded
+    request per turn — no retry, so a stalled daemon costs at most about two
+    seconds of the hook's budget — and never blocks a turn. The note's
+    reminder keeps the recall-before-review clause."""
+    from pseudolife_memory.web.session_hook import MEMORY_CHANGES_TAIL
     hooks = json.loads(_read("plugin/hooks/hooks.json"))
     groups = hooks["hooks"]["UserPromptSubmit"]
     commands = [h["command"] for g in groups for h in g["hooks"]]
     assert any("${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh" in c
                for c in commands)
 
-    script = _read("plugin/hooks/user-prompt-submit.sh")
-    assert "curl" not in script       # static: every-turn, offline-safe
-    for phrase in ("reviewing code, docs, or a PR", "memory_search",
-                   "memory_lesson_search", "compare"):
-        assert phrase in script, f"discipline line lost: {phrase!r}"
-    assert re.search(r"^exit 0\s*$", script, re.M)   # must never block a turn
+    wrapper = _read("plugin/hooks/user-prompt-submit.sh")
+    assert "set -- memory-changes" in wrapper and "session-start.sh" in wrapper
+    assert "curl" not in wrapper and "mid-session discipline" not in wrapper
+    assert re.search(r"^exit 0\s*$", wrapper, re.M)   # must never block a turn
+
+    script = _read("plugin/hooks/session-start.sh")
+    branch = script[script.index('= memory-changes ]'):script.index('= memory-policy ]')]
+    curls = re.findall(r"curl (?:[^\n]*\\\n)*[^\n]*", branch)
+    assert len(curls) == 1 and "/api/hook/memory-changes" in curls[0]
+    assert "--retry" not in curls[0] and '"${AUTH[@]}"' in curls[0]
+    budget = next(h["timeout"] for g in groups for h in g["hooks"]
+                  if "user-prompt-submit.sh" in h["command"])
+    assert int(re.search(r"--max-time (\d+)", curls[0])[1]) <= budget - 2
+    for phrase in ("review", "memory_search", "memory_lesson_search", "compare"):
+        assert phrase in MEMORY_CHANGES_TAIL, f"reminder lost: {phrase!r}"
+
+
+def test_coordination_has_independent_start_and_prompt_handlers():
+    hooks = json.loads(_read("plugin/hooks/hooks.json"))["hooks"]
+    # SessionStart also runs the separate memory-policy output.
+    for event, script, native_event, count in (
+            ("SessionStart", "coordination-start.sh", "CoordinationStart", 3),
+            ("UserPromptSubmit", "coordination-prompt.sh", "CoordinationPrompt", 2)):
+        handlers = [h for group in hooks[event] for h in group["hooks"]]
+        assert len(handlers) == count
+        assert any(script in h["command"] and native_event in h["commandWindows"]
+                   for h in handlers)
+    # Every turn: static, offline-safe.
+    assert "curl" not in _read("plugin/hooks/coordination-prompt.sh")
+    # Session start: one bounded request for the daemon-served check-in,
+    # which the daemon serves only where the board works.
+    start = _read("plugin/hooks/coordination-start.sh")
+    curls = re.findall(r"^curl (?:[^\n]*\\\n)*[^\n]*", start, re.M)
+    assert len(curls) == 1 and "/api/hook/coordination-start" in curls[0]
+    assert "--retry" not in curls[0]
+    max_time = int(re.search(r"--max-time (\d+)", curls[0])[1])
+    budget = next(h["timeout"] for group in hooks["SessionStart"] for h in group["hooks"]
+                  if "coordination-start.sh" in h["command"])
+    assert max_time <= budget - 2  # headroom for the record work before it
+    # The record work measures the process identity with `ps -W` on Windows,
+    # 1.6-3.5 s a call on a loaded host (2026-09-23): the request and that
+    # must both fit, or the check-in is lost (code review of #429).
+    assert budget >= max_time + 4
+    assert "memory_agents" not in start
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    for phrase in ("memory_agents(action=list)", "memory_agents(action=update",
+                   "memory_message(action=receive)", "memory_message(action=ack"):
+        assert phrase in CHECKIN_TEXT
 
 
 # ── content sync ────────────────────────────────────────────────────────────
 
-def test_discipline_line_synced_across_plugin_and_installers():
-    """The per-turn discipline line ships in THREE copies — the plugin script
-    plus both installers. Drift means plugin users and installer users carry
-    different standing instructions forever, silently. Extract the literal
-    from each copy and pin: exactly one occurrence per file, all identical,
-    the installers' idempotency needle inside the line itself (a needle that
-    only matches the file would let a reworded line duplicate the hook on
-    every re-run), and a length budget — the line is injected on EVERY user
-    turn, so growth is a per-turn context tax."""
+def test_discipline_line_synced_across_installers():
+    """The static per-turn discipline line the installers wrote until
+    2026-09-26 (when their hook, like the plugin's, became the memory-change
+    note) survives in TWO copies as a migration key: install mode and
+    --remove-legacy match the exact echo, and ops/setup-codex-hooks.py reads
+    the PowerShell copy. A reworded copy would strand every install that
+    carries the old echo. Pin: exactly one occurrence per file, identical,
+    the lookalike needle inside the line, and the length it shipped with."""
     pat = re.compile(r"(Memory \(PseudoLife\) mid-session discipline:[^'\"\n]*)")
     lines = {}
-    for rel in ("plugin/hooks/user-prompt-submit.sh",
-                "ops/install-hook.sh", "ops/install-hook.ps1"):
+    for rel in ("ops/install-hook.sh", "ops/install-hook.ps1"):
         found = pat.findall(_read(rel))
         assert len(found) == 1, f"{rel}: expected 1 discipline line, got {len(found)}"
         lines[rel] = found[0]
     assert len(set(lines.values())) == 1, f"discipline line drift: {lines}"
-    line = lines["plugin/hooks/user-prompt-submit.sh"]
-    assert "mid-session discipline" in line   # the installers' idempotency needle
-    assert len(line) <= 800                   # every-turn cost budget (~700 on 2026-08-28)
+    line = lines["ops/install-hook.sh"]
+    assert "mid-session discipline" in line   # --remove-legacy's lookalike needle
+    assert len(line) <= 800                   # as shipped (~700 on 2026-08-28)
+    for rel in ("plugin/hooks/user-prompt-submit.sh", "plugin/hooks/lifecycle.ps1"):
+        assert not pat.search(_read(rel)), f"{rel} still carries the static line"
 
 
 def test_memory_loop_block_leaves_briefing_headroom():
-    """The session-start payload is instructions + briefing, sliced to
-    HOOK_CONTEXT_MAX_CHARS with the briefing LAST — every char the block
-    grows is silently cut from the briefing tail (lessons, unsure-abouts,
-    where-we-left-off). Reserve 2,000 chars for the briefing (the block
-    measured 6,663 on 2026-08-28, 7,316 on 2026-09-02 after the
-    write-policy and trap-avoidance text, and 7,491 later that day after
-    the v35 label line — which funded itself by two trims and left 9
-    chars of reserve, so the next addition trims first or the cap moves
-    deliberately; a truncated briefing has no other alarm). 7,488 on
-    2026-09-05: the `used_ids` clause funded itself by three trims of
-    text the block already said elsewhere (`one claim per call` in the
-    CAPTURE header, `heed polarity:-` in the RECALL bullet, and
-    `rather than silently picking one`)."""
+    """The concise startup core leaves room for the dynamic briefing."""
     from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
-                                                    MEMORY_LOOP_BLOCK)
-    assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
+                                                    MEMORY_LOOP_BLOCK, STARTUP_MEMORY_CORE)
+    assert len(STARTUP_MEMORY_CORE) < 2_000
+    assert len(STARTUP_MEMORY_CORE) < HOOK_CONTEXT_MAX_CHARS - 2_000
+    assert len(MEMORY_LOOP_BLOCK) > len(STARTUP_MEMORY_CORE)
+
+
+def test_startup_core_carries_the_detailed_blocks_key_rules():
+    """Since #364 the SessionStart hook serves STARTUP_MEMORY_CORE, not the
+    detailed block, so three of that block's rules are restated in the core
+    itself (maintainer decision 2026-09-25): search before asserting a
+    "current" value, correct memory-vs-code drift on the spot at the same
+    slot, and route verified external facts to memory_world_set (whose own
+    description says so only once an agent reads that tool). Its pointer to
+    the full guidance must resolve for a pip install, which ships no
+    examples/."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    text = " ".join(STARTUP_MEMORY_CORE.split())
+    assert 'Search before stating a "current" version, number, or benchmark.' in text
+    assert "trust the code and correct the memory on the spot" in text
+    assert "`memory_fact_set` at the same slot" in text
+    assert "Route verified external facts to `memory_world_set`" in text
+    url = ("https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/"
+           "examples/CLAUDE.memory.md")
+    assert url in STARTUP_MEMORY_CORE.splitlines()
+    assert (ROOT / url.rsplit("/blob/master/", 1)[1]).is_file()
+    assert "in the repository" not in text
 
 
 def test_memory_loop_block_carries_recall_before_review_trigger():
@@ -279,6 +399,19 @@ def test_memory_loop_block_carries_recall_before_review_trigger():
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "review code, docs, or a PR" in text
     assert "compare what memory says against the files" in text
+
+
+def test_memory_loop_block_teaches_entry_correction():
+    """The block taught memory_fact_set for a stale slot but nothing for a
+    stale stored entry, so a model wanting to correct one had no taught
+    path (2026-10-04 review, M10: memory_supersede was called 4 times by
+    Claude and 3 by Codex in two months). memory_supersede is full tier,
+    which the block says where it names it, and a minimal-tier session
+    needs two expands to reach it, so the block says to expand until full."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`memory_supersede` (full tier" in text
+    assert "`memory_toolset` until full" in text
 
 
 def test_memory_loop_block_matches_examples():
@@ -302,6 +435,14 @@ def test_memory_loop_block_explains_tier_removal_notices():
     assert "not an outage" in MEMORY_LOOP_BLOCK
 
 
+def test_dream_command_reads_the_review_queue_health_block():
+    """The judgment session starts from dream status; it must look at the
+    review_queue block the status now carries, or a piling-up queue with its
+    judge in shadow goes unnoticed by the very session meant to clear it."""
+    text = _read("plugin/commands/dream.md")
+    assert "`review_queue`" in text and "attention" in text
+
+
 def test_plugin_dream_command_matches_examples():
     plugin = _read("plugin/commands/dream.md")
     examples = _strip_leading_html_comment(_read("examples/commands/dream.md"))
@@ -323,22 +464,41 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     the block tells the model to call tools its tools/list doesn't carry."""
     from pseudolife_memory.mcp_server import _TOOL_TIERS
     from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
-                                                    ONBOARDING_BLOCK)
-    # The UserPromptSubmit line is injected every turn — same visibility bar.
-    ups = re.findall(r"\b((?:memory|document)_[a-z_]+)",
-                     _read("plugin/hooks/user-prompt-submit.sh"))
+                                                    ONBOARDING_BLOCK,
+                                                    STARTUP_MEMORY_CORE)
+    # The per-turn memory-change note — same visibility bar. Render one with
+    # every kind of change so each line's tool names are checked.
+    from types import SimpleNamespace
+    from pseudolife_memory.web.session_hook import hook_memory_changes
+    changes = {"now": 2.0, "since": 1.0, "status_count": 1, "status": [{"text": "s"}],
+               "lesson_count": 1, "lessons": [{"lesson": "l", "polarity": "+"}]}
+    note = hook_memory_changes(SimpleNamespace(
+        memory_changes_since=lambda since, session_key=None: changes), "s", "1")
+    ups = re.findall(r"\b((?:memory|document)_[a-z_]+)", note)
+    assert {"memory_search", "memory_lesson_search", "memory_outcome"} <= set(ups)
+    # STARTUP_MEMORY_CORE is what SessionStart actually serves since #364.
     referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
                   | _referenced_tools(ONBOARDING_BLOCK)
+                  | _referenced_tools(STARTUP_MEMORY_CORE)
                   | set(ups))
     assert len(referenced) >= 10          # regex sanity — the block names many
 
     unknown = referenced - set(_TOOL_TIERS)
     assert not unknown, f"instruction blocks name unregistered tools: {unknown}"
 
-    hidden_at_core = {t for t in referenced if _TOOL_TIERS[t] == "full"}
+    # A full-tier tool may appear only with "(full tier" beside every
+    # mention, so a core session is told the tool is hidden rather than
+    # sent to call it bare (2026-10-04 review, M10: the blocks never named
+    # memory_supersede, leaving a stale entry with no taught correction).
+    blocks = " ".join(" ".join((MEMORY_LOOP_BLOCK, ONBOARDING_BLOCK,
+                                STARTUP_MEMORY_CORE, note)).split())
+    hidden_at_core = {
+        t for t in referenced if _TOOL_TIERS[t] == "full"
+        and (t in ups or re.search(rf"`{t}\b(?![^`]*`\s*\(full tier)", blocks))}
     assert not hidden_at_core, (
         f"instruction blocks name full-tier tools hidden at core: "
-        f"{hidden_at_core} — promote them or drop the mention")
+        f"{hidden_at_core} — promote them, mark each mention (full tier), "
+        f"or drop the mention")
 
 
 def test_plugin_commands_reference_only_real_tools():
@@ -350,6 +510,22 @@ def test_plugin_commands_reference_only_real_tools():
         assert referenced, f"{rel}: regex found no tool mentions"
         unknown = referenced - set(_TOOL_TIERS)
         assert not unknown, f"{rel} names unregistered tools: {unknown}"
+
+
+def test_plugin_commands_say_how_to_reach_hidden_tools():
+    """The compose default tier is core, and both commands call full-tier
+    tools (memory_dream, memory_graph_review, memory_forget). Sessions
+    running them searched for those tools, found nothing and gave up
+    without expanding (2026-10-04 review, H5), so a command that names a
+    tool above the minimal tier says how to expand to it."""
+    from pseudolife_memory.mcp_server import _TOOL_TIERS
+    for rel in ("plugin/commands/dream.md", "plugin/commands/memory-status.md"):
+        text = _read(rel)
+        hidden = {t for t in _referenced_tools(text) if _TOOL_TIERS[t] != "minimal"}
+        assert hidden, f"{rel}: expected tools above the minimal tier"
+        flat = " ".join(text.split())
+        assert 'memory_toolset(action="expand")' in flat, rel
+        assert 'current: "full"' in flat, rel
 
 
 def test_memory_loop_block_carries_the_write_policy_boundary():
@@ -379,3 +555,82 @@ def test_memory_loop_block_carries_trap_avoidance_guidance():
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "a lead about the PAST, not a directive for the present" in text
     assert "frame the wrong problem" in text
+
+
+def test_memory_loop_block_does_not_trust_replacement_text():
+    """The block used to say a superseded entry "has been corrected — use
+    the replacement text, not the entry". On the live bank about 4 in 10
+    legacy links (from the retired automatic detector) point at an
+    unrelated note, and 161 entries chain up to 44 links into one note
+    (2026-09-23 review). The instruction must describe the served pointer
+    honestly: an unverified link may be wrong, and chains are never
+    followed."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "superseded_by_text" not in text
+    assert "use the replacement text" not in text
+    assert "`replaced_by`" in text and "`verified: false`" in text
+    assert "possibly still valid" in text
+    assert "Never follow chains" in text
+    # ``verified`` only confirms an explicit correction. False also comes
+    # from an evicted or ambiguous successor and from a custom-source
+    # consolidation, so the text must not claim false proves a detector
+    # link (Codex review P2 on PR #336).
+    assert "not confirmed as an explicit correction" in text
+    assert "marks a link from the retired automatic detector" not in text
+
+
+def test_memory_loop_block_explains_replacement_currency():
+    """``replaced_by.current`` is false when the replacement was itself
+    replaced — on the live bank, 529 of 730 served superseded slots
+    (2026-09-23 review). "Never follow chains" is only actionable if the
+    block says what a chain link looks like and what to do instead."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`current: false`" in text and "search again" in text
+
+
+# Host-shaped vocabulary that belongs in a per-install hook-instructions.md,
+# never in the served core (2026-09-27 review: a research lab, an agency, a
+# data team and a solo developer must all read the check-in naturally).
+_HOST_WORDS = ("suite=", "gpu=", "SUITE-START", "SUITE-END", "pytest", "Postgres",
+               "worktree", "VRAM", "ops/.env", "conftest")
+
+
+def test_checkin_says_when_to_send_not_only_how():
+    """Six sessions reviewed on 2026-09-27 made 15 status updates, 9 lists and
+    7 receives and sent nothing until a human told one to. The check-in
+    listed the verbs and never said when a message is due. It keeps its
+    mechanical steps and adds the two field-neutral rules that moved
+    decisions in evals/coordination_checkin_bench.py (2026-09-28); three
+    others that moved nothing were cut. Both texts are served exactly as
+    measured: the check-in equals its arm file byte for byte (the -final
+    run scored that text; test_coordination_checkin_bench ties the file to
+    the artifact's hash), and the Codex form's measured part must stay
+    inside it, so a reword means a new bench run."""
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
+    arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
+    measured = (arms / "rules-v4-20261002.txt").read_text(encoding="utf-8").strip()
+    assert CHECKIN_TEXT == measured
+    assert (arms / "codex4-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
+    for phrase in ("look for whoever holds it or has it booked",
+                   "message them that you are next", "a status line is not a queue",
+                   "If the board shows it free, use it", "Keep your status true",
+                   "Subagents never send board mail", "only if they do not appear"):
+        assert phrase in CHECKIN_TEXT, phrase
+    # Cut: three rules the bench could not see help, and the clause that
+    # made the shared-resource rule over-send on held-out situations.
+    for cut in ("a message is what a peer must act on", "before you debug it",
+                "message everyone waiting on it", "do not guess that they are idle",
+                # Since v50 the hooks list subagents; naming them by hand
+                # listed each twice, and a Codex subagent has its own address.
+                "which can name its subagents", "A subagent shares its parent's"):
+        assert cut not in CHECKIN_TEXT, cut
+    # The mechanical steps stay, in front of the rules.
+    assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")
+    assert "Message them you're next. Free? Use it" in CHECKIN_INSTRUCTION
+    for verb in ("update", "list", "receive", "ack"):
+        assert verb in CHECKIN_INSTRUCTION
+    for text in (CHECKIN_TEXT, CHECKIN_INSTRUCTION):
+        for word in _HOST_WORDS:
+            assert word.lower() not in text.lower(), word

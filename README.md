@@ -24,8 +24,9 @@ the intelligence; this server is its memory on disk.
 What you get:
 
 - **Associative memory with honest forgetting** — a flat similarity store
-  ranked by hybrid dense-plus-lexical retrieval, with contradiction
-  detection and supersession. (The measured verdict: a preregistered
+  ranked by hybrid dense-plus-lexical retrieval, with conflict detection
+  that admits potential updates while preserving earlier source notes;
+  whole-note replacement is explicit. (The measured verdict: a preregistered
   ablation campaign found the previous 8-band continuum tied a flat store
   on every gate, so the simpler structure ships; the continuum remains
   one config line away.)
@@ -86,7 +87,7 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Two commands. No Docker, no database to set up, no container runtime:
+Install and register the lite tier. No Docker, no database to set up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -97,8 +98,54 @@ Codex instead of Claude Code — same shape:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory --env PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
 ```
+
+For Codex, finish setup before starting a fresh task. In the existing
+`[mcp_servers.pseudolife-memory]` table in `~/.codex/config.toml`, add
+`startup_timeout_sec = 240`, `tool_timeout_sec = 240`, and `required = true`.
+The shim can wait up to 180 seconds for a cold daemon; Codex's default
+startup budget is 10 seconds. `required` makes missing memory visible at
+startup and waits for its initial catalog. These are starting budgets,
+not a promise that a first model download fits. The tool budget leaves time for
+the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
+`pseudolife-mcp serve` in a terminal if needed.
+
+Approve `memory_message` in that table's tool configuration
+(`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
+"approve"`, or allow it once and keep the approval); Codex hook setup
+(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+keeps any value you chose. Board mail can wake an
+idle Codex task by default, and the woken task reads its mail with that tool:
+without the approval it stalls on a prompt until someone answers it. Set
+`PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
+from being woken (see [Codex doorbell](docs/guide/configuration.md#codex-doorbell)).
+
+The agent board (peer awareness and addressed mail between sessions) is on by
+default, behind bearer authentication. Without `coordination.allowed_principals`
+in the daemon's `config.yaml`, only the singular `PSEUDOLIFE_MCP_TOKEN`
+principal is admitted. A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map stays
+off the board until an operator lists it (`allowed_principals: [default, codex]`).
+Until then a shim on the default setting leaves coordination off without an
+error; one pinned with `--enable` shows an attach-unavailable hint instead.
+`python ops/setup-codex-coordination.py --check` reports `ready (default-on)`
+or names the cause. See
+[Codex CLI and desktop](docs/guide/configuration.md#codex-cli-and-desktop).
+
+The MCP handshake delivers compact recall/capture/reflection instructions.
+For the complete standing guidance, copy the
+[bundled memory block](examples/CLAUDE.memory.md) into your project
+`AGENTS.md` or `~/.codex/AGENTS.md`. For session briefings and per-turn
+reminders, follow [Codex hooks and verification](docs/guide/providers.md#codex-specifics).
+Use one MCP registration and one hook source; an installed plugin may
+already provide either. After the daemon is running, execute
+`pseudolife-mcp doctor` from the **same environment as the registered command**.
+It checks the handshake and annotations without calling bank tools. When
+the shell has no `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`,
+doctor takes the token from the Claude Code registration (`~/.claude.json`,
+or under `CLAUDE_CONFIG_DIR`), else from the Codex one, and names where it
+came from in `credential_source`; with none and a daemon that requires a
+token, it reports `BearerMissing`.
 
 Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
@@ -130,7 +177,7 @@ Windows needs an ASCII-only data path
 | External volumes, health-checked services, deploy/rollback tooling | no | yes |
 
 **The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
-pass still runs, prunes, and advances its **cursor**, but writes no
+pass still runs, prunes, and acknowledges its input batch, but writes no
 canonical facts: on this path `memory_fact_set` is the only **cortex**
 writer. Everything else above works. Nothing about this is silent —
 `curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
@@ -174,12 +221,21 @@ cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
+# Codex defaults to automatic hook-source detection and asks once for approval.
+# Unattended hook approval: --codex-hook-trust yes / -CodexHookTrust yes
+# Instructions only: --codex-hooks skip --instructions append
+# PowerShell equivalent: -CodexHooks skip -Instructions append
 # Both:  add --client both  / -Client both
 # Gemini: add --client gemini — or several: --client claude,codex,gemini
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-The installer asks which agents to wire (multi-select, with a capability
+The installer first asks where the memory bank lives: on this machine
+(the default, and everything below), on another machine that already runs
+it (a client-only install that asks for the daemon's URL and token), or on
+this machine with other machines connecting to it (see
+[Sharing one bank across machines](docs/guide/remote-bank.md)). It then
+asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
 missing prerequisite), then asks which **dream extractor** should
@@ -187,32 +243,60 @@ consolidate memories —
 
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone, and keeps every memory on the box (~11.8 GB image);
-- **sonnet-only** — the lightest install: a Claude model via a CLI shim
-  (`claude-opus-5` by default; the mode name is historical. Needs a
-  logged-in Max-plan `claude` CLI); the sidecar image is **never built or
-  pulled** (~11.8 GB lighter; dreams pause while the shim is down);
-- **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
+- **claude-only** — the lightest install: a Claude model via a CLI shim
+  (`claude-opus-5-5` by default since 2026-09-29, when it cleared the
+  extraction-ladder gate against `claude-opus-5`; needs a logged-in
+  Max-plan `claude` CLI);
+  the sidecar image is **never built or pulled** (~11.8 GB lighter; dreams
+  pause while the shim is down);
+- **claude-fallback** — the Claude shim primary, the bundled sidecar as
   automatic fallback (Max-plan CLI plus the ~11.8 GB image);
-- **codex-only / codex-fallback** — the same two shapes on an OpenAI
-  subscription: a GPT-5.6 model (Sol / Terra / Luna) via the Codex CLI
+- **openai-only / openai-fallback** — the same two shapes on an OpenAI
+  subscription: a GPT-5.6 or GPT-6 model (Terra by default) via the Codex CLI
   shim on a signed-in ChatGPT plan (extraction quality unmeasured — see
-  the [dreaming guide](docs/guide/dreaming.md)) —
+  the [dreaming guide](docs/guide/dreaming.md));
+- **endpoint / endpoint-fallback** — any OpenAI-compatible server you name
+  (`--extractor-url`, `--model`: LM Studio, Ollama, vLLM, a hosted API),
+  alone or with the sidecar as fallback. The earlier names `sonnet-*` and
+  `codex-*` still work as deprecated spellings —
 
 then brings the stack up, installs the selected clients' session hooks
 (where the client has a hook system), registers the MCP transport (the
 stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
-support. Where a session-hook briefing exists (Claude, Codex off-Windows)
-no standing-file edit is needed; for hook-less providers (Gemini CLI,
-generic agents, Codex on Windows) the installer offers to append the
-standing block instead — there it *is* the briefing. `--instructions
+support. Codex setup offers one choice to enable automatic memory briefings,
+reminders, and session cleanup (plus, where the agent board is on, a board
+check-in at session start and a new-mail hint per prompt), use standing
+instructions only, or skip.
+Automatic setup reuses an enabled PseudoLife plugin or installs the three
+lifecycle hooks, backs up configuration, approves only their exact current
+definitions, and verifies execution. If verification fails, the same approval
+allows the standing memory block as a fallback; setup reports the remaining
+repair step. Hook-less providers (Gemini CLI and generic agents) are offered
+the standing block. `--instructions
 append` always writes the block from `examples/CLAUDE.memory.md` into
 `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
 (useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
 setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex`.
+`ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes`.
+Without explicit hook approval, unattended setup does not grant trust; use
+`--codex-hooks skip --instructions append` for instructions only. Explicit
+`--instructions skip` prevents fallback edits.
+The installer also turns the agent board on: it mints a bearer token in
+`ops/.env` (owner-only, never printed) and gives each shim client it wires an
+owner-only token file. Re-running it on an existing install adds that file to
+the Claude Code registration in place. The ladder's last line, and
+`pseudolife-mcp doctor`, say whether the board is on or why it is off.
+Use `doctor --host codex` or `--host claude-code` for a compact coordination
+snapshot: reachability, bearer admission, registration evidence, tool inventory
+and configured wake are separate. Default doctor is read-only; health and a
+configured wake path do not prove delivery. The [coordination diagnostic
+quickstart](docs/guide/configuration.md#coordination-diagnostic-quickstart)
+covers saved-instance checks and an explicitly disposable mail proof.
+`--no-token` / `-NoToken` keeps an open-loopback install with the board
+dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
@@ -274,7 +358,7 @@ one answers*, not who's wrong:
 |---|---|---|---|---|
 | Survives sessions and compactions | yes | yes | yes | yes |
 | "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
-| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| A canonical-fact correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | cortex supersedes, with full version history kept |
 | Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
 | Distils do/avoid lessons from its own outcomes | no | no | no | yes |
 | Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
@@ -287,7 +371,8 @@ cases where one of them is the better pick:
 
 It layers several complementary stores: the **associative store** (a flat
 embedding store ranked by cosine similarity fused with a BM25 lexical pool
-(on by default), with contradiction detection and supersession; an 8-tier
+(on by default), with conflict-aware admission and explicit source-note
+replacement; an 8-tier
 banded layout is available as an opt-in preset); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
@@ -313,7 +398,7 @@ deep material lives in the user guide:
 | Page | What's in it |
 |---|---|
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
-| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, the hook-equivalent ladder, AGENTS.md standard, Codex hooks opt-in, writer ids |
+| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
 | [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
@@ -321,14 +406,18 @@ deep material lives in the user guide:
 | [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
 | [Comparison](docs/guide/comparison.md) | Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — the axes, and when to use something else |
 | [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
+| [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
+| [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
+| [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
+| [Coordination recovery](docs/guide/coordination-recovery.md) | Agent mailboxes, maintainer passkeys and the board's audit log after a database restore |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
 
 ## Tools exposed
 
-The surface was consolidated 2026-07-02 (55 → 32 tools; now 36 with
-`memory_toolset`, the set-slot pair, and strict RE evidence): lifecycle families became verb-dispatched tools
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 39 with
+`memory_toolset`, the set-slot pair, coordination and strict RE evidence): lifecycle families became verb-dispatched tools
 (`memory_dream`, `memory_forget`, `memory_graph_review`), and
 dump/introspection views moved to the Cortex Console (REST) — the manifest
 is agent context every session, so it stays lean.
@@ -338,26 +427,29 @@ is agent context every session, so it stays lean.
 | `memory_store(text, source?, tags?, origin?, episode?, authority?, distortion_tolerance?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`); `authority`/`distortion_tolerance` label the speech act and how exactly it must survive — `auto` (default) is a deterministic form heuristic, no model call, and both labels are inherited through supersession unless restated |
 | `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
-| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history; the result's `derived_flagged` names the canonical facts the dream built on what was corrected (flagged, never rewritten) |
-| `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
+| `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
+| `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
+| `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
+| `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?, name?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and each row by its session's `name` (the title Claude Code or Codex shows, else one the agent set with `name`, else its `memory_session_title`, else its label and short id; [board names](docs/guide/configuration.md#board-names-and-finding-a-session)), and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's delegate for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
-| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
+| `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
-| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
+| `memory_history(entity, attribute?, as_of?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps; `as_of` (ISO-8601 or epoch seconds) keeps only the versions written by then. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits the serving `retrieval_events` row with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
-| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
+| `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage, with long lists capped and their full counts under `truncated`) |
+| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `list` takes `scope=<memory source>` (the project scope of the Console's Graph and Review views) to keep only analyzer findings whose entities carry that source — queued proposals (`proposed_link` / `merge_candidate` / `junk_candidate`) always list; omit or `"all"` for everything; it is not a finding-kind filter; `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity\|attribute` key in `src` (or a bare entity to restore every retired aspect). In the slot keys `restore_slot` and `dismiss_slot_pair` take, a literal `\|` inside an entity or attribute is spelled `%7C`; the one bare `\|` joins the two halves, and a key with more than one bare `\|` is refused |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
-| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_consolidate(replaces?, new_text, source?, tags?, entry_ids?)` | Replace selected entries with one canonical note; validate every ID (or unique exact text) before any changes |
 | `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
@@ -372,12 +464,13 @@ is agent context every session, so it stays lean.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 The five recall-path tools return **compact entries** by default (result
-payloads are agent context on every retrieval); pass `verbose=true` for full
-metadata. Full-table dumps and topology views live in the **Cortex Console**
+payloads are agent context on every retrieval; search and recent entries
+keep their write `date`), and `memory_fact_get` likewise drops bookkeeping
+keys from its record; pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(23), `full` (36) — filtered per principal at
+**Toolset tiers.** Three visibility tiers — `minimal` (10 tools), `core`
+(25), `full` (39) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
 `memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
@@ -409,7 +502,14 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 
 This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are transactional
-so a crash can't wipe the bank. On top of the associative store sit the
+so a crash can't wipe the bank. The single writer is enforced: the daemon
+holds a Postgres advisory-lock *writer lease* on its bank. A second daemon,
+or a script or eval that opens the live bank through the service, refuses
+to start and names the process that holds it. Stop the daemon before
+offline maintenance such as `ops/dedup_cortex.py`. If the bank fails to
+load at startup, the daemon serves nothing rather than a partly loaded
+bank, and `/health` reports `degraded` with the reason until a retry
+succeeds. On top of the associative store sit the
 canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 ([the memory model](docs/guide/memory-model.md)) — joined to a typed
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
@@ -426,7 +526,7 @@ in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
 image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
-bake; skip the sidecar entirely with the installer's `sonnet-only` mode).
+bake; skip the sidecar entirely with the installer's `claude-only` mode).
 The ~12.6 GB and ~10.4 GB figures published before
 2026-07-29 are retired: both were inflated by a CUDA torch build that a
 dependency-resolution bug pulled into the image (see the CHANGELOG); the
@@ -452,8 +552,9 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pse
 docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 ```
 
-The extractor sidecar is not published and still builds locally; updates on
-the pull path are `pull` + `up -d`, not `ops/update.ps1`.
+The extractor sidecar is not published and still builds locally; update the
+pull path with `pseudolife-mcp update` (backup, pinned image, rollback tag;
+see [Updating](#updating)), not a bare `pull` + `up -d`.
 
 > **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
 > `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
@@ -473,6 +574,12 @@ HTTP (both below). Where the data actually lives, and
 how to back it up:
 [Configuration — data layout](docs/guide/configuration.md#data-layout).
 
+**Other machines, one bank:** sessions on a laptop, a server or a container
+can use this daemon too, through a client-only install that runs just the
+shim. Exposing the daemon (Tailscale Serve, a LAN publish or a reverse
+proxy), per-machine tokens and board admission:
+[Sharing one bank across machines](docs/guide/remote-bank.md).
+
 **Host-process install (Windows, for GPU / dev):** run Postgres in Docker
 but the daemon on host Python — for hacking on the daemon or running the
 embedder on a local GPU. Steps, the `pseudolife-mcp` CLI modes, and the
@@ -481,14 +588,96 @@ logon autostart task:
 
 ## Updating
 
-**Lite tier:** one command, bank untouched:
+**Upgrading from before the agent board (no bearer token yet):** this
+migration step applies to installer-managed Docker installations. Rerun
+`ops/install.ps1` (Windows) or `ops/install.sh` (Linux / macOS) with the
+same client selection (sessions can stay open: the shim installs as a new
+runtime beside the running one).
+The installer creates a bearer token for the default shim install and
+migrates the environment of the installer-managed `pseudolife-memory`
+stdio registration for Claude Code in place. Custom registrations are
+preserved; follow the installer's printed credential warnings for Gemini
+or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
+create the token or migrate the registration environment. Then refresh clients
+with the **Everything at once** recipe below and restart them.
+
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`** (installers up
+to 0.16.1) is refreshed over SSH, which fails on a machine with no GitHub SSH
+key. `pseudolife-mcp update` and the installers move it to the HTTPS URL
+themselves, with backups. If that step reports a failure, the manual fallback
+is: in `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), set the
+`pseudolife-mcp` entry's `source` under `extraKnownMarketplaces` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`,
+then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+(never `marketplace remove` it: that uninstalls the plugin).
+
+**One command, no checkout:** the installed shim updates the whole install
+from a release:
+
+```bash
+pseudolife-mcp update            # the newest release on PyPI
+pseudolife-mcp update --tag 0.15.1
+pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
+```
+
+**The first update from 0.15.0 or earlier** has no such command (that shim
+answers "unknown mode", and that daemon never announces a release): from a
+checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
+for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
+or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
+extra only for a lite install). After that, `pseudolife-mcp update` exists.
+On a client-only machine (the daemon on another host), `update` and
+`--clients-only` move this machine's clients to the daemon's release.
+
+On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
+bank up (the checkout's backup script when the compose project still has
+one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
+backups`), tags the running image for rollback, recreates **only** the
+daemon container from the compose files it was created with (or the
+package's bundled copies when the checkout is gone), waits for `/health`
+at the new version, then installs the release as a new shim runtime beside
+the running one, refreshes the plugin cache and prints the Codex hook
+step. The backup stays visible and deliberate: nothing here automates it
+away. `--clients-only` / `--daemon-only` take one half; the shim itself
+runs from wherever it was registered, so use its full path when
+`pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
+the package in the interpreter that holds it (pip, or pipx) and restarts
+nothing: it says what to restart.
+
+You are told when it is time: the daemon checks PyPI for the newest
+release in the background (`updates.check_releases`, on by default) and
+every session's briefing then opens with `release X is available — run
+pseudolife-mcp update`. With `updates.unattended_clients: true` in
+`config.yaml` (off by default) a Docker-tier shim on the daemon's host
+installs the daemon's release as its own new runtime and refreshes the
+plugin cache by itself whenever the daemon is newer than it; the daemon
+recreate stays a deliberate command.
+On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
+daily task or timer that applies a new release only while
+`updates.unattended_daemon: true` is set and no session is active on the
+agent board, with the same backup and rollback tag, and posts a board
+notice either way. Codex keeps its hook approvals across updates (it
+approves the hook definitions, not the scripts), and an update from a
+checkout refreshes manual Codex hook copies itself. Where Codex runs the
+plugin's hooks, the client step refreshes Codex's installed plugin copy
+through `codex plugin marketplace upgrade` while the approved hook
+definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-specifics));
+only a changed `hooks.json` makes every update path print the approval steps.
+See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
+
+**Lite tier by hand:** one command, bank untouched:
 
 ```bash
 pip install -U "pseudolife-mcp[lite]"
 ```
 
-**Docker tier:** after a `git pull` (or local code change), redeploy the
-**daemon only** — safely, without touching Postgres or the extractor:
+On Windows, first close every Claude Code, Codex and Claude Desktop
+session using the shim (quit Desktop from the tray): upgrading a package
+that is running can leave it half-removed.
+
+**Docker tier from a checkout:** after a `git pull` (or local code
+change), redeploy the **daemon only** — safely, without touching Postgres
+or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -497,7 +686,9 @@ pip install -U "pseudolife-mcp[lite]"
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+Both are thin wrappers over the same Python deploy `pseudolife-mcp update`
+runs (`ops/update.py` → `pseudolife_memory/update_cli.py`), so there is
+one implementation. It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
 image (when a previous one exists — it says so loudly when there isn't),
 rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —
@@ -506,6 +697,91 @@ every healthy deploy; see
 [Docker disk retention](docs/runbooks/docker-disk-retention.md) for the
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
+
+The image records the commit it was built from, and `/health` reports it
+as `build` (`git_sha`, `dirty`, `built_at`, and `source`: `checkout` or
+`release`). So the script refuses a tree
+with uncommitted or untracked files, and lists them. It also refuses a
+tree git cannot describe (no git, not a clone, or git's `safe.directory`
+refusal, which it quotes). Commit or clean up first, or pass
+`-AllowDirty` / `--allow-dirty` to deploy the tree as it is: stamped
+`dirty: true`, or `unknown` when git cannot describe it. Each deploy
+builds a new image, so the daemon container is recreated even when the
+commit has not changed.
+
+**Everything at once:** the daemon is one of three installs. The **shim**
+your clients launch and the **Claude Code plugin** are separate and do not
+move with it. `-All` / `--all` moves them in the same run, after the
+daemon is healthy:
+
+```powershell
+.\ops\update.ps1 -All   # Windows
+```
+```bash
+./ops/update.sh --all   # Linux / macOS
+```
+
+No session has to be closed for the shim step. Each shim version installs
+into its own **runtime** (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN`
+on Windows, `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere) and
+every client registers one **launcher** path
+(`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` /
+`~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) that starts the newest
+complete runtime. The installer and the update step also make
+`pseudolife-mcp` typed in a terminal reach the launcher. On Linux and macOS
+`~/.local/bin/pseudolife-mcp` becomes a link to it; an older pipx or
+pip --user entry there is moved aside as `pseudolife-mcp.<kind>-<stamp>`
+(never deleted), and anything else there is left alone and named. When
+`~/.local/bin` is not on `PATH`, the step prints the line to add to your
+shell profile: `export PATH="$HOME/.local/bin:$PATH"`. On Windows the
+launcher directory goes first on your user `PATH`, ahead of pipx's and
+pip's copies; open a new terminal for the name to reach the launcher,
+because a terminal that was already open keeps its old `PATH`.
+`pseudolife-mcp doctor` reports what the name resolves to
+(`path_resolution`) and warns when that is not the launcher; the
+launcher's full path always works.
+The step installs the checkout as a new runtime beside the old one, moves
+any registration that still names a runtime, pipx or virtualenv path to
+the launcher in place (Claude Code, Codex, Claude Desktop and Gemini CLI;
+each file is backed up first as `<file>.bak-<stamp>`), and removes older
+runtimes once no process runs from them and no registration names them.
+Sessions already running keep the runtime they started with; the next
+session start uses the new one. A shim running straight from this
+checkout's `.venv` is already live and is named instead. It then
+refreshes the plugin cache when its bytes differ from the marketplace
+clone (`claude plugin update` installs the new copy beside the one
+running sessions use; nothing is uninstalled), and reports whether
+Codex's hook copy matches the checkout (that refresh is a consent step:
+`python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
+and which clients need a restart; a client-side step that fails is
+reported, never a failed deploy. The same helper runs on its own:
+`python ops/update_clients.py`, and `python ops/shim_runtime.py` manages
+the runtimes by hand (`install`, `list`, `prune`, `migrate`). Custom
+registrations are preserved and named; upgrade those in their own
+interpreter. A daemon-side credential change with an old shim leaves the
+two out of step: the Claude Desktop registrar refuses a shim that cannot
+read the selected token file (exit 4), and names the upgrade.
+
+- **Upgrading past 2026-09-28: board mail starts waking idle sessions.**
+  Once the plugin cache and the shim move (`-All`, then a client restart),
+  a Claude Code session and a Codex task with a `codex` CLI are woken when
+  mail arrives that clears the need they parked on; before this both wake
+  paths were opt-in. Nothing rings for chatter, and rings are capped. To
+  keep the old behaviour, set `PSEUDOLIFE_AGENT_WAKE_HOOK=0` in the `env`
+  block of `~/.claude/settings.json` and `PSEUDOLIFE_CODEX_DOORBELL = "0"`
+  in the Codex server's `env` table (`PSEUDOLIFE_AGENT_COORDINATION=0` in
+  either place turns off the board for that client). `pseudolife-mcp
+  doctor` shows each client's wake path under `wake`.
+
+The three tell on each other: `/health` reports the daemon's `version`
+and a digest of the hook scripts it shipped with; the session briefing
+opens with a one-line notice when the plugin's version differs from the
+daemon's (naming `/plugin marketplace update pseudolife-mcp` then
+`/plugin update pseudolife-memory@pseudolife-mcp`, or the daemon redeploy,
+whichever side is behind), or when the version matches but the hooks do
+not (naming the `--all` command above); the shim says so on stderr and
+ahead of its instructions; and `pseudolife-mcp doctor` reports
+`version_mismatch`.
 
 > **Two upgrades are not automatic**, because neither can be done safely
 > in place. Both have a step-by-step runbook — backup, dry run, apply,
@@ -523,22 +799,30 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 
 ## Wire into your coding agent
 
-**Plugin (hooks + commands).** With the daemon running, two commands inside
-Claude Code wire the session hooks (briefing + episode identity), the
-memory-loop instructions, and the `/dream` + `/memory-status` commands:
+**Plugin (hooks + commands).** The installer adds it whenever Claude Code
+is a selected client (`--claude-plugin skip` / `-ClaudePlugin skip` opts
+out; an installed plugin is left alone). It wires the session hooks
+(briefing + episode identity), the memory-loop instructions, and the
+`/dream` + `/memory-status` commands. By hand, the same two commands inside
+Claude Code do it:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-The plugin replaces the settings.json hook **and** the CLAUDE.md block below
-— the same standing instructions arrive as session context from the daemon.
+The plugin replaces the settings.json hook, and the daemon serves a compact
+memory core and a live briefing as session context. By default
+(`memory_policy.variant: compact`) the full CLAUDE.md block below is not
+served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
 — so the transport is registered exactly once, by `ops/install.*` (stdio
 shim by default — per-session episode identity) or the one-liner below.
+Hooks an earlier install wrote to `~/.claude/settings.json` would duplicate
+the plugin's; the installer offers to remove them once the plugin runs
+(`--claude-legacy-hooks remove` / `-ClaudeLegacyHooks remove` unattended).
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 
@@ -583,6 +867,68 @@ a `.mcp.json` at a project root for project scope:
 
 For a token-protected daemon, add a `headers` key to that Claude JSON entry:
 `"headers": { "Authorization": "Bearer <your-token>" }`.
+
+**Claude Desktop** (the app, including its Cowork and Code sessions) — the
+installer writes the entry for you:
+
+```bash
+ops/install.sh --client claude-desktop      # Windows: ops\install.ps1 -Client claude-desktop
+```
+
+Desktop has no `mcp add`; its servers live in `claude_desktop_config.json`
+(macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`,
+Windows `%APPDATA%\Claude\` — except the Store/MSIX build, whose real file
+is under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; the
+installer prefers that path when it exists). The equivalent entry by hand:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-desktop": {
+      "command": "/absolute/path/to/pseudolife-mcp",
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"
+      }
+    }
+  }
+}
+```
+
+The entry is named `pseudolife-desktop` on purpose. Desktop's Code tab runs
+Claude Code, which starts its own per-session `pseudolife-memory` server; when
+an app-level entry has the same name, Desktop sends the session's
+`mcp__pseudolife-memory__*` calls to the app-level entry and the session's own
+server gets none. Re-running the installer renames an entry it wrote under the
+old name (its `env` sets `PSEUDOLIFE_WRITER_ID` to `claude-desktop`), keeping
+any `env` keys you added and backing the config up first. It leaves any other
+`pseudolife-memory` entry alone and warns about it. Chat and Cowork then list
+the tools as `mcp__pseudolife-desktop__*`.
+
+Two things differ from the CLI clients. Desktop launches MCP servers with a
+**sanitized environment** — PATH plus a few system variables, none of your
+shell's exports — so `command` must be the shim's absolute path (`which
+pseudolife-mcp` / `Get-Command pseudolife-mcp`), and a token-protected
+daemon needs `"PSEUDOLIFE_MCP_TOKEN_FILE": "/absolute/path/to/a/private/file"`
+in that `env` block: a bearer exported in your OS environment never reaches
+the shim. The symptom of forgetting it is every session failing with
+*"Couldn't start for Cowork and Code sessions. Error: unhandled errors in a
+TaskGroup (1 sub-exception)"* — a 401 under the SDK's wrapper, which the
+shim now names plainly on stderr at startup. When the daemon is
+token-gated the installer writes that file (owner-only) from
+`PSEUDOLIFE_MCP_TOKEN` in its environment or `ops/.env`, or migrates a
+literal token already in the entry into it; with no token to write it
+says so and exits 3. The shim must also be able to *read* that file:
+releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
+the registrar probes `<command> --help` for the file form first and
+refuses an older shim (exit 4, nothing written) rather than register an
+entry that would fail with the same TaskGroup error — upgrade the shim
+(re-run the installer, or `python ops/update_clients.py --only shim` from
+the checkout: it installs a new runtime beside the running one, so no
+session has to close) and re-run. After any edit, fully quit Desktop from the tray or
+menu-bar icon and relaunch — closing the window does not reload the
+config.
 
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
@@ -662,24 +1008,40 @@ per-turn discipline): [the provider matrix](docs/guide/providers.md).
 **Verify:** run `claude mcp list`, `codex mcp list`, or `gemini mcp list`
 (the server should report connected), then ask the agent to *"store a memory
 that this install works"* and check it
-appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+appears in the Console's Stream view at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio (this is what the installer wires by default, for
 per-session identity)? A thin torch-free **shim** proxies stdio to the
 daemon:
 [stdio shim](docs/guide/configuration.md#stdio-shim-per-session-identity)
-· [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
-· [backups & restore rehearsal](docs/guide/configuration.md#backups).
+· [sharing one bank across machines](docs/guide/remote-bank.md)
+· [backups & restore rehearsal](docs/guide/configuration.md#backups)
+· [agent mailbox recovery](docs/guide/coordination-recovery.md).
 
 ## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
-The server's value depends entirely on the agent *using* it well — **this step
-is what makes the memory loop actually fire**. The MCP server advertises the
-core loop through protocol-level `instructions`, and the session hook (one
-command, below) delivers the full block every session — **plugin users and
-hook users need nothing more**. If you want it in a standing file instead —
-or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
-hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+The server's value depends on the agent using it. The MCP server advertises
+the core loop through protocol-level `instructions`; the shim adds the
+messageboard check-in when its coordination adapter is up.
+The plugin's memory SessionStart hook (also used by verified Codex hooks)
+delivers a short operating guide and a bounded briefing; without the plugin,
+the installer's Claude Code `settings.json` hook
+(`pseudolife-mcp briefing --hook-json`) delivers the same two.
+A separate coordination hook asks the agent to set its project,
+task and status, discover peers, and read pending messages, but only where
+the board is on for that credential (it is on by default behind bearer
+authentication, so an open install or a disabled board adds no check-in).
+Detailed memory
+guidance remains in the bundled standing block. Hooks add per-prompt reminders
+and session bookkeeping; neither delivery method
+guarantees that the model performs every requested memory operation.
+
+By default (`memory_policy.variant: compact`) hooks serve at most that
+short guide, and the detailed block reaches an agent only as a standing copy
+(the `full_separate_hook` variant serves it in a separate hook; see
+[Startup memory policy](docs/guide/configuration.md#startup-memory-policy-memory_policy)).
+For the complete guidance, for subagent visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
 
@@ -694,8 +1056,8 @@ Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.me
 Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
 
-For hook-less providers this standing block is not a nice-to-have — it *is*
-the session briefing. `AGENTS.md` is the cross-vendor standard for standing
+For hook-less providers this standing block supplies the full memory policy,
+but it cannot provide a live briefing or run session cleanup. `AGENTS.md` is the cross-vendor standard for standing
 agent instructions (Linux Foundation-governed; read by Codex, Copilot,
 Cursor, Gemini CLI, Zed, and 30+ others), so a per-project `AGENTS.md`
 carrying the block reaches almost every agent at once. Claude Code is the
@@ -712,35 +1074,50 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
-`ops/install-hook.sh --client codex` (Linux/macOS) — installs the
-**SessionStart briefing hook** for the selected client (what your memory is
-unsure about + lessons from past work + verified world facts + where we left
-off, injected at every session start) and, for the Claude client, a
-**UserPromptSubmit discipline hook**: a static one-line memory reminder on
-every turn — recall before reviewing code, docs, or PRs, then compare memory
-against the files; status questions are memory questions; log outcomes.
-(Codex is excluded from the per-turn hook: its per-prompt hook support is
-unverified, and every new Codex hook needs a manual trust review.) The
-installer backs up `~/.claude/settings.json`
-or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
-the briefing budget flags, and how session episodes open/close/resume
-without any hooks: [Episodes & sessions](docs/guide/episodes.md).
+For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
+The helper asks once, detects the hook source, backs up changed configuration,
+persists scoped trust through Codex, and verifies startup briefing, prompt
+reminder, and session cleanup, plus the agent-board check-in where the board
+is on. The Docker installer runs this step for you.
+See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
-**Codex hooks are experimental and off by default** (and not available on
-Windows — use the standing AGENTS.md block there). Writing `hooks.json` is
-not enough on its own; first enable the hook engine in `~/.codex/config.toml`:
+For Claude Code, use the [plugin](plugin/README.md), or the legacy
+`ops/install-hook.ps1 -Client claude` / `ops/install-hook.sh --client claude`
+for briefing and reminder hooks. The legacy `--client codex` path remains
+available but only writes hook definitions; it does not complete trust and
+verification. Session episodes also work without hooks through the daemon:
+[Episodes & sessions](docs/guide/episodes.md).
 
-```toml
-[features]
-codex_hooks = true
-```
+**Current Codex runtimes enable hooks by default, including Windows.**
+Availability depends on the application/runtime and policy, not the model.
+If `[features] hooks = false` is intentional, keep it and use the standing
+`AGENTS.md` block. Codex runs the plugin's Windows hooks as native
+PowerShell 7 commands; Claude Code runs their Bash commands through Git
+Bash, so it needs Git for Windows installed (see
+[plugin/README.md](plugin/README.md#windows)).
+See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
-**Codex hook trust:** Codex also skips every new or changed hook until you
-review and trust its exact definition. After installing the Codex hook, start
-Codex, open `/hooks`, review the definition from `~/.codex/hooks.json`, and
-approve it. Until then, MCP tools still work and the server-level
-`instructions` still load, but the richer session briefing is not injected.
+**Codex hook trust:** setup approval is limited to PseudoLife's current hook
+definitions: the memory and coordination SessionStart and UserPromptSubmit
+handlers and SessionEnd, plus, with the plugin, its `Stop` entry (Claude
+Code's wake hook, on by default; in Codex it runs only the park gate), its
+`SubagentStart` and two `SubagentStop` handlers (Claude Code's subagent
+board hooks, a no-op in Codex, plus the park gate) and its `PreToolUse`
+guard. It does not approve other plugins or bypass
+future trust checks. The same consent sets `approval_mode = "approve"` for
+the `memory_message` tool on the `pseudolife-memory` server, unless you set
+another value yourself, so a Codex thread can then read and send board
+mail without asking. Codex approves the definitions, not the scripts they
+run, so the approval also covers the scripts later PseudoLife updates
+install (for manual copies the update installs them itself, verified by
+content). Changed definitions need approval again, and so does a
+handler a plugin update adds; Codex skips an unapproved one silently in the
+desktop app, which `pseudolife-mcp update` (from a checkout, `ops/update.ps1
+-All` or `ops/update_clients.py`) reports as `needs-approval`. If automatic setup cannot
+use the installed runtime's trust interface, it reports the problem and
+asks you to open `/hooks` to review and trust the definitions. Approved standing
+instructions remain available as fallback. Installed files alone do not
+establish that hooks are working.
 
 ## Usage patterns
 
@@ -757,22 +1134,34 @@ memory_store("Decided to use stdio transport for the MCP because no port conflic
 ```
 
 **When corrected** — marks the old fact superseded *and* stores the
-correction; both surface in future retrieval, the new one ranked higher:
+correction; both surface in future retrieval, the new one ranked higher.
+Select the entry by the `id` carried on the search or recent hit:
 ```
 memory_supersede(
-  "Provider interface uses synchronous calls",
-  "Provider interface uses async calls — sync version was the v0.7 prototype only"
+  entry_id=417,
+  new_text="Provider interface uses async calls — sync version was the v0.7 prototype only"
 )
 ```
+`old_text=` still selects by the full stored text when that text is exactly
+unique among live entries; it is the legacy selector and the only one file
+mode has. Ambiguous or missing targets change nothing.
 
 **Hygiene** — `memory` and `fact` scopes hard-delete (at least one filter
-is required for scope `memory`, preventing accidental wholesale deletion);
-`lesson` and `world` scopes retire the slot with an audit row and are
-reversible with `memory_graph_review(action="restore_slot", store=...,
-src="entity|attribute")`; for "keep the history but mark it wrong" use
-`memory_supersede` instead:
+is required for scope `memory`, preventing accidental wholesale deletion;
+several filters narrow the match, so `text="probe", source="status"` is
+the probe entry in that source, not the whole source; a match over
+`memory.delete_confirm_threshold` entries — default 20, `0` disables — is
+refused with `would_delete` until the call repeats with
+`confirm_bulk=true`; on Postgres, forgetting an entry also retires the
+current facts, dream edges and lessons it was the last surviving source of,
+keeping them as history, and queues affected session digests for
+regeneration); `lesson` and `world` scopes retire the slot with an
+audit row and are reversible with `memory_graph_review(action="restore_slot",
+store=..., src="entity|attribute")`; for "keep the history but mark it
+wrong" use `memory_supersede` instead:
 ```
-memory_forget(scope="memory", source="test-noise")
+memory_forget(scope="memory", source="test-noise")              # refused past 20 matches
+memory_forget(scope="memory", source="test-noise", confirm_bulk=True)
 memory_forget(scope="fact", entity="test-entity")
 ```
 
@@ -787,12 +1176,14 @@ episodes, and full-table views all live there. Going deeper:
 
 A **dream** distils the recent associative stream into canonical cortex
 facts while you're not looking: pull unconsolidated memories → extract
-`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+`(entity, attribute, value)` → acknowledge those exact entries durably.
+New entries remain pending regardless of their timestamps; failed acknowledgement
+can replay claim application. Manual commits use the token returned by `pull`.
 Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and acknowledges input batches, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
@@ -863,28 +1254,54 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
 **Observatory** (health, per-layer counts, the memory store's capacity meter, dream
-gauges), **Cortex** (canonical facts with provenance, version-history
-timelines, inline Accept/Discard for contested slots), **World / Lessons /
-Episodes**, **Stream** (live search with rerank/BM25 toggles and a
-ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
-can Accept/Reject merges or — for a source file and its own bare concept,
-`band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss; proposals a background dream has already judged carry a
-verdict chip — accept/reject/leave with confidence, the model's reason in
-the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
-badges, diff-preview, and atomic save).
+gauges, consolidation review), **Cortex** (canonical facts by entity with
+provenance, version-history ladders, Adopt/Discard for contested slots),
+**World / Lessons / Episodes**, **Stream** (live search with rerank/BM25
+toggles and a ranking-trace panel), **Recall** (multi-hop walks and paths
+between two entities), **Graph** (a 3D galaxy of entities with an entity page
+per star, and a table view), **Review** (the graph review queue: Accept/Reject
+merges or — for a source file and its own bare concept, `band.py` ↔ `band` —
+record an `implements` edge instead of forcing merge-or-dismiss; proposals a
+background dream has already judged carry a verdict chip — accept/reject/leave
+with confidence, the model's reason in the tooltip — as a lead, never a
+decision), **Insight** (hubs, communities and open questions from the graph
+digest), and **Settings** (every safe `config.yaml` scalar with
+live-vs-restart badges, diff-preview, and atomic save). Bookmarks into the
+pre-v3 console (`#/console`, `#/atlas`, `#/coordination`) land on the
+matching view.
+
+The **Board** is a read-only coordination view: active roster/status age, reported
+children, park needs/resume, resource holders and FIFO queues. Pending mail
+counts are visible only for the caller's principal; the latest 100 retained
+send/read/ack/wake/expiry events omit all message bodies. This view requires
+a configured bearer on `coordination.allowed_principals`, even on an otherwise
+open loopback installation. Refresh neither receives/acknowledges mail nor
+settles expired leases. Snapshots are marked stale after a minute; use Refresh
+for current state. The API is `GET /api/agents?view=coordination&limit=50`
+(roster limit 1–50); the default `/api/agents` awareness response is unchanged.
+Incoming audit visibility uses current recipient ownership, so incoming events
+may no longer appear after the recipient address is pruned; audit retention
+also bounds the timeline. A cold durable tier reports unavailable rather than
+initializing the bank through this read.
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No build step, no CDN, fully offline —
-vanilla ES modules + vendored OFL fonts served straight from the daemon.
-Developing the UI? A fixture-backed dev server (no Postgres, no torch)
-renders the real frontend against canned data:
+prompts for it and stores it locally). REST `POST` bodies are capped in
+wire bytes: 4 MiB for the text-bearing writes (`/api/facts/set`,
+`/api/consolidate`, `/api/supersede`), 32 KiB for `/api/coordination/*`,
+16 KiB for the session-end hook, 1 KiB for `/api/pair`, and 256 KiB for
+everything else; a larger body gets HTTP 413 `{"error":
+"request_too_large"}`. No CDN, fully offline: a Svelte
+build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+and a vendored 3D engine, served straight from the daemon, so neither the
+daemon image nor a pip install needs Node. The source is in
+[`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
+build differs. Developing the UI? A fixture-backed dev server (no Postgres,
+no torch) serves the console against canned data:
 `python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
 Its payloads self-announce (`"fixtures": true` on `/health`), and the
-topbar shows a "DEMO DATA — fixture server, not a real bank" chip in
-place of the live chip, so a fixture run is never mistaken for a real
-bank.
+topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
+mistaken for a real bank.
 
 ## Capabilities at a glance
 
@@ -892,7 +1309,7 @@ bank.
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
 | Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection admits potential updates, including a deterministic slot-identity path regardless of embedding similarity, while retaining earlier source notes; whole-note supersession requires an explicit replacement operation |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender); an `assistant`-origin add cannot convert or join another tier's set, and cannot retract another tier's member |
 | Provenance contenders | Tier-rank guard `user > action > agent > assistant`; `memory_fact_resolve` |
@@ -903,18 +1320,19 @@ bank.
 | Reverse-engineering evidence | Immutable original-byte, SHA-256-deduplicated JSON artifacts + separately reviewed build-scoped claims; exact address lookup and hash-verified ZIP export/import; isolated from memory/dream consolidation |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
-| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
+| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
-| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v37 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, RE evidence, config editor (read-mostly, token-gated like `/mcp`) |
+| Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 | RE Hub extension schema | `v34-rehub` (`rehub_schema_version`) — an independent, idempotent extension lineage that does not consume or override upstream's integer schema version |
 
 ## Troubleshooting
 
-Start with `curl http://127.0.0.1:8765/health` — it reports the schema
-version, storage backend, auth state, and `persist_errors` (non-zero means
+Start with `curl http://127.0.0.1:8765/health` — it reports the daemon's
+package `version`, the schema version, storage backend, auth state, and
+`persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
@@ -925,7 +1343,13 @@ pseudolife-mcp-daemon`).
   OpenAI-compatible endpoint
   ([Quickstart](#what-lite-gives-you-and-the-one-thing-it-doesnt)) or use
   the Docker tier's bundled sidecar. `"extractor": "disabled"` instead
-  means dreaming itself is switched off in config.
+  means dreaming itself is switched off in config. `"extractor":
+  "stalled"` means an extractor is configured but live dreams have stopped
+  reaching it; the `stall` sub-object gives the reason and times. For
+  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
+  hosted endpoint rejected its key): re-run
+  `claude auth login` (or `codex login`) on the daemon host. See
+  [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
   path: the embedded Postgres runtime needs an **ASCII-only** data
   directory. Set `PSEUDOLIFE_MCP_DATA_DIR` to one (e.g.
@@ -960,8 +1384,29 @@ pseudolife-mcp-daemon`).
   and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
   that environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
+  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
+- **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
+  unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
+  is at the bottom of `mcp-server-pseudolife-desktop.log`
+  (`mcp-server-pseudolife-memory.log` for an entry not yet renamed) in the app's log
+  folder (`%LOCALAPPDATA%\Claude\Logs` on Windows, `~/Library/Logs/Claude`
+  on macOS). If it is a 401, the daemon is token-gated and the
+  Desktop-launched shim holds no credential: Desktop sanitizes the
+  environment, so put `PSEUDOLIFE_MCP_TOKEN_FILE` in the entry's `env` (see
+  Claude Desktop under [Wire into your coding
+  agent](#wire-into-your-coding-agent)) or re-run `ops/install.* --client
+  claude-desktop`, then fully quit and relaunch. On the Windows Store build
+  the file lives under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`. If the
+  entry already carries `PSEUDOLIFE_MCP_TOKEN_FILE` and still 401s, the
+  shim predates token-file support (PyPI releases through 0.15.0 read only
+  the literal token): `pseudolife-mcp --help` from a capable shim lists
+  `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim (`python
+  ops/update_clients.py --only shim` from the checkout installs a new
+  runtime beside the running one, so no session has to close) and re-run
+  the installer, which now refuses to register an older one against a
+  token file.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —
@@ -994,8 +1439,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook — plus, Claude client, the UserPromptSubmit
-discipline hook — from `~/.claude/settings.json` and/or
+the SessionStart briefing hook — plus the UserPromptSubmit memory-change
+hook (`pseudolife-mcp prompt-hook`; older installs: the discipline echo) — from `~/.claude/settings.json` and/or
 `~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing
@@ -1006,15 +1451,23 @@ model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
 suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
 database on the bundled dev container (never your real bank; concurrent
 runs can't collide), dropped on exit, and skip cleanly without Postgres.
-Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
+The suite logs in with its own test login, which cannot open the bank
+(`pseudolife-mcp test-login create` writes `~/.pseudolife-mcp/test-pg.env`;
+see [agent isolation](docs/guide/agent-isolation.md)), else the password in
+`ops/.env` (override with `PSEUDOLIFE_TEST_DATABASE_URL` or
+`PSEUDOLIFE_TEST_PG_PASSWORD`); a server that is reachable but rejects the
+credentials *errors* the PG-backed tests rather than skipping them, so a
+rotated password can never produce a green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet
 
 - **Reflection via MCP sampling** — would let the dream borrow *Claude
   itself* as the extractor;
   [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
-- **Cross-machine sync** — memory lives on one PC's disk; syncing via
-  rclone / syncthing is left as an exercise.
+- **Replication / offline copies** — one daemon owns one bank; other
+  machines use it over the network
+  ([remote bank](docs/guide/remote-bank.md)), but there is no replica or
+  offline mode.
 - **Automated world-knowledge ingestion** — populating the world cortex
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today

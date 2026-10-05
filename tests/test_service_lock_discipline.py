@@ -63,22 +63,67 @@ SERVICE_PY = SERVICE_FILES[0]
 # test_allowlisted_helpers_only_called_under_lock, seeded by the
 # 2026-08-21 caller-by-caller audit).
 CALLER_HOLDS_LOCK = {
+    "_pending_lesson_signals",
+    "_refresh_source_retired_lessons_locked",
     "_assert_public_search_path",
     "_ensure_init",
+    # HLC startup seeding is reached only through _ensure_init; the fixpoint
+    # below verifies that entire caller chain remains under the service lock.
+    "_reseed_hlc",
+    # Reached only from _ensure_init; the fixpoint below verifies its lock.
+    "_initialize_dream_tracking",
+    # The store-building body of _ensure_init (fail-closed hydration,
+    # 2026-09-23), split out only so a failure can drop what it built.
+    "_hydrate_resident_stores",
+    # Drops stale resident stores after a writer handover; first step of
+    # _ensure_init (the fixpoint below verifies its lock).
+    "_rehydrate_if_bank_changed_hands",
     "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",
     "_entity_kind_map",
     "_emit_correction_signal",
     "_link_lesson_graph",
+    "_write_lesson_locked",
+    # ReviewJudgments invokes these evidence reads while locked; the
+    # *_from pack builders that consume them touch no storage.
+    "_judge_evidence_locked",
+    # The merge judge's relate filing (2026-09-30), called inside the
+    # locked reject loop of deep_dream_judge.
+    "_file_relate_link",
+    "_file_relate_link_isolated",
+    "_link_evidence_locked",
+    "_junk_evidence_locked",
+    "_graph_accept_proposal_locked",
+    "_graph_reject_proposal_locked",
+    "_graph_accept_entity_merge_locked",
+    "_graph_accept_entity_junk_locked",
+    "_graph_reject_entity_proposal_locked",
+    "_graph_propose_links_locked",
+    "_graph_dismiss_duplicate_locked",
+    "_write_graph_snapshot_locked",
+    "_lesson_duplicate_locked",
+    "_recover_lesson_synthesis",
     "_link_dream_relations",
     "_annotate_lesson_staleness",
     # Retract traversal — read-time helpers over the engram cross-index,
     # each reached only from an already-locked read surface (the fixpoint
     # below is what actually verifies that).
-    "_superseded_evidence",
+    "_annotate_trace_invalidations",
     "_annotate_set_slot_evidence",
     "_derived_from_entries_locked",
+    "_resolve_correction_targets_locked",
+    "_retire_entries_locked",
+    # CMS invokes the delete callback inline, within delete's lock hold.
+    "_forget_entries_locked",
+    "_correction_trace_state",
+    "_hydrate_correction_rows",
+    "_recover_correction_locked",
+    "_recover_entry_reinstatement_locked",
+    "_stage_correction_locked",
+    "_apply_correction_locked",
+    "_apply_correction_under_mutation_lock_locked",
+    "_correction_lock_session_lost_locked",
     # Constraint pinning (schema v35) — cortex_search's per-fact dict builder
     # and the TypeRetrieve pin step, both reached only from inside
     # cortex_search's lock (the fixpoint verifies the callers).
@@ -86,9 +131,14 @@ CALLER_HOLDS_LOCK = {
     "_pin_constraint_facts",
     "_log_retrieval_event",
     "_record_retrieval_use",
-    # used_ids labelling: loops _record_retrieval_use inside record_outcome's
-    # lock, so it inherits the same requirement (the fixpoint verifies it).
+    # used_ids labelling: calls credit_retrieval_uses once inside
+    # record_outcome's lock, so it inherits the same requirement (the
+    # fixpoint verifies it).
     "_label_used_entries",
+    # v44 records: the lesson-search log row (inside lesson_search's lock)
+    # and the used_ids partition on the signal row (inside record_outcome's).
+    "_log_lesson_search",
+    "_record_signal_used_ids",
     "_track_slot_reads",
     "_persist_episodes",
     "_persist_tombstones",
@@ -103,6 +153,11 @@ CALLER_HOLDS_LOCK = {
     "_pending_digest_candidates",
     "_store_digest",
     "_delete_episode_row",
+    # v43 client-session record write-throughs, called from the locked
+    # episode lifecycle (start, close, resume) like _delete_episode_row.
+    "_register_client_session_locked",
+    "_end_client_session_locked",
+    "_reopen_client_session_locked",
     "_retitle_locked",
     "_auto_title_locked",
     "_resolve_or_create_entity",

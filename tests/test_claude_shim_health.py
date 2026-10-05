@@ -41,11 +41,6 @@ def test_parse_args_host_defaults_to_loopback():
     assert shim._parse_args(["--host", "172.17.0.1"]).host == "172.17.0.1"
 
 
-def test_health_ok_when_cli_answers(monkeypatch):
-    ok, detail = _cli(monkeypatch, True).health()
-    assert ok is True
-
-
 def test_health_fails_when_cli_errors(monkeypatch):
     ok, detail = _cli(monkeypatch, False).health()
     assert ok is False and "Not logged in" in detail

@@ -46,12 +46,33 @@ The shipped configuration is deliberately conservative:
   rebinding) is rejected. That is a browser-facing guard, not
   authentication — anything that can make a loopback-looking request to a
   tokenless daemon can read the bank.
+  The maintainer actions under `/api/maintainer` (a board message sent as
+  the maintainer, withdrawing a sent message, a delegate or coordinator
+  role change, adding a passkey (after the first, which the one-time
+  enrolment code admits), cancelling or revoking one) need more than the bearer: each is
+  signed with the maintainer's WebAuthn passkey, user verification
+  required, and a tokenless daemon refuses them all. Every `/ui/`
+  response carries a strict `Content-Security-Policy` (no inline or
+  foreign script, no framing), so script injected inline or from another
+  origin cannot run to request its own maintainer challenge.
 - **`/health` is unauthenticated and verbose.** It is an open liveness probe
-  by design, and it reports more than "ok": schema version, storage backend,
-  whether a token is set, durable-save error count, and — when the daemon is
-  degraded — a startup-refusal message and the raw database error string,
-  which can carry DSN-shaped detail. Anyone who can reach the port reads all
-  of it. Fine on the loopback default; a reason not to publish the port.
+  by design, and it reports more than "ok": package version, schema version,
+  storage backend, whether a token is set, the `bank` fingerprint (16 hex
+  characters; it tells banks apart and is not a secret), durable-save error
+  count, the image's `build` stamp (`git_sha`, `dirty`, `built_at`,
+  `source`), `coordination` (whether the board is on, and its wake caps),
+  `updates` (the newest known release, when it was checked, and the
+  unattended-update switches), the hooks digest, memory headroom, the
+  embedder in use, the last backup's age, the `extractor` state with a
+  `stall` record (reason, times and failure count) when dreams have stopped, and
+  flags such as `migration_partial`, `dream_tracking_error` (a code only)
+  and `capacity_warning`. When the daemon is degraded it adds a
+  startup-refusal message, the raw database error string and a `not_ready`
+  reason, which can carry DSN-shaped detail. Anyone who can reach the port reads all of it.
+  Fine on the loopback default; a reason not to publish the port.
+  `pseudolife-mcp expose tailscale` refuses a daemon without a token, but
+  `/health` stays unauthenticated, so after it every machine on the tailnet
+  can read this payload.
 - **Postgres is never LAN-exposed.** Remote clients only ever reach the
   daemon.
 
@@ -110,9 +131,19 @@ How this maps onto Pseudolife:
   is deliberately narrow: it does not stop a poisoned entry from being
   stored or retrieved — episodic search still surfaces it — it stops
   poison from silently gaining *canonical* authority.
+- **Board mail is another read path.** On an authenticated install, peer
+  sessions' messages reach the agent's context through the board (digest
+  previews, `memory_message` receive, wakes). They are framed as
+  agent-origin and cannot grant user approval, but a steered session can
+  still try to steer its peers; see the
+  [security posture](docs/guide/security-posture.md#the-threat-model).
 - **Remediation is deletion, not correction.** If a poisoned memory lands:
-  `memory_forget` the entry, then follow its engram links and retire any
-  cortex facts derived from it. Supersession history is your audit trail.
+  `memory_forget(scope="memory")` the entry. On Postgres that also retires,
+  in the same transaction, the current cortex facts, dream edges and lessons
+  it was the last surviving source of, and queues affected session digests
+  for regeneration. Then follow its engram links and retire any fact that
+  another source still supports (`memory_forget(scope="fact")`).
+  Supersession history is your audit trail.
   Telling the agent "that was wrong" only adds a correction alongside live
   poison.
 

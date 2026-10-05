@@ -48,6 +48,9 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/configuration.md",
      "Every configuration knob, the DSN, schema version history, and "
      "extractor setups"),
+    ("docs/guide/coordination-recovery.md",
+     "Offline mailbox recovery after a full restore: revoke attachments, "
+     "rebind private adapter state, and explicitly resume delivery"),
     ("docs/guide/providers.md",
      "Per-coding-agent capability matrix, the hook-equivalent ladder, "
      "the AGENTS.md standard, and writer ids"),
@@ -63,6 +66,16 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/security-posture.md",
      "Memory poisoning (ASI06): the threat model, every shipped "
      "mitigation mapped to it, and what is not defended"),
+    ("docs/guide/remote-bank.md",
+     "One daemon, many machines: exposing the daemon over a tailnet, a LAN "
+     "or a proxy; per-machine principals; board admission; client-only "
+     "installs"),
+    ("docs/guide/tunnels.md",
+     "Guided ChatGPT Secure MCP Tunnel setup: private keys, resumable account "
+     "steps, read-only cloud verification, updates and optional autostart"),
+    ("docs/guide/agent-isolation.md",
+     "The test suite's own Postgres login that cannot open the bank, and "
+     "running agent sessions under a separate account"),
 ]
 
 

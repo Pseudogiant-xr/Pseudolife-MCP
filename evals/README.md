@@ -33,6 +33,33 @@ extractor change.
   pure *extraction quality*, not the cortex contender-parking policy.
 - Unreachable LLM rungs are skipped and recorded as `status: "unreachable"`.
 
+## Offline supersession audit
+
+`audit_supersessions.py` reads a private snapshot and replays uniquely linked
+replacement pairs through the current contradiction detector on CPU. It uses
+persisted vectors and slots; it never calls an embedding model, NLI model,
+external service or live database. Recorded replacements and current detector
+agreement are not semantic correctness labels or proof of historical cause.
+
+```powershell
+python evals/audit_supersessions.py --snapshot <private-dir>/entries.snapshot.json --out-dir <private-dir>/audit --sample-per-stratum 2 --seed 0
+```
+
+The JSON input is `{format_version: 1, metadata: {...}, entries: [...]}`.
+Each entry supplies `id`, `text`, `embedding` (a numeric array), `source`,
+`timestamp`, `superseded_at`, `superseded_by_text`, and `slots` (four-string
+entity/attribute/value/polarity arrays). Capture it from a read-only consistent
+snapshot, recording schema/model provenance where known. Preserve a backup
+before any later correction campaign; this utility never applies corrections.
+
+Outputs are `summary.json`, `pairs.json`, `manual-sample.json` and
+`sample-key.json`. Give reviewers only the manual sample until their labels
+are complete. Same-source, cross-source and status/digest strata are included;
+small stratified samples do not establish a bank-wide error rate. Missing or
+ambiguous exact-text links are explicit; no arbitrary match is selected.
+All output must remain outside Git checkouts because it may contain private
+bank text. Existing output files are refused rather than overwritten.
+
 ## Rungs
 
 `LADDER_ORDER` (`ladder_sweep.py`) is the sweep, in rung order — 14 rungs.
@@ -54,7 +81,7 @@ changes, so read the code if they disagree.
 | `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `$PSEUDOLIFE_BENCH_DG_URL` (default `http://127.0.0.1:8082/v1`, via `evals/dg_shim.py` — no llama-server support for diffusion archs) ⚠️ |
 | `gemma4-26b-qat` | Gemma 4 26B-A4B QAT-Q4_0 (candidate)          | `http://127.0.0.1:8081/v1`   |
 | `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
-| `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
+| `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default until `e4b-v3` replaced it (2026-08-08)** | `http://127.0.0.1:8081/v1` |
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
@@ -125,7 +152,10 @@ shim inherited the host's `~/.codex/config.toml`
 the `claude` CLI's per-model default. Cross-machine reruns may measure a
 different effort setting; a rerun wanting comparability should pin it
 with the flag (or the request-level `reasoning_effort` field both shims
-now honour).
+now honour). Since 2026-09-29 the Codex shim no longer reads
+`~/.codex/config.toml` at all, so an unpinned rerun gets the CLI's
+per-model default, not the host's setting: `--reasoning-effort high`
+reproduces these runs.
 
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served
 GGUF between runs (see below). Run one, then the next.
@@ -1170,7 +1200,10 @@ instruction is a separate change needing its own gate.
   and reaches the sidecar **only when the shim is unreachable**. The shim
   replaces the shipped prompt prefix with `sonnet_extractor_v2.md`, so
   until that override file carries the same instruction the new prompt
-  serves approximately nothing on this install.
+  serves approximately nothing on this install. (That follow-up has since
+  landed: `sonnet_extractor_v4.md` carried the same blocks from 2026-09-05
+  — the gate in the next section — and `sonnet_extractor_v5.md`, the shim
+  default since 2026-09-07, still does.)
 - **Restart the shim after `ops/update.ps1`.** A shim process holds the
   `_SYSTEM_PROMPT` of the tree it was launched from and swaps exactly that
   prefix (`evals/claude_shim.py`, `system.startswith(_SYSTEM_PROMPT)`).
@@ -1383,6 +1416,34 @@ here only because the v4 → v5 diff is six token substitutions and no rule
 change — the shape of edit the KU-oracle gates for the v12 base (#279,
 #280) already measured on the daemon path. A shim prompt change that alters
 a rule needs the KU-oracle paired gate, not this table.
+
+##### Opus 5.5 against Opus 5 on the shim (2026-09-28)
+
+The same instrument, asked whether `claude-opus-5-5` extracts as well as
+`claude-opus-5` on the Claude shim with the v5 prompt: the `opus-5` rung on
+port 8083, two replicates per arm, only the model the shim served changed.
+The arm files cannot show that change (they record the rung, `opus-5`, and
+the alias the daemon asks for, `extractor`), so the verdict carries it:
+its `served_model` field reads `claude-opus-5` for the pre arm and `claude-opus-5-5` for the post arm,
+from the shim's serving lines recorded at run time. A first post attempt was
+discarded because the old shim still held the port.
+
+| arm | served model | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | claude-opus-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-opus55-pre.json` |
+| pre, rep 2 | claude-opus-5 | 1.0 | 0.0 | 13.9 | 16 / 16 | `opus-5-opus55-pre-rep2.json` |
+| post | claude-opus-5-5 | 1.0 | 0.0 | 13.7 | 17 / 17 | `opus-5-opus55-post.json` |
+| post, rep 2 | claude-opus-5-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-opus55-post-rep2.json` |
+
+**The gate passes, at the ceiling.**
+`ladder-opus55-paired-verdict-threshold.json` reads `gate: PASS` and `no_regression_gate: PASS`,
+with `rungs["opus-5"].cleared: true`: both arms
+beat naive RAG inside its token budget and the post arm goes backwards on
+neither quality metric. Both arms sit at the ladder ceiling on every run and
+the token ranges (pre 13.9–14.8, post 13.7–14.8) overlap, so the ladder
+cannot tell the two models apart. That is what licensed moving the
+Claude-shim default to `claude-opus-5-5` (maintainer decision, 2026-09-29):
+no regression, not a measured improvement.
 
 The run artifacts carry `git_rev … 0e1338be-dirty`: the four runs were made
 from the working tree that became this change, before it was committed —
@@ -1879,6 +1940,29 @@ Convention, updated:
   `replicate.py` prints a nondeterminism WARNING if replicates of
   byte-identical contexts ever disagree, which means the run was served by
   the fast fork.
+- **The embedder's precision is recorded, and compared.**
+  `EmbeddingConfig.cpu_dtype` defaults to `auto` (bf16 on a CPU with native
+  bf16, fp32 elsewhere, including GitHub runners and most Intel CPUs), and
+  `PSEUDOLIFE_EMBEDDING_CPU_DTYPE` overrides it per process, so one command
+  embeds differently on different hosts. Every harness that builds an
+  embedder stamps `EmbeddingPipeline.describe()` (`backend`, `device`,
+  `dtype`) into what it writes (`evals/embedder_stamp.py`). LongMemEval and
+  BEAM rows record one description per stage that embedded their contexts
+  (`extract`, `rebuild_contexts`, `rag_lite_rebuild`, `band_ablation`);
+  summaries, `.agg.json` files and the gate baseline carry the merge.
+  `replicate.py compare` and `gate-check` print a WARNING when the two
+  sides embedded at different precisions. Stages are compared one by one,
+  and a side that never ran a later stage is compared through its
+  `extract` stage, so a tag rebuilt in bf16 warns against its fp32 source.
+  A stage that ran but was recorded as unknown (None) never inherits.
+  `rag_lite_rebuild` is recorded but not compared, because its output is
+  byte-identical to the judged control by construction. It is a caveat,
+  not a failure: bf16
+  and fp32 scored every gate arm identically on 2026-09-23
+  (`results/embedder-cpu-bf16-probe-20260923.json`). Artifacts written
+  before the stamp existed read as `unknown`, never as a mismatch. That
+  includes the committed gate baseline until it is next re-established with
+  `-Establish`.
 - **Question-sampling variance does not go away** and is the real limit on
   small effects. A deterministic judge makes a measured difference *real*,
   not *significant*: config-vs-config claims still need the paired
@@ -1905,6 +1989,16 @@ re-extract):
 `evals/regression_gate.ps1` runs a pinned, replicated slice against the
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
+
+The pinned bank dumps are required: a missing bank directory exits with
+infrastructure code 2 before prior gate results are cleared or the GPU server
+starts. Missing individual dump files fail during rebuilding, after cleanup
+but before the GPU server starts.
+There is no fallback that can pass by copying all contexts. With the banks
+present, the gate reconstructs cortex fact ranking offline and judges the
+resulting contexts. Raw-entry contexts remain copied from the pinned run;
+CMS candidate selection, entry reranking, service search and MCP rendering
+need separate tests or a replay through those actual paths.
 
 > **SUPERSEDED 2026-07-27.** Everything in this block was measured on the
 > nondeterministic turboq server. The baseline was re-established on the
@@ -2577,7 +2671,7 @@ unchanged by the correction and is stated once, above.
 
 Two harnesses answer "can a judge model reproduce the ratified human panel"
 for the daemon's autonomous review-queue judging (2026-09-02 — every queue
-the Console's Atlas Review view surfaces now gets a shadow/auto-gated
+the Console's Review view surfaces now gets a shadow/auto-gated
 verdict from the SHIPPED judge code path itself, not a separate scorer).
 
 `judge_ladder.py` runs `OpenAICompatExtractor.judge_merges` against the
@@ -2669,6 +2763,86 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 (Cognee, Mem0, Hindsight): those are GPT-judged, and the runs below are
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
+
+## "Learning on the Job" on our instrument — the τ-bench adapter (added 2026-09-08; no numbers yet)
+
+Tablan et al. (arXiv 2607.22157) distil every τ-bench banking episode into a
+retrievable rule and report single-trial success 1.6× a static-RAG control
+from the outcome verdict alone and 2.6× from corrections (22 of 84
+never-solved tasks converted), replicated on Sonnet 5. Their numbers cannot
+be read against ours: a gpt-5.2 customer, a hosted memory service and a
+frontier agent are a different instrument. `taubench_adapter.py` runs their
+protocol — tau2-bench 1.0.1 at the pinned commit, 97 banking tasks, 4
+trials, trial-major, deterministic evaluator — with Pseudolife as the
+memory backend, on a local customer, so the only thing read is the paired
+ratio over our own baseline. The design record, the mapping onto the
+lessons tier and the preregistered parity bar are in
+`docs/specs/2026-09-08-learning-on-the-job.md`.
+
+- **Two runtimes, one protocol.** The tau2 side is a Python 3.12 plugin
+  (`evals/taubench_pseudolife/`, its own `.venv-taubench`, never imports the
+  engine) registering a `pl_memory` agent through a four-hunk patch that
+  mirrors the paper's; memory tools ride as ordinary environment tools and
+  mid-episode writes are deferred, exactly as the paper's harness does. The
+  repo-venv adapter builds the `tau2 run` commands, drives the dreams,
+  scores and reports.
+- **Feedback arm and rule route are separate arms.** `--condition
+  experience|instruction` picks verdict-only vs verified-sequence + action
+  diff (`PL_SUPERVISION`); `--rules entries|lessons` picks where rules live
+  (constraint entries written by the reflection and credited by
+  `used_ids`, or `memory_outcome` signals the dream distils under rule
+  mode). Both routes run under both arms; the results file carries the
+  route in its name so the resume set never conflates them.
+- **Retrieval mode is an arm.** `--retrieval nudge` (the paper's reported
+  configuration: the first turn asks the model to search) produced one
+  memory search in twelve smoke episodes under tool-call emulation, even
+  with a memory addendum in the policy; `--retrieval inject` (the paper's
+  second mode: the harness runs both searches on the first turn and folds
+  the results into the agent's copy of it, through the same dispatch, so
+  served ids and the window clock are recorded exactly as for an
+  agent-driven search) served and credited memory in every episode. Inject
+  is part of the run name so its rows never share a resume set with a
+  nudge run.
+- **Cadence is an arm too.** `--distill episode` lets the plugin dream after
+  every episode (the paper's cadence); `--distill trial` runs tau2 once per
+  trial and dreams between trials — the paper's own data shows learning
+  only from a task's second trial, so this is the cheaper cadence the spec
+  expects to tie.
+- **The use-window invariant is checked, not assumed.** One `X-PL-Session`
+  per episode, the outcome logged before the episode ends and inside
+  `use_window_seconds` of the first search; the plugin records `window_ok`
+  per episode (the outcome is still sent — refuse the label, never the
+  signal) and `--report` withholds every ratio if any episode violated it —
+  a silent zero label is the failure PR #285 documented.
+- **Instruments.** Customer = local Qwen under `Start-Qwen`'s reproducible
+  config (never `-Fast`); agent = Claude Sonnet 5 at medium effort through
+  `claude_shim.py --emulate-tools` on an eval-only port
+  (`PSEUDOLIFE_BENCH_TAUBENCH_AGENT_URL`; the port guard refuses :8082/:8086);
+  bench daemon on its own database and port. The adapter starts none of
+  them and exits with the command to run.
+- **No benchmark text in any prompt.** The plugin's prompt constants and the
+  engine's rule prompt are checked by `tests/test_prompt_example_lifts.py`
+  for banking vocabulary and for 4-gram overlap with the task set and the
+  698 policy documents when the pinned checkout is present.
+
+```bash
+# smoke — 3 tasks x 2 trials, plumbing only; runs on the maintainer's word
+python evals/taubench_adapter.py --condition instruction --rules entries \
+    --out-tag lotj --smoke --task-ids-file local/data/tau2/tasks.txt
+# report a finished learning run against the baseline rows; the task list
+# is the denominator's authority (a task missing from the rows is a failure)
+python evals/taubench_adapter.py --condition instruction --rules entries \
+    --out-tag lotj --report --task-ids-file local/data/tau2/tasks.txt \
+    --baseline-rows evals/results/taubench-baseline-lotj.jsonl
+```
+
+**No τ-bench number is published here.** The smoke and the full grid are
+separate launches; the parity bar — instruction ≥ 1.6× our static-RAG
+pass^1 with the paired bootstrap interval excluding 1.0×, the paper's
+Sonnet 5 replication figure (its 2.6× headline is Mistral Large at a 0.064
+baseline; experience has no Sonnet arm in the paper and carries no bar) —
+and what each way of missing it would mean are preregistered in the spec,
+amended 2026-09-09 before any learning-arm episode ran.
 
 ## Cognee on our instrument — the adapter (added 2026-09-07; no numbers yet)
 
@@ -3097,6 +3271,7 @@ the summary:
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"   # unset = shipped default 1
 $env:PSEUDOLIFE_BENCH_FUSION    = "rrf" # unset = shipped weighted_sum
 $env:PSEUDOLIFE_BENCH_RERANK    = "1"   # unset/0/false/off = shipped default off (cross-encoder)
+$env:PSEUDOLIFE_BENCH_RERANK_TOP_N = "32"  # unset = shipped budget 20; the WHOLE pool must fit or the pass skips
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
     --tag arm1-pool --phase extract
 python evals/longmemeval_bench.py --dataset oracle --extractor e4b-ft `
@@ -3178,7 +3353,19 @@ three runs above), both with the reranker ON:
 $env:PSEUDOLIFE_BENCH_RERANK    = "1"
 $env:PSEUDOLIFE_BENCH_FUSION    = "weighted_sum"  # NOT rrf - see the CAUTION above
 $env:PSEUDOLIFE_BENCH_POOL_MULT = "4"             # "1" for the pool-m1rr cell
+$env:PSEUDOLIFE_BENCH_RERANK_TOP_N = "24"         # m4rr only — see below
 ```
+
+Since the bounded-reranking change (2026-09-22) the pass scores the whole
+combined pool or skips it with `candidate_budget_exceeded`. The `m4rr`
+cell's associative pool is `RAG_TOP_K` (6) x 4 = 24 candidates, over the
+shipped `top_n` budget of 20, so a rerun at the default budget serves the
+un-reranked order under a reranker-on stamp; the 2026-09-05 artifact was
+produced under the earlier head/tail rule (top 20 of 24 reranked) and is
+not directly comparable to either. Set `PSEUDOLIFE_BENCH_RERANK_TOP_N` to
+at least the pool width (24 here; `m1rr` fits at 6 and needs nothing).
+The summary stamps `reranker.top_n` (`null` = shipped 20) so a rerun can
+be audited either way.
 
 `weighted_sum` is not a preference: under `rrf` the reranker's
 `fusion_weight` collapses to cross-encoder-only ordering, so an
@@ -3437,7 +3624,8 @@ docker exec pseudolife-mcp-daemon python /tmp/lb.py --target all
 
 The prime optimisation target is the **shipped sidecar** — whatever
 `ops/Dockerfile.extractor` bakes, which since 2026-07-06 is an **E4B-class**
-model and currently the Gemma 4 E4B QLoRA fine-tune (`e4b-ft`), not the 2B the
+model and currently the Gemma 4 E4B v3 fine-tune (`e4b-v3`, since 2026-08-08;
+`e4b-ft` before it), not the 2B the
 findings below were measured on. **Qwen3.6-27B** (4090) is the quality CEILING,
 not the target. The `_LESSON_SYSTEM_PROMPT` here is tuned, then ported to
 `memory/dream.py`.
@@ -3551,9 +3739,13 @@ guard  floor   abstain_recall   false_abstain
 
 Raising the guard `0.3 → 0.65` (paired with `search_confidence_floor = 0.70`)
 **doubles** abstention recall at zero false-abstain. Pushing the floor higher
-trades into wrongly abstaining on answerable queries. **Recommended for an
+trades into wrongly abstaining on answerable queries. ~~**Recommended for an
 abstention-on deployment: `guard_min_score = 0.65`, `search_confidence_floor =
-0.70`.** Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
+0.70`.**~~ **Retired 2026-09-25:** measured on the MiniLM embedder; on real
+agent searches under the current embedder the pair flags searches whose hits
+agents used (`docs/guide/retrieval.md`, "Abstention & confidence floors").
+Both knobs shipped at their behaviour-preserving defaults then (`0.3` /
+`0.0`); the guard has shipped at `0.2` since the 2026-07-06 replay sweep.
 
 **Dream slot resolver (Feature A) — no measurable benefit; ships off.** Sweeping
 `dream_slot_match_threshold` (distractor-clean corpus) moved nothing:
@@ -3844,13 +4036,267 @@ trained on the bench corpus transfers directly to the live consolidation run.
 
 # Capture metrics (`capture_metrics.py`)
 
-Read-only report over the **live** bank measuring the memory loop's beats:
-capture coverage, outcome coverage of substantive sessions, per-session
-store density, failure+correction share, and the explicit-vs-inferred
-outcome mix. Carries the 2026-07-18 pre-auto-outcome baseline in its
-docstring and the success criteria for the 2-3-week re-measurement.
+Read-only report over the **live** bank measuring the memory loop's beats
+per client session: capture coverage, sessions that searched within 15
+minutes of starting, outcome coverage, outcomes that credited `used_ids`,
+stored entries another session retrieved within 14 days, per-session store
+density, failure+correction share, and the explicit-vs-inferred outcome
+mix. Since 2026-09-25 a session is a hook-registered root or a shim root
+with memory activity, not every keyed root episode (idle shim roots
+outnumbered sessions four to one); the docstring explains the pairing rule
+and carries the 2026-07-18 baseline, measured with the old denominator.
+The daemon deletes a session root that ends with no stored entry; since
+schema v43 sessions are counted from the `client_sessions` registration
+record, which survives that prune: sessions that only searched count, and
+so do hook-registered sessions that never touched memory (idle shim-only
+sessions are still dropped as transport artifacts), one per session key,
+with their memory-policy variant. Activity from before v43, or from a client that
+never registered, whose root is gone is still reported separately. Lesson
+searches and unmatched `used_ids` are reported as null: since schema v44 the
+bank persists both (`lesson_search_events`, `outcome_signals.used_ids`), but
+the script does not read them yet.
 
     python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
+
+---
+
+# Memory-policy bench (`memory_policy_bench.py`)
+
+Does the session-start memory policy change what an agent does with
+memory? Each run starts a disposable daemon on a free loopback port over a
+fresh `plbench_` database cloned from a seeded template (synthetic
+"Lanternfish" fixtures, `memory_policy_scenarios.py`), then one headless
+`claude -p` (or `codex exec`) session in a throwaway config home and a
+project outside the home directory, with the plugin's SessionStart and
+SessionEnd scripts. Arms are values of `memory_policy.variant`;
+`label@suffix` is an A/A copy.
+
+- **Isolation.** Database names must start with `plbench_` and the server is
+  asked which database it reached; the live bank and the live daemon ports
+  are refused. No real client configuration is written; the Claude child
+  gets only the current access token (it cannot refresh the login). A
+  project under the home directory would inherit `~/.claude/CLAUDE.md` as
+  an ancestor file, so the work root defaults to `C:\plbench` /
+  `/tmp/plbench` and is refused if any ancestor carries instruction files.
+- **Scenarios.** One per policy rule: a planted lesson, a contested fact, a
+  stale "current version", continuing another session, a decision plus
+  long-running work, a verified external fact, a secret in the prompt, and
+  an outcome that should cite what it used.
+- **Scoring.** Only from the daemon's records: the run database, the
+  daemon's REST view before shutdown, and a ledger the disposable daemon
+  keeps of every MCP tool call and hook response
+  (`memory_policy_daemon.py`), because the bank does not persist lesson
+  searches or unmatched `used_ids`. Task success checks the files the agent
+  left, never its own account.
+- **Validity.** A local capture proxy records each model request; a run is
+  valid only if the arm's policy text is present and no other memory-policy
+  text is. Constant across arms and listed in the artifact: the MCP server
+  instructions, the memory tools (deferred behind ToolSearch), the episode
+  line, the briefing and the plugin's slash commands. The per-turn reminder
+  and coordination are held off.
+- **Statistics.** Paired on (scenario, replicate), cluster-bootstrap 95%
+  CIs over scenarios, an A/A arm for the noise floor. A challenger replaces
+  the incumbent only if its score (compliance + task success − 0.1 per
+  100k BITE) beats it by more than the A/A spread and no guarded metric
+  (compliance, task success, `used_ids` precision, cost) regresses beyond
+  its own A/A noise.
+
+    python -m evals.memory_policy_bench run --tag <tag> \
+        --arms none,full_separate_hook,full_separate_hook@aa --replicates 3
+    python -m evals.memory_policy_bench report evals/results/memory-policy-bench-<tag>.json
+    python -m evals.memory_policy_bench estimate evals/results/memory-policy-bench-<tag>.json
+    python -m evals.memory_policy_bench regrade --tag <tag> --arms <same> --replicates <n>
+    python -m evals.memory_policy_bench cleanup
+
+**Sanity check, 2026-09-25** (`memory-policy-bench-sanity-20260925-regraded.json`:
+claude-sonnet-5 at medium effort, memory tools deferred behind ToolSearch;
+`none` against `full_separate_hook` and an A/A copy of it, 8 scenarios x 3
+replicates, 72 valid runs, $7.04 at list prices). The bench could not tell
+the two policies apart. The full policy moved the score +0.19 over no policy,
+inside the A/A noise floor of 0.24, and every other metric stayed inside its
+own A/A noise. Most scenarios scored zero compliance in every arm: agents made
+0.4 (none) to 1.0 (full) memory calls per run and solved most tasks from the
+repository alone. At this size the instrument is not fit for purpose yet; it
+needs scenarios that cannot be solved without memory and more replicates (the
+A/A floor narrows roughly with the square root of the number of pairs).
+
+---
+
+# Coordination recovery replay (`coordination_bench.py`)
+
+The local coordination instrument uses actual adapters and authenticated ASGI
+routes with synthetic Console responses. `--recovery` adds a persisted adapter
+reopen, pending-mail replay, idempotent send retry, and renewal of an owned
+resource lease with the same fence. It concurrently calls fixture memory search
+and pending-mail receive before the harness acknowledges the message. These
+checks run outside the latency sample; they do not measure embedding, durable
+memory writes, host wake, or model acknowledgment.
+
+```sh
+python -m evals.coordination_bench --recovery --samples 3 \
+    --admin-url <isolated-admin-url> --out <new-private-directory>
+```
+
+Coordinate access to the selected PG server before running. The explicit admin
+URL selects a separately provisioned server; the harness creates and removes
+only its uniquely named disposable database. Without it, the existing local
+bench-server default applies. Results use a new directory outside a repository
+or inside a gitignored directory and are never overwritten.
+
+`tests/test_coordination_bench.py` checks the replay oracle with scripted HTTP,
+including changed receipts, missing mail, and changed lease fences. The combined
+`test_reopen_replay_preserves_mail_and_fences_takeover_expiry_and_redaction` in
+`tests/test_coordination_storage.py` requires disposable PG and covers a new
+connection, attachment and lease takeover, expiry, and operator redaction. A
+connection reopen or scripted outage does not prove a PostgreSQL server restart
+or production load behavior; report unexecuted checks separately.
+
+# Coordination check-in bench (`coordination_checkin_bench.py`)
+
+Does the served coordination check-in (`CHECKIN_TEXT` in
+`pseudolife_memory/coordination.py`, what the plugin's startup hook prints)
+change *when* an agent messages a peer? The 2026-09-27 review of six
+sessions found 15 status updates, 9 peer lists and 7 receives against no
+sends until a human asked for one; the text listed the verbs and never said
+when a message was due. The question is one decision, so each run is one
+tool-free `claude -p` call (own system prompt, no settings files, no MCP
+servers, a throwaway config dir and a working directory outside the home
+directory, as the memory-policy bench does) that reads the arm's check-in
+text, a team, a board and a situation, and answers with one of three board
+actions: send a message now (and to whom), only update its status, or
+nothing.
+
+- **Scenarios** (`coordination_checkin_scenarios.py`): four teams that share
+  something (a lab with one GPU and a results database; an agency with a
+  style guide and a review calendar; a data team with a warehouse query
+  slot and a vendor API quota; one developer with two CLI sessions, one
+  test suite and one local database) x five rules x one situation where a
+  message is due and one where it is not: 40 in all. Situations never use
+  the words message, send, tell, notify or broadcast, and a send situation
+  leaves the peer it matters to on the board rather than naming it.
+- **Held-out sets.** `coordination_checkin_heldout.py` (8 shared-resource
+  situations, each with a peer tied to the shared thing on the board) was
+  written after the shared-resource rule had been reworded against the main
+  set; its result then drove a second rewording, so it is no longer held
+  out. `coordination_checkin_heldout2.py` (16 situations, both shipped rules,
+  both directions) was frozen in its own commit before the shipped wording
+  was scored on anything, and is the unbiased check. Each set has its own
+  digest in the artifact; `--scenarios all+heldout+heldout2` runs them
+  together and the artifact reports each set separately (`by_set`).
+- **Arms**: `none` (no check-in), `old` (the text served before the rules,
+  pinned verbatim in the fixtures with its SHA-256 in the test), `new` (the
+  constant now); `label@suffix` is an A/A copy for the noise floor; other
+  texts come from files with `--arm-file`, and every text measured on
+  2026-09-28 is committed under `evals/results/coordination-checkin-arms/`.
+- **Scoring**: correct when a send scenario gets a message and a no-send
+  scenario gets status or nothing; `addressed` (send scenarios) when the
+  message names the peer the rule points at, or everyone. Paired on
+  (scenario, replicate), cluster-bootstrap 95% CIs over scenarios, per rule
+  and split by expectation, so a rule that does not move its own scenarios
+  is visible. A resumed run reuses a record only if its arm text and frame
+  are unchanged.
+
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms none,old,new,new@aa \
+        --scenarios all+heldout+heldout2 --replicates 3
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms new,cut \
+        --arm-file cut=evals/results/coordination-checkin-arms/<file>.txt
+    python -m evals.coordination_checkin_bench report evals/results/coordination-checkin-bench-<tag>.json
+
+Two frames put the question. `board` (bench v1) asks for a board decision
+outright; `task` (the default since v2) asks for the agent's next step in its
+own work, with the board action as one field of it.
+
+**2026-09-28 (claude-sonnet-5, medium effort, 3 replicates, every run
+valid).** Nine artifacts, `coordination-checkin-bench-checkin-rules-20260928*.json`,
+in the order run. The shared-resource rule went through three wordings:
+(1) "check who holds it and message them"; (2) "message them that you are
+next ... a status line is not a queue, and do not guess that they are
+idle"; (3, shipped) "look for whoever holds it or has it booked; if someone
+does, message them that you are next ... a status line is not a queue; if
+the board shows it free, use it and say so in your status".
+
+1. *Board frame, five rules, wording 1* (no suffix, $2.01). New minus old
+   +0.000 over 120 pairs. Every arm, no check-in included, sent whenever a
+   situation named a peer, so four rules sat at ceiling; wording 1 of the
+   shared-resource rule also moved nothing, because the model read a
+   holder's posted ETA as making a message pointless.
+2. *Task frame, five rules, wording 2* (`-task`, $2.32): new minus old
+   +0.100 [+0.025, +0.200], all of it from the shared-resource rule
+   (+0.375) and keep-your-status-true (+0.125). "A message is what a peer
+   must act on" and "tell every active peer before debugging what you did
+   not break" scored 1.00 in every arm, no check-in included; "message
+   everyone waiting when you clear something" scored 1.00 in the old arm,
+   whose mechanical steps were enough (no check-in: 0.92).
+3. *Ablation* (`-ablation`, $1.78): the text without those first two rules
+   decided exactly like the full text (+0.000 over 120 pairs). The Codex
+   form carrying only them scored 0.90, the old text's accuracy.
+4. *Ablation* (`-ablation2`, $1.73): dropping the waiting rule as well
+   changed nothing (+0.000 over 120 pairs). A Codex form carrying the
+   shared-resource rule instead scored 0.97.
+5. *Wording 2 with the two kept rules* (`-shipped`, $2.23; named for the
+   text it was going to ship). New minus old +0.108 [+0.025, +0.208] over
+   120 pairs. On the send situations, the shared-resource rule went from
+   0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00.
+6. *First held-out set* (`-heldout`, $0.46). Wording 2 reversed: new minus
+   old -0.208 [-0.500, +0.000] over 24 pairs, because it messaged holders
+   who had already released the thing (no-send held 0.50 against the old
+   text's 0.92). Its gain in run 5 came from the four situations it had
+   been reworded against. Wording 3 adds the boundary.
+7. *Wording 3 on every set* (`-final`, $4.74, 960 runs), accuracy by arm:
+
+| set | no check-in | old check-in | wording 2 | shipped (wording 3) |
+|---|---|---|---|---|
+| main (40 situations) | 0.87 | 0.91 | 0.98 | 0.98 |
+| first held-out (8, used for wording 3) | 0.88 | 0.92 | 0.83 | 1.00 |
+| second held-out (16, frozen first) | 0.96 | 0.92 | 0.81 | 0.98 |
+
+Shipped minus old, by set: main +0.075 [-0.008, +0.175] (120 pairs);
+first held-out +0.083 [+0.000, +0.292] (24); second held-out +0.062
+[-0.062, +0.208] (48), A/A -0.021. Shipped minus wording 2 on the second
+held-out set: +0.167 [+0.000, +0.375].
+
+8. *Codex form, unbounded* (`-codex`, $2.54): "message its holder you're
+   next; status isn't a queue" gained on the main set (+0.067 [-0.017,
+   +0.167] over the old check-in) but, like wording 2, messaged holders who
+   had let go on the first held-out set: -0.167 [-0.417, +0.000], no-send
+   held 0.50.
+9. *Codex form, bounded and shipped* (`-codex4`, $2.56): "Need what a peer
+   holds? Message them you're next. Free? Use it, update status." adds
+   nothing on the main set (+0.000 [-0.058, +0.058]) and gains on both
+   held-out sets: +0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188],
+   holding every no-send situation. It ships over the unbounded form
+   because over-sending is the costlier failure.
+
+Runs 8 and 9 also re-scored the full check-in on the second held-out set
+against the old one: +0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188],
+beside run 7's +0.062. Three runs, the same direction, every interval
+crossing zero.
+
+Read plainly: wording 3 keeps wording 2's gain on the main set and removes
+its over-sending on both held-out sets. On the only unbiased set the gain
+over the old check-in, and over no check-in at all (0.96), cannot be told
+apart from zero. There the shared-resource rule lifted due messages from
+0.75 to 1.00 while holding no-send at 0.92, the old text's level; every arm
+scored 1.00 on keep-your-status-true, so only the main set supports that
+rule. The three cut rules are not shown to be useless: nothing any arm did
+could improve on them here. Nor does one decision in a short prompt
+reproduce what the review saw, an agent deep in its own work with the board
+out of mind; this bench is an upper bound on attention.
+
+**2026-10-02 (claude-sonnet-5, medium effort, 3 replicates, 576 runs, every
+run valid, $4.29).** After schema v50 the closing subagent sentence was
+reworded: the hooks list a Claude Code session's subagents, so a parent is
+no longer asked to name them by hand (which listed each one twice), and a
+Codex subagent has an address of its own, so "a subagent shares its
+parent's board address" became a Claude Code statement. The rules part is
+unchanged. Artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`,
+arms `v3` (the text served since 2026-09-28, from its arm file), `new` (the
+reworded constant, `coordination-checkin-arms/rules-v4-20261002.txt`) and
+`new@aa`, on all three sets. New minus v3 +0.005 [-0.021, +0.036] over 192
+pairs, inside the A/A spread (new@aa minus new -0.016 [-0.057, +0.021]);
+by set main +0.000, first held-out +0.000, second held-out +0.021
+[+0.000, +0.083]. The rewording moved no send decision, which is all this
+bench can say about it: who may write is not one of its five rules.
 
 ---
 
@@ -4388,19 +4834,33 @@ labels the whole served set rather than the one id someone happened to
 dereference.
 
 **Shipped 2026-09-05.** `memory_outcome(..., used_ids=[...])` credits each
-id to the most recent event in the session window that served it, writing
+id to the event in the session window that served it — originally the most
+recent one only; since 2026-09-08 **every** serving event in the window
+under an identified session (the agent names ids, not queries; with no
+session id the most-recent rule stays, because "same session" would then
+mean every other NULL-session event) — writing
 the ordinary `retrieval_uses` row under `used_via="outcome"` — so
 `retrieval_replay.py`'s `uses` label source and this script's `by_via`
 breakdown pick it up with no harness change, and the two dereference vias
-stay distinguishable from the asserted one. No schema bump, and no join:
-nothing links a signal row to the use rows it caused — the labels stand on
-their own, and which outcome named which ids is deliberately not recorded.
-The result reports `used_ids_recorded`, `used_ids_unmatched` and
-`used_ids_errors`, because an id no event served must not read the same as
-a landed label, and neither must a label the storage layer refused.
+stay distinguishable from the asserted one. No join: nothing links a signal
+row to the use rows it caused, and the labels stand on their own. Since
+schema v44 the signal row's `used_ids` column does keep what its ids became
+(credited / unmatched / served elsewhere).
+The result reports `used_ids_recorded`, `used_ids_unmatched`,
+`used_ids_served_elsewhere` (an event in the window served it, under another
+session id) and `used_ids_errors`, because an id no event served must not
+read the same as a landed label, and neither must a label the storage layer
+refused. The 2026-09-08 widening is sized by
+`results/retrieval-uses-multiserve-20260908.json` (read-only, live log):
+720 of 2,487 (session, entry) pairs — 29% — were served by more than one
+event in their session, so most-recent-wins left about one named id in
+three with an unlabelled earlier serving event.
 Whether agents actually pass it is the open question — the served session-start block
 (`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
-telemetry review measures the answer against the 1 label above.
+telemetry review measures the answer against the 1 label above. (Since
+2026-09-24 the block served by default is `STARTUP_MEMORY_CORE`
+— `memory_policy.variant: compact` — which asks for `used_ids` at task end
+too; `MEMORY_LOOP_BLOCK` is served only under `full_separate_hook`.)
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -4847,6 +5307,23 @@ raw chars, and the manifest by the new parameter's 81-char description in
 all three tiers — without a rerun of this ledger, which needs the live
 daemon.)
 
+**Superseded 2026-09-24 — the session-start row prices a block the hook no
+longer serves.** Since #364 the SessionStart hook serves
+`STARTUP_MEMORY_CORE`, a compact core that `tests/test_plugin_packaging.py`
+pins under 2,000 chars (the 7,500 cap above no longer applies), followed by
+a bounded briefing; `MEMORY_LOOP_BLOCK` remains the detailed standing copy in
+`examples/CLAUDE.memory.md`. `agent_token_ledger.py` now measures the core
+alone; the briefing after it depends on the bank and can fill the rest of the
+hook's 9,500-byte budget. The ledger has not been rerun, which needs the live
+daemon; until it is, the row above is the pre-#364 measurement.
+
+The tier counts have moved as well: on 2026-10-05 `minimal` holds 10 tools,
+`core` 24 and `full` 38 (counted from the tier tags in
+`pseudolife_memory/mcp_server.py`), so the manifest rows above price smaller
+tiers than ship now. `MEMORY_LOOP_BLOCK` is served only when
+`memory_policy.variant` is `full_separate_hook`, by the plugin's separate
+memory-policy hook, and has grown to about 8,200 characters.
+
 ## What a call costs — before and after the cuts
 
 Mean over the 15 queries, `memory_search` at the tool's default `top_k=8`:
@@ -4879,6 +5356,23 @@ one clipped under r2 (2,406 → 1,199 chars mean). It was published as a row
 here rather than left inside "entries block" because the r2 breakdown left
 those ~2,400 chars unlabelled between the block total and text + metadata
 (2026-09-04 review finding).
+
+**Superseded 2026-09-23 — the `superseded_by_text` rows in both tables
+price a field compact payloads no longer carry.** A superseded hit now
+serves `replaced_by: {id, at, preview, verified, current}` instead: the
+successor's row id (so `memory_get` is the recovery path the paragraph
+above said was missing), the date, a 120-char preview, whether an explicit
+correction made the link, and whether the successor is itself still live
+(`current`, added by a same-day follow-up). The 2026-09-23 review found
+that about 4 in 10 links the
+automatic contradiction detector left before it stopped superseding point
+at an unrelated note, so the three
+surfaces that told agents to prefer the replacement text now describe the
+pointer instead. The ledger meters the pointer in its own column
+(`entries_replaced_by_chars`) but has not been rerun, which needs the live
+daemon; until it is, the rows above describe the 2026-09-04 shape. The same
+change re-priced the manifest (the `memory_search` description, +242
+chars in every tier) and the session-start block (7,488 → 7,491 raw chars).
 
 One approximation, named: the narrow arm slices the width-5 cortex list
 `/api/search` returns rather than re-running `cortex_search` at width 3, so

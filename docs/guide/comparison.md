@@ -68,11 +68,15 @@ overwritten" and "there is one current answer" are different products.
 
 ### Supersession with version history
 
-A correction **supersedes**: the new value becomes current, the old one is
-retained as a dated version with its writer and its **HLC** stamp, and
+A canonical-fact correction **supersedes**: the new value becomes current,
+the old one is retained as a dated version with its writer and its **HLC** stamp, and
 `memory_history(entity, attribute)` prints the timeline. Nothing is
 silently overwritten and nothing is silently duplicated —
 [memory model](memory-model.md#canonical-facts--the-cortex-schema-v8).
+
+Source notes have a separate policy: storing a potential conflict retains
+both notes for retrieval. Replacing a whole source note requires an
+explicit `memory_supersede` or `memory_consolidate` operation.
 
 The word is worth being precise about, because three different behaviours
 get marketed with the same vocabulary:
@@ -93,8 +97,8 @@ to a doubtful one*, which is the next axis.
 Not every claim deserves to become canonical. Three mechanisms decide:
 
 - **Provenance tiers.** Writes carry an origin: `user` > `action` >
-  `agent`. A lower-tier claim cannot silently overwrite a higher-tier
-  value.
+  `agent` > `assistant`. A lower-tier claim cannot silently overwrite a
+  higher-tier value.
 - **Contender parking.** A competing value is parked *against* the slot
   instead of taking `current`. `memory_fact_get` shows both, search flags
   the slot `contested`, and `memory_fact_resolve` settles it.
@@ -103,7 +107,7 @@ Not every claim deserves to become canonical. Three mechanisms decide:
   claim parks as a contender, promotable only by an explicit human resolve
   or an independent second witness
   ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
-- **Authority, distinct from provenance.** `origin` (user/action/agent)
+- **Authority, distinct from provenance.** `origin` (user/action/agent/assistant)
   says *who* wrote a claim; a separate write-time `authority` label
   (`directive`/`observation`/`quoted`) says *how* it was said — a quoted
   third-party remark is demoted to a contender by the two-man rule rather
@@ -125,7 +129,7 @@ in a contender, not in `current`, when trust is low.
 Entity dedup is where an automatic graph quietly eats itself: fold
 `band.py` into `band` once and every fact attached to either becomes
 ambiguous. Merges here are **proposals**, not actions. They queue in the
-**review queue** (the Console's Atlas Review view, or
+**review queue** (the Console's Review view, or
 `memory_graph_review`), carry their evidence, and are subject to
 **merge vetoes** — name-shape rules that block a bad **fold direction** at
 filing time. Accepting or rejecting one writes an audit-stamped row in
@@ -155,11 +159,13 @@ The precise claim: **your memory text never leaves the machine — on the
 sidecar extractor mode.** The Docker tier's default ships a local CPU
 extractor **sidecar**, so **dream** consolidation — the step that reads
 your memory stream and turns it into facts — runs on your box with no
-API key and no outbound request. The installer's `sonnet-only` /
-`sonnet-fallback` modes trade this away deliberately — they route dream
+API key and no outbound request. The installer's `claude-only` /
+`claude-fallback` modes trade this away deliberately — they route dream
 extraction through the Claude CLI, which sends the extracted stream to
-Anthropic — and the `codex-only` / `codex-fallback` modes trade it away
-the same way toward OpenAI (the Codex CLI carries the stream).
+Anthropic — and the `openai-only` / `openai-fallback` modes trade it away
+the same way toward OpenAI (the Codex CLI carries the stream). The
+`endpoint` modes send it wherever the named server runs: nowhere past your
+network for a local or LAN model, to the provider for a hosted one.
 Retrieval embeddings are local too, and the weights are baked into the
 image. (Not the same as "never touches the network": the first pip install
 downloads an embedding model, and image pulls are image pulls. Those carry
@@ -168,15 +174,21 @@ no memory content.)
 This one is checkable rather than assertable, which is the point. Pull the
 network, run a dream, and watch it produce facts. Or read
 `ops/docker-compose.yml`: the extractor container is never published to
-the host, and the only endpoint the daemon calls is the one you configure.
+the host, and the only endpoint the daemon calls with memory content is
+the one you configure. (Since 2026-09-29 the daemon also asks PyPI for
+the newest release every six hours, a version number and nothing else,
+so the session briefing can say when an update is out; `updates:
+check_releases: false` in `config.yaml` turns that off, see
+[Configuration](configuration.md#being-told-and-the-unattended-client-half-updates).)
 Point `PSEUDOLIFE_DREAM_BASE_URL` at a hosted model and you have traded the
 property away deliberately — that is a supported configuration, and
 [Dreaming](dreaming.md) says so where you make the choice.
 
 Two honest caveats. First, the **lite** tier ships *no* extractor at all
-(`pip install "pseudolife-mcp[lite]"`) — zero egress by default there,
-because nothing extracts anything until you point it at an endpoint; see
-the README's quickstart for exactly what that costs you. Second, the agent
+(`pip install "pseudolife-mcp[lite]"`) — no memory content leaves it by
+default, because nothing extracts anything until you point it at an
+endpoint (the same release check applies, and the same switch turns it
+off); see the README's quickstart for exactly what that costs you. Second, the agent
 calling these tools is usually a hosted model, so "no egress" describes
 this server's behaviour, not your whole stack.
 
@@ -266,11 +278,11 @@ whose entire pitch is auditability should not fudge its own boundaries.
 | If you need | Use | Why not this |
 |---|---|---|
 | **Multi-tenant SaaS memory** — one deployment serving many customers with tenant isolation | Mem0, Zep Cloud | One daemon owns one **bank**, single-writer by construction. Principals are bearer-token identities for *your* agents, not tenants; there is no tenant boundary in the schema |
-| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There are no roles, no directory integration, and no compliance attestations |
+| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There is no SSO/OIDC, no org-wide RBAC, no directory integration, and no compliance attestations. The board's only roles are a project's delegate and coordinator, and maintainer actions need a passkey tap in the Console |
 | **Managed hosting** — someone else runs it, patches it, backs it up | Mem0, Zep Cloud | There is no cloud tier and there will not be one: a hosted service would dilute the zero-egress claim and add a business to run |
 | **An agent framework** — runtime, planner, tool loop, agent state | Letta, LangGraph | This is a memory server with no agent in it. Your coding agent is the intelligence |
 | **Memory for a non-MCP application** — a web app, a chatbot backend | Mem0, Cognee, Memori | The interface is MCP plus a REST console. There is no general-purpose SDK, and the tool docstrings are written for a coding agent to read |
-| **Cross-machine sync out of the box** | A hosted service | Memory lives on one machine's disk; syncing is left to rclone/syncthing |
+| **Cross-machine sync out of the box** | A hosted service | One daemon owns one bank; other machines use it over the network ([remote bank](remote-bank.md)), but there is no replica and no offline mode |
 | **A LoCoMo leaderboard number to put in a deck** | Anyone who publishes one | We publish a documented refusal instead — see above |
 
 Also worth saying: this is **solo-maintained, best-effort** software. It is
@@ -288,7 +300,7 @@ memory_fact_get("staging", "host")
 memory_history("staging", "host")
 
 # Is this bank extracting locally, or at all?
-curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | disabled
+curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | stalled | disabled
 
 # Every published number's run artifact:
 ls evals/results/

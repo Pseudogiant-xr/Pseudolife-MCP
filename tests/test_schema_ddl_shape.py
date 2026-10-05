@@ -43,6 +43,17 @@ _REQUIRED_COLUMNS = [
     # v13 — provenance-as-link: the trace index is SLOT-keyed.
     ("memory_traces",
      {"entity_norm", "attribute_norm", "entry_id", "created_at"}),
+    # v39 — survives deletion of its evictable source entry.
+    ("memory_trace_invalidations",
+     {"entity_norm", "attribute_norm", "source_entry_id",
+      "invalidated_at", "cause"}),
+    # v41 — FK-free, operation-keyed continuum reinstatement audit.
+    ("entry_reinstatement_decisions",
+     {"operation_id", "entry_id", "request_sha256", "entry_text_sha256",
+      "entry_source_sha256", "prior_superseded_at",
+      "prior_superseded_by_text", "prior_superseded_by_text_sha256",
+      "evidence_packet_sha256", "reviewer_ids", "reason", "decided_by",
+      "decided_at"}),
     # v13 reinforcements / v33 explicit_reinforcements (the split counter).
     ("entries", {"reinforcements", "explicit_reinforcements"}),
     # v16 — per-entity source attribution.
@@ -93,6 +104,27 @@ _REQUIRED_COLUMNS = [
     # v33 — per-slot read counters.
     ("slot_reads",
      {"entity_norm", "attribute_norm", "read_count", "last_read_at"}),
+    # v38 — durable dream acknowledgement state, per entry.
+    ("entries", {"dream_state"}),
+    # v49 — the park record on the agent row, the wake decision kept on the
+    # message for retries, and the rings the daemon decided.
+    ("coordination_agents", {"park_reason", "park_needs", "park_clear_by", "park_resume",
+                             "park_expires", "park_set_at"}),
+    ("coordination_messages", {"wake"}),
+    ("coordination_wakes", {"wake_id", "recipient_agent_id", "sender_agent_id", "message_id",
+                            "decision", "reason", "urgent", "ring_at", "created_at",
+                            "served_at"}),
+    # v54 — maintainer passkeys, the host's bootstrap codes, spent challenge
+    # nonces, and a message's origin, proof and withdrawal.
+    ("maintainer_passkeys", {"credential_id", "public_key", "alg", "sign_count", "label",
+                             "enrolled_by", "state", "active_from", "created_at",
+                             "last_used_at", "revoked_at", "revoked_by", "flagged_at"}),
+    ("maintainer_bootstrap", {"code_hash", "expires_at", "used_at", "credential_id",
+                              "failed_attempts"}),
+    ("maintainer_nonces", {"nonce", "expires_at"}),
+    ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
+    # v55 — the board name and who set it ('' = unnamed).
+    ("coordination_agents", {"name", "name_source", "name_set_at", "harness_name"}),
 ]
 
 
@@ -123,6 +155,14 @@ _COLUMN_TYPES = [
     ("slot_reads", "read_count", "bigint"),
     ("slot_reads", "last_read_at", "double precision"),
     ("entries", "explicit_reinforcements", "integer"),
+    ("entries", "dream_state", "text"),           # v38
+    ("outcome_signals", "used_ids", "jsonb"),     # v44: read back as a dict
+    ("lesson_search_events", "served", "jsonb"),  # v44
+    ("coordination_messages", "maintainer_proof", "jsonb"),  # v54: read back as a dict
+    ("coordination_messages", "origin", "text"),             # v54
+    ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
+    ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
+    ("maintainer_bootstrap", "failed_attempts", "integer"),  # v54: wrong guesses; 5 burn a code
 ]
 
 _NULLABLE_COLUMNS = [
@@ -144,11 +184,19 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judge2_confidence"),
     ("entity_proposals", "judge2_model"),
     ("entity_proposals", "judged2_at"),
+    ("coordination_agents", "parent_agent_id"),   # v50: NULL = no parent (yet)
+    ("coordination_agents", "parent_thread"),     # v50: NULL = not a subagent
+    ("coordination_agents", "name_set_at"),       # v55: NULL = never named
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled
     ("facts", "authority"),
     ("facts", "distortion_tolerance"),
+    ("entries", "dream_state"),                   # v38: NULL = pre-bump row
+    ("outcome_signals", "used_ids"),              # v44: NULL = named no ids
+    ("coordination_messages", "maintainer_proof"),  # v54: NULL = agent mail
+    ("coordination_messages", "repudiated_at"),     # v54: NULL = stands
+    ("maintainer_passkeys", "active_from"),         # v54: NULL while pending
 ]
 
 
@@ -185,6 +233,72 @@ def test_additive_columns_are_nullable(pg_conn):
     assert not not_null, f"must be nullable: {not_null}"
 
 
+def test_a_v49_bank_gains_the_v50_parent_columns_through_the_guarded_pass(pg_conn):
+    """The upgrade path: a bank at v49 (no parent columns) gets both from
+    the schema pass, its rows reading NULL (not subagents), and a second
+    pass finds them present and adds nothing. The pass is guarded (probe,
+    then ALTER only when missing), like v47's and v49's columns."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    pg_conn.autocommit = True
+    pg_conn.execute("INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
+                    "created_at,last_activity) VALUES ('v49-row','alice','h',1,1)")
+    pg_conn.execute("ALTER TABLE coordination_agents DROP COLUMN parent_agent_id, "
+                    "DROP COLUMN parent_thread")
+    assert not {"parent_agent_id", "parent_thread"} & _columns(pg_conn, "coordination_agents")
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert {"parent_agent_id", "parent_thread"} <= _columns(pg_conn, "coordination_agents")
+    assert pg_conn.execute("SELECT parent_agent_id, parent_thread FROM coordination_agents "
+                           "WHERE agent_id='v49-row'").fetchone() == (None, None)
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert {"parent_agent_id", "parent_thread"} <= _columns(pg_conn, "coordination_agents")
+
+
+def test_a_v53_bank_gains_the_v54_message_columns_through_the_guarded_pass(pg_conn):
+    """The upgrade path: a bank at v53 (no origin columns) gets all three
+    from the schema pass, every existing message reading origin ``agent``
+    with no proof and no withdrawal; a second pass adds nothing."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    pg_conn.autocommit = True
+    for agent in ("a", "b"):
+        pg_conn.execute("INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
+                        "created_at,last_activity) VALUES (%s,'alice','h',1,1)", (agent,))
+    pg_conn.execute("INSERT INTO coordination_messages (message_id,sender_agent_id,"
+                    "recipient_agent_id,sender_principal,text,request_id,fingerprint,"
+                    "recipient_sequence,created_at,expires_at) VALUES "
+                    "('v53-mail','a','b','alice','hi','r','f',1,1,2)")
+    pg_conn.execute("ALTER TABLE coordination_messages DROP COLUMN origin, "
+                    "DROP COLUMN maintainer_proof, DROP COLUMN repudiated_at")
+    columns = {"origin", "maintainer_proof", "repudiated_at"}
+    assert not columns & _columns(pg_conn, "coordination_messages")
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert columns <= _columns(pg_conn, "coordination_messages")
+    assert pg_conn.execute("SELECT origin, maintainer_proof, repudiated_at FROM "
+                           "coordination_messages WHERE message_id='v53-mail'"
+                           ).fetchone() == ("agent", None, None)
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert columns <= _columns(pg_conn, "coordination_messages")
+
+
+def test_an_early_v54_bootstrap_table_gains_the_failure_count(pg_conn):
+    """``failed_attempts`` joined the v54 DDL during development (security
+    review, 2026-10-04): a bank created before it gains it, zero for a code
+    already issued, and a second pass adds nothing."""
+    from pseudolife_memory.storage.schema import MAINTAINER_SCHEMA_SQL
+    pg_conn.autocommit = True
+    pg_conn.execute("INSERT INTO maintainer_bootstrap (code_hash,expires_at) VALUES ('h',1)")
+    pg_conn.execute("ALTER TABLE maintainer_bootstrap DROP COLUMN failed_attempts")
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+    assert pg_conn.execute("SELECT failed_attempts FROM maintainer_bootstrap").fetchone() == (0,)
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+    assert _column_attr(pg_conn, "maintainer_bootstrap", "failed_attempts", "is_nullable") == "NO"
+
+
+def test_maintainer_origin_defaults_to_agent_mail(pg_conn):
+    default = _column_attr(pg_conn, "coordination_messages", "origin", "column_default")
+    assert "agent" in (default or "")
+    assert _column_attr(pg_conn, "coordination_messages", "origin", "is_nullable") == "NO"
+
+
 # ── structural one-offs ───────────────────────────────────────────────────
 
 
@@ -193,6 +307,25 @@ def test_memory_traces_is_slot_keyed_not_fact_keyed(pg_conn):
     fact-keyed trace index goes stale silently. Lock the slot anchor so a
     regression to the old one fails."""
     assert "fact_id" not in _columns(pg_conn, "memory_traces")
+
+
+def test_trace_invalidations_are_slot_keyed_and_fk_free(pg_conn):
+    """v39 events outlive both evictable source and regenerated fact rows."""
+    pk = pg_conn.execute(
+        "SELECT a.attname FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid=i.indrelid "
+        "AND a.attnum=ANY(i.indkey) "
+        "WHERE i.indrelid='memory_trace_invalidations'::regclass "
+        "AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)"
+    ).fetchall()
+    assert [r[0] for r in pk] == [
+        "entity_norm", "attribute_norm", "source_entry_id"]
+    fks = pg_conn.execute(
+        "SELECT conname FROM pg_constraint c "
+        "JOIN pg_class t ON c.conrelid=t.oid "
+        "WHERE t.relname='memory_trace_invalidations' AND c.contype='f'"
+    ).fetchall()
+    assert fks == []
 
 
 def test_entity_kinds_primary_key_is_entity_norm(pg_conn):
@@ -218,6 +351,16 @@ def test_edges_dst_id_index_present(pg_conn):
     ).fetchone()
     assert row is not None, "edges_dst_idx is missing"
     assert "dst_id" in row[0]
+
+
+def test_coordination_agents_episode_index_present(pg_conn):
+    """v55: a ``memory_session_title`` rename names the board rows
+    registered under that session, an UPDATE keyed by ``episode``."""
+    row = pg_conn.execute(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'coordination_agents' "
+        "AND indexname = 'coordination_agents_episode_idx'").fetchone()
+    assert row is not None, "coordination_agents_episode_idx is missing"
+    assert "episode" in row[0]
 
 
 def test_dream_run_slots_src_entry_id_carries_no_foreign_key(pg_conn):
@@ -259,3 +402,36 @@ def test_facts_table_declares_freshness_class_defaulting_to_evergreen():
     assert "'evergreen'" in facts_block, (
         "personal facts must default to evergreen — defaulting to volatile "
         "would silently re-rank every existing fact")
+
+
+def test_schema_import_does_not_load_database_driver():
+    """Health/schema imports must not race the warmup thread's driver import."""
+    import subprocess
+    import sys
+
+    result = subprocess.run([
+        sys.executable, "-c",
+        "import sys; from pseudolife_memory.storage import schema; "
+        "assert 'coordination_messages' in schema.SCHEMA_SQL; "
+        "assert not any(n == 'psycopg' or n.startswith('psycopg.') for n in sys.modules)",
+    ], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
+def test_entries_dream_state_defaults_to_pending_under_its_named_check(pg_conn):
+    """v38. Two halves of one contract. The DEFAULT is what makes every new
+    write eligible for the dream without a backfill, and NULL (the pre-bump
+    reading) is the only legacy marker — so a default of NULL would make
+    daemon writes indistinguishable from pre-bump rows and hand them to the
+    one-shot legacy classification. The CHECK is pinned BY NAME because
+    ``ensure_schema`` looks it up by that name to decide whether to add it;
+    a rename would silently re-add it on every boot."""
+    default = _column_attr(pg_conn, "entries", "dream_state", "column_default")
+    assert "'pending'" in (default or ""), (
+        "dream_state must default to 'pending' — NULL is reserved for rows "
+        "written before the column existed")
+    row = pg_conn.execute(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname = 'entries_dream_state_check'").fetchone()
+    assert row is not None, "entries_dream_state_check is missing"
+    assert "dream_state" in row[0]

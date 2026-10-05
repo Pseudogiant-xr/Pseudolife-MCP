@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.15.0",
-  "schema": 37,
-  "verified": "2026-09-03"
+  "version": "0.17.0",
+  "schema": 55,
+  "verified": "2026-10-05"
  },
  "groups": {
   "clients": {
@@ -50,6 +50,10 @@
    "label": "Release surfaces",
    "hue": "#b0988a"
   },
+  "remote": {
+   "label": "Remote access",
+   "hue": "#d9b44a"
+  },
   "custom": {
    "label": "Custom",
    "hue": "#999999"
@@ -74,20 +78,20 @@
    "id": "codex",
    "g": "clients",
    "x": 40,
-   "y": 215,
+   "y": 200,
    "t": "Codex CLI",
    "s": "MCP client · same shim path",
    "p": "",
    "d": [
     "Wired by ops/install --client codex",
-    "Hook lives in ~/.codex/hooks.json"
+    "Hooks: the plugin's own hooks.json when the Codex plugin is installed, else a managed ~/.codex/hooks.json (install --codex-hooks auto|manual|plugin|skip)"
    ]
   },
   {
    "id": "desktop",
    "g": "clients",
    "x": 40,
-   "y": 310,
+   "y": 280,
    "t": "Claude Desktop",
    "s": "stdio-only MCP client",
    "p": "",
@@ -99,7 +103,7 @@
    "id": "gemini",
    "g": "clients",
    "x": 40,
-   "y": 370,
+   "y": 360,
    "t": "Gemini CLI",
    "s": "MCP client · shim or HTTP",
    "p": "",
@@ -112,13 +116,13 @@
    "id": "browser",
    "g": "clients",
    "x": 40,
-   "y": 430,
+   "y": 440,
    "t": "Browser",
    "s": "Cortex Console user",
    "p": "",
    "d": [
     "Talks only to /ui/* and /api/*",
-    "Bearer token kept in localStorage (pl_token); 401 → token modal"
+    "Bearer token kept in localStorage (pl_token); a 401 shows the refusal with a token prompt"
    ]
   },
   {
@@ -131,8 +135,9 @@
    "p": "plugin/.claude-plugin/plugin.json",
    "d": [
     "Deliberately bundles no MCP server (avoids duplicate tool namespaces)",
-    "Version pinned to pyproject by test_plugin_packaging",
-    "Served straight from master via marketplace.json — no publish step"
+    "Manifest carries no version: Claude Code caches each marketplace commit in its own folder, so updates install beside running sessions; the release is plugin/release.json, pinned to pyproject by test_plugin_packaging",
+    "Served straight from master via marketplace.json — no publish step",
+    "hooks.json wires eight bash scripts: session-start (twice, the second for memory-policy), coordination-start, user-prompt-submit, coordination-prompt, session-end, stop-wake, subagent-board and subagent-board-guard (a PreToolUse guard on memory_agents / memory_message); every entry's commandWindows is lifecycle.ps1, Codex's native-Windows override"
    ]
   },
   {
@@ -145,8 +150,10 @@
    "p": "plugin/hooks/",
    "d": [
     "GET /api/hook/session-start → stdout becomes session context",
+    "On resume or compact the daemon serves only drift notices, the episode-handle line and a briefing pointer (after a compaction also hook-instructions.md); the memory-policy request forwards source too",
     "Fail-open: daemon down → friendly fallback, still exit 0",
-    "Payload capped at 9,500 chars (client caps stdout at 10k)"
+    "Payload capped at 9,500 chars (client caps stdout at 10k)",
+    "Board state is a sibling SessionStart hook, coordination-start.sh: the per-process shim digest-key record, the <key>.reprint flag on resume / compact / clear, and the board check-in from GET /api/hook/coordination-start (2 s)"
    ]
   },
   {
@@ -155,12 +162,13 @@
    "x": 40,
    "y": 790,
    "t": "user-prompt-submit.sh",
-   "s": "UserPromptSubmit hook · static echo",
+   "s": "UserPromptSubmit hook · memory-change note",
    "p": "plugin/hooks/",
    "d": [
-    "One-line memory discipline injected on every user turn",
-    "Recall-before-review: search the bank, then compare to the files",
-    "No daemon call — offline-safe, always exit 0"
+    "Sources session-start.sh memory-changes: one GET /api/hook/memory-changes per turn (2 s cap, no retry), printing only when lessons or other sessions' status notes landed since the session's last note",
+    "Cursor in <digest dir>/<sha256(session id)>.mark, saved only after printing, so a missed note is asked for again next turn",
+    "The note's reminder tail keeps recall-before-review; silent on any failure, always exit 0",
+    "Coordination digest is a second UserPromptSubmit hook, coordination-prompt.sh: prints the shim's per-session digest when its watermark passed the shared .seen marker (or once after SessionStart's .reprint flag), leaves the <key>.turn stamp the park gate reads and one ledger line per firing; local files only, no daemon call"
    ]
   },
   {
@@ -173,14 +181,49 @@
    "p": "plugin/hooks/",
    "d": [
     "POST /api/hook/session-end closes the session episode",
-    "Ownership-guarded: only clears the active-session pointer it owns"
+    "Ownership-guarded: only clears the active-session pointer it owns",
+    "First, before the connection checks and any network call (plugin SessionEnd hooks get 1.5 s): on /clear or /resume confirms the process's digest-key record for the ending session (rewriting one that is not) and leaves the handoff claude-<CLAUDE_PID>.switch: time, the process's creation identity, the ending session's key"
+   ]
+  },
+  {
+   "id": "hookwake",
+   "g": "plugin",
+   "x": 40,
+   "y": 980,
+   "t": "stop-wake.sh",
+   "s": "Stop hook · asyncRewake + park gate",
+   "p": "plugin/hooks/",
+   "d": [
+    "On by default since 2026-09-28; off on a PSEUDOLIFE_AGENT_WAKE_HOOK of 0/false/no/off or a PSEUDOLIFE_AGENT_COORDINATION set to anything but 1/true/yes/on, checked in the hooks.json command before bash reads the script",
+    "async + asyncRewake: waits after each turn on the session's coordination digest; exit 2 wakes an idle session",
+    "v49: fires only on a rung ring the daemon decided (<key>.ring past .seen, written by the shim for rung mail) with the digest past .seen and mail listed; chatter, withheld mail and plain mail to a session that never parked never wake (urgent mail to it is rung; since 2026-10-02 a leftover nudged marker is no ring); the wait ledger line carries the ring's reason; one lease per session, at most 20 wakes an hour",
+    "While waiting it renews a 60 s local listener lease every poll (the daemon rings only an address with a live wake path); after a wake fires, one background POST /api/hook/woke (2 s) records it for wake-precision stats",
+    "Listens 14 days after each turn end (since 2026-10-05; 59 minutes before): hooks.json timeout 1209600 s, twice the longest delegate lease, which Claude Code passes uncapped into a Node timer; the wait ends at MAX_WAIT 1209540, before the kill; polls every 5 s for the first 3540 s, then every 30 s; with no Claude Code parent to watch it keeps 3540 s; PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT only shortens it; each turn end writes a fresh token to <key>.wake and an older watcher exits at its next poll",
+    "v49 park gate, before the wait: unless stop_hook_active, with <key>.agent present, one 2 s request to GET /api/hook/park-gate?agent=<id>&since=<the .turn stamp coordination-prompt.sh leaves>; block ends the turn at once (exit 2) with the daemon's message, once; allow, no address or no answer arms the wait",
+    "Codex loads the same hooks.json and gets only the park gate on every platform (off on an explicit PSEUDOLIFE_AGENT_WAKE_HOOK or PSEUDOLIFE_AGENT_COORDINATION of 0/false/no/off): on Windows lifecycle.ps1 -Event Stop, on macOS and Linux this script in Codex context (PSEUDOLIFE_CODEX_HOOK=1 or PLUGIN_ROOT equal to CLAUDE_PLUGIN_ROOT), resolving the daemon from the managed connection file as coordination-start.sh does; a block is {\"decision\":\"block\",\"reason\":...} on stdout with exit 0 as Codex documents, plus the gate ledger line, and the wait is never armed (the doorbell is Codex's wake)",
+    "SubagentStop (argument subagent-stop; lifecycle.ps1 -Event SubagentStop on Windows) runs the same gate for a Codex child thread, keyed by the payload's agent_id (the child's MCP threadId, a canonical lower-case UUID; never the root session_id), with no turn stamp; in Claude Code it does nothing"
+   ]
+  },
+  {
+   "id": "hooksubagent",
+   "g": "plugin",
+   "x": 262,
+   "y": 980,
+   "t": "subagent-board.sh",
+   "s": "SubagentStart/Stop · children liveness",
+   "p": "plugin/hooks/",
+   "d": [
+    "v50: keeps a Claude Code session's board children current: SubagentStart adds, SubagentStop removes, one 2 s POST /api/hook/subagent naming the session's address (<key>.agent, found as stop-wake.sh finds it) and the payload's agent_id and agent_type; both entries are async in hooks.json (the answer is ignored)",
+    "Top-level payload keys only (an escaped copy inside last_assistant_message never matches); a malformed id sends nothing, a malformed type is left out; runs only in a hook Claude Code started for this very session",
+    "Fails open: exits 0 and prints nothing on every path, so a down daemon or a refused bearer never holds a subagent back",
+    "Codex loads the same hooks.json: a no-op there (lifecycle.ps1 -Event SubagentBoardStart|SubagentBoardStop exits at once; this script exits in Codex context); the shim links Codex's native subagents to their parent instead; ops/setup-codex-hooks.py treats both events as optional, like Stop"
    ]
   },
   {
    "id": "cmds",
    "g": "plugin",
    "x": 40,
-   "y": 980,
+   "y": 1075,
    "t": "/dream · /memory-status",
    "s": "slash commands",
    "p": "plugin/commands/",
@@ -200,8 +243,12 @@
    "d": [
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
-    "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
-    "Re-emits tools/list_changed downstream after memory_toolset tier changes"
+    "A daemon it must not spawn (non-loopback URL, or PSEUDOLIFE_MCP_NO_SPAWN) that misses a 5 s wait starts the session degraded: initialize + tools/list from the per-URL handshake cache (handshake-cache/ under PSEUDOLIFE_AGENT_STATE_DIR, else ~/.pseudolife-mcp), calls retried, a /health watcher emits tools/list_changed on recovery",
+    "X-PL-Session = Claude Code's session id when the writer is Claude Code (joins the hook's root), else one uid per process; opens no episode (the daemon lazy-opens on the first write); closes only its own key at exit",
+    "Re-emits tools/list_changed downstream after memory_toolset tier changes",
+    "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",
+    "By default asks /api/hook/coordination-start at startup and builds its coordination adapter (Codex: per-thread registry) only where the daemon serves its bearer the board; appends the compact board check-in to the MCP instructions only when the adapter is up (or its registration is being retried after the daemon said yes). A startup registration or board check the daemon did not answer is retried in the background by _LateBoardAdapter, which stands in for the adapter until one lands (for Codex, _LateCodexRegistry builds the per-thread registry on a later yes)",
+    "A process serving many conversations (writer id claude-desktop or tunnel, or PSEUDOLIFE_MCP_SHARED_HOST not off) binds no coordination identity, refuses memory_message / memory_agents update, claim and release with a pointer to a per-session server, and prepends that advice to its instructions; its memory_agents list shows open sessions only"
    ]
   },
   {
@@ -213,8 +260,8 @@
    "s": "pseudolife-mcp entry · torch-free",
    "p": "pseudolife_memory/cli.py",
    "d": [
-    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio",
-    "briefing / episode-start / episode-end subcommands",
+    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
+    "briefing / prompt-hook / doctor / backup / export / import / board-audit / coordination-recovery / wait-mail / lease / maintainer / test-login / doorbell-prompt-seen / episode-start / episode-end subcommands; version (runtime path and source) and help; host lifecycle: update · connect / invite / pair / expose / tunnel / move",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
   },
@@ -227,8 +274,9 @@
    "s": "manual / Codex hook path",
    "p": "pseudolife_memory/briefing_cli.py",
    "d": [
-    "GET /api/briefing → markdown or hookSpecificOutput JSON",
+    "GET /api/briefing → markdown; --hook-json: GET /api/hook/session-start → hookSpecificOutput JSON; --coordination prints the board check-in from /api/hook/coordination-start instead, empty where the board is off",
     "Never auto-starts the daemon; prints nothing on any failure",
+    "prompt-hook: the plugin's per-turn memory-change note (GET /api/hook/memory-changes, 2 s, redirects refused) with the same <digest dir>/<sha256(session id)>.mark cursor, saved only after printing; imports no shim or httpx (URL and redirect helpers come from the stdlib-only daemon_url.py), since it runs every turn",
     "Wired by ops/install-hook for non-plugin installs"
    ]
   },
@@ -255,7 +303,45 @@
    "p": "pseudolife_memory/transfer_cli.py",
    "d": [
     "ZIP of JSONL (one per table) + manifest — decoupled from Postgres major version and deployment tier, unlike pg_dump's physical backup",
-    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim"
+    "Export is a live-safe REPEATABLE READ snapshot; import fills a fresh bank only, inside one transaction, ids/HLC/embeddings verbatim",
+    "Carries entry dream state but excludes the acknowledgement secret; an imported bank creates its own token identity",
+    "Operational coordination_agents, coordination_messages, the coordination_events audit log and the v45 lease tables never enter portable knowledge exports; full database backups retain them",
+    "Serving telemetry stays behind too: retrieval_events/retrieval_uses, slot_reads, lesson_search_events, the dream-run journal, and the outcome_signals.used_ids column (EXCLUDED_COLUMNS)"
+   ]
+  },
+  {
+   "id": "adapter",
+   "g": "transport",
+   "x": 330,
+   "y": 660,
+   "t": "coordination_adapter.py",
+   "s": "one attachment · explicit private state",
+   "p": "pseudolife_memory/coordination_adapter.py",
+   "d": [
+    "Holds the instance credential privately and injects it as X-PL-Agent / X-PL-Agent-Key on every coordination call — never from model arguments",
+    "The explicit state path is the only resume key: opened O_EXCL/O_NOFOLLOW at owner-only permissions, never overwritten; a failed or cancelled first register releases its empty reservation",
+    "60s attachment lease renewed by a 20s heartbeat task; a request retries at most twice (5xx and 429) before the adapter degrades",
+    "Registers resumable = a state path exists; note_turn() marks a forwarded tool call and the next heartbeat carries active:true, dropped for the process after one unexpected_parameter from an older daemon",
+    "Renders a per-turn digest from the pending_preview that attach/heartbeat return; the watermark moves only when the text changes; with a digest_path (host session id) the file and its .seen marker are what the prompt hooks read, and deliver_hint() hands each change to a tool result once plus a one-line reminder every HINT_REPEAT_CALLS while mail stays pending",
+    "An outage pauses the stream and the heartbeat task re-attaches with backoff (1 s to 60 s), replaying unacknowledged mail under the new generation; a restored notice follows the once-per-outage warning",
+    "inbox() long-polls receive (wait_seconds 30), marks one attempt per message per attachment and frames every event with a fixed agent-origin header; acknowledgment stays an explicit model action",
+    "v49: the daemon decides, the shim rings. The adapter declares its ring path (a digest for the Stop hook, or a Codex doorbell) in its register capabilities and as attach's ring, dropping the parameter once for a pre-v48 daemon; a wake on an attach or heartbeat answer (taken once, repeats ignored) becomes <key>.ring (digest watermark, then decision and reason) at ring_at for the Stop hook, and ring_due() offers the same ring to the Codex doorbell once due, dropped when its mail was already seen or nothing is pending; <key>.agent names the address for the park gate and is touched with the digest; .ring, .agent and the hooks' .turn leave with the digest and are swept with it",
+    "v55: the heartbeat sends the harness's title for the session as name (harness_names.py, read in a worker thread: the Claude transcript's custom-title > agent-name > ai-title, or Codex session_index thread_name) only when it changed; a pre-v55 daemon's unexpected_parameter retires it for the process, and an invalid_name or secret_like_body refusal is not resent until the title changes; PSEUDOLIFE_BOARD_HARNESS_NAMES=0 (false/no/off) in the shim's environment reads no transcript or index"
+   ]
+  },
+  {
+   "id": "channel",
+   "g": "transport",
+   "x": 330,
+   "y": 760,
+   "t": "channel.py",
+   "s": "optional Claude channel transport",
+   "p": "pseudolife_memory/channel.py",
+   "d": [
+    "Declares exactly one experimental capability, claude/channel; no mailbox, host launch or implicit receipt",
+    "Serializes every outbound write through one lock, so events never interleave with tool replies on the shared stdout",
+    "Delivery starts only after the client's notifications/initialized; an out-of-order notification cannot open the inbox early",
+    "The caller supplies the inbox and this module owns only that worker's lifetime — stream submission is not proof of host receipt"
    ]
   },
   {
@@ -270,7 +356,8 @@
     "Refuses non-loopback bind without token (exit 2) unless TRUST_BIND=1",
     "Starts durability autosave, dream sweep, idle-session reaper",
     "/health does a LIVE db ping on a dedicated connection",
-    "Reports status: degraded + init_refusal when the engine can't init (v25)"
+    "Reports status: degraded + init_refusal when the engine refuses for good (v25 dim guards; the shim exits on it), or degraded + not_ready while a retry can clear it (bank writer lease held elsewhere, failed store hydration backing off)",
+    "Startup also starts the stored-principal refresher and the release-check thread (PyPI once per updates.check_interval_seconds, 6 h; served on /health updates and in the briefing's update notice); a moved bank's old daemon refuses to start (exit 2)"
    ]
   },
   {
@@ -282,10 +369,13 @@
    "s": "ASGI composition + auth gate",
    "p": "pseudolife_memory/web/api.py",
    "d": [
-    "Route order: /health → /ui → /api/hook/* → /api/* → /mcp",
+    "Route order: /health → /ui → /api/hook/* → /api/pair → /api/* → /mcp",
     "Bearer token; tokenless = loopback Origin/Host guard (CSRF / DNS-rebind)",
     "POST must be exactly application/json (forces CORS preflight)",
-    "Sync service calls always via run_in_executor — never blocks the loop"
+    "Sync service calls always via run_in_executor — never blocks the loop",
+    "POST /api/pair is the one unauthenticated write (pairing-code redemption): any Origin 403, one uniform 400 pairing_refused for every refused code, a failure budget then 429; stored (invited) principals are refused the operator POST paths",
+    "v54: every /ui/ response (and the / redirect) carries Content-Security-Policy default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ... frame-ancestors 'none'; form-action 'self', X-Frame-Options DENY and Referrer-Policy no-referrer; /api/maintainer* require a configured bearer (tokenless: 401) and answer MaintainerError codes with their status (409/410/403/404/429/503), never exception text",
+    "X-Content-Type-Options nosniff on every JSON answer (_send_json), every /ui/ response and the / redirect (CONSOLE_SECURITY_HEADERS)"
    ]
   },
   {
@@ -294,12 +384,15 @@
    "x": 940,
    "y": 160,
    "t": "mcp_server.py",
-   "s": "MCPServer (SDK v2) · 36 tools",
+   "s": "MCPServer (SDK v2) · 39 tools",
    "p": "pseudolife_memory/mcp_server.py",
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",
     "_async_offload: tool bodies run on worker threads",
-    "tools/list filtered per principal tier; hidden tools stay callable server-side"
+    "tools/list filtered per principal tier; hidden tools stay callable server-side",
+    "Core memory_agents and memory_message delegate to coordination.py; mailbox authority requires bearer plus private adapter instance binding; dispatch raises CoordinationRefused (a ValueError: public code, optional detail such as an ambiguous prefix's candidates, text code: detail) and notifies each recipient a send's receipts name, so a burst or a prefix send wakes the right adapters",
+    "A refused or failed call is an isError result whose text and structuredContent are one JSON object: {error, message} plus param / accepted / action where the refusal names them; a raiser's code (code attribute, or code / code: detail text) is kept, prose ValueError/TypeError is invalid_argument, FileNotFoundError file_not_found, anything else internal_error with the cause only in the daemon log; mutation: unknown when a write tool's outcome is in doubt (internal_error, coordination_unavailable)",
+    "Strict binding (extra=forbid, schema additionalProperties false): an argument name the tool lacks is refused as unknown_parameter, naming it and never its value, with a did-you-mean guess (_PARAM_ALIASES from the 2026-10-04 transcript review, e.g. limit -> top_k, else difflib) and the accepted list; any other binding failure is invalid_argument with pydantic's per-field sentences, no input echoed"
    ]
   },
   {
@@ -311,9 +404,9 @@
    "s": "minimal ⊂ core ⊂ full",
    "p": "pseudolife_memory/toolset_tiers.py",
    "d": [
-    "Resolution: principal override → tier map → env default (core)",
+    "Resolution: principal override → tier map → stored principal's tier → env default (unset = full; compose sets core)",
     "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
-    "core = 23 of 36 tools; minimal = 9; auth is the bearer token"
+    "core = 25 of 39 tools; minimal = 10; mailbox operations additionally require an adapter-held instance credential"
    ]
   },
   {
@@ -327,7 +420,8 @@
    "d": [
     "A NAMED principal from the bearer token outranks X-PL-Writer (2026-08-10)",
     "Then: X-PL-Writer / X-PL-Session → hook pointer → legacy mcp-session-id",
-    "mcp-session-id removed from MCP spec 2026-07-28 — fallback only"
+    "mcp-session-id removed from MCP spec 2026-07-28 — fallback only",
+    "A presented bearer that resolves to no principal raises PrincipalsUnavailable instead of falling back to default"
    ]
   },
   {
@@ -336,12 +430,14 @@
    "x": 1200,
    "y": 360,
    "t": "principals.py",
-   "s": "token → principal map",
+   "s": "token → principal map · stored principals",
    "p": "pseudolife_memory/principals.py",
    "d": [
     "PSEUDOLIFE_MCP_TOKENS (token:principal,…) parsed fail-closed; malformed entries skipped",
     "Matched principal IS the writer id and keys the toolset tier",
-    "Singular PSEUDOLIFE_MCP_TOKEN → reserved principal 'default' (legacy writer path kept)"
+    "Singular PSEUDOLIFE_MCP_TOKEN → reserved principal 'default' (legacy writer path kept)",
+    "Stored principals (v53, principal_store): resolved after the environment from an in-memory snapshot keyed by token SHA-256, refreshed every 10 s off the event loop; 503 principals_unavailable when never loaded or older than 60 s",
+    "principal_admitted(cfg, principal): the one board admission check (allowed_principals, or a stored row with board on); stored principals are refused POST /api/config and /api/daemon-notice"
    ]
   },
   {
@@ -367,9 +463,10 @@
    "s": "hook payload + identity tier 3",
    "p": "pseudolife_memory/web/session_hook.py",
    "d": [
-    "MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity)",
-    "Authorized: registers active session + prepends the episode handle",
-    "Unauthorized callers get byte-identical public output — no identity minting"
+    "Serves the session's memory_policy variant (compact = STARTUP_MEMORY_CORE inline; full_separate_hook = the full block on /api/hook/memory-policy; none; optional A/B arms), then a byte-bounded briefing; MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity) is the detailed standing copy",
+    "Authorized: registers active session + prepends the episode handle; the registration upserts the session's client_sessions row (v43) with the policy variant served",
+    "Unauthorized callers get byte-identical public output — no identity minting",
+    "An update, version or hooks-digest notice leads the output, for unauthorized callers too"
    ]
   },
   {
@@ -378,11 +475,12 @@
    "x": 660,
    "y": 380,
    "t": "Cortex Console SPA",
-   "s": "vanilla JS · /ui/",
+   "s": "Svelte 5 build · /ui/",
    "p": "pseudolife_memory/web/static/",
    "d": [
-    "Panels: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Insight · Episodes · RE Evidence · Console",
-    "Hash-routed, REST-only; 401 anywhere → token modal",
+    "Views: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Review · Insight · Board · Episodes · RE Evidence · Settings",
+    "Source in frontend/ (Vite + Svelte 5 + TypeScript); the committed build is what the wheel ships, and CI rebuilds and diffs it",
+    "Hash-routed, REST-only; pre-v3 hash ids (#/console, #/atlas, #/coordination) alias onto the new views",
     "Dev harness: web/devserver.py on :8770 against FixtureService"
    ]
   },
@@ -395,9 +493,26 @@
    "s": "config knobs whitelist",
    "p": "pseudolife_memory/web/config_io.py",
    "d": [
-    "~35 scalar knobs only — never structural fields",
+    "~80 scalar knobs only — never structural fields",
     "Atomic merge into config.yaml (.bak first) + live in-process mutate",
-    "restart-flagged knobs persist only"
+    "restart-flagged knobs persist only",
+    "v54: coordination.maintainer.* (rp_id, origin, the ring cap) is file-only: a patch naming it is refused config_protected before any knob lookup"
+   ]
+  },
+  {
+   "id": "coordhub",
+   "g": "daemon",
+   "x": 1200,
+   "y": 470,
+   "t": "web/coordination.py · CoordinationHub",
+   "s": "bounded async receive waits",
+   "p": "pseudolife_memory/web/coordination.py",
+   "d": [
+    "Every dispatch runs on the hub's own 4-thread pool behind a 16-permit semaphore — never on the loop's default executor the console routes share, never on the event loop",
+    "A waiting receive subscribes to an asyncio.Event OUTSIDE the service lock and clears it BEFORE reading durable state, so a commit during the read cannot fall into a race gap",
+    "Caps: 30s wait, 64 waiters, one wait per (agent, attachment, generation) — a second is refused, not queued",
+    "A wait timeout still re-reads the authoritative database, covering a restart or any writer outside this loop",
+    "Shielded jobs own their capacity until the synchronous work ends; a disconnected caller cannot release it early"
    ]
   },
   {
@@ -409,11 +524,13 @@
    "s": "one instance · coarse lock",
    "p": "pseudolife_memory/service.py",
    "d": [
-    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,300 lines)",
+    "Owns CMS, cortex, world, lessons, graph, refbank and episodes",
     "Dream + deep-dream methods live in service_dream.py (DreamOps mixin — one class, one lock at runtime)",
     "_resolve_writer: X-PL-Session → hook pointer (6h TTL) → legacy header",
     "PersistenceError counter surfaces save failures via /health",
-    "No LLM inside — deterministic Python; the dream is the only LLM path"
+    "No LLM inside — deterministic Python; the dream is the only LLM path",
+    "coordination_awareness reads current open roots without initializing a cold bank or using the shared active-session pointer for caller exclusion",
+    "Forgetting a source entry cascades: slots whose last source is gone retire, affected digests retire and source-backed dream edges drop"
    ]
   },
   {
@@ -427,7 +544,9 @@
    "d": [
     "sentence-transformers; torch or ONNX backend with auto-fallback",
     "Thread-safe LRU cache; weights baked into the image (HF_HUB_OFFLINE)",
-    "Swapped from MiniLM 384-d in schema v25 after a seven-arm shootout"
+    "CPU precision cpu_dtype auto: bf16 loaded directly on native-bf16 CPUs, else fp32; rows leave as float32",
+    "Swapped from MiniLM 384-d in schema v25 after a seven-arm shootout",
+    "ONNX loads only an artifact already present locally or in the Hub cache, never an implicit export; native Windows falls back to torch for a nested-module layout"
    ]
   },
   {
@@ -442,7 +561,7 @@
     "store(): flat band by default (2026-08-15); promotion walk only under multi-band presets",
     "retrieve(): neural + slot-index + BM25 + reference + rerank pools",
     "retrieve_with_trace() powers memory_search(explain=True) diagnostics",
-    "Write-through to Postgres; .pt fallback schema v6 with migration"
+    "Write-through to Postgres; .pt fallback schema v7 persists entry IDs, dream state, bank secret and display cursor together"
    ]
   },
   {
@@ -466,11 +585,12 @@
    "x": 640,
    "y": 800,
    "t": "bm25.py",
-   "s": "lexical fusion pool (opt-in)",
+   "s": "lexical fusion pool (default on)",
    "p": "pseudolife_memory/memory/bm25.py",
    "d": [
     "Pure-stdlib Okapi BM25, rebuilt per query",
-    "Min-max normalized, weighted-sum fused with dense scores"
+    "Min-max normalized, weighted-sum fused with dense scores",
+    "Cortex-fact BM25 (cortex_enabled) is a separate switch that ships off; weighted_sum fusion by default, rrf selectable"
    ]
   },
   {
@@ -525,8 +645,10 @@
    "d": [
     "Slot-identity path first (v0.10) — deterministic, embedding-free, shares cortex normalisation",
     "Then negation / replacement / state-transition / NLI paths",
-    "Runs BEFORE the surprise gate so near-duplicate corrections always land",
-    "Hits decay + stamp superseded_at / superseded_by_text"
+    "Runs BEFORE the surprise gate so detected potential updates can land despite low novelty",
+    "Detection admits new source notes without decaying or superseding earlier notes",
+    "Explicit supersede/consolidate use selected IDs or unique exact text; reject invalid selections before mutation",
+    "Cortex slot supersession is separate from source-note correction"
    ]
   },
   {
@@ -565,7 +687,7 @@
    "p": "pseudolife_memory/memory/episodes.py",
    "d": [
     "open_leaf_for(session_key): concurrent sessions never clobber each other",
-    "Daemon-owned lazy open; the idle reaper closes; empty roots are kept for the resume window, then swept to a tombstone (handle recreates)",
+    "Daemon-owned lazy open; the idle reaper closes; empty roots are kept for the resume window, then swept to a tombstone (handle recreates); a registered session's client_sessions row (v43) outlives both",
     "stamp() fills episode_id / title on every stored entry"
    ]
   },
@@ -579,7 +701,9 @@
    "p": "pseudolife_memory/memory/briefing.py",
    "d": [
     "Pure assembly — no LLM, no torch",
-    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap"
+    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap",
+    "Peer awareness in the full briefing whenever coordination is on (the default); the session-start hook leaves peers out (the board has its own hook); labels are context, not identity, and last reported activity is not liveness",
+    "Hook output is byte-bounded by format_bounded_briefing: sections in priority order, whole entries omitted with a marker; the full briefing can lead with a dream-stall line and a review-queue backlog line"
    ]
   },
   {
@@ -691,9 +815,35 @@
    "s": "AppConfig tree · YAML",
    "p": "pseudolife_memory/utils/config.py",
    "d": [
-    "~20 sub-configs; unknown YAML keys ignored",
+    "~28 sub-configs; unknown YAML keys ignored",
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
-    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)"
+    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
+    "coordination.enabled defaults on (bearer authentication still required); awareness_limit bounds peer summaries; without the key allowed_principals admits the singular-token principal default plus bank-stored principals with board on; other token-map principals must be listed; audit_retention_days (default 90, 0 = forever) bounds the board audit log",
+    "updates.*: check_releases (every 6 h) on; unattended_clients and unattended_daemon off by default",
+    "coordination.maintainer (rp_id, origin, maintainer_per_recipient_per_hour 30) is file-only: POST /api/config refuses every coordination.maintainer path with config_protected"
+   ]
+  },
+  {
+   "id": "coordination",
+   "g": "engine",
+   "x": 1160,
+   "y": 1020,
+   "t": "coordination.py · dispatch",
+   "s": "authenticated action dispatch",
+   "p": "pseudolife_memory/coordination.py",
+   "d": [
+    "Bearer principal must be admitted (listed in coordination.allowed_principals, or a stored principal with board on); every action except context, register and the leases listing also needs the adapter's X-PL-Agent / X-PL-Agent-Key headers",
+    "Per-action parameter allow-lists reject unexpected or missing parameters before any database work",
+    "Runs the store on a dedicated mailbox connection under the coordination lock; the service lock is used for cold durable-tier initialization and for full initialization before send, including clock-reseed retries; initialized mailbox calls avoid it, so a dream holding it cannot expire an adapter lease; send waits for clock history before stamping the message",
+    "Failures re-raise through public_error, so callers see a stable code and never a supplied value",
+    "The prune pass (at most once a minute, on register, send or heartbeat) hands coordination.audit_retention_days to the store",
+    "Disabled configuration answers {enabled: false} rather than an error, so a disabled bank stays quiet",
+    "unavailable_reason applies the same gates (enabled, bearer, listed principal, PostgreSQL) without storage I/O; GET /api/hook/coordination-start serves the startup check-in only when it returns none",
+    "v45 lease actions: lease (acquire, renew or queue), release, and leases, a listing the bearer alone may read; memory_agents claim/release map onto them with a day's ttl for claim:<path> and an hour otherwise, and update's expect sets a status's expected end; update's children (up to 8 labels, [] clears) names the subagents running under the caller's address, which only the parent may write",
+    "v49: update's park_reason/park_needs/park_clear_by/park_resume/park_expires and send's clears/urgent pass the allow-lists; park_gate() serves GET /api/hook/park-gate (allow or block plus PARK_GATE_MESSAGE) behind the same gates as the check-in, open on any failure; woke() serves POST /api/hook/woke (ok when the store recorded the marker, empty otherwise) behind the same gates; the store is built with the configured coordination.wake caps; the park request reaches sessions through memory_agents' description and the park gate (PARK_CHECKIN_SENTENCE stays out of CHECKIN_TEXT until a bench run)",
+    "v50: register's parent_thread passes the allow-list (a Codex native subagent's parent); invalid_parent and child_send_refused are public codes (child_send_refused is a 403 on REST); subagent() serves POST /api/hook/subagent?agent=<id>&event=start|stop&child=<agent_id>&type=<agent_type> for the plugin's SubagentStart/SubagentStop hooks behind the same gates as woke(): ok when the store recorded it, empty otherwise, open on any failure",
+    "context returns bank_id and principal; optional X-PL-Bank / X-PL-Principal headers must match them or the call fails bank_identity_mismatch; daemon_notice() posts board-wide notices as the reserved daemon principal; claim / release accept repository-scoped file claims",
+    "v54: MAINTAINER_NOTE rides beside a receive result only when it holds a verified maintainer message; send may leave out to when reply_to names the caller's own mail (routed to that message's sender); recipient_reserved is a public code; the store's wake policy takes coordination.maintainer.maintainer_per_recipient_per_hour; the maintainer principal is never admitted, whatever allowed_principals lists"
    ]
   },
   {
@@ -706,15 +856,16 @@
    "p": "pseudolife_memory/memory/dream.py",
    "d": [
     "OpenAICompatExtractor: claims · lessons · relations · outcomes (stdlib urllib)",
-    "ExtractorError holds the cursor (outage) vs empty [] advances (genuine)",
+    "ExtractorError leaves the batch pending (outage) vs empty [] acknowledges it (genuine); per-entry dream_state (v38) picks the work, the cursor is display-only",
     "Batch retry ×3 → per-entry quarantine (poison-pill isolation)",
     "run_sweep_once: compaction every tick; dream on backlog + quiescence",
     "Claim op:add/remove routes to set members; op prompt block shipped 2026-08-01 (v5, count-exclusion repaired the KU-negative v0)",
     "Write gates: literal_violations (digit fidelity, enforce) · span_unbacked (quote-vs-cited-note containment, ships off) — fidelity checks, never trust checks",
     "run_sweep_once also rides: need-based deep tick + autonomous Step-C judge (judge_merges, shadow/auto-reject, v30)",
-    "v35 TypeCompact: a constraint-labelled source's text is carried verbatim onto a derived scalar claim (_apply_constraint_carrier); post-dream guard reports constraint entries with no verbatim carrier (constraint_misses — flag, cursor advances); derived facts take the SOURCE entry's labels, never extractor output; quoted sources are low-trust for the two-man rule",
+    "v35 TypeCompact: a constraint-labelled source's text is carried verbatim onto a derived scalar claim (_apply_constraint_carrier); post-dream guard reports constraint entries with no verbatim carrier (constraint_misses — a flag, not a hold); derived facts take the SOURCE entry's labels, never extractor output; quoted sources are low-trust for the two-man rule",
     "Review-queue judges (2026-09-02): judge_links · judge_junk · judge_candidates · judge_slot_pairs share the merge judge's transport; run_sweep_once runs each as a bounded, mode-gated batch",
-    "Retire-not-delete (2026-09-03): the curation judge's auto forget retires the losing slot through lesson_forget/world_forget (store_decisions audit, lesson_restore/world_restore undo); merge and junk rejects write text-keyed tombstones to dismissed_pairs; the merge judge builds evidence at judge_snippet_max_chars (default 240 — the 2026-09-03 full-length ladder measured 3000 as no better) and stamps it on each proposal"
+    "Retire-not-delete (2026-09-03): the curation judge's auto forget retires the losing slot through lesson_forget/world_forget (store_decisions audit, lesson_restore/world_restore undo); merge and junk rejects write text-keyed tombstones to dismissed_pairs; the merge judge builds evidence at judge_snippet_max_chars (default 240 — the 2026-09-03 full-length ladder measured 3000 as no better) and stamps it on each proposal",
+    "Dream stall (2026-09-28): a due backlog no dream served for three sweeps surfaces in status, /health and the briefing and posts a board notice; the merge judge's relate verdict rejects the merge and files the named relation as a link proposal"
    ]
   },
   {
@@ -794,7 +945,8 @@
    "p": "pseudolife_memory/memory/graph_review.py",
    "d": [
     "EXTRACTED / AMBIGUOUS / INFERRED provenance tags",
-    "Duplicates, orphans, dubious edges, test artifacts — read-only"
+    "Duplicates, orphans, dubious edges, test artifacts — read-only",
+    "Its merge / link / junk proposals are what the review-queue judges rule on (review_judgments, review_decisions); also holds the merge relate-verdict helpers"
    ]
   },
   {
@@ -809,7 +961,7 @@
     "OpenAI-compatible :8081 — compose-internal only, no host port",
     "~5.3 GB Q4_K_M GGUF baked at build; --jinja --parallel 1",
     "Swap weights via gitignored compose override — no rebuild",
-    "Disabled entirely in sonnet-only installs (profiles: disabled)"
+    "Disabled entirely in claude-only / openai-only / endpoint installs (profiles: disabled)"
    ]
   },
   {
@@ -817,13 +969,13 @@
    "g": "sidecar",
    "x": 600,
    "y": 1400,
-   "t": "Sonnet shim",
+   "t": "Claude shim",
    "s": "host · 127.0.0.1:8082",
    "p": "evals/claude_shim.py",
    "d": [
     "Wraps the Max-plan claude CLI as an OpenAI-compatible endpoint",
     "Task Scheduler AtLogOn autostart (install-shim-autostart)",
-    "Primary extractor in sonnet / sonnet-fallback modes"
+    "Primary extractor in claude-only / claude-fallback modes"
    ]
   },
   {
@@ -836,7 +988,7 @@
    "p": "evals/codex_shim.py",
    "d": [
     "Wraps the ChatGPT-plan codex CLI as an OpenAI-compatible endpoint",
-    "Autostart via install-codex-shim-autostart (codex-* installer modes)",
+    "Autostart via install-codex-shim-autostart (openai-* installer modes)",
     "Serves gpt-5.6-terra by default; gpt-*/codex-* honoured per request"
    ]
   },
@@ -851,7 +1003,13 @@
    "d": [
     "One psycopg conn: autocommit reads + explicit _txn() writes",
     "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
-    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health"
+    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health",
+    "Writer lease: a session advisory lock on that one conn, taken before schema DDL (waits up to 2 s for an exiting holder); a second instance on the bank refuses (WriterLeaseHeld names the holder), and a reconnect must re-take it before serving; a writer_lease_epoch meta row detects another writer in the gap, and then every call refuses (BankChangedHands) until the service re-reads the bank",
+    "Dream acknowledgement captures one connection and transaction for exact entry IDs plus display cursor; pre-v38 rows are classified once",
+    "Explicit source retirement and trace invalidations commit together; late trace writes lock the same source row",
+    "Source forget atomically retires lessons whose last trusted source it removes, unsupported current facts, affected digests and source-backed agent edges before deleting entries; digest regeneration remains durable in meta",
+    "Entry reinstatement locks the same row, atomically appends an operation-keyed audit and clears only retirement fields; durable replay precedes target admission",
+    "CoordinationStore uses the same transaction discipline; locked recipient sequence allocation and message insertion commit together, and each mutation's audit event commits with it"
    ]
   },
   {
@@ -860,14 +1018,15 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 37",
+   "s": "DDL · SCHEMA_META_VERSION 55",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads · curation_judgments · store_decisions · optional RE evidence/claims",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction)",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges/edge_evidence · episodes · memory_traces/memory_trace_invalidations · entry_reinstatement_decisions · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · lesson_search_events · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages · coordination_events · coordination_leases/coordination_lease_waiters · coordination_wakes · client_sessions · principals · maintainer_passkeys · maintainer_bootstrap · maintainer_nonces · optional RE evidence/claims",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings) · v41 entry_reinstatement_decisions (FK-free operation-keyed audit; exact preimage, decision and retirement clear commit together; trace-invalidated targets refused) · v42 coordination_events (append-only, FK-free, sha256-chained board audit log written in each mutation's own transaction and pruned only by its own window, which logs its cuts; coordination_messages.first_read_at) · v43 client_sessions (one FK-free row per registered session key, never pruned: registered_via, principal, first start, last close + end_reason, the memory-policy variant served, every root episode id — outlives the prune of a root that stored nothing) · v44 memory-loop observability (lesson_search_events: one FK-free row per memory_lesson_search, slot-keyed, kept out of the replayed retrieval_events; nullable outcome_signals.used_ids JSONB keeps the credited/unmatched/served_elsewhere partition of an outcome's used_ids) · v45 resource leases (coordination_leases: one FK-free row per name, its fence from the coordination_lease_fence sequence so it never repeats; coordination_lease_waiters: its FIFO queue; coordination_agents.status_expires_at for a status's expected end) · v46 coordination_events.body (a send's body outside the row hash, its payload committing to text_commitment (sha256 of a per-message salt in body_salt plus the body; no length), so an operator redact event can blank it and the chain still verifies; pre-v46 sends keep text in the hashed payload) · v47 coordination_agents.children (the subagents a session names under its own address, as [{label, since}]) · v48 fan-out mail (one send to project:<name> or all writes one coordination_messages row and one send event per recipient under one request id; the sender request key becomes the unique index coordination_messages_request_idx over (sender_agent_id, request_id, recipient_agent_id), created before the pre-v48 two-column constraint is dropped where it exists; ids resolve from a unique 8+ hex prefix, no DDL) · v49 park records and wake decisions (coordination_agents.park_reason/park_needs/park_clear_by/park_resume/park_expires/park_set_at: a session's standing statement of why it stopped and what clears it; coordination_messages.wake: the send's decision, repeated on a retry; coordination_wakes: every rung or nudged ring with its reason, ring_at and served_at, for the caps, the fan-out stagger and the hand-off to the shim) · v50 subagents as their parent's children (coordination_agents.parent_thread: the parent Codex thread a native subagent registered with, set once; parent_agent_id: the parent's row under the same principal, filled at register or when the parent registers later, cleared when prune removes the parent; both added only when missing) · v51 edge_evidence (source-entry links for new dream edges; forgetting the last current supporting entry retires the edge) · v52 retained coordination history indexes (partial send indexes on sender/principal/seq, recipient/seq, sender/recipient/seq and principal/seq; principal/seq timeline and partial expiry/seq indexes; message/event/time for lifecycle reconstruction) · v53 principals (stored bearer identities for pseudolife-mcp invite / pair: token and pairing-code SHA-256 only, tier, board, the redeemed code's hash for a ten-minute retry window; excluded from logical exports) · v54 maintainer messages and Board roles (maintainer_passkeys: each WebAuthn credential with its COSE key, alg, sign count, label, enrolled_by, pending/active/revoked state, quarantine end and flagged_at; maintainer_bootstrap: host-code SHA-256, expiry, failed attempts (burned at 5) and redeeming credential; maintainer_nonces: spent challenge nonces to expiry; coordination_messages.origin/maintainer_proof/repudiated_at, added only when missing; excluded from logical exports) · v55 board session names (coordination_agents.name/name_source/name_set_at/harness_name, added only when missing, plus a partial index on episode)",
     "Independent extension: v34-rehub adds immutable build/address evidence plus evidence-gated claims without consuming an upstream integer schema version",
-    "One-current-row-per-slot partial unique indexes"
+    "One-current-row-per-slot partial unique indexes",
+    "Owns driver-free COORDINATION_SCHEMA_SQL; all six operational tables enter the shared bench reset roster; PRINCIPALS_SCHEMA_SQL (v53) is appended the same way; MAINTAINER_SCHEMA_SQL (v54) likewise"
    ]
   },
   {
@@ -881,7 +1040,8 @@
    "d": [
     "hydrate_* on startup; dirty-slot incremental sync per write",
     "snapshot_* full rewrite for explicit save / flush / restore",
-    "Auto-links cortex subjects to graph entities"
+    "Auto-links cortex subjects to graph entities",
+    "Hydrates per-entry dream state; ordinary snapshots preserve committed acknowledgement against stale in-memory state"
    ]
   },
   {
@@ -895,7 +1055,8 @@
    "d": [
     "Empty bank or a recorded resume; weights_only=True (CWE-502 guard)",
     "Progress in the legacy_migration meta row — partial imports resume",
-    "Renames sources *.pre-v8.bak — never deletes"
+    "Renames sources *.pre-v8.bak — never deletes",
+    "Translates old file entries using the source cursor and target source policy; preserves explicit per-entry state across resumed imports"
    ]
   },
   {
@@ -903,7 +1064,7 @@
    "g": "storage",
    "x": 1760,
    "y": 1090,
-   "t": "Postgres 16 + pgvector",
+   "t": "Postgres 18 + pgvector",
    "s": "container · 127.0.0.1:5433 → 5432",
    "p": "ops/Dockerfile.pg",
    "d": [
@@ -934,7 +1095,7 @@
    "s": "EXTERNAL volume · daemon /data",
    "p": "ops/docker-compose.yml",
    "d": [
-    "config.yaml, ChromaDB docs, snapshots, backups",
+    "config.yaml, ChromaDB docs, snapshots, the last-backup.json manifest (the dumps land in the host's data/backups)",
     "Tarred by backup.ps1 alongside the pg_dump"
    ]
   },
@@ -951,26 +1112,68 @@
    ]
   },
   {
+   "id": "coordstore",
+   "g": "storage",
+   "x": 1760,
+   "y": 1530,
+   "t": "storage/coordination.py",
+   "s": "agent rows + addressed mail + audit log",
+   "p": "pseudolife_memory/storage/coordination.py",
+   "d": [
+    "send locks both agent rows FOR UPDATE in agent-ID order, so reciprocal sends cannot deadlock each other",
+    "(sender, request_id) is the idempotency key: a repeat with the same fingerprint returns the first receipt, a different one is request_conflict",
+    "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry",
+    "ack takes one message_id or several comma-separated (MAX_PAGE): a batch returns receipts in order plus the ids that were not this mailbox's, under the agent row lock so overlapping batches serialize",
+    "Receive continuity explains expired unacknowledged mail and seven-day metadata gaps without expired bodies; authenticated history pages retained sends for this instance, with exact peer filtering, separate cursors, audit retention and operator redaction, and no delivery effects. v52 seeks sender and recipient pages separately, gets cursor high-water from two indexed heads and reconstructs only page message lifecycles through the message index; history and Console pin transactions and use transaction-local statement timeouts to bound lock occupancy for large caller-owned histories",
+    "v55 board names: name/name_source on each row, precedence agent (update name; \"\" restores harness_name) > harness (heartbeat name from harness_names.py: the Claude transcript's custom-title > agent-name > ai-title, or Codex session_index thread_name; harness_name always kept, only a shown-name change is written to the audit log) > title (title_names: one indexed UPDATE by episode when a memory_session_title rename resolves a session key, the caller's principal only, none without one); an unnamed row, a lease holder and a waiter read as label + 8-char id (_board_name); names follow the label rule (reserved_name)",
+    "console_snapshot uses a repeatable-read, read-only transaction over roster, unsettled leases, principal-visible pending counts and a bounded metadata-only event timeline; it never receives mail or settles a lease",
+    "v48: to, reply_to and ack's message ids resolve from a unique prefix of 8-31 lowercase hex characters (is_id_prefix; ambiguous_recipient / ambiguous_message_id / ambiguous_reply carry the candidates' distinguishing prefixes in CoordinationError.detail; to resolves among unrevoked addresses, reply_to and ack among the caller's own mail); to project:<name> or all reaches every attached non-idle peer but the sender (the adapter_available rows of list_agents, _fanout_rows), at most FANOUT_MAX (50), atomically under one request id whose fingerprint covers the resolved address, one row and one send event (payload fanout: {to, recipients}) with its own salt per recipient, counted once against SEND_RATE (distinct request ids); the sender and every recipient are locked in id order after an unlocked read of the set, which is re-read under the locks; send receipts carry recipient_agent_id, the stored wake decision and a path (live for an attached wake-enabled peer, else pull); resolve_agent_id serves the operator CLIs (export --agent against addresses and the log, rebind --agent among registered addresses, revoked included)",
+    "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
+    "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
+    "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
+    "prune() removes an address with no retained message once it has had neither its own activity nor a lease for seven days, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true, and a re-attach under the row's own attachment_id is lease recovery, not activity; list_agents shows peers active within ACTIVE_WINDOW (ATTACHED_IDLE_WINDOW, 3 h, while leased), leased first, stamps each with status_set_at/status_age/status_stale (newest register or status update in the audit log, stale past STATUS_STALE_AFTER = 2 h) and counts the rest as idle_omitted",
+    "attach and heartbeat return pending_preview beside pending_count: the PREVIEW_LIMIT (5) oldest pending messages with sender label and a PREVIEW_EXCERPT (100-char) excerpt, read-only, for the shim's turn digest",
+    "Every mutation but a heartbeat or a plain lease renewal appends a coordination_events row in its own transaction: a dense seq under a transaction-scoped advisory lock taken last, hash = sha256(prev_hash || canonical row)",
+    "receive stamps first_read_at once, pull or delivery, and logs a read; prune logs expire/prune and, given audit_retention_days, cuts the log as a prefix and logs the cut (audit_prune) as the surviving chain's anchor",
+    "audit_events / verify_audit_chain back the operator-only board-audit CLI (export, verify and stats read one snapshot; redact writes; stats hands events, coordination_wakes rows and the suite lock's durations to board_audit_stats.compute_stats, which emits counts, seconds and names only); woke(agent, principal) logs the Stop hook's woke marker as a woke event counting the rings served to the address in the last hour; recover/rebind log operator events and still run on a restored pre-v42 bank, and on a pre-v46 one because only rows with a body name the body column",
+    "Resource leases (v45): acquire_lease is acquire, renew, or queue once; a freed lease goes to the head of its queue for LEASE_GRANT_WINDOW (300 s, or the waiter's ttl if shorter) and passes on if not renewed; every grant takes a fence from one sequence; grants, releases, expiries and operator breaks are audit events, renewals are not",
+    "Every lease mutation, ordinary board listing and prune settles due leases first; the Console read-only snapshot leaves expired holds unsettled, locking the lease row, then waiter rows, then the agent row, then the chain; prune never removes a live holder and deletes a departed waiter's queue rows",
+    "Redactable bodies (v46): a send event keeps its body in coordination_events.body, outside the hash, and its hashed payload commits to text_commitment (sha256 of a per-message salt in body_salt plus the body; no length); redact() (operator-only, never dispatched) locks the message row, then the chain, then blanks the body and the live copy and appends a redact event naming the send's seq (audit_copy removed) and returns the new head; a pre-v46 send keeps text in the payload, so only its live copy is taken (audit_copy kept); verify fails body_mismatch (a body its row does not commit to, or one back after its redaction), body_missing (absent without a later operator redact that removed it) or body_not_exported (an export with no body fields); redact clears body and body_salt together (a salt left alone too) and blanks the live row's request fingerprint, and takes the fingerprint even after a short audit retention cut the send event (audit_copy gone); after the commit the board-audit CLI runs VACUUM (ANALYZE) on both tables and vacuums pg_statistic, because ANALYZE copies sampled bodies, salts and fingerprints into the planner statistics; a step Postgres skips with a WARNING (a role without the privilege) is collected by a notice handler and reported as vacuumed false",
+    "looks_like_secret refuses credential-shaped message bodies and request ids, statuses, child labels, labels, projects, tasks, episodes, lease names and purposes, and redaction reasons with secret_like_body before the store reads or writes anything for the call, never echoing the text",
+    "v49 park record: update's park_* fields set it (park_reason in done/blocked/needs_approval/needs_info/needs_resource/waiting_peer; needs and clear_by 120 chars, resume 240; expires an epoch), a null reason or a status without park fields clears it, a field alone needs a standing park; park_gate(agent, principal, since) answers the Stop hook: a live standing park allows unless coordination_wakes has a rung delivery to this agent after since and park_set_at is not strictly later than the newest such delivery (a delivery is its send time, or served_at for a queued no-path ring); without a live park, the current-turn status/park update check and done-shaped status rule still apply, block otherwise",
+    "v49 wake decision at send (_wake_decision, on the locked recipient row): hinted while an unparked recipient acted within active_seconds (a parked one is decided on its park); a done park rings only for urgent mail from the maintainer, the maintainer's delegate for the project or its named clearer (reopened), else not_needed with reopen_by, and maintainer / delegate urgency spends authority_per_sender_per_hour; no_path without a live channel or a ring path (capabilities.ring, set by attach's ring); parked with a need: rung for the clearer, anyone, a clears naming the need in whole words or urgent (each within its cap), else withheld with the need; idle unparked (or a lapsed park): rung (reason urgent) for urgent within the same urgent sender cap, else not_needed (no_park), no ring and no row (regular mail never wakes, 2026-10-02; the hourly nudged ring is retired, and a nudged row from before is never served nor delivered live); per-recipient hourly and nightly caps, urgent per sender per hour, ring_at staggered across one sender's burst; each ring is a coordination_wakes row that the recipient's attach and heartbeat answers carry as wake: queued mail and Codex offers until ack or expiry, other rings for WAKE_SERVE_REPEAT (25 s) after first served; unparked urgent Codex mail is capped attention with no steer path",
+    "v50 subagents: register(parent_thread=) on a Codex row (capabilities name codex, episode is the thread) links the row to the most recently active live Codex row for that thread under the same principal (_codex_parent), and a Codex row registering links every row naming its thread (_link_children, one daemon update event per child, before = the row it replaced); prune clears parent_agent_id of the children of a removed parent; send from a row with parent_thread raises child_send_refused before any lookup; _public carries parent_agent_id and subagent. children entries with an agent_id belong to the hooks: subagent_started/subagent_stopped (actor hook) add or remove one by agent_id, labelled <agent_type>#<id8>, idempotent, with their own MAX_HOOK_CHILDREN (8, the oldest replaced past it) outside the parent's MAX_CHILDREN; a parent update keeps them (_parent_children) and is never refused because of them; _live_children hides a hook entry past HOOK_CHILD_TTL (the attached-idle window) and every write drops it; detach clears them all (a daemon update event); a refused children update applies nothing and says so",
+    "Operator grant: grant_delegate grants the lease delegate:<project> (reason delegate); a session asking for a delegate: or designated: (the 0.16.0 name) lease gets reserved_lease, a freed grant never passes to a queued session, a delegate: hold counts only with the operator's lease_delegate audit record for its current fence (so one a session took under 0.16.0 grants nothing), and a 0.16.0 designated:coordinator: hold grants nothing",
+    "v54 maintainer mail: send(maintainer_proof=) only as the reserved MAINTAINER_PRINCIPAL (never reachable from dispatch), one full-id recipient that is a session's own address, stored with origin maintainer and its proof; receive shows origin maintainer with verified {by, label, signed_at} only for such a row (message_origin), or repudiated_at and the withdrawal sentence, and a withdrawn one is never a live turn; history shows it withdrawn the same way (repudiated_at, the sentence in place of an unredacted body), from the live row or, once that is pruned, the maintainer_repudiate audit event the withdrawal appends as its transaction's last write; the pending preview omits maintainer mail and _mailbox_state counts it (maintainer_pending); _wake_decision decides it first: rung whenever a listener is live (done parks and active sessions included), capped above maintainer_per_recipient_per_hour, else no_path, recorded under reason maintainer_message, which _serve_wake serves without a park",
+    "v54 reserved names: daemon and maintainer are refused as a to (recipient_reserved), either reserved row is reached only by a routed reply (send without to, reply_to one of the caller's maintainer messages); labels spelling daemon, maintainer, passkey or verified after NFKC, casefold and dropping non-alphanumerics are invalid_label except a reserved sender's own",
+    "v54 role changes take actor operator (host CLI) or maintainer (passkey route), nothing else: grant_delegate, break_lease and assign_coordinator (coordinator:<project> vacated with lease_assign naming the replaced holder, then an ordinary lease; the queue stays); one role per session per project, the other role's live hold broken in the same transaction (lease_break reason one_role, also_broken); acquire_lease refuses coordinator:<project> to that project's live delegate (already_delegate) unless it already holds it, so a pre-v54 session holding both keeps renewing; both role leases locked in name order before any waiter or agent row; _authority accepts a lease_delegate record by either actor for the current fence. CoordinationConnection._txn is re-entrant (inner blocks are savepoints) so a signed action and its nonce commit together",
+    "Reachability: grant_delegate and assign_coordinator return reachable and reason (_listener_path: listener_expired / listener_unknown / wake_disabled) plus, when not reachable, a warning; the grant still succeeds and lease delegate prints the warning; MaintainerStore.roles() carries reachable/reason per role holder"
+   ]
+  },
+  {
    "id": "install",
    "g": "ops",
    "x": 40,
-   "y": 1700,
+   "y": 1795,
    "t": "install.ps1 / .sh",
    "s": "one-shot idempotent installer",
    "p": "ops/",
    "d": [
     "providers (multi-select + capability matrix) → preflight → extractor mode",
     "volumes → managed .env → compose up --build → hooks → MCP registration",
-    "Providers: claude / codex / gemini / generic; per-provider writer ids",
-    "Modes: sidecar / sonnet-fallback / sonnet-only / codex-fallback / codex-only (-only = ~11.8 GB lighter)",
-    "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll"
+    "Providers: claude / claude-desktop / codex / gemini / generic; per-provider writer ids",
+    "Modes: sidecar / claude-* / openai-* / endpoint[-fallback] (-only and endpoint = ~11.8 GB lighter)",
+    "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll",
+    "Client-only mode: -DaemonUrl with -TokenFile / -ReadToken / -PairingCode wires clients to a remote daemon, no Docker, volumes or token minting",
+    "-TestLogin / --test-login: also runs test-login create in the Postgres container (a failure warns, the install stands); a client-only install ignores it with a note",
+    "A daemon install with a token ends by offering maintainer setup: --check first (in place: says so), no terminal prints the command, else one y/N (default no), then maintainer setup --yes; a failure leaves the install complete"
    ]
   },
   {
    "id": "preflight",
    "g": "ops",
    "x": 300,
-   "y": 1700,
+   "y": 1795,
    "t": "preflight",
    "s": "read-only doctor",
    "p": "ops/preflight.ps1",
@@ -983,36 +1186,42 @@
    "id": "installhook",
    "g": "ops",
    "x": 560,
-   "y": 1700,
+   "y": 1795,
    "t": "install-hook",
    "s": "SessionStart hook wiring",
    "p": "ops/install-hook.ps1",
    "d": [
-    "Adds `pseudolife-mcp briefing --hook-json` to settings.json / hooks.json",
-    "Backs up the settings file first; strips obsolete episode hooks"
+    "Adds `pseudolife-mcp briefing --hook-json` and its `--coordination` check-in to settings.json / hooks.json, replacing the unconditional check-in echo older installers wrote",
+    "UserPromptSubmit: `pseudolife-mcp prompt-hook` (Docker tier: `docker exec -i`), replacing the exact static discipline echoes older installers wrote",
+    "Backs up the settings file first; strips obsolete episode hooks",
+    "--remove-legacy: drops its exact Claude entries once the plugin owns them"
    ]
   },
   {
    "id": "shimauto",
    "g": "ops",
    "x": 820,
-   "y": 1700,
+   "y": 1795,
    "t": "install-shim-autostart",
-   "s": "Sonnet shim task",
+   "s": "Claude extractor shim task",
    "p": "ops/install-shim-autostart.ps1",
    "d": [
-    "Task Scheduler AtLogOn, console-less detached launch"
+    "Task Scheduler AtLogOn task (Pseudolife Claude Shim), console-less detached launch",
+    "The task runs ops/shim_autostart.py run claude, which reads model, prompt, port and paths from ops/.env (PSEUDOLIFE_CLAUDE_SHIM_*) at every start: a change is an edit plus restart, no elevation"
    ]
   },
   {
    "id": "update",
    "g": "ops",
    "x": 1080,
-   "y": 1700,
+   "y": 1795,
    "t": "update.ps1 / .sh",
-   "s": "safe daemon-only redeploy",
+   "s": "checkout-mode wrapper over pseudolife-mcp update",
    "p": "ops/update.ps1",
    "d": [
+    "Maps its switches onto pseudolife_memory/update_cli.py through ops/update.py --checkout <repo> (the code pseudolife-mcp update runs); -ClientsOnly is refused (ops/update_clients.py); -NoTestLogin / --no-test-login pass --no-test-login through (skips the checkout-mode test-suite login step)",
+    "Refuses a dirty tree, or one git cannot describe, unless -AllowDirty",
+    "Stamps git sha / dirty / build time into image labels + /health build",
     "backup → rollback tag <tag>-pre-update-<ts> → prune (keep 2)",
     "compose up -d --no-deps --build pseudolife-daemon ONLY",
     "Health poll; prints the exact rollback one-liner",
@@ -1023,33 +1232,36 @@
    "id": "backup",
    "g": "ops",
    "x": 1340,
-   "y": 1700,
+   "y": 1795,
    "t": "backup.ps1 / .sh",
    "s": "pg_dump + state tar",
    "p": "ops/backup.ps1",
    "d": [
     "gzip -9 in-container → data/backups/; 7-day rotation",
-    "Optional off-disk mirror with independent retention"
+    "Optional off-disk mirror with independent retention",
+    "Row-count manifest per dump; a >25% drop in entries/facts/lessons holds all rotation",
+    "Manifest copied into the daemon → /health last_backup; install-backup-task.ps1 runs it daily"
    ]
   },
   {
    "id": "restore",
    "g": "ops",
    "x": 1600,
-   "y": 1700,
+   "y": 1795,
    "t": "restore.ps1 / .sh",
    "s": "rehearsal-first restore",
    "p": "ops/restore.ps1",
    "d": [
     "Default: scratch-DB rehearsal + row-count diff — zero writes",
-    "-Apply: safety dump → stop daemon → drop / create → restore → health"
+    "-Apply: safety dump → stop daemon → drop / create → restore → health",
+    "REVOKE CONNECT ... FROM PUBLIC before each replay (a plain dump carries no database ACL): on the rehearsal's scratch DB (a failure drops it and stops) and on the recreated bank (a failure only warns: re-run test-login create), so the test login cannot open either"
    ]
   },
   {
    "id": "compose",
    "g": "ops",
    "x": 1860,
-   "y": 1700,
+   "y": 1795,
    "t": "docker-compose.yml",
    "s": "project pseudolife-mcp · 3 services",
    "p": "ops/docker-compose.yml",
@@ -1058,14 +1270,15 @@
     "Daemon depends_on pg healthy; extractor deliberately NOT depended on",
     "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
     "Override file: swap extractor GGUF or disable the sidecar (profiles)",
-    "Daemon mem_limit 4g (memswap pinned equal - no swap); fences the 2026-08-04 balloon incident"
+    "Daemon mem_limit 6g (memswap pinned equal - no swap; 4g OOM-killed it 2026-09-23); MALLOC_ARENA_MAX=2",
+    "ops/docker-compose.ghcr.yml overlays the GHCR daemon and pg images (PSEUDOLIFE_IMAGE_TAG); byte-equal copies ship in pseudolife_memory/compose/ for an update with no checkout"
    ]
   },
   {
    "id": "ladder",
    "g": "evals",
    "x": 40,
-   "y": 1120,
+   "y": 1215,
    "t": "ladder_sweep.py",
    "s": "extractor ladder",
    "p": "evals/ladder_sweep.py",
@@ -1079,7 +1292,7 @@
    "id": "lme",
    "g": "evals",
    "x": 40,
-   "y": 1215,
+   "y": 1310,
    "t": "LongMemEval bench",
    "s": "flagship external eval",
    "p": "evals/longmemeval_bench.py",
@@ -1093,21 +1306,22 @@
    "id": "gate",
    "g": "evals",
    "x": 40,
-   "y": 1310,
+   "y": 1405,
    "t": "regression_gate.ps1",
-   "s": "pre-commit retrieval gate",
+   "s": "fact-ranking + answer/judge regression gate",
    "p": "evals/regression_gate.ps1",
    "d": [
     "Pinned slice vs committed baseline; exit 1 = regression — default 2 replicates as a drift canary (byte-identical on the reproducible q8_0 server)",
     "Local + GPU — deliberately NOT wired into CI",
-    "Does not cover extraction: re-run the ladder for dream-path changes"
+    "Does not cover extraction: re-run the ladder for dream-path changes",
+    "Scope: offline cortex fact-ranking reconstruction plus the answer/judge path, not CMS candidate selection or MCP rendering; missing pinned bank dumps invalidate the run (exit 2)"
    ]
   },
   {
    "id": "distill",
    "g": "evals",
    "x": 40,
-   "y": 1405,
+   "y": 1500,
    "t": "distillation pipeline",
    "s": "teacher → QLoRA E4B",
    "p": "evals/distill_*.py",
@@ -1121,7 +1335,7 @@
    "id": "benches",
    "g": "evals",
    "x": 40,
-   "y": 1500,
+   "y": 1595,
    "t": "subsystem benches",
    "s": "lesson · relation · memcot · retention…",
    "p": "evals/",
@@ -1142,7 +1356,7 @@
    "p": "pyproject.toml",
    "d": [
     "Console script pseudolife-mcp = pseudolife_memory.cli:main",
-    "Wheel ships the Console static assets; extras: nli / rerank / pdf / onnx"
+    "Wheel ships the Console static assets and compose/*.yml; extras: nli / rerank / pdf / lite / onnx / codex (+ dev)"
    ]
   },
   {
@@ -1179,8 +1393,9 @@
    "s": "GitHub Actions test suite",
    "p": ".github/workflows/ci.yml",
    "d": [
-    "~760 tests vs a real pgvector pg18 service; offline, CPU torch",
-    "Separate from evals/ — those never run in CI"
+    "~8.3k test functions vs a real pgvector pg18 service (job test); offline, CPU torch; job test also sets PSEUDOLIFE_TEST_LOGIN_ADMIN_URL (the service's superuser), so tests/test_test_login_cli.py makes a test-login role there and runs a PG-backed slice under it",
+    "Separate from evals/ — those never run in CI",
+    "Also test-lite-linux / test-lite-windows / test-lite-macos (embedded PG lanes) and frontend (type check, vitest, committed-build diff)"
    ]
   },
   {
@@ -1189,10 +1404,256 @@
    "x": 1760,
    "y": 440,
    "t": "release.yml",
-   "s": "PyPI Trusted Publishing",
+   "s": "PyPI · GHCR · MCP registry",
    "p": ".github/workflows/release.yml",
    "d": [
-    "Tag == pyproject guard; OIDC, human-approved pypi environment"
+    "Tag == pyproject and both server.json versions guarded before build; OIDC, human-approved pypi environment",
+    "After publish: images pushes pseudolife-daemon:<ver> / latest and pseudolife-pg:18 / 18-<ver> to GHCR and verifies them pullable by digest; registry publishes server.json via OIDC"
+   ]
+  },
+  {
+   "id": "movecli",
+   "g": "remote",
+   "x": 2100,
+   "y": 60,
+   "t": "move_cli.py",
+   "s": "pseudolife-mcp move · the bank to another host",
+   "p": "pseudolife_memory/move_cli.py",
+   "d": [
+    "Run on the source Docker-tier host; the target is a checkout host reached over key-based ssh (BatchMode); preflight refuses a target bank that is not empty (entries, facts or principals) or shares the source's bank fingerprint",
+    "Stops the source (docker stop, never rm), takes a final pg_dump and fences the database (ALLOW_CONNECTIONS false), copies with a SHA-256 check, restores with ops/restore.sh --apply --no-start; /data/move.json and /data/moved.json keep either daemon from starting outside the move",
+    "Carries the environment token identities over ssh stdin (--no-keep-tokens skips), starts the target once, then re-points this machine with connect; a failure or signal while the source is down rolls back in a fixed order, recorded under ~/.pseudolife-mcp/moves/<id>/"
+   ]
+  },
+  {
+   "id": "connectcli",
+   "g": "remote",
+   "x": 2100,
+   "y": 160,
+   "t": "connect_cli.py",
+   "s": "re-point client registrations at a daemon",
+   "p": "pseudolife_memory/connect_cli.py",
+   "d": [
+    "Plan → confirm → verify → apply, all or nothing, across claude-code / codex / claude-desktop / gemini registrations and the hooks' URL + token-file copies; every file backed up and read back; never creates a registration",
+    "Verify = the shim's token-file check, an authenticated no-redirect request and an MCP handshake with the board check-in off (a child run from the temp dir, so a source checkout's package cannot shadow the installed one, given only the target's URL and credential), before anything is written; a remote target gets PSEUDOLIFE_MCP_NO_SPAWN=1; Codex is written through its app-server (codex_connection)",
+    "--code / --read-code joins a bank: runs pair only after confirmation (--dry-run never spends a code), then connects with the new token file"
+   ]
+  },
+  {
+   "id": "paircli",
+   "g": "remote",
+   "x": 2100,
+   "y": 260,
+   "t": "invite_cli.py · pair_cli.py",
+   "s": "join a bank with one short code (v53)",
+   "p": "pseudolife_memory/invite_cli.py",
+   "d": [
+    "invite <name> on the daemon host writes a principals row holding only the code's SHA-256 and prints the code once (15 min default, 24 h cap; --tier, --no-board, --list, --revoke, --replace); refuses unless the local daemon reports auth on and its /health bank fingerprint matches the database",
+    "pair on the joining machine mints its own token into a new owner-only file and sends POST /api/pair {code, token_sha256}: the token never crosses the wire; the answer names principal, tier and bank, and the file becomes ~/.pseudolife-mcp/<principal>.token",
+    "/api/pair sits before the bearer gate: any Origin is 403, JSON only, every refused redemption the same 400 pairing_refused (no oracle for which codes exist), a global budget of 20 failed redemptions a minute before 429"
+   ]
+  },
+  {
+   "id": "exposecli",
+   "g": "remote",
+   "x": 2100,
+   "y": 360,
+   "t": "expose_cli.py",
+   "s": "tailnet reachability · tailscale serve",
+   "p": "pseudolife_memory/expose_cli.py",
+   "d": [
+    "expose tailscale | off | status: tailscale serve --bg --tcp=<port> tcp://127.0.0.1:<port>, a raw TCP forward; client URL http://<tailnet ip>:<port>",
+    "Refuses unless local /health answers auth: true (a tunnel to loopback looks local and bypasses the bind guard); never replaces another serve or a Funnel on the port; undoes a forward that does not show up",
+    "The bank-fingerprint probe through the tailnet URL is advisory: a failure is reported, nothing rolled back"
+   ]
+  },
+  {
+   "id": "tunnelcli",
+   "g": "remote",
+   "x": 2100,
+   "y": 460,
+   "t": "tunnel_cli.py + runtime / bridge / service",
+   "s": "optional OpenAI Secure MCP Tunnel",
+   "p": "pseudolife_memory/tunnel_cli.py",
+   "d": [
+    "setup / status / doctor / verify / run / start / stop / shim / service / update over saved profiles; tunnel_runtime installs OpenAI's tunnel-client (0.0.15, SHA-256-pinned per OS/arch) and runs it with a profile whose MCP command is the stdio shim",
+    "tunnel_bridge launches the shim with a scrubbed environment (the profile's token file, OPENAI_API_KEY dropped) and writes payload-free receipts for memory_search / memory_agents; verify prints a nonce prompt to paste into the cloud app",
+    "tunnel_profiles keeps secret-free profile JSON plus <name>.key (DPAPI-wrapped on Windows, owner-only elsewhere) under ~/.pseudolife-mcp/tunnel; tunnel_service installs systemd / launchd / schtasks autostart only with --accept-autostart or --persistent"
+   ]
+  },
+  {
+   "id": "principalstore",
+   "g": "daemon",
+   "x": 1460,
+   "y": 360,
+   "t": "principal_store.py",
+   "s": "stored principals · snapshot + redeem (v53)",
+   "p": "pseudolife_memory/principal_store.py",
+   "d": [
+    "public.principals keeps only SHA-256 of the token and the pairing code, plus tier (minimal / core / full), board flag, code expiry, paired_at and revoked_at; environment names always shadow stored rows",
+    "PrincipalRefresher reloads the in-memory PrincipalSnapshot every 10 s on its own connection, never under the service or coordination lock nor on the event loop; resolution is one dict lookup by token hash",
+    "redeem() is one conditional UPDATE on the database clock (single use under concurrency; the same code + token hash retried within 600 s still answers); create_invite / list_principals / revoke back the invite CLI"
+   ]
+  },
+  {
+   "id": "codexbell",
+   "g": "transport",
+   "x": 330,
+   "y": 860,
+   "t": "codex_doorbell.py · codex_coordination.py",
+   "s": "Codex per-thread board identity + wake",
+   "p": "pseudolife_memory/codex_doorbell.py",
+   "d": [
+    "CodexCoordinationRegistry attaches one coordination adapter per Codex thread (thread id only from the transport's _meta.threadId, a canonical UUID), private state under $CODEX_HOME/pseudolife/agents/",
+    "Doorbell: once the adapter's ring is due (rung or attention), the thread has been quiet 30 s and no earlier notice is unresolved, runs codex queue --thread <id> with fixed text (a count and a nonce) so peer text never enters a user turn; the woken model reads the mail with memory_message receive; any failure disables it for the process",
+    "codex_delivery (opt-in, PSEUDOLIFE_AGENT_WAKE plus a separate host token) pushes events to a loaded thread over a loopback app-server WebSocket and falls back to pull and the doorbell; codex_connection writes Codex's MCP config only through app-server config/batchWrite"
+   ]
+  },
+  {
+   "id": "reviewq",
+   "g": "dream",
+   "x": 1420,
+   "y": 1510,
+   "t": "review_judgments.py · review_decisions.py",
+   "s": "judge opinions · automatic decisions · safe folds",
+   "p": "pseudolife_memory/memory/review_judgments.py",
+   "d": [
+    "review_judgments: one judge tick per queue (merge / link / junk); every pending opinion is fingerprinted to its evidence and judging policy; requeue clears pending opinions and never reopens a terminal decision",
+    "review_decisions: versioned audit of automatic nondestructive terminals only (merge or link reject, junk keep, candidate-pair dismissals), one meta row each plus a bounded active index; reopenable, and a human confirmation retires automatic ownership",
+    "curation_safety: lesson and world duplicate folds fail closed: automatic only on exact text with matching polarity and origin (world facts: equal citations, the survivor at least as fresh); the judge picks the survivor, never writes text, and the fold applies only if both rows still match the snapshot before and after row locking"
+   ]
+  },
+  {
+   "id": "leasecli",
+   "g": "ops",
+   "x": 40,
+   "y": 1895,
+   "t": "lease_cli.py",
+   "s": "pseudolife-mcp lease · named shared-resource holds",
+   "p": "pseudolife_memory/lease_cli.py",
+   "d": [
+    "run | hold | check | list | break | delegate (designate: deprecated alias); the truth is an OS file lock (os_lock, ~/.pseudolife-mcp/locks) held while the command runs; the board mirrors it through POST /api/coordination/lease | release | leases and keeps the FIFO queue; without a daemon it is flock with a name",
+    "run takes the board lease first, then the OS lock, renewing every ttl/3; hold --while-pid covers a process it did not start; break and delegate are operator-only and open the bank directly; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
+    "check exits 0 free, 1 held, 70 when the check itself failed, so a gate never reads a crash as held"
+   ]
+  },
+  {
+   "id": "boardaudit",
+   "g": "ops",
+   "x": 300,
+   "y": 1895,
+   "t": "board_audit_cli.py",
+   "s": "operator-only board audit log",
+   "p": "pseudolife_memory/board_audit_cli.py",
+   "d": [
+    "export (JSON lines in chain order) · verify (walks the hash chain) · redact (one body, with a reason) · stats; reaches the bank directly with the database owner's credentials: no MCP tool, no REST route, never a bearer; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py); export --out and the stats report are written on this side, and stats sends this host's suite-lock durations in on stdin",
+    "stats (board_audit_stats.compute_stats, pure) reports mail latency, wake precision against coordination_wakes, park outcomes, sends per session-hour and suite-lock waits as counts, seconds and names only",
+    "Exit 0 ok, 1 chain broken or redaction refused, 2 nothing checked or changed"
+   ]
+  },
+  {
+   "id": "doctorcli",
+   "g": "ops",
+   "x": 560,
+   "y": 1895,
+   "t": "doctor_cli.py",
+   "s": "pseudolife-mcp doctor · read-only diagnostics",
+   "p": "pseudolife_memory/doctor_cli.py",
+   "d": [
+    "One JSON report: installed versions, credential source, /health (2 s cap), an MCP stdio handshake (instructions, tool count, annotations), wake state, Codex hooks, coordination snapshot, saved tunnels; exit 0 only when ok",
+    "Never starts a daemon; a daemon/shim version mismatch sets ok false and recommends update --clients-only --tag <daemon version>",
+    "--agent-state adds a read_only POST /api/coordination/context; --disposable-proof is the one writing mode and needs an explicit PSEUDOLIFE_TEST_DATABASE_URL",
+    "maintainer_passkeys, only when the board is on for this token: GET /api/maintainer with the bearer → on (rp_id, origin, active keys, and a note that the database password or a host shell can also reset them) / off (unset) / invalid (the config_problem rule: fails the report, MaintainerPasskeysInvalid, recovery names maintainer setup) / unsupported / not_checked"
+   ]
+  },
+  {
+   "id": "unattended",
+   "g": "ops",
+   "x": 820,
+   "y": 1895,
+   "t": "unattended_update.py",
+   "s": "opt-in daily daemon update",
+   "p": "pseudolife_memory/unattended_update.py",
+   "d": [
+    "update --schedule HH:MM registers a Task Scheduler task (Windows) or a systemd --user timer (Linux) running update --unattended once a day; --unschedule removes it; refused on the pip tier",
+    "Applies a release only when /health updates.unattended_daemon is on and the board lists no active session; takes the update lock, re-checks the board after the backup and before the rollback tag moves, then posts POST /api/daemon-notice",
+    "Exit 0 updated · 3 current · 4 held off · 2 could not check · 1 failed; every run appends to ~/.pseudolife-mcp/unattended-update.log"
+   ]
+  },
+  {
+   "id": "updatecli",
+   "g": "ops",
+   "x": 1080,
+   "y": 1895,
+   "t": "update_cli.py",
+   "s": "pseudolife-mcp update · the one deploy implementation",
+   "p": "pseudolife_memory/update_cli.py",
+   "d": [
+    "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image → backup → rollback tag <current>-pre-update-<stamp> → prune → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
+    "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag → prune → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → test-suite login (test-login create, never --rotate) when this account has no test-pg.env, the bundled Postgres runs here and the suite's test server (PSEUDOLIFE_TEST_PG_HOST_PORT, else ~/.config/pseudolife-suite/env, else 127.0.0.1:5433) is its published port; a default-only match asks y/N at a terminal and otherwise skips (--no-test-login skips; release mode never) → BuildKit cache prune",
+    "Held under an OS update.lock in the data dir (busy = exit 2); backup is the checkout's backup script, else a built-in in-container pg_dump + /data tar; exit 1 daemon failure, 2 could not run, 3 current, 5 client step failed",
+    "Both Docker modes end (not with --clients-only) with one line naming pseudolife-mcp maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it (default no) after the update lock is released, passing --yes"
+   ]
+  },
+  {
+   "id": "clientupd",
+   "g": "ops",
+   "x": 1340,
+   "y": 1895,
+   "t": "client_updates.py · runtimes.py",
+   "s": "moves shim, plugin cache and Codex hooks together",
+   "p": "pseudolife_memory/client_updates.py",
+   "d": [
+    "Shim: installs a numbered side-by-side runtime (venv, pip --no-deps, version probe, runtime.json written last) behind one stable launcher, migrates registrations to the launcher (each file backed up) and removes runtimes nothing names or runs (never the one the update itself runs from); a release the current runtime was installed from reports current instead of installing again (--reinstall forces it)",
+    "Plugin: claude plugin marketplace update, a byte compare of marketplace clone and cache, claude plugin update only on a difference, then the compare again as proof; never uninstalls; a failed marketplace update (the CLI's \"Failed to update/refresh marketplace\" line, or a nonzero exit) makes the step failed, never current or refreshed, its detail quoting that line, the remedy and the retry (update_clients.py --only plugin, else update --clients-only); a github-source marketplace is first moved to the HTTPS git source (settings.json and the record backed up; never removed)",
+    "Codex: refreshes manual hook copies, upgrades a plugin copy via codex plugin marketplace upgrade, prints re-approval steps only when an approved hook definition changed; saved tunnels are updated too"
+   ]
+  },
+  {
+   "id": "maintainerN",
+   "g": "daemon",
+   "x": 920,
+   "y": 480,
+   "t": "maintainer.py",
+   "s": "passkey-proven maintainer routes (v54)",
+   "p": "pseudolife_memory/maintainer.py",
+   "d": [
+    "MaintainerOps: the ten service methods behind /api/maintainer* (status, challenge, enrol, send, role, cancel, revoke, repudiate, sent, inbox), one per route; MemoryService inherits it",
+    "Gate: a configured bearer (tokenless refuses), a request principal the board admits (never maintainer), Postgres, and coordination.maintainer rp_id/origin that pass MaintainerConfig.problem() (https://<rp_id>[:port], or http://localhost[:port] with rp_id localhost; never the scheme's default :443 / :80, which a browser leaves out of the origin), else 409 maintainer_https_required; the origin is never read from a request header",
+    "Stateless challenges (storage/maintainer.py): canonical JSON payload with purpose, nonce, expiry (120 s) and every deciding input, HMAC-SHA256 under the meta row maintainer_secret_v1; the WebAuthn challenge is sha256(payload); completion checks MAC, purpose, expiry, assertion, then spends the nonce in the action's transaction",
+    "maintainer_webauthn.py: strict CBOR/COSE and clientDataJSON parsing with cryptography signatures (ES256 DER, EdDSA, RS256 PKCS#1 v1.5 n>=2048 e=65537; no PSS); UP+UV required; exact origin and rpIdHash; crossOrigin/topOrigin refused; sign-count compare-and-set, a regression flags the key; every failure is assertion_invalid with the check in the log only",
+    "Enrolment: first key by host code (pseudolife-mcp maintainer enrol-code) stays pending until maintainer confirm; later keys need an enrol-approve signature and sit 24 h in quarantine, cancellable by any older key; a key revokes only itself; host revoke and reset (rotates the secret) via maintainer_cli.py",
+    "Signed sends from the lazily registered reserved maintainer row; repudiation marks repudiated_at and, if already acknowledged, sends a maintainer follow-up; role purposes grant-delegate / revoke-delegate / assign-coordinator / revoke-coordinator call the store with actor maintainer, recipient on exactly the payload's project; the holder a role change replaces or evicts is signed too (payload holder, re-checked under both role leases, else 409 role_changed), and a spend re-checks the expiry so a replay straddling it cannot re-spend a pruned nonce"
+   ]
+  },
+  {
+   "id": "maintainercli",
+   "g": "ops",
+   "x": 1600,
+   "y": 1895,
+   "t": "maintainer_cli.py",
+   "s": "pseudolife-mcp maintainer · host passkey ops",
+   "p": "pseudolife_memory/maintainer_cli.py",
+   "d": [
+    "enrol-code prints a one-time 10-character base32 code (10 min, stored hashed, refused while any key is pending or active) and waits to print the redeeming key's prefix and label; confirm <prefix> activates it; revoke <prefix>; reset --yes; list",
+    "Opens the bank directly (PSEUDOLIFE_MCP_DATABASE_URL or the lite tier's instance), never through a bearer: what keeps an agent holding only a bearer from enrolling, confirming or revoking a key; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
+    "setup (maintainer_setup.py) is the guided first setup: health with auth → tier (the daemon container, else this install) → the daemon's own config and keys read in its environment (docker exec / this interpreter, python -m pseudolife_memory.maintainer_setup state; MaintainerConfig.problem()) → a valid name is kept, else the tailnet HTTPS name (tailscale serve --bg --https=8443, verified, undone if it does not take; Tailscale stopped or without HTTPS certificates is refused) or http://localhost:<port> → one confirmation (--yes) → config write with a backup → docker restart (Docker tier only; a lite or pip daemon is told how to restart it, and a re-run enrols) → enrol-code, then one y/N after the prefix check (N revokes)",
+    "setup --check only answers (0 set up, 1 not, 2 unreadable): what the installers ask before offering the setup"
+   ]
+  },
+  {
+   "id": "testlogincli",
+   "g": "ops",
+   "x": 1860,
+   "y": 1895,
+   "t": "test_login_cli.py",
+   "s": "pseudolife-mcp test-login · a test-suite login that cannot open the bank",
+   "p": "pseudolife_memory/test_login_cli.py",
+   "d": [
+    "create (idempotent): role pseudolife_test with LOGIN and CREATEDB only (memberships revoked); REVOKE CONNECT from PUBLIC and the role on each production database (pseudolife_memory, POSTGRES_DB, --bank), and from PUBLIC on template1; leftover run databases handed to it; vector installed in template1, since CREATE EXTENSION vector needs a superuser",
+    "Refuses before any change when a role would lose CONNECT with PUBLIC (the PSEUDOLIFE_MCP_DATABASE_URL user, or one connected to a bank now), or when --role names that user",
+    "Writes PSEUDOLIFE_TEST_PG_USER / _PASSWORD to an owner-only ~/.pseudolife-mcp/test-pg.env (PSEUDOLIFE_TEST_PG_LOGIN_FILE), which tests/pg_defaults.py reads before ops/.env; a re-run re-applies the file's password; --rotate draws a new one, required when the role exists and no file here holds its password",
+    "Runs psql in the pseudolife-mcp-postgres container as its own superuser (stdlib only, SQL on stdin), or psycopg with --admin-url; the server gets only a SCRAM-SHA-256 verifier; exit 0 done, 1 database failed, 2 usage, 4 refused"
    ]
   }
  ],
@@ -1258,6 +1719,18 @@
    "k": "control"
   },
   {
+   "f": "plugin",
+   "t": "hookwake",
+   "l": "registers (opt-in)",
+   "k": "control"
+  },
+  {
+   "f": "hookwake",
+   "t": "cc",
+   "l": "exit 2 wakes the idle session",
+   "k": "control"
+  },
+  {
    "f": "cmds",
    "t": "mcpsrv",
    "l": "drives memory_dream · memory_stats…",
@@ -1278,7 +1751,7 @@
   {
    "f": "briefingcli",
    "t": "api",
-   "l": "GET /api/briefing",
+   "l": "GET /api/hook/session-start (--hook-json) · /api/briefing",
    "k": "data"
   },
   {
@@ -1368,7 +1841,7 @@
   {
    "f": "mcpsrv",
    "t": "service",
-   "l": "36 tools → service.*",
+   "l": "39 tools → service / coordination / RE evidence",
    "k": "data"
   },
   {
@@ -1744,18 +2217,6 @@
    "k": "deploy"
   },
   {
-   "f": "update",
-   "t": "backup",
-   "l": "backup first",
-   "k": "deploy"
-  },
-  {
-   "f": "update",
-   "t": "compose",
-   "l": "--no-deps rebuild daemon",
-   "k": "deploy"
-  },
-  {
    "f": "restore",
    "t": "backup",
    "l": "safety dump first",
@@ -1807,6 +2268,294 @@
    "f": "relN",
    "t": "pypi",
    "l": "OIDC publish",
+   "k": "deploy"
+  },
+  {
+   "f": "shim",
+   "t": "adapter",
+   "l": "attaches by default when the daemon serves the shim's bearer the board (PSEUDOLIFE_AGENT_COORDINATION=0 opts out) · wake only with PSEUDOLIFE_AGENT_WAKE",
+   "k": "control"
+  },
+  {
+   "f": "shim",
+   "t": "channel",
+   "l": "channel mode · serve_channel owns the connection",
+   "k": "control"
+  },
+  {
+   "f": "adapter",
+   "t": "api",
+   "l": "POST /api/coordination/* · X-PL-Agent headers",
+   "k": "data"
+  },
+  {
+   "f": "api",
+   "t": "coordhub",
+   "l": "/api/coordination/*",
+   "k": "data"
+  },
+  {
+   "f": "coordhub",
+   "t": "coordination",
+   "l": "dispatch in a worker thread",
+   "k": "data"
+  },
+  {
+   "f": "coordination",
+   "t": "coordstore",
+   "l": "CoordinationStore on its own connection under the coordination lock",
+   "k": "data"
+  },
+  {
+   "f": "coordstore",
+   "t": "pgstorage",
+   "l": "coordination_agents / messages / events / leases · _txn()",
+   "k": "data"
+  },
+  {
+   "f": "relN",
+   "t": "registry",
+   "l": "publish (OIDC)",
+   "k": "deploy"
+  },
+  {
+   "f": "update",
+   "t": "updatecli",
+   "l": "--checkout <repo> (ops/update.py)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "backup",
+   "l": "backup first (script, else built-in pg_dump)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "compose",
+   "l": "up -d --no-deps daemon (--build | GHCR image)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "clientupd",
+   "l": "client step (release mode · --all)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "pypi",
+   "l": "newest release",
+   "k": "control"
+  },
+  {
+   "f": "unattended",
+   "t": "updatecli",
+   "l": "deploy_release while the board is idle",
+   "k": "deploy"
+  },
+  {
+   "f": "unattended",
+   "t": "api",
+   "l": "/health · POST /api/daemon-notice",
+   "k": "data"
+  },
+  {
+   "f": "clientupd",
+   "t": "shim",
+   "l": "new runtime · registrations → launcher",
+   "k": "deploy"
+  },
+  {
+   "f": "clientupd",
+   "t": "plugin",
+   "l": "claude plugin update (on a byte difference)",
+   "k": "deploy"
+  },
+  {
+   "f": "cli",
+   "t": "updatecli",
+   "l": "update",
+   "k": "control"
+  },
+  {
+   "f": "cli",
+   "t": "doctorcli",
+   "l": "doctor",
+   "k": "control"
+  },
+  {
+   "f": "doctorcli",
+   "t": "api",
+   "l": "/health · /api/coordination/context (read-only)",
+   "k": "data"
+  },
+  {
+   "f": "daemon",
+   "t": "pypi",
+   "l": "release check thread (/health updates)",
+   "k": "control"
+  },
+  {
+   "f": "leasecli",
+   "t": "api",
+   "l": "POST /api/coordination/lease · release · leases",
+   "k": "data"
+  },
+  {
+   "f": "leasecli",
+   "t": "coordstore",
+   "l": "break · delegate (operator, direct)",
+   "k": "data"
+  },
+  {
+   "f": "boardaudit",
+   "t": "coordstore",
+   "l": "export · verify · redact · stats (direct)",
+   "k": "data"
+  },
+  {
+   "f": "shim",
+   "t": "codexbell",
+   "l": "Codex: per-thread registry + doorbell",
+   "k": "control"
+  },
+  {
+   "f": "adapter",
+   "t": "codexbell",
+   "l": "ring_due()",
+   "k": "control"
+  },
+  {
+   "f": "codexbell",
+   "t": "codex",
+   "l": "codex queue wakes the idle thread",
+   "k": "control"
+  },
+  {
+   "f": "principals",
+   "t": "principalstore",
+   "l": "stored-principal snapshot",
+   "k": "control"
+  },
+  {
+   "f": "principalstore",
+   "t": "pgstorage",
+   "l": "principals table (v53)",
+   "k": "data"
+  },
+  {
+   "f": "paircli",
+   "t": "api",
+   "l": "POST /api/pair {code, token_sha256}",
+   "k": "data"
+  },
+  {
+   "f": "paircli",
+   "t": "principalstore",
+   "l": "invite row (direct DB · docker exec)",
+   "k": "data"
+  },
+  {
+   "f": "connectcli",
+   "t": "paircli",
+   "l": "--code redeems",
+   "k": "control"
+  },
+  {
+   "f": "connectcli",
+   "t": "shim",
+   "l": "re-points registrations · handshake",
+   "k": "control"
+  },
+  {
+   "f": "movecli",
+   "t": "connectcli",
+   "l": "re-point this machine",
+   "k": "control"
+  },
+  {
+   "f": "movecli",
+   "t": "exposecli",
+   "l": "expose the target",
+   "k": "control"
+  },
+  {
+   "f": "movecli",
+   "t": "restore",
+   "l": "restore --apply --no-start on the target",
+   "k": "deploy"
+  },
+  {
+   "f": "exposecli",
+   "t": "daemon",
+   "l": "tailscale TCP forward to loopback",
+   "k": "control"
+  },
+  {
+   "f": "tunnelcli",
+   "t": "shim",
+   "l": "vendor client runs the shim via the bridge",
+   "k": "data"
+  },
+  {
+   "f": "greview",
+   "t": "reviewq",
+   "l": "proposals the judge rules on",
+   "k": "control"
+  },
+  {
+   "f": "reviewq",
+   "t": "graphstore",
+   "l": "opinions · automatic terminals",
+   "k": "data"
+  },
+  {
+   "f": "reviewq",
+   "t": "lessonsN",
+   "l": "fail-closed duplicate folds",
+   "k": "data"
+  },
+  {
+   "f": "reviewq",
+   "t": "worldN",
+   "l": "fail-closed duplicate folds",
+   "k": "data"
+  },
+  {
+   "f": "routes",
+   "t": "maintainerN",
+   "l": "/api/maintainer* → service.maintainer_*",
+   "k": "data"
+  },
+  {
+   "f": "maintainerN",
+   "t": "coordstore",
+   "l": "signed send · repudiate · role changes (actor maintainer)",
+   "k": "data"
+  },
+  {
+   "f": "maintainercli",
+   "t": "pgstorage",
+   "l": "enrol-code · confirm · revoke · reset (direct)",
+   "k": "data"
+  },
+  {
+   "f": "cli",
+   "t": "testlogincli",
+   "l": "test-login",
+   "k": "control"
+  },
+  {
+   "f": "testlogincli",
+   "t": "pgN",
+   "l": "role · REVOKE CONNECT (psql in-container | --admin-url)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "testlogincli",
+   "l": "checkout mode: test-suite login when missing",
    "k": "deploy"
   }
  ],
@@ -1889,13 +2638,15 @@
   },
   "deploy": {
    "name": "deploy",
-   "desc": "Lifecycle: install (preflight → compose up → hooks). Updates are daemon-only: backup → rollback tag → --no-deps rebuild → health poll. The distilled E4B model is the one eval artifact baked into a shipped image.",
+   "desc": "Lifecycle: install (preflight → compose up → hooks). Updates run through pseudolife-mcp update (ops/update.* wrap its checkout mode): backup → rollback tag → daemon-only --no-deps recreate → health poll → client side (shim runtime, plugin cache, Codex hooks). The distilled E4B model is the one eval artifact baked into a shipped image.",
    "seq": [
     "install>preflight",
     "install>compose",
-    "update>backup",
-    "update>compose",
+    "update>updatecli",
+    "updatecli>backup",
+    "updatecli>compose",
     "compose>daemon",
+    "updatecli>clientupd",
     "distill>extractor"
    ]
   }

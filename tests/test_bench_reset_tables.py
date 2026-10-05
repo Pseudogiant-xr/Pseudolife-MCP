@@ -30,9 +30,9 @@ _CREATE_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)")
 
 def _declared_tables() -> set[str]:
     """Every table name the schema module creates, DDL string and the
-    additive-migration `cur.execute` tail alike — read from the source, so
-    a table added anywhere in the file counts."""
-    return set(_CREATE_RE.findall(inspect.getsource(schema)))
+    additive-migration `cur.execute` tail alike. Include the composed runtime
+    DDL so declarations imported from a subsystem are covered too."""
+    return set(_CREATE_RE.findall(schema.SCHEMA_SQL + inspect.getsource(schema)))
 
 
 def test_every_declared_table_is_in_the_reset_list():
@@ -41,6 +41,12 @@ def test_every_declared_table_is_in_the_reset_list():
         "these tables are declared by schema.py but absent from "
         "BENCH_RESET_TABLES, so a bench reset leaves their rows behind:\n  "
         + "\n  ".join(missing))
+
+
+def test_declared_tables_include_imported_ddl(monkeypatch):
+    monkeypatch.setattr(schema, "SCHEMA_SQL", schema.SCHEMA_SQL +
+                        "\nCREATE TABLE IF NOT EXISTS fixture_imported_ddl (id TEXT);")
+    assert "fixture_imported_ddl" in _declared_tables()
 
 
 def test_reset_list_names_no_table_the_schema_does_not_declare():
@@ -64,7 +70,7 @@ def test_the_previously_leaking_tables_are_covered():
     ``pg_fixtures`` had (#181, 2026-08-25)."""
     for table in ("chronicle_events", "entity_kinds", "retrieval_events",
                   "outcome_signals", "dismissed_pairs", "merge_decisions",
-                  "communities"):
+                  "communities", "memory_trace_invalidations"):
         assert table in schema.BENCH_RESET_TABLES, table
 
 

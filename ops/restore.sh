@@ -17,6 +17,11 @@
 #                                         # backup.sh state tar. Opt-in: a
 #                                         # DB-only restore must not clobber
 #                                         # current state.
+#   ops/restore.sh --apply --no-start ... # REAL RESTORE, but leave the
+#                                         # daemon stopped afterwards
+#                                         # (pseudolife-mcp move checks the
+#                                         # restored bank before its first
+#                                         # start).
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope.
@@ -29,6 +34,7 @@ DAEMON_CONTAINER="pseudolife-mcp-daemon"
 DB="pseudolife_memory"
 DB_USER="pseudolife"
 APPLY=0
+NO_START=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -39,16 +45,37 @@ while [ $# -gt 0 ]; do
         --db)               DB="$2"; shift 2 ;;
         --user)             DB_USER="$2"; shift 2 ;;
         --apply)            APPLY=1; shift ;;
+        --no-start)         NO_START=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
+if [ "$NO_START" -eq 1 ] && [ "$APPLY" -eq 0 ]; then
+    echo "--no-start applies to a real restore (--apply); a rehearsal never starts or stops the daemon" >&2
+    exit 2
+fi
+
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
-# 1. Resolve + validate the backup artifact.
+# 1. Resolve + validate the backup artifact. With no file named, take the
+# newest dump the row-count gate did not hold (see ops/restore.ps1 for why);
+# --backup-file is the override, and a dump with no manifest is taken as
+# before.
 if [ -z "$BACKUP_FILE" ]; then
-    BACKUP_FILE="$(ls -1t "$repo/data/backups"/pseudolife_memory-*.sql.gz 2>/dev/null | head -1 || true)"
-    [ -n "$BACKUP_FILE" ] || { echo "no backups found under data/backups" >&2; exit 1; }
+    found=0
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        found=1
+        m="$(dirname "$f")/pseudolife_manifest-$(basename "$f" | sed 's/^pseudolife_memory-\(.*\)\.sql\.gz$/\1/').json"
+        if [ -f "$m" ] && grep -q '"rotation": *"held"' "$m"; then
+            echo "==> Skipping $(basename "$f"): the row-count gate held it (its entries, facts or lessons fell sharply). Pass --backup-file to restore it anyway."
+            continue
+        fi
+        BACKUP_FILE="$f"
+        break
+    done < <(ls -1t "$repo/data/backups"/pseudolife_memory-*.sql.gz 2>/dev/null || true)
+    [ "$found" -eq 1 ] || { echo "no backups found under data/backups" >&2; exit 1; }
+    [ -n "$BACKUP_FILE" ] || { echo "every backup under data/backups is held by the row-count gate; pass --backup-file <path> to restore one anyway" >&2; exit 1; }
 fi
 [ -s "$BACKUP_FILE" ] || { echo "backup artifact missing or empty: $BACKUP_FILE" >&2; exit 1; }
 echo "==> Backup: $BACKUP_FILE ($(( $(wc -c < "$BACKUP_FILE") / 1024 )) KB)"
@@ -83,6 +110,15 @@ if [ "$APPLY" -eq 0 ]; then
     echo "==> Rehearsal: restoring into scratch db '$scratch' (live bank untouched)"
     docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $scratch"
     docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "CREATE DATABASE $scratch"
+    # The scratch copy holds the whole bank and a plain CREATE DATABASE is
+    # open to PUBLIC: close it before the replay, as a real restore closes
+    # the bank, or the test login (`pseudolife-mcp test-login create`) could
+    # read it while the rehearsal runs.
+    if ! docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "REVOKE CONNECT ON DATABASE $scratch FROM PUBLIC"; then
+        echo "could not revoke CONNECT on the scratch db from PUBLIC; not restoring the bank into a database any login could open" >&2
+        docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $scratch" >/dev/null 2>&1 || true
+        exit 1
+    fi
     if ! docker exec "$CONTAINER" sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $DB_USER -d $scratch > /dev/null"; then
         echo "restore into scratch db FAILED - the backup may be unusable" >&2
         exit 1
@@ -152,7 +188,8 @@ else
     # ── REAL RESTORE ─────────────────────────────────────────────────────
     echo "WARNING: REAL RESTORE: this REPLACES the live bank '$DB' with $BACKUP_FILE" >&2
     echo "==> Safety-dumping the current bank first..."
-    "$(dirname "$0")/backup.sh"
+    "$(dirname "$0")/backup.sh" --container "$CONTAINER" --db "$DB" --user "$DB_USER" \
+        --daemon-container "$DAEMON_CONTAINER"
 
     echo "==> Stopping the daemon..."
     docker stop "$DAEMON_CONTAINER" >/dev/null
@@ -174,6 +211,14 @@ else
         echo "CREATE DATABASE $DB failed after the drop - the bank no longer exists in Postgres. Re-run this restore (the dump is still at $BACKUP_FILE) before starting the daemon." >&2
         exit 1
     fi
+    # A plain dump carries no database ACL, so the new database is open to
+    # PUBLIC again: close it before the replay, as `pseudolife-mcp test-login
+    # create` does, so the test login cannot open it. The daemon connects as
+    # the owner, who keeps CONNECT. A failure only warns: the replay matters
+    # more, and re-running `test-login create` closes it.
+    if ! docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "REVOKE CONNECT ON DATABASE $DB FROM PUBLIC"; then
+        echo "WARNING: could not revoke CONNECT on $DB from PUBLIC; after the restore, run 'pseudolife-mcp test-login create' to close it again." >&2
+    fi
     if ! docker exec "$CONTAINER" sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $DB_USER -d $DB > /dev/null"; then
         echo "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data/backups." >&2
         exit 1
@@ -194,6 +239,11 @@ else
             echo "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data/backups." >&2
             exit 1
         fi
+    fi
+
+    if [ "$NO_START" -eq 1 ]; then
+        echo "==> Restore complete; the daemon was left stopped (--no-start). Start it with 'docker start $DAEMON_CONTAINER' (or ops/update.sh) once the restored bank has been checked."
+        exit 0
     fi
 
     echo "==> Restarting the daemon..."

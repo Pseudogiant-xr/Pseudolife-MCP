@@ -155,9 +155,11 @@ def parse_verdict(text) -> bool:
 # Row fields carried into the re-judged artifact. The served contexts are
 # deliberately NOT carried: they are ~7MB of the source file and nothing
 # downstream re-reads them, while {arm}_context_tokens (which IS carried)
-# is what beam_within_run_pairs reports the cost column from.
+# is what beam_within_run_pairs reports the cost column from. The embedder
+# stamp IS carried: the re-judged verdicts are still verdicts on contexts
+# that embedder built (evals/embedder_stamp.py).
 CARRY = ("question_id", "question", "question_type", "question_date",
-         "answer", "gold_in_question", "abstention")
+         "answer", "gold_in_question", "abstention", "embedder")
 
 
 def rejudge_row(row: dict, arms: tuple[str, ...], tag: str, judge) -> dict:

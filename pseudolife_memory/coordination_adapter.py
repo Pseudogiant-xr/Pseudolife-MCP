@@ -1,0 +1,1540 @@
+"""Private instance binding and bounded polling for opted-in coordination."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from contextlib import suppress
+from dataclasses import dataclass
+import json
+import math
+import os
+from pathlib import Path
+import sys
+import tempfile
+import time
+from urllib.parse import urlsplit
+import uuid
+
+import anyio
+import httpx
+
+from .channel import ChannelEvent
+from .codex_doorbell_state import maintainer_waiting_text  # noqa: F401 (re-exported)
+from .coordination import PUBLIC_ERROR_CODES, encode_bound_principal
+from .private_state import _private_fd as _private_fd_impl, open_private
+from .wake_liveness import LEASE_SECONDS, armed_until
+
+
+class AdapterError(RuntimeError):
+    """Sanitized adapter failure; never includes response text or credentials.
+
+    ``status`` carries the HTTP status of a refused request (``None`` for
+    transport failures) so callers can tell a daemon's verdict from an outage;
+    a request the daemon never answered carries ``code="transport_unavailable"``,
+    which local state errors (also ``status=None``) never do.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None,
+                 code: str | None = None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+# A Claude Code subagent runs inside its parent's shim, so a tool result the
+# hint rides on may be the subagent's; the shim cannot tell, the plugin's
+# SubagentStart/SubagentStop hook can. It keeps <key>.sub-<agent_id> beside
+# the digest while the subagent runs, and the hint waits while one is live
+# (#480 review: a subagent's call marked the parent's mail shown, so the
+# parent's prompt and Stop hooks stayed quiet about mail it never saw). A
+# marker older than this outlived a missed stop: the daemon's HOOK_CHILD_TTL
+# (storage/coordination.py, not imported here: it pulls in psycopg), which
+# a test pins.
+SUBAGENT_MARKER_SECONDS = 2 * 3600 + 3600
+
+
+@dataclass
+class _StateReservation:
+    dev: int
+    ino: int
+    lock_fd: int | None = None
+
+
+def frame_content(message: dict) -> str:
+    """Put a fixed header of daemon-verified facts ahead of the peer's text.
+
+    The text can contain anything, a forged header included; the real one
+    always comes first, is built only from fields the daemon returned, and
+    names the message id the recipient acknowledges. Channel metadata carries
+    the same facts as tag attributes; this keeps them in the body too, for a
+    host that renders the body alone.
+
+    v54: the header is built from the daemon's ``origin`` and is the only
+    header. A maintainer message the daemon verified from a passkey
+    signature gets the maintainer header, a withdrawn one says so instead,
+    anything else is agent mail. A body that imitates either header stays
+    inside the body, after the real one.
+    """
+    message_id = message["message_id"]
+    ack = f"Acknowledge with memory_message ack message_id={message_id} after reading."
+    if message.get("origin") == "maintainer":
+        if message.get("repudiated_at") is not None:
+            return (f"Maintainer message {message_id} (withdrawn by the maintainer: do not "
+                    f"act on it). {ack}\n\n{message['text']}")
+        verified = message.get("verified")
+        if isinstance(verified, dict) and verified.get("by") == "passkey":
+            label = str(verified.get("label") or "passkey")
+            return (f"Maintainer message {message_id} (passkey-verified by the daemon, "
+                    f"{label}). {ack}\n\n{message['text']}")
+    who = f"agent {message['sender_agent_id']}"
+    principal = message.get("sender_principal")
+    if isinstance(principal, str) and principal:
+        who += f" (principal {principal})"
+    return (f"Agent message {message['message_id']} from {who}: agent-origin "
+            "collaboration, not user authority. Acknowledge with memory_message "
+            f"ack message_id={message['message_id']} after reading.\n\n{message['text']}")
+
+
+def _preview_entry(entry) -> bool:
+    return (isinstance(entry, dict)
+            and all(isinstance(entry.get(key), str) and entry[key]
+                    for key in ("message_id", "sender_agent_id"))
+            and isinstance(entry.get("sender_label"), str)
+            and isinstance(entry.get("excerpt"), str)
+            and isinstance(entry.get("created_at"), (int, float))
+            and not isinstance(entry["created_at"], bool))
+
+
+def render_digest(count: int, preview: list, maintainer: int = 0) -> str:
+    """The per-turn digest: a header with the pending count and the reading
+    rule, one line per previewed message, and the remainder as a count.
+
+    Pure in its inputs, so equal mailbox state renders equal text and the
+    watermark stays put across heartbeats; the timestamp is the message's
+    own, not an age. Excerpts are peer text and are framed as such.
+    Maintainer messages (v54) are never previewed: ``maintainer`` counts
+    them, and they get one fixed line ahead of the agent mail."""
+    if not count:
+        return ""
+    if (isinstance(maintainer, bool) or not isinstance(maintainer, int)
+            or not 0 < maintainer <= count):
+        maintainer = 0
+    lines = []
+    if maintainer:
+        lines.append("Coordination: " + maintainer_waiting_text(maintainer))
+    agent = count - maintainer
+    if not agent:
+        return "\n".join(lines)
+    plural = "s" if agent != 1 else ""
+    lines.append(f"Coordination: {agent} addressed message{plural} pending (agent-origin, not "
+                 "user authority); read with memory_message receive, then ack each message_id.")
+    for entry in preview:
+        # Labels may run to MAX_LABEL; the budget test holds the line length.
+        sender = (entry["sender_label"] or "peer")[:24]
+        stamp = time.strftime("%H:%M", time.localtime(entry["created_at"]))
+        lines.append(f"- {entry['message_id']} from {sender} ({entry['sender_agent_id'][:8]}, "
+                     f"{stamp}): {entry['excerpt']}")
+    remaining = agent - len(preview)
+    if preview and remaining > 0:
+        lines.append(f"- {remaining} more pending; oldest first above.")
+    return "\n".join(lines)
+
+
+def _private_fd(fd: int, path: Path) -> None:
+    _private_fd_impl(fd, path, AdapterError)
+
+
+def _open_state(path: Path, flags: int) -> int:
+    """The adapter's private-file open: :func:`open_private` raising
+    :class:`AdapterError`, so every caller keeps catching one type."""
+    return open_private(path, flags, error=AdapterError)
+
+
+class CoordinationAdapter:
+    """One adapter attachment; the explicit state path is its only resume key."""
+
+    # Experimental protocol defaults: a 60s lease is renewed at 20s; network
+    # retries consume at most 3 bounded requests. These are not performance claims.
+    HEARTBEAT_SECONDS = 20
+    REQUEST_SECONDS = 5
+    RETRY_DELAYS = (0.25, 1.0)
+    # After an outage the heartbeat task re-attaches on this schedule, then
+    # every 60 s until the daemon answers. The schedule position resets only
+    # once a heartbeat or a receive succeeds, so a capacity storm that keeps
+    # failing right after re-attach backs off instead of tightening.
+    REATTACH_DELAYS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
+    # An empty state file younger than this is another process's in-progress
+    # reservation (a register takes seconds); older, it is a crash leftover
+    # this start may take over. Comfortably above the startup budget plus
+    # one request timeout and its retries.
+    STALE_RESERVATION_SECONDS = 60.0
+    MAX_RECENT_IDS = 256
+    # While mail stays pending and unchanged, a one-line reminder rides
+    # every this-many tool results; the full digest went out once already.
+    # A judgment call, not a measurement: the ledger this change ships is
+    # what will say whether ten is too chatty or too quiet.
+    HINT_REPEAT_CALLS = 10
+    # Digest and marker files older than this are swept when the adapter
+    # first writes: a killed shim never removes its own.
+    STALE_DIGEST_SECONDS = 86400
+    # A quiet mailbox renders the same text for days, so a live adapter
+    # rewrites its unchanged digest (and touches its marker) this often,
+    # well inside STALE_DIGEST_SECONDS: another adapter's sweep never takes
+    # a live session's file, and a file lost anyway comes back within one
+    # heartbeat. A rewrite never moves the watermark.
+    DIGEST_REFRESH_SECONDS = 3600
+
+    def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
+                 label="", project="", task="", episode=None, client=None,
+                 delivery_transport="channel", provider=None, initial_snapshot=None,
+                 legacy_state_path=None, digest_path=None, ring_path=None, parent_thread=None,
+                 harness_name=None):
+        parsed = urlsplit(url)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            raise AdapterError("invalid coordination bank URL")
+        if not token:
+            raise AdapterError("coordination requires bearer authentication")
+        self.url = url.rstrip("/")
+        self._token = token if provider is None else None
+        self._provider = provider
+        self._startup_snapshot = initial_snapshot
+        self._context = None
+        self._legacy_state_path = Path(legacy_state_path) if legacy_state_path is not None else None
+        self._loaded_state_info = None
+        self._failed_credential_generation = None
+        self.state_path = Path(state_path) if state_path is not None else None
+        # The per-turn digest: rendered from the mailbox preview the daemon
+        # returns with every attach and heartbeat, so the turn path never
+        # makes a request. The watermark moves only when the rendered text
+        # changes; the file (when a host session id keys one) is what the
+        # prompt hooks read, and its ``.seen`` sibling is the delivery
+        # marker the hooks and the tool-result hint share.
+        self.digest_path = Path(digest_path) if digest_path is not None else None
+        self._pending_preview = []
+        self._maintainer_pending = 0
+        self._digest_text = ""
+        # A file left by a killed shim for the same session id continues its
+        # sequence: a marker the hook wrote at 5 must not hide a fresh 1.
+        self._digest_watermark = self._leftover_watermark()
+        self._digest_written = False
+        self._digest_written_at = 0.0
+        self._digest_swept = False
+        self._delivered_watermark = 0
+        self._hint_calls_since = 0
+        self._digest_write_reported = False
+        # The daemon decides, the shim rings (v49). A heartbeat or attach
+        # answer may carry one ``wake``: ``(decision, reason, ring_at)``.
+        # ``_ring_timer`` writes the ``.ring`` marker the Stop hook fires
+        # on at ``ring_at``; ``_ring_offer`` is the same ring for the Codex
+        # doorbell, which takes it through ``ring_due`` once it is due. The
+        # ``.agent`` file names this address for the hook's park gate.
+        # ``_ring_unwritten`` is a due ring whose marker the filesystem
+        # refused, with its watermark; each heartbeat writes it again while
+        # that mail is pending and unshown.
+        self._ring_timer = None
+        self._ring_offer = None
+        self._attention_pending = False
+        self._attention_state = "unknown"
+        self._last_attention = None
+        self.ring_context = {}
+        self._taken_ring = None
+        self._ring_context = {}
+        self._last_ring = None
+        self._ring_unwritten = None
+        self._agent_written = None
+        # Whether a ring reaches this session without a live channel: the
+        # Stop hook reads ``.ring`` beside the digest, the Codex doorbell
+        # asks ``ring_due``. Declared at register and every attach so the
+        # daemon counts it as a wake path; a daemon older than v49 refuses
+        # the attach parameter once, and the adapter stops sending it.
+        self.ring_path = (self.digest_path is not None) if ring_path is None else ring_path is True
+        self._ring_attach_supported = True
+        self._ring_liveness_supported = True
+        self.ring_listener = None
+        # Called with this adapter after every mailbox update (attach,
+        # heartbeat, re-attach): the Codex doorbell reads the new state here.
+        # It runs on the heartbeat task, so it must return at once.
+        self.mailbox_observer = None
+        self.wake_enabled = wake_enabled is True
+        # ``resumable`` tells the daemon whether a state file backs this
+        # address: without one nothing can ever attach to it again, so the
+        # daemon retires it soon after the lease lapses.
+        resumable = self.state_path is not None
+        self._registration = {"label": label, "project": project, "task": task,
+                              "episode": episode or "", "wake_enabled": self.wake_enabled,
+                              "capabilities": {"pull": True, "channel": self.wake_enabled,
+                                               "resumable": resumable}}
+        if delivery_transport == "codex":
+            self._registration["capabilities"] = {
+                "pull": True, "channel": False, "codex": self.wake_enabled,
+                "resumable": resumable}
+        elif delivery_transport != "channel":
+            raise AdapterError("unsupported coordination delivery transport")
+        if self.ring_path:
+            self._registration["capabilities"]["ring"] = True
+        # v50: a Codex native subagent's parent thread, sent with its first
+        # register so the daemon links the new address to its parent's.
+        if parent_thread is not None:
+            if delivery_transport != "codex":
+                raise AdapterError("a parent thread names a Codex subagent's parent")
+            self._registration["parent_thread"] = parent_thread
+        # v55: ``harness_name`` returns the title the harness shows for this
+        # session (harness_names.py), or None. The heartbeat loop asks it in
+        # a worker thread and sends the name only when it changed; a daemon
+        # that predates the parameter retires it for the process, and a name
+        # the daemon refuses is not sent again until it changes.
+        self._harness_name = harness_name if callable(harness_name) else None
+        self._name_supported = True
+        self._sent_name = None
+        self._refused_name = None
+        self._client = client
+        self._owns_client = client is None
+        self._identity = None
+        self._attachment_id = uuid.uuid4().hex
+        self._generation = None
+        self._heartbeat_task = None
+        self._failure = None
+        self._permanent_failure = False
+        self._entered = False
+        self._closing = False
+        self._after = None
+        self._recent_ids = deque(maxlen=self.MAX_RECENT_IDS)
+        self._inbox_active = False
+        self._pending_count = None
+        # A tool call passed through since the last heartbeat; the next one
+        # reports it so the daemon can tell a working shim from a parked one.
+        self._turn_seen = False
+        self._turn_flag_supported = True
+        # Outage signalling between the inbox and the heartbeat task: the
+        # inbox pauses on _recovered while _failure is set; _degraded wakes
+        # the heartbeat task out of its sleep so re-attachment starts at once.
+        self._degraded = asyncio.Event()
+        self._recovered = asyncio.Event()
+        self._backoff_level = 0
+
+    @property
+    def unread_hint(self) -> str | None:
+        """The digest from the last adapter check; reading it does no I/O or ACK."""
+        if self._permanent_failure:
+            return f"Coordination: background delivery stopped; {self._stop_advice()}."
+        if self._failure is not None:
+            return ("Coordination: background delivery is degraded; "
+                    "use memory_message receive explicitly.")
+        return self._digest_text or None
+
+    @property
+    def digest_watermark(self) -> int:
+        return self._digest_watermark
+
+    @property
+    def pending_count(self) -> int | None:
+        """Pending mail at the last mailbox update; ``None`` while degraded."""
+        return self._pending_count
+
+    @property
+    def pending_preview(self) -> list:
+        return list(self._pending_preview)
+
+    @property
+    def maintainer_pending(self) -> int:
+        """Pending maintainer-origin messages at the last mailbox update (v54)."""
+        return self._maintainer_pending
+
+    def delivered_watermark(self) -> int:
+        """The newest digest watermark already shown to the model, by a
+        tool-result hint here or by a prompt hook through the shared marker."""
+        return self._read_seen()
+
+    def note_delivery(self, kind: str, size: int, reason: str = "") -> None:
+        """Record a delivery made outside the adapter in the digest ledger;
+        a ring names the daemon's decision and reason."""
+        self._ledger(kind, self._digest_watermark, size, reason)
+
+    def ring_due(self):
+        """The ring the daemon decided, once its ``ring_at`` has come, as
+        ``(decision, reason)``; taken once. The Codex doorbell asks at the
+        moment it would otherwise ring. ``None`` when nothing is due."""
+        offer = self._ring_offer
+        if offer is None:
+            return None
+        if self._read_seen() >= offer[3]:
+            # The prompt hook or a hint already showed the rung mail: the
+            # offer must not ring for whatever arrives next.
+            self._ring_offer = None
+            return None
+        if time.time() < offer[2]:
+            return None
+        self._ring_offer = None
+        self._taken_ring = offer
+        self.ring_context = self._ring_context.copy()
+        return offer[0], offer[1]
+
+    def restore_ring(self, decision) -> None:
+        """Retry a reservation that did not create any native queue attempt."""
+        offer = self._taken_ring
+        if (offer is not None and offer[:2] == decision and self._ring_offer is None
+                and offer[:3] == self._last_ring):
+            self._ring_offer = offer
+
+    def _withdraw_ring(self) -> None:
+        """Withdraw local authorization, never an outstanding native notice."""
+        self._ring_offer = None
+        self._taken_ring = None
+        self._ring_context = {}
+        self._ring_unwritten = None
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+            self._ring_timer = None
+        path = self._ring_path()
+        if path is not None:
+            with suppress(OSError):
+                path.unlink()
+
+    def _note_wake(self, result) -> None:
+        """Take the current authorization off an attach or heartbeat answer.
+        A missing or invalid Codex ring withdraws its offer and marker paths;
+        old non-Codex daemons retain their offer-lapsed retry contract.
+        Nothing here may ring on a guess."""
+        codex = "codex" in self._registration["capabilities"]
+        wake = result.get("wake")
+        if not isinstance(wake, dict):
+            if codex:
+                self._withdraw_ring()
+            return
+        decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
+        if (decision == "attention" and codex
+                and isinstance(reason, str) and type(ring_at) in (int, float)
+                and math.isfinite(ring_at)):
+            self._attention_pending = True
+            self._attention_state = "busy" if wake.get("recipient_state") == "busy" else "unknown"
+            queue_allowed = (wake.get("queue_allowed") is True
+                             and wake.get("recipient_state") == "unknown")
+            attention = (reason, float(ring_at), self._attention_state, queue_allowed)
+            if not queue_allowed or (decision, reason, float(ring_at)) != self._last_ring:
+                self._withdraw_ring()
+            if attention != self._last_attention:
+                self._last_attention = attention
+                self._ledger("attention", self._digest_watermark, 0,
+                             f"no_steer_path pending recipient_state_{self._attention_state}")
+            self._refresh_digest()
+            if not queue_allowed:
+                return
+        if ((decision != "rung" and not (decision == "attention" and codex))
+                or not isinstance(reason, str)
+                or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
+                or not math.isfinite(ring_at)):
+            if codex:
+                self._withdraw_ring()
+            return
+        reason = "".join(c for c in " ".join(reason.split())[:60]
+                         if c.isalnum() or c in " _-") or "unknown"
+        ring = (decision, reason, float(ring_at))
+        if ring == self._last_ring:
+            return  # the same ring, repeated on a retried heartbeat's answer
+        self._last_ring = ring
+        self._ring_context = {"message_expires_at": wake.get("message_expires_at"),
+                              "recipient_state": wake.get("recipient_state"),
+                              "queue_allowed": wake.get("queue_allowed")}
+        self._ring_unwritten = None   # superseded by the newer ring
+        # The offer names the digest watermark it rings for.
+        self._ring_offer = (*ring, self._digest_watermark)
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+        # A far-off ring_at (a stepped clock) still rings within minutes.
+        delay = min(max(0.0, ring[2] - time.time()), 300.0)
+        if decision == "attention":
+            return  # unknown-state queue permission never writes an idle Stop marker
+        try:
+            self._ring_timer = asyncio.get_running_loop().call_later(delay, self._write_ring, ring)
+        except RuntimeError:
+            self._write_ring(ring)
+
+    def _write_ring(self, ring, watermark=None) -> None:
+        """Write ``<key>.ring``: the digest watermark the ring is for, then
+        the decision and reason; the Stop hook fires on a ring past its
+        ``.seen`` marker."""
+        self._ring_timer = None
+        if self._closing or self.digest_path is None:
+            return
+        if watermark is None:
+            watermark = self._digest_watermark
+        decision, reason, _ = ring
+        body = f"{watermark}\n{decision} {reason}\n"
+        if self._write_private(self._ring_path(), body):
+            self._ring_unwritten = None
+            self._ledger("ring", watermark, len(body), f"{decision} {reason}")
+        else:
+            # A reader holding the marker open on Windows refuses the
+            # replace. ``_last_ring`` already took this ring, so the
+            # daemon's repeat of it is dropped: the heartbeat retries, for
+            # the watermark this attempt named.
+            self._ring_unwritten = (ring, watermark)
+
+    def _write_agent(self) -> None:
+        """Name this address beside the digest for the Stop hook's park
+        gate; rewritten when a re-attach registered a fresh one."""
+        if self.digest_path is None or self._identity is None:
+            return
+        agent_id = self._identity.get("agent_id")
+        if not isinstance(agent_id, str) or agent_id == self._agent_written:
+            return
+        if self._write_private(self._agent_path(), f"{agent_id}\n"):
+            self._agent_written = agent_id
+
+    def deliver_hint(self) -> str | None:
+        """The hint to attach to a tool result: a failure notice every call,
+        otherwise the digest once per change and a one-line reminder every
+        HINT_REPEAT_CALLS calls while mail stays pending. A change the prompt
+        hook already printed (its marker is past the watermark) is not
+        repeated here."""
+        if self._permanent_failure or self._failure is not None:
+            return self.unread_hint
+        if not self._digest_text:
+            self._hint_calls_since = 0
+            return None
+        # The marker file is read only while this process still has an
+        # undelivered change; a quiet call touches nothing.
+        if (self._delivered_watermark < self._digest_watermark
+                and self._read_seen() < self._digest_watermark):
+            if self._subagent_running():
+                return None  # nothing marked: the next call, or a hook, delivers it
+            self._mark_seen(self._digest_watermark)
+            self._hint_calls_since = 0
+            self._ledger("hint", self._digest_watermark, len(self._digest_text) + 1)
+            return self._digest_text
+        self._delivered_watermark = self._digest_watermark
+        self._hint_calls_since += 1
+        count = self._pending_count
+        if (self._hint_calls_since < self.HINT_REPEAT_CALLS or not count
+                or self._subagent_running()):
+            return None
+        self._hint_calls_since = 0
+        reminder = (f"Coordination: {count} addressed message{'s' if count != 1 else ''} still "
+                    "pending; memory_message receive, then ack each message_id.")
+        self._ledger("nag", self._digest_watermark, len(reminder) + 1)
+        return reminder
+
+    def _update_pending_count(self, result):
+        count = result.get("pending_count")
+        self._pending_count = (count if isinstance(count, int) and not isinstance(count, bool)
+                               and count >= 0 else None)
+        preview = result.get("pending_preview")
+        self._pending_preview = (preview if isinstance(preview, list)
+                                 and all(_preview_entry(entry) for entry in preview) else [])
+        maintainer = result.get("maintainer_pending")
+        self._maintainer_pending = (maintainer if isinstance(maintainer, int)
+                                    and not isinstance(maintainer, bool) and maintainer >= 0
+                                    else 0)
+        if self._pending_count == 0:
+            self._attention_pending = False
+        self._refresh_digest()
+        if not self._pending_count:
+            self._ring_offer = None   # nothing left to ring for
+            self._ring_unwritten = None
+        # After the digest, so the ring marker names the watermark that
+        # lists the rung mail.
+        self._write_agent()
+        # A newer ring in this answer replaces a refused one before the
+        # retry, so the newer ring's ``ring_at`` stagger holds.
+        self._note_wake(result)
+        if self._ring_unwritten is not None:
+            ring, watermark = self._ring_unwritten
+            if self._read_seen() >= watermark:
+                # A hint or the prompt hook already showed the rung mail; a
+                # later digest change must not ring on it.
+                self._ring_unwritten = None
+            else:
+                self._write_ring(ring, watermark)
+        observer = self.mailbox_observer
+        if observer is not None:
+            try:
+                observer(self)
+            except Exception as error:  # noqa: BLE001 - an optional doorbell never costs the lease
+                self.mailbox_observer = None
+                print(f"pseudolife-mcp: coordination mailbox observer failed "
+                      f"({type(error).__name__}); the Codex doorbell is off for this "
+                      "task, pull delivery continues.", file=sys.stderr)
+
+    def _refresh_digest(self):
+        if self._closing:
+            return  # the file is being removed; nothing may put it back
+        text = render_digest(self._pending_count or 0, self._pending_preview,
+                             self._maintainer_pending)
+        if text and self._attention_pending:
+            from .codex_doorbell import attention_text
+            text += ("\nCoordination attention: no_steer_path; mail pending for hint/pull, "
+                     f"recipient turn state {self._attention_state}.\n" + attention_text(self._pending_count))
+        if text == self._digest_text and self._digest_written and not self._digest_due():
+            return
+        if text != self._digest_text:
+            self._digest_text = text
+            self._digest_watermark += 1
+        # The first write happens even for an empty mailbox, so a file left
+        # by a dead process never shows its stale text. Rewriting unchanged
+        # text (due, lost, or refused last time) keeps the watermark.
+        self._write_digest()
+
+    def _digest_due(self) -> bool:
+        if self.digest_path is None:
+            return False
+        # os.path.exists swallows every OSError (Path.exists re-raises some),
+        # so this can never escape into the heartbeat task; a file it cannot
+        # see is simply rewritten.
+        return (time.monotonic() - self._digest_written_at >= self.DIGEST_REFRESH_SECONDS
+                or not os.path.exists(self.digest_path))
+
+    def _leftover_watermark(self) -> int:
+        """Continue above whatever a dead process left: its digest, or a
+        marker that outlived it (a waiter marking as the shim exited, or a
+        delete Windows refused), which would otherwise hide new mail."""
+        if self.digest_path is None:
+            return 0
+        leftover = 0
+        for path in (self.digest_path, self._seen_path()):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    leftover = max(leftover, int(handle.readline().strip() or 0))
+            except (OSError, ValueError):
+                pass
+        return leftover
+
+    def _subagent_running(self) -> bool:
+        """A live subagent marker beside the digest (SUBAGENT_MARKER_SECONDS).
+        Read only when a hint is about to go out."""
+        if self.digest_path is None:
+            return False
+        cutoff = time.time() - SUBAGENT_MARKER_SECONDS
+        try:
+            for marker in self._subagent_markers():
+                with suppress(OSError):
+                    if (marker.is_file() and not marker.is_symlink()
+                            and marker.stat().st_mtime >= cutoff):
+                        return True
+        except OSError:
+            pass
+        return False
+
+    def _subagent_markers(self):
+        return self.digest_path.parent.glob(f"{self.digest_path.stem}.sub-*")
+
+    def _seen_path(self):
+        return self.digest_path.with_suffix(".seen") if self.digest_path is not None else None
+
+    def _ring_path(self):
+        return self.digest_path.with_suffix(".ring") if self.digest_path is not None else None
+
+    def _agent_path(self):
+        return self.digest_path.with_suffix(".agent") if self.digest_path is not None else None
+
+    def _turn_path(self):
+        # Written by the prompt hooks (the turn's start, for the park gate).
+        return self.digest_path.with_suffix(".turn") if self.digest_path is not None else None
+
+    async def _post_attach(self, wake_enabled):
+        """Attach, declaring the ring path (v49). A daemon that predates
+        the parameter refuses it with unexpected_parameter; the adapter
+        drops it for good and attaches again, as the heartbeat does for
+        ``active``."""
+        body = {"attachment_id": self._attachment_id, "wake_enabled": wake_enabled}
+        if self._ring_liveness_supported and self.ring_path:
+            body["ring_armed_until"] = self._ring_armed_until()
+        if self._ring_attach_supported:
+            try:
+                return await self._post("attach", {**body, "ring": self.ring_path}, retry=True)
+            except AdapterError as error:
+                if error.code != "unexpected_parameter":
+                    raise
+                if self._ring_liveness_supported:
+                    self._ring_liveness_supported = False
+                    return await self._post_attach(wake_enabled)
+                self._ring_attach_supported = False
+        return await self._post("attach", body, retry=True)
+
+    def _ring_armed_until(self) -> float:
+        if not self.ring_path:
+            return 0.0
+        # Either listener arms the ring: the marker a waiter reads is written
+        # for every rung ring, so a waiter's lease still counts once the
+        # doorbell has turned itself off.
+        lease = armed_until(self.digest_path)
+        if callable(self.ring_listener):
+            try:
+                if self.ring_listener():
+                    return max(lease, time.time() + LEASE_SECONDS)
+            except Exception:
+                pass
+        return lease
+
+    def _read_seen(self) -> int:
+        seen = self._delivered_watermark
+        path = self._seen_path()
+        if path is not None:
+            try:
+                seen = max(seen, int(path.read_text(encoding="utf-8").strip() or 0))
+            except (OSError, ValueError):
+                pass
+        return seen
+
+    def _mark_seen(self, watermark: int) -> None:
+        self._delivered_watermark = watermark
+        path = self._seen_path()
+        if path is not None:
+            self._write_private(path, f"{watermark}\n")
+
+    def _write_digest(self) -> None:
+        if self.digest_path is None:
+            return
+        if not self._digest_swept:
+            self._digest_swept = True
+            self._sweep_stale_digests()
+        body = f"{self._digest_watermark}\n" + (self._digest_text + "\n" if self._digest_text else "")
+        self._digest_written = self._write_private(self.digest_path, body)
+        if self._digest_written:
+            self._digest_written_at = time.monotonic()
+            # The markers must stay as fresh as the digest, or the sweep
+            # takes them: mail already shown would look unshown again, the
+            # Stop hook's park gate would lose this session's address, and
+            # a compacted session idle for a day would lose its reprint.
+            for marker in (self._seen_path(), self._agent_path(),
+                           self.digest_path.with_suffix(".reprint")):
+                with suppress(OSError):
+                    os.utime(marker)
+
+    def _sweep_stale_digests(self) -> None:
+        cutoff = time.time() - self.STALE_DIGEST_SECONDS
+        try:
+            with os.scandir(self.digest_path.parent) as entries:
+                mine = (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path(),
+                        self._turn_path(), self.digest_path.with_suffix(".reprint"))
+                for entry in entries:
+                    if ((entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn",
+                                              ".reprint", ".wait-armed", ".wake-armed"))
+                         or ".sub-" in entry.name)
+                            and entry.is_file(follow_symlinks=False)
+                            and entry.stat(follow_symlinks=False).st_mtime < cutoff
+                            and Path(entry.path) not in mine):
+                        with suppress(OSError):
+                            os.unlink(entry.path)
+        except OSError:
+            pass
+
+    def _write_private(self, path: Path, body: str) -> bool:
+        """Atomic replace inside a private directory; the digest is advisory,
+        so a filesystem problem is reported once and never stops the shim.
+        Returns whether the file was written; a digest that was not is
+        written again at the next heartbeat."""
+        try:
+            from .codex_coordination import _prepare_private_dir
+            _prepare_private_dir(path.parent, path.parent)
+            fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=path.suffix)
+            try:
+                _private_fd(fd, Path(temp))
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(body)
+                # On Windows a reader holding the file open (a prompt hook, a
+                # waiter) refuses the replace; the temp file must not outlive it.
+                os.replace(temp, path)
+            except BaseException:
+                with suppress(OSError):
+                    os.unlink(temp)
+                raise
+            return True
+        except (OSError, ValueError, RuntimeError) as error:
+            if not self._digest_write_reported:
+                self._digest_write_reported = True
+                print(f"pseudolife-mcp: coordination digest or marker file not written "
+                      f"({error}); the digest is retried at the next heartbeat and "
+                      "tool-result hints continue.", file=sys.stderr)
+            return False
+
+    def _ledger(self, kind: str, watermark: int, size: int, reason: str = "") -> None:
+        """One line per delivery for the token-cost measurement; the prompt
+        hooks append to the same file. A ring adds a sixth column, the
+        daemon's decision and reason."""
+        if self.digest_path is None:
+            return
+        try:
+            with open(self.digest_path.parent / "ledger.log", "a", encoding="utf-8") as handle:
+                handle.write(f"{int(time.time())}\t{kind}\t{self.digest_path.stem[:8]}\t"
+                             f"{watermark}\t{size}" + (f"\t{reason}" if reason else "") + "\n")
+        except OSError:
+            pass
+
+    def _remove_digest(self) -> None:
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+            self._ring_timer = None
+        for path in (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path(),
+                     self._turn_path()):
+            if path is not None:
+                with suppress(OSError):
+                    path.unlink()
+        if self.digest_path is not None:
+            with suppress(OSError):
+                for marker in list(self._subagent_markers()):
+                    with suppress(OSError):
+                        marker.unlink()
+
+    def _record_failure(self, error: AdapterError) -> None:
+        """Enter the degraded state once per outage; recovery clears it."""
+        self._pending_count = None
+        if self._is_permanent_identity_error(error) and not self._replaceable(error):
+            if self._provider is not None:
+                with suppress(AdapterError):
+                    self._failed_credential_generation = self._snapshot().generation
+            already_reported = self._permanent_failure
+            self._failure = error
+            self._permanent_failure = True
+            self._recovered.clear()
+            # Wake a renewal task that may be sleeping so it can terminate.
+            self._degraded.set()
+            if not already_reported:
+                print("pseudolife-mcp: live coordination background delivery stopped; "
+                      f"{self._stop_advice()}.", file=sys.stderr)
+            return
+        if self._failure is not None:
+            return
+        self._failure = error
+        self._recovered.clear()
+        self._degraded.set()
+        print("pseudolife-mcp: live coordination delivery unavailable; retrying in the "
+              "background, use explicit receive meanwhile.", file=sys.stderr)
+
+    def _stop_advice(self) -> str:
+        """What the operator can do once background delivery has stopped. A
+        missing address cannot be rebound (rebind refuses a missing row), but
+        the next start retires the saved state and registers a new address."""
+        if self._failure is not None and self._failure.code == "instance_not_found":
+            return ("the board address no longer exists on this bank; restart the session "
+                    "to register a new one")
+        return "check bearer access or restore/rebind the saved identity"
+
+    @staticmethod
+    def _is_permanent_identity_error(error: AdapterError) -> bool:
+        if error.code in {"authentication_required", "unauthorized", "principal_not_allowed",
+                          "instance_authentication_required", "invalid_credential",
+                          "instance_not_found", "bank_identity_mismatch"}:
+            return True
+        # Older daemons may not return a categorical body. Treat an auth status
+        # as terminal, but never infer that the saved address itself is gone.
+        return error.code is None and error.status in {401, 403}
+
+    def _replaceable(self, error: AdapterError) -> bool:
+        """An address nothing backs can be replaced once the daemon says it
+        is gone: it registered ``resumable: false`` and was retired while
+        its lease was lapsed (a daemon outage longer than the short
+        retention). Nothing is lost by a fresh address. A state-backed
+        address is never replaced this way; that is deliberate recovery."""
+        return error.code == "instance_not_found" and self.state_path is None
+
+    @property
+    def instance_headers(self) -> dict[str, str]:
+        if self._identity is None:
+            raise AdapterError("coordination adapter is not registered")
+        headers = {"X-PL-Agent": self._identity["agent_id"],
+                   "X-PL-Agent-Key": self._identity["credential"]}
+        if self._context is not None:
+            headers.update({"X-PL-Bank": self._context["bank_id"],
+                            "X-PL-Principal": encode_bound_principal(self._context["principal"])})
+        return headers
+
+    def _snapshot(self):
+        if self._provider is None:
+            return None
+        try:
+            return self._startup_snapshot or self._provider.snapshot()
+        except Exception:
+            raise AdapterError("coordination credential source is unavailable", code="credential_unavailable") from None
+
+    def _credential_changed(self, generation):
+        if self._provider is None:
+            return False
+        try:
+            return self._provider.snapshot().generation != generation
+        except Exception:
+            return True
+
+    def _check_snapshot(self, snapshot):
+        if snapshot is not None and self._credential_changed(snapshot.generation):
+            raise AdapterError("coordination credential changed during the operation; outcome may be unknown",
+                               code="credential_changed")
+
+    async def validate_snapshot(self, snapshot):
+        """Verify current authority before returning instance headers to a proxy."""
+        if self._provider is None:
+            return
+        from .coordination_identity import fetch_context, check_binding
+
+        self._check_snapshot(snapshot)
+        context = await fetch_context(self._client, self.url, snapshot)
+        self._check_snapshot(snapshot)
+        if self._identity is not None:
+            check_binding(self._identity, context)
+        elif self._context is not None and context != self._context:
+            raise AdapterError("coordination bank or principal changed", code="bank_identity_mismatch")
+        self._context = context
+        if self._failure is not None and self._failure.code in {
+                "unauthorized", "authentication_required", "principal_not_allowed",
+                "credential_unavailable", "credential_changed", "bank_identity_mismatch"}:
+            self._permanent_failure = False
+            self._failure = None
+            self._degraded.clear()
+            self._recovered.set()
+            if (not self._closing and self._generation is not None
+                    and (self._heartbeat_task is None or self._heartbeat_task.done())):
+                self._heartbeat_task = asyncio.create_task(self._renew())
+
+    def _load_or_reserve(self):
+        if self.state_path is None:
+            return None
+        try:
+            fd = _open_state(self.state_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                fd = _open_state(self.state_path, os.O_RDONLY)
+                try:
+                    info = os.fstat(fd)
+                except OSError:
+                    os.close(fd)
+                    raise
+                if info.st_size == 0:
+                    os.close(fd)
+                    if time.time() - info.st_mtime < self.STALE_RESERVATION_SECONDS:
+                        # Another process reserved this path moments ago and
+                        # is still registering: two adapters must not share
+                        # one identity, so this start yields.
+                        raise AdapterError("adapter state is being registered by another process")
+                    # A crash between the reservation and the identity write
+                    # left an empty file behind long ago. Claim it under the
+                    # sibling kernel lock before treating it as ours.
+                    return self._claim_stale_reservation(info)
+                with os.fdopen(fd, "r", encoding="utf-8") as stream:
+                    state = json.load(stream)
+            except (OSError, ValueError):
+                raise AdapterError("adapter state is invalid; explicit recovery is required") from None
+            if (not isinstance(state, dict) or state.get("bank_url") != self.url
+                    or not all(isinstance(state.get(key), str) and state[key]
+                               for key in ("agent_id", "credential"))):
+                raise AdapterError("adapter state does not match this bank or is incomplete")
+            self._identity = state
+            self._loaded_state_info = _StateReservation(info.st_dev, info.st_ino)
+            return None
+        except OSError:
+            raise AdapterError("cannot reserve private adapter state") from None
+        else:
+            info = os.fstat(fd)
+            os.close(fd)
+            return _StateReservation(info.st_dev, info.st_ino)
+
+    def _claim_stale_reservation(self, expected):
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        try:
+            lock_fd = _open_state(lock_path, os.O_CREAT | os.O_RDWR)
+        except OSError:
+            raise AdapterError("cannot claim stale adapter state") from None
+        try:
+            try:
+                acquired = self._try_reservation_lock(lock_fd)
+            except OSError:
+                raise AdapterError("cannot claim stale adapter state") from None
+            if not acquired:
+                raise AdapterError("adapter state is being registered by another process")
+            # The state may have changed between the initial read and acquiring
+            # the lock. Re-open it with the normal link/type checks and require
+            # the same old, empty inode before any network request.
+            try:
+                fd = _open_state(self.state_path, os.O_RDONLY)
+            except OSError:
+                raise AdapterError("adapter state reservation changed") from None
+            try:
+                current = os.fstat(fd)
+            finally:
+                os.close(fd)
+            if ((current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino)
+                    or current.st_size != 0
+                    or time.time() - current.st_mtime < self.STALE_RESERVATION_SECONDS):
+                raise AdapterError("adapter state reservation changed")
+            return _StateReservation(current.st_dev, current.st_ino, lock_fd)
+        except BaseException:
+            self._unlock_reservation_fd(lock_fd)
+            raise
+
+    @staticmethod
+    def _try_reservation_lock(fd: int) -> bool:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(fd).st_size < 1:
+                os.ftruncate(fd, 1)
+                os.fsync(fd)
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError:
+                return False
+        import fcntl
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _unlock_reservation_fd(fd: int) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            with suppress(OSError):
+                os.close(fd)
+
+    def _release_reservation(self, reservation) -> None:
+        if reservation is not None and reservation.lock_fd is not None:
+            lock_fd, reservation.lock_fd = reservation.lock_fd, None
+            self._unlock_reservation_fd(lock_fd)
+
+    async def _register(self, reservation):
+        try:
+            result = await self._post("register", self._registration)
+        except AdapterError as error:
+            # A daemon older than v50 refuses the parent link with
+            # unexpected_parameter: register without it, as _post_attach
+            # drops ``ring``, rather than lose the child's address.
+            if error.code != "unexpected_parameter" or "parent_thread" not in self._registration:
+                raise
+            self._registration.pop("parent_thread")
+            result = await self._post("register", self._registration)
+        if not all(isinstance(result.get(key), str) and result[key]
+                   for key in ("agent_id", "credential")):
+            raise AdapterError("coordination registration returned invalid identity")
+        self._identity = {key: result[key] for key in ("agent_id", "credential")}
+        if self._context is not None:
+            self._identity.update(version=2, **self._context)
+        # A new address starts unnamed: the next heartbeat names it again.
+        self._sent_name = None
+        self._save_new_identity(reservation)
+
+    def _retire_stale_state(self):
+        """Move a state file whose address the bank no longer accepts aside
+        under a ``.stale`` suffix, so the path is free for a fresh identity
+        and the old one stays available for diagnosis."""
+        self._identity = None
+        if self.state_path is None:
+            return
+        stale = self.state_path.with_name(self.state_path.name + ".stale")
+        try:
+            os.replace(self.state_path, stale)
+        except OSError:
+            raise AdapterError("cannot retire stale adapter state") from None
+        print("pseudolife-mcp: the saved coordination address is no longer valid on this "
+              "bank; registering a new one (old state kept with a .stale suffix).",
+              file=sys.stderr)
+
+    def _discard_reservation(self, reservation):
+        """Remove the empty file reserved before ``register`` when no identity
+        was written into it. Only the exact reservation goes: the same
+        dev/inode and still zero bytes. A file another process replaced, or
+        one that now holds an identity, is left alone."""
+        if self.state_path is None or reservation is None:
+            return
+        try:
+            with suppress(OSError):
+                info = self.state_path.stat(follow_symlinks=False)
+                if ((info.st_dev, info.st_ino) == (reservation.dev, reservation.ino)
+                        and info.st_size == 0):
+                    self.state_path.unlink()
+        finally:
+            self._release_reservation(reservation)
+
+    def _save_new_identity(self, reservation):
+        if self.state_path is None:
+            return
+        temp_path = None
+        try:
+            fd, name = tempfile.mkstemp(prefix=".agent-state-", dir=self.state_path.parent)
+            temp_path = Path(name)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                _private_fd(stream.fileno(), temp_path)
+                state = {"bank_url": self.url, **self._identity}
+                if self._context is not None:
+                    state.update(version=2, **self._context)
+                json.dump(state, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            info = self.state_path.stat(follow_symlinks=False)
+            if ((info.st_dev, info.st_ino) != (reservation.dev, reservation.ino)
+                    or self.state_path.is_symlink()):
+                raise AdapterError("adapter state reservation changed")
+            os.replace(temp_path, self.state_path)
+            temp_path = None
+        except OSError:
+            raise AdapterError("cannot persist private adapter identity") from None
+        finally:
+            self._release_reservation(reservation)
+            if temp_path is not None:
+                with suppress(OSError):
+                    temp_path.unlink()
+
+    async def _post(self, action, body, *, retry=False, timeout=None):
+        snapshot = self._snapshot()
+        if snapshot is not None:
+            await self.validate_snapshot(snapshot)
+        headers = {"Authorization": f"Bearer {snapshot.token if snapshot is not None else self._token}"}
+        if self._context is not None:
+            headers.update({"X-PL-Bank": self._context["bank_id"],
+                            "X-PL-Principal": encode_bound_principal(self._context["principal"])})
+        if action != "register":
+            headers.update(self.instance_headers)
+        attempts = len(self.RETRY_DELAYS) + 1 if retry else 1
+        for attempt in range(attempts):
+            try:
+                self._check_snapshot(snapshot)
+                response = await self._request_once(action, body, headers, timeout)
+                self._check_snapshot(snapshot)
+                # 429 is how the daemon answers its own transient limits
+                # (wait capacity, send rate, queue); retry it like a 5xx.
+                if ((response.status_code >= 500 or response.status_code == 429)
+                        and attempt + 1 < attempts):
+                    await asyncio.sleep(self.RETRY_DELAYS[attempt])
+                    continue
+                if response.status_code >= 400:
+                    code = None
+                    with suppress(ValueError):
+                        payload = response.json()
+                        candidate = payload.get("error") if isinstance(payload, dict) else None
+                        if isinstance(candidate, str) and candidate in PUBLIC_ERROR_CODES:
+                            code = candidate
+                    raise AdapterError(f"coordination {action} refused (HTTP {response.status_code})",
+                                       status=response.status_code, code=code)
+                result = response.json()
+                if not isinstance(result, dict):
+                    raise ValueError
+                return result
+            except httpx.TransportError:
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(self.RETRY_DELAYS[attempt])
+                    continue
+                raise AdapterError(f"coordination {action} unavailable",
+                                   code="transport_unavailable") from None
+            except ValueError:
+                raise AdapterError(f"coordination {action} returned an invalid response") from None
+
+    async def _request_once(self, action, body, headers, timeout):
+        # Channel shutdown uses AnyIO level cancellation. Give HTTP cleanup one
+        # edge cancellation, then shield its awaited finally blocks from repeats.
+        request = asyncio.create_task(self._client.post(
+            self.url + "/api/coordination/" + action, json=body, headers=headers,
+            timeout=timeout or self.REQUEST_SECONDS))
+        try:
+            return await asyncio.shield(request)
+        except asyncio.CancelledError:
+            request.cancel()
+            with anyio.move_on_after(self.REQUEST_SECONDS, shield=True):
+                # The request's own outcome no longer matters, whatever it
+                # is: a transport error escaping here would replace the
+                # cancellation, the retry loop would swallow it, and a task
+                # being shut down would keep running.
+                with suppress(Exception, asyncio.CancelledError):
+                    await request
+            raise
+
+    def _attachment(self):
+        return {"attachment_id": self._attachment_id, "generation": self._generation}
+
+    async def __aenter__(self):
+        if self._entered:
+            raise AdapterError("coordination adapter cannot be reused")
+        self._entered = True
+        if self._owns_client:
+            self._client = httpx.AsyncClient(follow_redirects=False)
+        reservation = None
+        try:
+            snapshot = self._snapshot()
+            if snapshot is not None:
+                from .coordination_identity import fetch_context
+
+                self._startup_snapshot = snapshot
+                self._context = await fetch_context(self._client, self.url, snapshot)
+                self._check_snapshot(snapshot)
+            reservation = self._load_or_reserve()
+            if snapshot is not None:
+                from .coordination_identity import read_legacy, fetch_context, check_binding
+
+                if self._identity is None and self._legacy_state_path is not None:
+                    # Only the exact legacy path derived from this configured
+                    # credential is eligible; never search neighboring namespaces.
+                    if self._legacy_state_path.exists() or self._legacy_state_path.is_symlink():
+                        self._identity = read_legacy(self._legacy_state_path, self.url)
+                if self._identity is not None:
+                    if self._identity.get("version") not in (None, 2):
+                        raise AdapterError("unsupported adapter state version; state was preserved")
+                    needs_upgrade = self._identity.get("version") != 2
+                    if not needs_upgrade:
+                        check_binding(self._identity, self._context)
+                    else:
+                        proved = await fetch_context(self._client, self.url, snapshot, identity=self._identity)
+                        self._check_snapshot(snapshot)
+                        if proved != self._context:
+                            raise AdapterError("coordination context changed during migration", code="bank_identity_mismatch")
+                    self._identity = {**self._identity, "version": 2, **self._context}
+                    if reservation is not None:
+                        self._save_new_identity(reservation)
+                        reservation = None
+                    elif needs_upgrade and self._loaded_state_info is not None:
+                        # Existing records receive binding metadata atomically;
+                        # retaining the original inode fence prevents a stale upgrade.
+                        self._save_new_identity(self._loaded_state_info)
+                        self._loaded_state_info = None
+            resumed = self._identity is not None
+            if not resumed:
+                await self._register(reservation)
+                # The file now holds a durable identity: from here on a failure
+                # keeps it, so the next start resumes this address.
+                reservation = None
+            try:
+                result = await self._post_attach(self.wake_enabled)
+            except AdapterError as error:
+                if not (resumed and error.code == "instance_not_found"):
+                    raise
+                # The saved address is unknown to this bank: pruned after long
+                # idleness, or absent from a restored snapshot. The old file stays beside
+                # the new one for diagnosis; a fresh address is registered. A bound
+                # identity reaches this only after _post re-verified the saved bank and
+                # principal, and the daemon says instance_not_found only for a missing
+                # row, which rebind cannot restore either.
+                self._retire_stale_state()
+                reservation = self._load_or_reserve()
+                await self._register(reservation)
+                reservation = None
+                result = await self._post_attach(self.wake_enabled)
+            if not isinstance(result.get("generation"), int) or isinstance(result["generation"], bool):
+                raise AdapterError("coordination attach returned invalid generation")
+            self._generation = result["generation"]
+            self._update_pending_count(result)
+            if self._context is not None:
+                self._identity.update(version=2, **self._context)
+            self._startup_snapshot = None
+            self._heartbeat_task = asyncio.create_task(self._renew())
+            return self
+        except BaseException:
+            # A register that failed or was cancelled (the shim's startup
+            # budget) leaves the empty reservation behind, and every later
+            # start would read it as invalid state and refuse. Release it.
+            self._discard_reservation(reservation)
+            if self._owns_client:
+                await self._client.aclose()
+            raise
+
+    async def __aexit__(self, *exc):
+        self._closing = True
+        with anyio.CancelScope(shield=True):
+            try:
+                if self._heartbeat_task:
+                    self._heartbeat_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await self._heartbeat_task
+            finally:
+                try:
+                    if self._generation is not None:
+                        with suppress(AdapterError):
+                            await self._post("detach", self._attachment())
+                finally:
+                    # The session is over: a digest left behind would print
+                    # stale mail into a later session that reuses the id.
+                    self._remove_digest()
+                    if self._owns_client:
+                        await self._client.aclose()
+
+    async def downgrade_to_pull(self) -> bool:
+        """Stop push delivery and keep this identity usable for explicit pull.
+
+        The local flag changes before network I/O, so every later recovery
+        attach is conservative.  A failed immediate attach leaves the normal
+        recovery worker queued with ``wake_enabled=False``; the previous
+        wake-capable lease receives no more heartbeats and therefore expires.
+        """
+        self.wake_enabled = False
+        self._registration["wake_enabled"] = False
+        heartbeat = self._heartbeat_task
+        self._heartbeat_task = None
+        if heartbeat is not None and heartbeat is not asyncio.current_task():
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+
+        try:
+            result = await self._post_attach(False)
+            generation = result.get("generation")
+            if not isinstance(generation, int) or isinstance(generation, bool):
+                raise AdapterError("coordination attach returned invalid generation")
+        except AdapterError as error:
+            self._record_failure(error)
+            self._heartbeat_task = asyncio.create_task(self._renew())
+            return False
+
+        if generation != self._generation:
+            self._after = None
+            self._recent_ids.clear()
+        self._generation = generation
+        self._update_pending_count(result)
+        self._failure = None
+        self._permanent_failure = False
+        self._degraded.clear()
+        self._recovered.set()
+        self._heartbeat_task = asyncio.create_task(self._renew())
+        return True
+
+    def note_turn(self) -> None:
+        """Record that a tool call passed through; no I/O, the heartbeat
+        carries it."""
+        self._turn_seen = True
+
+    async def _current_name(self):
+        """The harness's title for this session when it differs from what
+        was last sent (and was not refused), else None. Read in a worker
+        thread: the reader does bounded file I/O."""
+        if self._harness_name is None or not self._name_supported:
+            return None
+        try:
+            name = await asyncio.to_thread(self._harness_name)
+        except Exception:  # noqa: BLE001 - a name never fails a heartbeat
+            return None
+        if not isinstance(name, str) or not name or name in (self._sent_name, self._refused_name):
+            return None
+        return name
+
+    async def _heartbeat(self, *, name=False):
+        body = self._attachment()
+        if self._ring_liveness_supported and self.ring_path:
+            body["ring_armed_until"] = self._ring_armed_until()
+        report_turn = self._turn_seen and self._turn_flag_supported
+        if report_turn:
+            body["active"] = True
+            self._turn_seen = False
+        if name:
+            current = await self._current_name()
+            if current is not None:
+                body["name"] = current
+        while True:
+            try:
+                result = await self._post("heartbeat", body, retry=True)
+                break
+            except AdapterError as error:
+                if "name" in body and error.code == "unexpected_parameter":
+                    # Checked first: a daemon older than v55 must not cost
+                    # the fields it does take.
+                    self._name_supported = False
+                    body.pop("name")
+                    continue
+                if "name" in body and error.code in {"invalid_name", "secret_like_body"}:
+                    self._refused_name = body.pop("name")
+                    continue
+                if error.code == "unexpected_parameter" and "ring_armed_until" in body:
+                    self._ring_liveness_supported = False
+                    body.pop("ring_armed_until")
+                    continue
+                if error.code == "unexpected_parameter" and report_turn:
+                    self._turn_flag_supported = False
+                    body.pop("active", None)
+                    report_turn = False
+                    continue
+                self._turn_seen = self._turn_seen or report_turn
+                raise
+        if result.get("generation") != self._generation:
+            raise AdapterError("coordination attachment is no longer current")
+        if "name" in body:
+            self._sent_name = body["name"]
+        self._update_pending_count(result)
+        self._backoff_level = 0
+
+    async def _reattach(self):
+        """Re-attach after an outage, backing off until the daemon answers.
+
+        The same attachment id resumes the lease while it is still valid, in
+        which case the generation, the cursor and the dedupe set all stand:
+        mail already attempted under it is not re-delivered. Once the lease
+        has expired the daemon grants a new generation, and that is a fresh
+        attempt pass: the mailbox is replayed from the start, bounded
+        server-side by the per-message attempt limit.
+        """
+        while True:
+            index = min(self._backoff_level, len(self.REATTACH_DELAYS) - 1)
+            self._backoff_level += 1
+            await asyncio.sleep(self.REATTACH_DELAYS[index])
+            try:
+                result = await self._post_attach(self.wake_enabled)
+            except AdapterError as error:
+                if self._replaceable(error):
+                    try:
+                        await self._register(None)
+                    except AdapterError as register_error:
+                        if self._is_permanent_identity_error(register_error):
+                            self._record_failure(register_error)
+                            return False
+                    continue
+                if self._is_permanent_identity_error(error):
+                    self._record_failure(error)
+                    return False
+                continue
+            generation = result.get("generation")
+            if not isinstance(generation, int) or isinstance(generation, bool):
+                continue
+            if generation != self._generation:
+                self._after = None
+                self._recent_ids.clear()
+            self._generation = generation
+            self._update_pending_count(result)
+            self._failure = None
+            self._permanent_failure = False
+            self._degraded.clear()
+            self._recovered.set()
+            print("pseudolife-mcp: live coordination delivery restored.", file=sys.stderr)
+            return True
+
+    async def _wait_for_new_credential(self):
+        # Auth rejection is not a reason to replay requests. Observe only the
+        # configured source until it changes, then validate authority afresh.
+        if (self._provider is None or self._failure is None or self._failure.code not in {
+                "unauthorized", "authentication_required", "principal_not_allowed",
+                "bank_identity_mismatch"}):
+            return False
+        await asyncio.sleep(self.HEARTBEAT_SECONDS)
+        try:
+            snapshot = self._snapshot()
+            if snapshot.generation == self._failed_credential_generation:
+                return True
+            await self.validate_snapshot(snapshot)
+            await self._heartbeat()
+        except AdapterError as error:
+            self._record_failure(error)
+        return True
+
+    async def _renew(self):
+        """Renew the lease and recover transient outages in the background.
+
+        Authentication rejection pauses network retries until a file-backed
+        credential changes. Authority mismatches preserve state for deliberate
+        recovery and never silently replace the address.
+        """
+        while True:
+            try:
+                if self._permanent_failure:
+                    if await self._wait_for_new_credential():
+                        continue
+                    return
+                if self._failure is not None:
+                    if not await self._reattach():
+                        if self._provider is not None and self._permanent_failure:
+                            continue
+                        return
+                    continue
+                with suppress(TimeoutError, asyncio.TimeoutError):
+                    await asyncio.wait_for(self._degraded.wait(), self.HEARTBEAT_SECONDS)
+                if self._permanent_failure:
+                    continue
+                if self._failure is None:
+                    await self._heartbeat(name=True)
+            except AdapterError as error:
+                self._record_failure(error)
+
+    async def inbox(self):
+        """Yield at most one live attempt per message per attachment; never
+        acknowledge. An outage pauses the stream until the heartbeat task has
+        re-attached, then pending mail is replayed under the new generation."""
+        if self._inbox_active:
+            raise AdapterError("coordination inbox already has a receiver")
+        if not self.wake_enabled:
+            await anyio.sleep_forever()
+            return
+        self._inbox_active = True
+        try:
+            while True:
+                if self._failure is not None:
+                    await self._recovered.wait()
+                    continue
+                try:
+                    generation = self._generation
+                    snapshot = self._snapshot()
+                    page_credential = snapshot.generation if snapshot is not None else None
+                    page_attachment = {"attachment_id": self._attachment_id,
+                                       "generation": generation}
+                    page = await self._post("receive", {"after": self._after, "limit": 50,
+                                                         "wait_seconds": 30, **page_attachment},
+                                             retry=True, timeout=35)
+                    if self._generation != generation or self._credential_changed(page_credential):
+                        # Re-attached under a new generation while this page
+                        # was in flight: the cursor was reset for the replay,
+                        # and this page's cursor must not overwrite it.
+                        continue
+                    messages = page.get("messages")
+                    if not isinstance(messages, list) or len(messages) > 50:
+                        raise AdapterError("coordination receive returned invalid messages")
+                    next_after = page.get("after")
+                    if messages and next_after == self._after:
+                        raise AdapterError("coordination mailbox cursor did not advance")
+                    stale_page = False
+                    for message in messages:
+                        if self._generation != generation or self._credential_changed(page_credential):
+                            stale_page = True
+                            break
+                        if (not isinstance(message, dict)
+                                or not all(isinstance(message.get(key), str) and message[key]
+                                           for key in ("message_id", "sender_agent_id",
+                                                       "recipient_agent_id"))
+                                or not isinstance(message.get("text"), str)
+                                or message["recipient_agent_id"] != self._identity["agent_id"]):
+                            raise AdapterError("coordination receive returned an invalid message")
+                        message_id = message["message_id"]
+                        if message_id in self._recent_ids:
+                            continue
+                        await self._heartbeat()
+                        if self._generation != generation or self._credential_changed(page_credential):
+                            stale_page = True
+                            break
+                        try:
+                            await self._post("attempt", {"message_id": message_id,
+                                                         **page_attachment}, retry=True)
+                        except AdapterError as error:
+                            if self._generation != generation or self._credential_changed(page_credential):
+                                stale_page = True
+                                break
+                            if error.status != 400:
+                                raise
+                            # Acknowledged, expired or exhausted since the page
+                            # was read: not ours to deliver, and not an outage.
+                            self._recent_ids.append(message_id)
+                            continue
+                        if self._generation != generation or self._credential_changed(page_credential):
+                            stale_page = True
+                            break
+                        self._recent_ids.append(message_id)
+                        yield ChannelEvent(frame_content(message), {"message_id": message_id,
+                                           "sender_id": message["sender_agent_id"],
+                                           "recipient_id": message["recipient_agent_id"],
+                                           "origin": ("maintainer"
+                                                      if message.get("origin") == "maintainer"
+                                                      and isinstance(message.get("verified"), dict)
+                                                      else "agent")})
+                        if self._generation != generation or self._credential_changed(page_credential):
+                            stale_page = True
+                            break
+                    if stale_page or self._generation != generation or self._credential_changed(page_credential):
+                        continue
+                    self._after = next_after if next_after is not None else self._after
+                    self._backoff_level = 0
+                except AdapterError as error:
+                    self._record_failure(error)
+                    continue
+                if not messages:
+                    await asyncio.sleep(0.25)
+        finally:
+            self._inbox_active = False

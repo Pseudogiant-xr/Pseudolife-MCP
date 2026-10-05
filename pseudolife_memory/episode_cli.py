@@ -13,7 +13,11 @@ import os
 import sys
 import urllib.request
 
-from pseudolife_memory.shim import _daemon_url, probe_health  # torch-free
+from pseudolife_memory.shim import (  # torch-free
+    _daemon_url,
+    _NoRedirectHandler,
+    probe_health,
+)
 # Title derivation is shared with the shim (which now owns session lifecycle).
 from pseudolife_memory.session_title import (  # noqa: F401  (re-exported for tests)
     git_project_name as _git_project_name,
@@ -41,7 +45,9 @@ def _post(url: str, token: str | None, path: str, payload: dict) -> None:
     req.add_header("content-type", "application/json")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=5) as r:
+    # Plain urlopen follows a 3xx and copies Authorization to the new host.
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    with opener.open(req, timeout=5) as r:
         r.read()
 
 

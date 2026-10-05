@@ -32,9 +32,11 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # Every (enclosing function, embedder method) pair behind a ``self._embedder.<method>(...)``
 # call in pseudolife_memory/service.py, per the call-site rule in this file's module
 # docstring. Built from the AST walk below (see task-3-report.md for the raw dump) and
-# verified against the spec review's counts: 23 raw call sites (9 encode_query, 14
-# encode_single/encode) collapse to 21 unique pairs here because cortex_write and
+# verified against the source's counts: 22 raw call sites (9 encode_query, 13
+# encode_single/encode) collapse to 20 unique pairs here because cortex_write and
 # _propose_dream_alias_candidates each call the same method twice in the same function.
+# (2026-09-23: the alias screen now makes ONE document-side encode, outside the service
+# lock, over only the names its memo lacks -- same pair, same classification.)
 #
 # Task 4 (set-valued slots) added ("set_add", "encode_single") -- set_add embeds the
 # member text through the same document-side composition cortex_write uses, so it
@@ -45,22 +47,26 @@ _SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 # until its author classifies it under the query/document rule and adds a row here.
 EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("_dream_hints", "encode_single"),
+    ("_apply_correction_under_mutation_lock_locked", "encode_single"),
     ("_promote_slots", "encode_single"),
     ("_propose_dream_alias_candidates", "encode"),
     ("_resolve_dream_slot", "encode_single"),
-    ("consolidate", "encode_query"),
-    ("consolidate", "encode_single"),
     ("consolidation_candidates", "encode_query"),
     ("cortex_candidates", "encode_single"),
     ("cortex_dedup", "encode_single"),
     ("cortex_search", "encode_query"),
     ("cortex_write", "encode_single"),
     ("lesson_search", "encode_query"),
-    ("lesson_write", "encode_single"),
+    ("_write_lesson_locked", "encode_single"),
     # Synthesis-time dedup gate (2026-08-12): document-side on purpose — it
     # re-composes the exact string lesson_write embeds, so the comparison
     # against stored lesson embeddings is symmetric.
-    ("_synthesized_lesson_duplicate", "encode_single"),
+    ("_lesson_duplicate_locked", "encode_single"),
+    # Synthesis batch (2026-09-11): document-side on purpose -- the claim
+    # embeddings are computed once before the lesson transaction opens and
+    # handed to both the dedup gate and the write, so they are the stored
+    # lesson vectors, not retrieval probes.
+    ("synthesize_lessons", "encode_single"),
     ("search", "encode_query"),
     ("search_documents", "encode_query"),
     ("set_add", "encode_single"),
@@ -69,8 +75,6 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     # digest is stored content embedded for later retrieval, the same
     # classification as store()'s entry embedding.
     ("_store_digest", "encode_single"),
-    ("supersede", "encode_query"),
-    ("supersede", "encode_single"),
     ("trace", "encode_query"),
     ("world_search", "encode_query"),
     ("world_write", "encode_single"),
@@ -263,31 +267,33 @@ def test_recall_seed_uses_encode_query(recording_service):
     assert "encode_query" in embedder.methods_for("sky color")
 
 
-def test_supersede_fallback_probe_uses_encode_query(recording_service):
-    """supersede()'s embedding-fallback retrieval over old_text is a probe
-    that is never itself stored — only new_text gets stored."""
+def test_supersede_resolves_exactly_and_only_embeds_the_replacement(recording_service):
+    """Correction identity needs no retrieval probe, even for a near match."""
     svc, embedder = recording_service
     svc.store("the sky is blue", source="agent")
     embedder.calls.clear()
 
-    svc.supersede("the sky is a shade of blue", "the sky is grey today")
+    refused = svc.supersede("the sky is a shade of blue", "the sky is grey today")
+    assert refused["new_memory_stored"] is False
+    assert embedder.calls == []
 
-    assert "encode_query" in embedder.methods_for("the sky is a shade of blue")
-    # new_text is the thing that gets stored — document-side.
-    assert "encode_query" not in embedder.methods_for("the sky is grey today")
-    assert "encode_single" in embedder.methods_for("the sky is grey today")
+    corrected = svc.supersede("the sky is blue", "the sky is grey today")
+    assert corrected["new_memory_stored"] is True
+    assert embedder.calls == [("encode_single", "the sky is grey today")]
 
 
-def test_consolidate_fallback_probe_uses_encode_query(recording_service):
+def test_consolidate_resolves_exactly_and_only_embeds_the_replacement(recording_service):
     svc, embedder = recording_service
     svc.store("the sky is blue", source="agent")
     embedder.calls.clear()
 
-    svc.consolidate(["the sky is a shade of blue"], "the sky is grey today")
+    refused = svc.consolidate(["the sky is a shade of blue"], "the sky is grey today")
+    assert refused["new_memory_stored"] is False
+    assert embedder.calls == []
 
-    assert "encode_query" in embedder.methods_for("the sky is a shade of blue")
-    assert "encode_query" not in embedder.methods_for("the sky is grey today")
-    assert "encode_single" in embedder.methods_for("the sky is grey today")
+    corrected = svc.consolidate(["the sky is blue"], "the sky is grey today")
+    assert corrected["new_memory_stored"] is True
+    assert embedder.calls == [("encode_single", "the sky is grey today")]
 
 
 # ---------------------------------------------------------------------------

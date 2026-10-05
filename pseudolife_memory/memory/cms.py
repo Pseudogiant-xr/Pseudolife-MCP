@@ -28,11 +28,13 @@ outside the MIRAS spectrum (no gradient updates, documents not memories).
 
 from __future__ import annotations
 
+import copy
 import heapq
 import logging
 import math
 import random
 import re
+import secrets
 import time
 from functools import partial
 from pathlib import Path
@@ -44,7 +46,7 @@ from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.miras.band import MIRASBand, build_band
 from pseudolife_memory.memory.miras.retention import now_seconds
 from pseudolife_memory.memory.meta_filter import is_meta_statement
-from pseudolife_memory.memory.contradiction import detect_contradictions, decay_contradicted_entries
+from pseudolife_memory.memory.contradiction import detect_contradictions
 from pseudolife_memory.memory.slots import extract_slots
 from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
 from pseudolife_memory.memory.episodes import EpisodeManager, normalize_tags
@@ -148,7 +150,16 @@ def has_date_cue(text: str) -> bool:
 #                 ``episodes`` block holds the :class:`EpisodeManager`
 #                 state. Pre-v6 entries default to ``None`` / ``[]`` on
 #                 load; pre-v6 ``episodes`` block defaults to empty.
-SCHEMA_VERSION = 6
+#   v7 — entries carry durable dream identity/state; the top-level snapshot
+#        co-locates the signing secret and display cursor with those states.
+SCHEMA_VERSION = 7
+
+# Fill fraction of the terminal band (the one whose evictions are true
+# drops) at which stats() carries a ``capacity_warning``. Measured
+# 2026-09-23 on the production bank: 36-65 new entries/day against the
+# 5,250-entry flat default, so the last 20% (1,050 entries) is roughly
+# 16-29 days of notice before the first permanent delete.
+CAPACITY_WARNING_FRACTION = 0.8
 
 # Shared tokenizer for the slot-query pool (Pool 1.5): the query side and
 # the entry-slot-token index below must use the identical rule, or the two
@@ -181,6 +192,19 @@ def _entry_slot_tokens(entry: "MemoryEntry") -> set[str]:
     for s_entity, _s_attr, s_value, _polarity in entry.slots:
         tokens |= _content_tokens(f"{s_entity} {s_value}")
     return tokens
+
+
+class BulkDeleteRefused(Exception):
+    """``delete_entries`` matched more entries than its ``max_removed``
+    bound and removed none of them. ``count`` is the match size,
+    ``limit`` the bound, ``texts`` the matched entries' texts."""
+
+    def __init__(self, count: int, limit: int, texts: list[str]) -> None:
+        super().__init__(
+            f"delete would remove {count} entries, over the {limit} bound")
+        self.count = count
+        self.limit = limit
+        self.texts = texts
 
 
 class ContinuumMemorySystem:
@@ -311,6 +335,12 @@ class ContinuumMemorySystem:
         # affected (they live in storage); surfaced via stats().
         self.weights_reset: bool = False
 
+        # File-mode dream acknowledgement metadata. ``None`` means an old
+        # snapshot that still needs one-time classification by MemoryService.
+        self.dream_ack_secret: str | None = None
+        self.dream_display_cursor: float = 0.0
+        self._loaded_schema_version: int | None = None
+
         # Slot-token inverted index (Pool 1.5 candidate gathering,
         # 2026-07-12 perf fix): token -> (ordinal, containing band, entry)
         # for every slotted entry, across every band. Built lazily on
@@ -335,6 +365,10 @@ class ContinuumMemorySystem:
         # module-global generator would perturb any consumer that seeds
         # ``random`` globally for reproducibility (PR #145 review note).
         self._shadow_rng = random.Random()
+        # Correction staging makes write-through failures fatal while the
+        # disposable clone is being built. Ordinary stores retain their
+        # historical best-effort relocation/eviction behavior.
+        self._strict_storage = False
 
     @property
     def total_memories(self) -> int:
@@ -342,6 +376,33 @@ class ContinuumMemorySystem:
         if self.reference:
             total += self.reference.size
         return total
+
+    def clone_for_staged_store(self) -> "ContinuumMemorySystem":
+        """Clone resident bank state while sharing immutable collaborators.
+
+        The clone is a transaction candidate: entries, tensors, indexes,
+        counters, episodes, and telemetry are isolated, while configuration,
+        model/runtime collaborators, and the storage connection remain shared.
+        """
+        shared = (
+            self.config,
+            self.storage,
+            self.reference,
+            self._nli_scorer,
+            self._reranker,
+        )
+        memo = {id(value): value for value in shared if value is not None}
+        staged = copy.deepcopy(self, memo)
+        for index, band in enumerate(staged.bands):
+            band.on_evict = partial(staged._on_band_evict, band_idx=index)
+        named = {band.name: band for band in staged.bands}
+        staged.instant = named.get("instant", staged.bands[0])
+        staged.short_term = named.get(
+            "short_term",
+            staged.bands[1] if len(staged.bands) > 1 else staged.bands[0],
+        )
+        staged.long_term = named.get("long_term", staged.bands[-1])
+        return staged
 
     # ------------------------------------------------------------------
     # Store path
@@ -357,6 +418,40 @@ class ContinuumMemorySystem:
         attribution_episode_id: str | None = None,
         authority: str | None = None,
         distortion_tolerance: str | None = None,
+        *,
+        bypass_surprise_gate: bool = False,
+        strict_storage: bool = False,
+    ) -> tuple[bool, float]:
+        """Store a memory, optionally making every write-through step strict."""
+        previous = self._strict_storage
+        self._strict_storage = previous or strict_storage
+        try:
+            return self._store(
+                text,
+                embedding,
+                source=source,
+                tags=tags,
+                session_key=session_key,
+                attribution_episode_id=attribution_episode_id,
+                authority=authority,
+                distortion_tolerance=distortion_tolerance,
+                bypass_surprise_gate=bypass_surprise_gate,
+            )
+        finally:
+            self._strict_storage = previous
+
+    def _store(
+        self,
+        text: str,
+        embedding: torch.Tensor,
+        source: str = "",
+        tags: list[str] | None = None,
+        session_key: str | None = None,
+        attribution_episode_id: str | None = None,
+        authority: str | None = None,
+        distortion_tolerance: str | None = None,
+        *,
+        bypass_surprise_gate: bool = False,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -364,13 +459,15 @@ class ContinuumMemorySystem:
 
         1. Filter self-referential meta-statements.
         2. Compute surprise across all bands (for telemetry + gating).
-        3. Run contradiction detection against every band. Any entry
-           flagged here is both decayed and marked ``superseded_at`` so
-           retrieval hides it from the LLM.
-        4. If a contradiction was found, **bypass the surprise gate**:
-           the correction must land even when it is semantically
-           near-identical to the fact it replaces. Otherwise apply the
-           normal gate.
+        3. Run contradiction detection against every band. A possible
+           conflict admits the new note without retiring or decaying
+           existing source evidence: a conflict may concern only one
+           of the original note's claims.
+        4. If a possible conflict was found, **bypass the surprise gate**:
+           an update must land even when semantically near-identical
+           to prior evidence. Explicit correction operations may also
+           bypass this gate via ``bypass_surprise_gate``. Otherwise apply
+           the normal gate.
         5. Store in the first (fastest) band and periodically promote.
 
         ``attribution_episode_id`` (identity tier 2, spec 2026-07-18):
@@ -389,6 +486,12 @@ class ContinuumMemorySystem:
         the heuristic and the inheritance rules); stamped on the entry
         before the write-through so the row carries them.
 
+        ``bypass_surprise_gate`` is an internal admission override for
+        explicit supersede/consolidate operations, whose targets may
+        already be marked before their replacement reaches this method.
+        It does not bypass the meta filter or authorize changing any
+        existing entry. Source tags never grant this override.
+
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
         """
@@ -405,12 +508,13 @@ class ContinuumMemorySystem:
                 self._surprise_history[b.name] = history[-self._max_history:]
 
         # ── Contradiction detection (runs BEFORE the surprise gate) ───────────
-        # Corrections are often semantically near-identical to the fact
-        # they replace ("dog is Rex" → "dog is Max"), so their surprise is
-        # LOW. If we gated first, the write would be silently dropped and
-        # the old fact would live on forever. Instead: detect first, and
-        # if anything is flagged, force the write through regardless of
-        # surprise.
+        # Updates are often semantically near-identical to prior evidence
+        # ("dog is Rex" → "dog is Max"), so their surprise is LOW. Detect
+        # first so a potential update lands despite the duplicate gate.
+        # Detection is admission evidence only: a whole note can contain
+        # useful claims beyond the conflicting span, even with one
+        # extracted slot. Retirement belongs to explicit operations;
+        # canonical slot supersession remains in the cortex.
         device = "cuda" if torch.cuda.is_available() else "cpu"
         # Extracted once, here, rather than after the write: the slot-identity
         # path needs them, and they are reused for the entry stamp below —
@@ -422,7 +526,6 @@ class ContinuumMemorySystem:
             (s.entity, s.attribute, s.value, s.polarity) for s in extracted_slots
         ]
         contradiction_found = False
-        all_contradicted: list[MemoryEntry] = []
         for band in self.bands:
             contradicted = detect_contradictions(
                 text, embedding, band.entries,
@@ -432,34 +535,11 @@ class ContinuumMemorySystem:
                 new_slots=new_slots,
             )
             if contradicted:
-                all_contradicted.extend(contradicted)
-                # Decay factor is band-policy-specific; pull it from the band's
-                # retention policy rather than hardcoding 0.3.
-                # ``superseding_text=text`` records the new memory's text on
-                # each superseded entry (schema v5, v0.7.6) so the context
-                # builder can show the correction inline even when the new
-                # memory's own embedding misses retrieval.
-                decay_contradicted_entries(
-                    contradicted,
-                    decay_factor=band.retention.decay_factor_on_contradiction,
-                    superseding_text=text,
-                )
                 contradiction_found = True
 
-        if not contradiction_found and overall_surprise < self.config.surprise_threshold:
+        if (not bypass_surprise_gate and not contradiction_found
+                and overall_surprise < self.config.surprise_threshold):
             return False, overall_surprise
-
-        # Write-through: persist supersession marks set by the
-        # contradiction decay above (entries already have rows).
-        if self.storage is not None:
-            for c in all_contradicted:
-                if c.db_id is not None:
-                    self.storage.update_entry(
-                        c.db_id,
-                        superseded_at=c.superseded_at,
-                        superseded_by_text=c.superseded_by_text,
-                        surprise=float(c.surprise_score),
-                    )
 
         # ── Land the write in the first band ──────────────────────────────────
         self.bands[0].store(text, embedding, source=source, surprise=overall_surprise)
@@ -566,6 +646,8 @@ class ContinuumMemorySystem:
             for e in band.entries:
                 if e.text in seen:
                     continue
+                if e.source == "digest" and e.superseded_at is not None:
+                    continue
                 if hide_superseded and e.superseded_at is not None:
                     continue
                 if entry.episode_id:
@@ -671,6 +753,8 @@ class ContinuumMemorySystem:
         rerank: bool | None = None,
         bm25: bool | None = None,
         timeline: bool | None = None,
+        hide_superseded: bool | None = None,
+        count_access: bool = True,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -687,6 +771,12 @@ class ContinuumMemorySystem:
         Args:
             query_embedding: The encoded query.
             top_k: Maximum neural results. Falls back to ``config.top_k``.
+            hide_superseded: Override the configured history visibility for
+                this retrieval only. Applied before candidate caps and dedup.
+            count_access: False serves the result without bumping the
+                served entries' ``access_count`` or the per-band query/hit
+                counters — for synthetic probes (the startup warmup), which
+                are not reads.
             bands: When provided, restrict the neural pool to bands with
                 these names — e.g. ``["working", "instant"]`` for "just the
                 fast tiers" or ``["forever"]`` for identity recall only.
@@ -703,13 +793,20 @@ class ContinuumMemorySystem:
         Filters compose: ``bands`` is applied first, then ``sources``, then
         ``min_logical_turn``, then the score-based ranking.
         """
-        MIN_SCORE = 0.25 if min_score is None else float(min_score)
+        # The default floor is ``memory.search.min_score`` (0.25; see its
+        # comment for the measurement); the getattr guard mirrors the
+        # search-block idiom below for config objects predating the knob.
+        MIN_SCORE = (
+            float(getattr(getattr(self.config, "search", None),
+                          "min_score", 0.25))
+            if min_score is None else float(min_score))
         # An explicitly-passed floor is a contract over the whole result
         # set, including BM25-only injections (which otherwise bypass the
         # dense pool's gate entirely). The *default* floor deliberately
-        # does not bound them: injected scores are ``weight × normalised``
-        # (≤0.3 at the shipped weight), so applying 0.25 to them would
-        # admit only the single top lexical hit per query.
+        # does not bound them — a configured one included: injected scores
+        # are ``weight × normalised`` (≤0.3 at the shipped weight), so
+        # applying 0.25 to them would admit only the single top lexical
+        # hit per query.
         explicit_floor = min_score is not None
         # Gentle penalty for assistant-authored memories so user-authored
         # facts outrank assistant restatements of the same fact.
@@ -776,11 +873,15 @@ class ContinuumMemorySystem:
             else False
         )
         # Today's order is truncate-then-rerank: the cross-encoder's
-        # ``top_n`` (20) budget only ever saw the ~k+ref_k entries that
+        # ``top_n`` (20) budget only ever sees the ~k+ref_k entries that
         # survived the cut. That stays the default — flipping it under
         # multiplier 1 would change the shipped path, which this change
         # deliberately does not. With a widened pool the reranker sees the
-        # fused pool BEFORE the cut, which is the point of widening it.
+        # fused pool BEFORE the cut, which is the point of widening it —
+        # provided the whole pool fits ``top_n``. A wider pool skips the
+        # pass (``candidate_budget_exceeded`` in Pool 3 below) rather than
+        # scoring a head and serving an unscored tail, so a widened pool
+        # needs ``top_n`` widened with it to be reranked at all.
         rerank_before_cut = bool(pool_mult > 1 and rerank_enabled)
 
         # v0.7.3: superseded entries are included in retrieval by
@@ -792,9 +893,12 @@ class ContinuumMemorySystem:
         # event — so it is opt-in, for debugging and audit.
         # ``getattr`` (not an attribute read) because library callers
         # and eval harnesses pass config objects predating the field.
-        hide_superseded = bool(getattr(self.config, "hide_superseded", False))
+        if hide_superseded is None:
+            hide_superseded = bool(getattr(self.config, "hide_superseded", False))
 
         def _keep(entry: MemoryEntry) -> bool:
+            if entry.source == "digest" and entry.superseded_at is not None:
+                return False
             if not hide_superseded:
                 return True
             return entry.superseded_at is None
@@ -811,6 +915,23 @@ class ContinuumMemorySystem:
         )
         tag_filter: set[str] | None = (
             set(normalize_tags(tags)) if tags else None
+        )
+
+        def _dense_eligible(entry: MemoryEntry) -> bool:
+            return (
+                _keep(entry)
+                and (source_filter is None or entry.source in source_filter)
+                and (episode_filter is None or entry.episode_id in episode_filter)
+                and (tag_filter is None or bool(set(entry.tags) & tag_filter))
+                and (min_logical_turn is None or (
+                    entry.last_logical_turn is not None
+                    and entry.last_logical_turn >= min_logical_turn))
+            )
+
+        dense_filter_active = bool(
+            hide_superseded or source_filter is not None
+            or episode_filter is not None or tag_filter is not None
+            or min_logical_turn is not None
         )
 
         # ── Pool 1: neural memories — N bands, recency-weighted by depth ──────
@@ -847,6 +968,8 @@ class ContinuumMemorySystem:
                 if _trace is not None:
                     _trace["tiers"].append({
                         "name": band.name, "depth": depth, "filtered_out": True,
+                        "entry_count": len(band.entries), "eligible_count": 0,
+                        "excluded_count": len(band.entries),
                         "candidates": [],
                     })
                 continue
@@ -867,13 +990,25 @@ class ContinuumMemorySystem:
                 # config-driven: 1h chat default, 24h in the MCP build.
                 half_life = self.config.recency_base_half_life_s * (2.0 ** depth)
 
-            band_result = band.retrieve(query_embedding, top_k=pool_k)
+            # Apply eligibility before the cap: a scoped fact may rank below
+            # arbitrarily many out-of-scope neighbors. The unfiltered path
+            # retains its existing selection and tie behavior.
+            if dense_filter_active:
+                band_result = band.retrieve(
+                    query_embedding, top_k=pool_k, entry_filter=_dense_eligible,
+                )
+            else:
+                band_result = band.retrieve(query_embedding, top_k=pool_k)
             pool_size = max(pool_size, len(band_result.entries))
             tier_trace: dict | None = None
             if _trace is not None:
+                eligible_count = (sum(_dense_eligible(e) for e in band.entries)
+                                  if dense_filter_active else len(band.entries))
                 tier_trace = {
                     "name": band.name, "depth": depth, "filtered_out": False,
                     "boost": round(boost, 4), "half_life_s": half_life,
+                    "entry_count": len(band.entries), "eligible_count": eligible_count,
+                    "excluded_count": len(band.entries) - eligible_count,
                     "candidates": [],
                 }
                 _trace["tiers"].append(tier_trace)
@@ -1295,9 +1430,11 @@ class ContinuumMemorySystem:
         # Update per-tier instrumentation. ``hit_band_names`` is the set of
         # tiers that contributed at least one entry to the *post-merge*
         # result — gives a usage-rate signal we can surface via /api/memory/stats.
-        self._tier_queries += 1
-        for name in hit_band_names:
-            self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
+        # A synthetic probe (count_access=False) is not a query either.
+        if count_access:
+            self._tier_queries += 1
+            for name in hit_band_names:
+                self._tier_hits[name] = self._tier_hits.get(name, 0) + 1
 
         # ── Pool 2: reference documents ───────────────────────────────────────
         # Kept separate so they can NEVER displace neural memories.
@@ -1330,7 +1467,10 @@ class ContinuumMemorySystem:
 
         # ── Pool 3: optional cross-encoder reranking ─────────────────────────
         # Tier B. When enabled (via config.reranker.enabled or rerank=True
-        # per call), re-score the top-N combined candidates with a
+        # per call), re-score the entire combined pool when it fits the
+        # configured top-N budget. Otherwise preserve the original ranking:
+        # fused CE scores and unscored originals have no calibrated common
+        # scale. Never mix the two domains in one served result. Use a
         # cross-encoder and fuse with the bi-encoder score. Only fires when
         # we have query_text — without it the cross-encoder has nothing to
         # attend over. Falls through silently if the reranker is unavailable
@@ -1341,20 +1481,24 @@ class ContinuumMemorySystem:
         #
         # Knob snapshot for the retrieval log. ``fired``/``skip_reason``
         # explain the per-entry ``ce: None`` a reader will meet below.
+        top_n = getattr(getattr(self.config, "reranker", None), "top_n", 20)
         rerank_log: dict = {
             "enabled": bool(rerank_enabled), "fired": False,
             "skip_reason": None,
+            "top_n": top_n,
+            "candidate_count": len(combined),
+            "scored_candidates": 0,
+            "scoring_policy": "complete_pool_or_skip",
         }
         if (
             rerank_enabled
             and self._reranker is not None
             and query_text
             and combined
+            and len(combined) <= top_n
             and self._reranker.is_available()
         ):
-            top_n = getattr(self.config.reranker, "top_n", 20)
-            head = combined[:top_n]
-            tail = combined[top_n:]
+            head = combined
             head_texts = [e.text for e, _, _ in head]
             head_orig_scores = [float(s) for _, s, _ in head]
             # Margin gate: when the two best bi-encoder scores are already
@@ -1406,7 +1550,6 @@ class ContinuumMemorySystem:
             # pass ran, an explicit None when the margin gate (or an
             # unavailable model) skipped it — "the bi-encoder order was
             # served unrefined" is training signal, not a missing value.
-            # Tail entries beyond top_n never had a ce score and get no key.
             for i, (entry, _, _) in enumerate(head):
                 c = comps.get(entry.text)
                 if c is not None:
@@ -1414,13 +1557,14 @@ class ContinuumMemorySystem:
                                if i < len(ce_scores) else None)
             if ce_scores:
                 rerank_log["fired"] = True
+                rerank_log["scored_candidates"] = len(ce_scores)
                 fused = self._reranker.fuse(head_orig_scores, ce_scores)
                 reranked = [
                     (entry, fused_s, surprise)
                     for (entry, _, surprise), fused_s in zip(head, fused)
                 ]
                 reranked.sort(key=lambda x: x[1], reverse=True)
-                combined = reranked + tail
+                combined = reranked
                 if _trace is not None:
                     _trace["reranker"] = {
                         "fired": True,
@@ -1453,9 +1597,17 @@ class ContinuumMemorySystem:
                         "reason": "rerank_failed_or_unavailable",
                     }
         elif rerank_enabled:
-            # Enabled but the gate above never opened: no model, no query
-            # text, or nothing to rerank.
-            rerank_log["skip_reason"] = "unavailable"
+            over_budget = (
+                self._reranker is not None and bool(query_text)
+                and len(combined) > top_n
+            )
+            reason = "candidate_budget_exceeded" if over_budget else "unavailable"
+            rerank_log["skip_reason"] = reason
+            if _trace is not None:
+                _trace["reranker"] = {
+                    "fired": False, "reason": reason,
+                    "top_n": top_n, "candidate_count": len(combined),
+                }
 
         if rerank_before_cut:
             # Deferred cut: the reranker — not the bi-encoder — chooses which
@@ -1569,8 +1721,9 @@ class ContinuumMemorySystem:
         entries, scores, surprises = zip(*combined)
         # Access accrual happens HERE, on the final merged result set —
         # not in band.retrieve, whose top-k is only a candidate pool.
-        for e in entries:
-            e.access_count += 1
+        if count_access:
+            for e in entries:
+                e.access_count += 1
         return RetrievalResult(
             entries=list(entries),
             scores=list(scores),
@@ -1757,6 +1910,8 @@ class ContinuumMemorySystem:
                 candidate_map.values(), key=lambda t: t[0]):
             if entry.text in seen_texts:
                 continue
+            if entry.source == "digest" and entry.superseded_at is not None:
+                continue
             # Filter on the band that CONTAINS the entry (recorded at
             # index time), not entry.bank — the stamp can go stale when a
             # preset change makes hydration re-route rows into band[0].
@@ -1826,6 +1981,27 @@ class ContinuumMemorySystem:
                 if e.db_id in db_ids:
                     e.db_id = self.storage.insert_entry(entry_to_row(e))
                     n += 1
+        return n
+
+    def flush_unpersisted_entries(self, entries) -> int:
+        """Insert resident entries that never reached storage at all — the
+        sibling of :meth:`reflush_entries` for ``db_id is None`` rather than
+        a phantom id. :meth:`store` seats the entry in ``bands[0]`` BEFORE
+        its write-through ``insert_entry``, and that insert is not wrapped,
+        so a failed insert leaves a resident with no row. Each hit gets a
+        row + id; entries already carrying an id are skipped. Returns the
+        number inserted. Raises whatever the insert raises — the caller
+        decides whether a still-unpersisted entry is fatal — and stops at
+        the first failure with the entries inserted so far already stamped.
+        The caller holds the service lock."""
+        if self.storage is None:
+            return 0
+        from pseudolife_memory.storage.sync import entry_to_row
+        n = 0
+        for e in entries:
+            if e.db_id is None:
+                e.db_id = self.storage.insert_entry(entry_to_row(e))
+                n += 1
         return n
 
     def bump_entry_access_count(self, db_id: int, delta: int) -> bool:
@@ -1983,6 +2159,8 @@ class ContinuumMemorySystem:
         # Schema v35: the label pair follows the entry across bands.
         moved.authority = entry.authority
         moved.distortion_tolerance = entry.distortion_tolerance
+        moved.dream_state = entry.dream_state
+        moved.dream_id = entry.dream_id
         moved.db_id = entry.db_id
         if self.storage is not None and entry.db_id is not None:
             # Must not escape. On the demotion path this runs inside
@@ -2000,6 +2178,8 @@ class ContinuumMemorySystem:
                     access_count=entry.access_count,
                 )
             except Exception as exc:  # noqa: BLE001
+                if self._strict_storage:
+                    raise
                 logger.warning(
                     "band relocation write-through failed (%s -> %s): %s",
                     entry.bank, destination.name, exc,
@@ -2056,7 +2236,14 @@ class ContinuumMemorySystem:
     # Persistence — schema v2 (N bands) with v1 migration
     # ------------------------------------------------------------------
 
-    def save(self, directory: str | Path) -> None:
+    def save(
+        self,
+        directory: str | Path,
+        *,
+        dream_state_overrides: dict[str, str] | None = None,
+        dream_ack_secret: str | None = None,
+        dream_display_cursor: float | None = None,
+    ) -> None:
         """Save the CMS state to ``directory/cms_state.pt``.
 
         Always writes the current ``SCHEMA_VERSION``. Reference bank
@@ -2065,10 +2252,17 @@ class ContinuumMemorySystem:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
 
+        bands = {b.name: b.get_state_dict() for b in self.bands}
+        if dream_state_overrides:
+            for band_state in bands.values():
+                for entry in band_state.get("entries", []):
+                    identity = entry.get("dream_id")
+                    if identity in dream_state_overrides:
+                        entry["dream_state"] = dream_state_overrides[identity]
         state = {
             "schema_version": SCHEMA_VERSION,
             "preset_name": self.config.miras.preset,
-            "bands": {b.name: b.get_state_dict() for b in self.bands},
+            "bands": bands,
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "surprise_history": self._surprise_history,
@@ -2079,8 +2273,18 @@ class ContinuumMemorySystem:
             # losslessly through torch.save. Pre-v6 loaders ignore unknown
             # keys; v6 loaders restore via EpisodeManager.from_dict.
             "episodes": self.episodes.to_dict(),
+            "dream_ack_secret": (
+                self.dream_ack_secret if dream_ack_secret is None
+                else dream_ack_secret
+            ),
+            "dream_display_cursor": (
+                self.dream_display_cursor if dream_display_cursor is None
+                else float(dream_display_cursor)
+            ),
         }
-        torch.save(state, directory / "cms_state.pt")
+        from pseudolife_memory.utils.atomic_io import atomic_torch_save
+        atomic_torch_save(state, directory / "cms_state.pt")
+        self._loaded_schema_version = SCHEMA_VERSION
 
     # ------------------------------------------------------------------
     # Weights-only persistence (v0.2 — entries live in Postgres)
@@ -2156,7 +2360,7 @@ class ContinuumMemorySystem:
         directory = Path(directory)
         state_path = directory / "cms_state.pt"
 
-        if not state_path.exists():
+        if not state_path.exists() and not state_path.with_suffix(".pt.bak").exists():
             legacy_path = directory / "memory_state.pt"
             if legacy_path.exists():
                 self._load_legacy_hopfield(legacy_path)
@@ -2165,14 +2369,33 @@ class ContinuumMemorySystem:
                 self.rebalance_bands()
             return
 
-        # weights_only=True: the CMS snapshot is tensors + plain containers, so
-        # the safe loader handles it without unpickling arbitrary objects (CWE-502).
-        state = torch.load(state_path, weights_only=True, map_location="cpu")
+        # The CMS snapshot is tensors + plain containers, so the safe loader
+        # handles it without unpickling arbitrary objects (CWE-502). Fall back
+        # to the last complete checkpoint if the primary was interrupted.
+        from pseudolife_memory.utils.atomic_io import load_with_backup
+        state, used_backup = load_with_backup(state_path)
+        if used_backup:
+            logger.warning("cms_state.pt corrupt — restored from .bak.")
         schema_version = state.get("schema_version", 1)
+        self._loaded_schema_version = schema_version
+        if schema_version < 7:
+            # Old snapshots had no durable file identity. Assign it before
+            # the shared band loader runs; a v7 row missing its ID remains
+            # visibly corrupt and is rejected by dream initialization.
+            if schema_version == 1:
+                saved_band_states = [
+                    state[key] for key in
+                    ("instant", "short_term", "long_term") if key in state
+                ]
+            else:
+                saved_band_states = list((state.get("bands") or {}).values())
+            for band_state in saved_band_states:
+                for entry in band_state.get("entries", []):
+                    entry.setdefault("dream_id", secrets.token_hex(16))
 
         if schema_version == 1:
             self._load_schema_v1(state)
-        elif schema_version in (2, 3, 4, 5, 6):
+        elif schema_version in (2, 3, 4, 5, 6, 7):
             # v3 / v4 / v5 / v6 are all fully backwards-compatible with v2 —
             # each added optional entry fields with sensible defaults:
             # v3: ``last_logical_turn`` + top-level ``chain_residual``,
@@ -2288,6 +2511,8 @@ class ContinuumMemorySystem:
                         tags=list(e.get("tags") or []),
                         authority=e.get("authority"),
                         distortion_tolerance=e.get("distortion_tolerance"),
+                        dream_state=e.get("dream_state"),
+                        dream_id=e.get("dream_id", ""),
                     ))
                 except Exception as exc:  # noqa: BLE001 — one bad entry
                     logger.warning("Skipping unrestorable entry from saved "
@@ -2312,6 +2537,11 @@ class ContinuumMemorySystem:
         # v6 episode log — pre-v6 saves have no ``episodes`` key, in which
         # case from_dict returns an empty manager.
         self.episodes = EpisodeManager.from_dict(state.get("episodes") or {})
+        self.dream_ack_secret = state.get("dream_ack_secret")
+        # Preserve malformed metadata for the service's dream-only validator.
+        # Raising here would discard otherwise-readable entries when load() is
+        # wrapped by the normal service startup tolerance.
+        self.dream_display_cursor = state.get("dream_display_cursor", 0.0)
         # Band entries were wholesale replaced without going through
         # store() — a previously-built slot index must not survive.
         self._slot_index_dirty = True
@@ -2338,6 +2568,7 @@ class ContinuumMemorySystem:
                     surprise_score=e.get("surprise_score", 0.0),
                     source=e.get("source", ""),
                     bank=first_band.name,
+                    dream_state=None,
                 ))
             first_band._dirty = True
 
@@ -2351,10 +2582,12 @@ class ContinuumMemorySystem:
                         surprise_score=e.get("surprise_score", 0.0),
                         source=e.get("source", ""),
                         bank=last_band.name,
+                        dream_state=None,
                     ))
                 last_band._dirty = True
 
             self._interaction_count = state.get("interaction_count", 0)
+            self._loaded_schema_version = 0
             # Entries appended without going through store() — invalidate
             # any previously-built slot index.
             self._slot_index_dirty = True
@@ -2375,6 +2608,8 @@ class ContinuumMemorySystem:
         self._interaction_count = 0
         self._surprise_history = {b.name: [] for b in self.bands}
         self._consolidation_events = []
+        self.dream_ack_secret = secrets.token_hex(32)
+        self.dream_display_cursor = 0.0
         # Tier C — reset the episode log too so test fixtures get clean
         # bookkeeping on every ``clear``. Without this, ``pristine_service``
         # leaks episodes from earlier tests in the same module.
@@ -2388,14 +2623,23 @@ class ContinuumMemorySystem:
         source: str | None = None,
         episode: str | None = None,
         tag: str | None = None,
+        max_removed: int | None = None,
+        before_delete=None,
     ) -> list[str]:
-        """Remove entries from every band matching any provided filter.
+        """Remove entries from every band matching every provided filter.
 
         At least one of ``text`` / ``substring`` / ``source`` /
         ``episode`` / ``tag`` must be provided — refuses to
-        delete-everything implicitly. Filters combine with OR (an entry
-        matching any filter is dropped). Returns the list of removed
-        entry texts.
+        delete-everything implicitly. Filters combine with AND across
+        kinds (an entry must satisfy each one given), the same way
+        ``retrieve``'s ``sources`` / ``bands`` / ``tags`` filters narrow a
+        search. Before 2026-09-29 they OR-combined, and a ``text`` +
+        ``source`` call meant to remove one entry removed the whole
+        source. Returns the list of removed entry texts.
+
+        ``max_removed`` bounds the match: when more entries match than
+        that, nothing is removed and :class:`BulkDeleteRefused` reports
+        the count. ``None`` sets no bound.
 
         Marks each affected band's pattern matrix dirty so the next
         retrieve rebuilds without the gone entries.
@@ -2410,38 +2654,56 @@ class ContinuumMemorySystem:
         tag_norm = tag.strip().lower() if isinstance(tag, str) else None
 
         def _matches(entry: MemoryEntry) -> bool:
-            if text is not None and entry.text == text:
-                return True
-            if substring is not None and substring in entry.text:
-                return True
-            if source is not None and entry.source == source:
-                return True
-            if episode is not None and entry.episode_id == episode:
-                return True
-            if tag_norm is not None and tag_norm in entry.tags:
-                return True
-            return False
+            if text is not None and entry.text != text:
+                return False
+            if substring is not None and substring not in entry.text:
+                return False
+            if source is not None and entry.source != source:
+                return False
+            if episode is not None and entry.episode_id != episode:
+                return False
+            if tag_norm is not None and tag_norm not in entry.tags:
+                return False
+            return True
+
+        # Match first, mutate second: a refused bulk delete must leave
+        # every band and the storage rows exactly as they were.
+        doomed: list[tuple[MIRASBand, list[MemoryEntry]]] = []
+        matched = 0
+        for band in self.bands:
+            hits = [entry for entry in band.entries if _matches(entry)]
+            if hits:
+                doomed.append((band, hits))
+                matched += len(hits)
+        if max_removed is not None and matched > max_removed:
+            raise BulkDeleteRefused(
+                matched, max_removed,
+                [entry.text for _, hits in doomed for entry in hits],
+            )
+
+        matches = [entry for _, hits in doomed for entry in hits]
+        retained = set()
+        if matches and before_delete is not None:
+            # The synchronous cascade may retain matched derived history.
+            retained = {id(e) for e in (before_delete(matches) or [])}
 
         removed: list[str] = []
         removed_ids: list[int] = []
-        for band in self.bands:
-            kept: list[MemoryEntry] = []
-            band_changed = False
-            for entry in band.entries:
-                if _matches(entry):
-                    removed.append(entry.text)
-                    if entry.db_id is not None:
-                        removed_ids.append(entry.db_id)
-                    band_changed = True
-                else:
-                    kept.append(entry)
-            if band_changed:
-                band.entries = kept
-                band._dirty = True
+        for band, hits in doomed:
+            hits = [e for e in hits if id(e) not in retained]
+            gone = set(map(id, hits))
+            for entry in hits:
+                removed.append(entry.text)
+                if entry.db_id is not None:
+                    removed_ids.append(entry.db_id)
+            band.entries = [e for e in band.entries if id(e) not in gone]
+            band._dirty = True
         if removed:
             self._slot_index_dirty = True
-        if self.storage is not None and removed_ids:
-            self.storage.delete_entry_ids(removed_ids)
+        if self.storage is not None and removed_ids and before_delete is None:
+            # An explicit forget: storage retires lessons whose last source
+            # this removes (capacity eviction below never does).
+            self.storage.delete_entry_ids(removed_ids, forgotten=True)
         return removed
 
     def _on_band_evict(self, entry: MemoryEntry, band_idx: int | None = None) -> None:
@@ -2469,19 +2731,82 @@ class ContinuumMemorySystem:
         tying the continuum under forced eviction). True drops are
         counted (``stats()["true_drops"]``) and logged so a bank under
         real capacity pressure is visible, never silent.
+
+        Since 2026-09-23 each true drop is also a WARNING line naming the
+        entry, and Postgres storage deletes the row through
+        ``delete_evicted_entry``, which counts the drop in ``meta`` in the
+        same transaction — the per-process counter above resets on every
+        restart, so it could not say whether a bank had ever lost entries.
+        Inside a correction the whole store is staged in one transaction, so
+        a drop that rolls back is neither deleted nor counted (the WARNING
+        line, written as the drop happens, is not taken back).
         """
         self._slot_index_dirty = True
         if band_idx is not None and band_idx + 1 < len(self.bands):
             self._relocate(entry, self.bands[band_idx + 1])
             return
         self._true_drops += 1
-        logger.info("capacity eviction (true drop #%d): %r",
-                    self._true_drops, entry.text[:80])
-        if self.storage is not None and entry.db_id is not None:
+        superseded = entry.superseded_at is not None
+        all_time: int | None = None
+        if self.storage is not None:
+            # Test doubles and older storages expose only the plain delete
+            # (the same optional-capability read as hydrate's update_entry).
+            evict = getattr(self.storage, "delete_evicted_entry", None)
             try:
-                self.storage.delete_entry_ids([entry.db_id])
+                if evict is not None:
+                    all_time = evict(
+                        entry.db_id, source=entry.source,
+                        superseded=superseded)
+                elif entry.db_id is not None:
+                    # A plain delete: eviction is capacity, not a forget.
+                    self.storage.delete_entry_ids([entry.db_id])
             except Exception as exc:  # noqa: BLE001
+                if self._strict_storage:
+                    raise
                 logger.warning("evict write-through failed: %s", exc)
+        band = self.bands[band_idx].name if band_idx is not None else entry.bank
+        logger.warning(
+            "capacity eviction true drop: entry_id=%s source=%r "
+            "superseded=%s band=%r (#%d since start, all-time %s): %r",
+            entry.db_id, entry.source, superseded, band, self._true_drops,
+            all_time if all_time is not None else "n/a", entry.text[:80])
+
+    def capacity_warning(self) -> dict | None:
+        """Warn when the terminal band nears the capacity where evictions
+        become permanent deletes; ``None`` below the threshold.
+
+        Only the last band is checked: an earlier band that fills demotes
+        its evictee into the next one and loses nothing, so under the
+        continuum a full head band is normal. Under the flat default the
+        last band is the only band. Cheap attribute reads only — ``/health``
+        calls this without the service lock.
+        """
+        band = self.bands[-1]
+        capacity = band.max_entries
+        if capacity <= 0:
+            return None
+        size = band.size
+        fill = size / capacity
+        if fill < CAPACITY_WARNING_FRACTION:
+            return None
+        if size >= capacity:
+            state = ("is full: every new memory now permanently deletes "
+                     "the lowest-retention entry")
+        else:
+            state = (f"is {fill:.0%} full: at capacity every new memory "
+                     "will permanently delete the lowest-retention entry")
+        return {
+            "band": band.name,
+            "size": size,
+            "capacity": capacity,
+            "fill": round(fill, 3),
+            "message": (
+                f"Band {band.name!r} holds {size:,} of {capacity:,} entries "
+                f"and {state} (superseded entries first). Raise its "
+                "max_entries with a custom preset — see 'MIRAS preset "
+                "flat' in docs/guide/configuration.md."
+            ),
+        }
 
     def stats(self) -> dict:
         """Memory statistics.
@@ -2518,8 +2843,12 @@ class ContinuumMemorySystem:
             # Entries destroyed by capacity eviction since startup (no
             # deeper band to demote into). 0 until the store genuinely
             # fills; a growing number is the signal to raise capacity or
-            # curate.
+            # curate. The all-time count lives in storage (service.stats()
+            # adds true_drops_total on Postgres).
             "true_drops": self._true_drops,
+            # Set from 80% of the terminal band's capacity, i.e. before the
+            # first permanent delete; None below that.
+            "capacity_warning": self.capacity_warning(),
             # v0.2: True when weights.pt (and .bak) failed to load and the
             # band MLPs restarted fresh. Entries are unaffected.
             "weights_reset": self.weights_reset,

@@ -327,11 +327,23 @@ def svc(pg_url, tmp_path_factory):
     """Module-scoped service against a wiped DB — embedder loads once."""
     import psycopg as _psy
     from pseudolife_memory.storage.schema import (BENCH_RESET_TABLES,
+                                                  assert_disposable_database,
                                                   ensure_schema)
 
+    from tests.pg_fixtures import await_background_dreams
+
+    await_background_dreams()
     with _psy.connect(pg_url) as conn:
+        assert_disposable_database(conn)  # first: before the DDL + TRUNCATE
         # Pin to public first (see pg_fixtures.pg_conn) — mirrors PostgresStorage.
         conn.execute("SET search_path TO public")
+        conn.commit()
+        # Reap backends earlier tests leaked on this run's database, as
+        # pg_conn does: a leaked storage still holds the bank writer lease.
+        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                     "WHERE datname = current_database() "
+                     "AND pid <> pg_backend_pid() "
+                     "AND backend_type = 'client backend' AND usename = current_user")
         conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:
@@ -376,6 +388,24 @@ def test_relate_normalizes_variant_and_warns_on_type(svc):
 def test_builtin_relation_protected(svc):
     out = svc.relation_define("depends-on", "rewrite attempt")
     assert out["error"] == "builtin_relation"
+
+
+def test_replacing_graph_meaning_requires_destructive_mcp_hints(svc):
+    """These writes can replace existing meaning, even without deleting rows."""
+    import asyncio
+    from pseudolife_memory.mcp_server import mcp
+
+    svc.graph_alias("fixture-first-target", "fixture-movable-alias")
+    svc.graph_alias("fixture-second-target", "fixture-movable-alias")
+    assert svc._storage.find_entity("fixture-movable-alias")["canonical"] == "fixture-second-target"
+    svc.relation_define("fixture-custom-relation", "original meaning", transitive=True)
+    svc.relation_define("fixture-custom-relation", "replacement meaning", transitive=False)
+    relation = next(r for r in svc._graph.load_relations() if r["name"] == "fixture-custom-relation")
+    assert relation["description"] == "replacement meaning"
+    assert relation["transitive"] is False
+    manifest = {t.name: t.annotations for t in asyncio.run(mcp.list_tools())}
+    for name in ("memory_alias", "memory_relation_define"):
+        assert manifest[name].destructive_hint is True
 
 
 def test_alias_resolves_in_relate(svc):
@@ -873,6 +903,57 @@ def test_seedless_scoped_whole_graph(svc):
     scoped = svc.graph_neighborhood(entity=None, scope="es-scope-a")
     scoped_names = {n["entity"] for n in scoped["nodes"]}
     assert "es-keep-node" in scoped_names and "es-drop-node" not in scoped_names
+
+
+def test_graph_review_scope_filters_by_memory_source_not_finding_kind(svc):
+    # 2026-09-20 (review of PR #316): the MCP ``scope`` description read
+    # "keep only findings of this kind", but graph_review keeps the entities
+    # whose entity_sources carry that memory SOURCE (the Console's project
+    # switcher passes the same value to /api/graph?scope= and
+    # /api/graph/review?scope=). Pin the real contract: a source keeps its
+    # entities' analyzer findings and drops the others; a finding-kind name
+    # matches no source, so the analyzer listing is EMPTY — not "everything".
+    # Filed queue proposals (proposed_link / merge_candidate /
+    # junk_candidate) are not scoped and are left out of these assertions.
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    a_name = "Scoped Review web frontend"
+    b_name = "web frontend (Scoped Review)"
+    other = "es-review-scope-other"
+    a = st.ensure_entity(a_name.lower(), display=a_name)
+    b = st.ensure_entity(b_name.lower(), display=b_name)
+    o = st.ensure_entity(other, display=other)
+    st.upsert_entity_source(a, "es-review-scope", "derived", _t.time())
+    st.upsert_entity_source(b, "es-review-scope", "derived", _t.time())
+    st.upsert_entity_source(o, "es-review-scope-2", "derived", _t.time())
+    analyzer_types = {"duplicate", "dubious_edge", "orphan", "unattributed",
+                      "test_artifact"}
+
+    def analyzer(out):
+        return [f for f in out["findings"] if f["type"] in analyzer_types]
+
+    def pair_listed(out):
+        return any(f["type"] == "duplicate"
+                   and set(f.get("entities", ())) == {a_name, b_name}
+                   for f in out["findings"])
+
+    def named(out):
+        return {n for f in analyzer(out) for n in f.get("entities", ())}
+
+    assert pair_listed(svc.graph_review())
+    assert pair_listed(svc.graph_review(scope="all"))
+    assert other in named(svc.graph_review())  # weakly connected, unscoped
+
+    scoped = svc.graph_review(scope="es-review-scope")
+    assert pair_listed(scoped)
+    assert named(scoped) == {a_name, b_name}  # nothing outside the source
+    assert other not in named(scoped)
+
+    # A finding kind is not a source: no entity carries it, so the scoped
+    # entity set — and every analyzer finding over it — is empty.
+    for kind in ("merge_candidate", "duplicate", "orphan"):
+        assert analyzer(svc.graph_review(scope=kind)) == [], kind
 
 
 def test_whole_graph_caps_nodes_by_degree(svc):

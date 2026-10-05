@@ -1,0 +1,604 @@
+/* Cortex Console v3: black glass. Tokens follow the design sheet
+   (System.dc.html); every color is a variable so light mode can remap it. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("./fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("./fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #000;
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --hero-shadow: 0 30px 80px -40px rgba(0, 0, 0, 1);
+  --selected: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.07);
+  --fill: rgba(255, 255, 255, 0.06);
+  --fill-strong: rgba(255, 255, 255, 0.08);
+  --track: rgba(255, 255, 255, 0.08);
+  --side: rgba(255, 255, 255, 0.03);
+  --side-border: rgba(255, 255, 255, 0.06);
+  --bar: rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.6);
+
+  --ink: #f5f5f7;
+  --ink-2: rgba(255, 255, 255, 0.72);
+  --ink-3: rgba(255, 255, 255, 0.55);
+  --ink-4: rgba(255, 255, 255, 0.45);
+
+  /* Two accents taken from the brand logo: the lavender of the brain's
+     outline for associative memory, the gold of the traces for canonical. */
+  --assoc: #cfa0f5;
+  --canon: #f2c14e;
+  --link: #f6d47a;
+  --link-hover: #fbe5a3;
+  --ok: #34d399;
+  --ok-ink: #6ee7b7;
+  --warn: #fb923c;
+  --danger: #f87171;
+  --danger-ink: #fca5a5;
+  --lessons: #b07ce8;
+  --contested-ink: #d4b5f7;
+  --graph: #d4a017;
+  --focus: #f2c14e;
+
+  --btn: #f5f5f7;
+  --btn-ink: #000;
+  --on-accent: #000;
+  --glow-opacity: 0.09;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground: #f2f2f5;
+  --panel: rgba(255, 255, 255, 0.72);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --hero-shadow: 0 30px 80px -50px rgba(30, 27, 75, 0.35);
+  --selected: rgba(0, 0, 0, 0.06);
+  --hairline: rgba(0, 0, 0, 0.08);
+  --fill: rgba(0, 0, 0, 0.045);
+  --fill-strong: rgba(0, 0, 0, 0.06);
+  --track: rgba(0, 0, 0, 0.08);
+  --side: rgba(255, 255, 255, 0.55);
+  --side-border: rgba(0, 0, 0, 0.07);
+  --bar: rgba(242, 242, 245, 0.72);
+  --scrim: rgba(0, 0, 0, 0.3);
+
+  --ink: #0b0b0f;
+  --ink-2: rgba(0, 0, 0, 0.72);
+  --ink-3: rgba(0, 0, 0, 0.6);
+  --ink-4: rgba(0, 0, 0, 0.52);
+
+  --assoc: #7e22ce;
+  --canon: #a16207;
+  --link: #92400e;
+  --link-hover: #78350f;
+  --ok: #059669;
+  --ok-ink: #047857;
+  --warn: #c2410c;
+  --danger: #dc2626;
+  --danger-ink: #b91c1c;
+  --lessons: #6d28d9;
+  --contested-ink: #5b21b6;
+  --graph: #a16207;
+  --focus: #7e22ce;
+
+  --btn: #0b0b0f;
+  --btn-ink: #fff;
+  --on-accent: #fff;
+  --glow-opacity: 0.07;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+}
+
+body {
+  font-family: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01" 0;
+}
+
+a {
+  color: var(--link);
+}
+a:hover {
+  color: var(--link-hover);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.mono {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- surfaces ---- */
+.panel {
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--highlight);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  min-width: 0;
+}
+.panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.meta {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.caption {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* ---- controls ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-primary {
+  border: 0;
+  background: var(--btn);
+  color: var(--btn-ink);
+  font-weight: 600;
+}
+.btn-primary:hover {
+  color: var(--btn-ink);
+}
+.btn-secondary {
+  border: 1px solid var(--panel-border);
+  background: var(--fill-strong);
+  color: var(--ink);
+}
+.btn-secondary:hover {
+  color: var(--ink);
+  background: var(--selected);
+}
+.btn-sm {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.btn-danger {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+.btn-danger:hover {
+  color: var(--danger-ink);
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+/* Quiet text-weight action inside rows ("history", "forget"). */
+.btn-ghost {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 0 10px;
+}
+.btn-ghost:hover {
+  color: var(--ink);
+  background: var(--fill);
+}
+.btn-ghost.danger:hover {
+  color: var(--danger-ink);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.btn[disabled],
+.btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--fill);
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:hover {
+  color: var(--ink);
+}
+
+/* ---- chips and dots ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: "Geist Mono", ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-2);
+  background: var(--fill);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A chip that carries free text (labels, purposes) wraps instead. */
+.chip-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.chip-lg {
+  min-height: 28px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+.chip-prose {
+  font-family: inherit;
+}
+.chip.ok {
+  color: var(--ok-ink);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.chip.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.chip.danger {
+  color: var(--danger-ink);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.chip.canon {
+  color: var(--link);
+  background: color-mix(in srgb, var(--canon) 14%, transparent);
+}
+.chip.lessons {
+  color: var(--contested-ink);
+  background: color-mix(in srgb, var(--lessons) 14%, transparent);
+}
+.chip.mail {
+  color: var(--on-accent);
+  background: var(--canon);
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-4);
+}
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 80%, transparent);
+}
+.dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 70%, transparent);
+}
+.dot.danger {
+  background: var(--danger);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 70%, transparent);
+}
+.dot.assoc {
+  background: var(--assoc);
+}
+.dot.canon {
+  background: var(--canon);
+}
+.dot.lessons {
+  background: var(--lessons);
+}
+:root[data-theme="light"] .dot {
+  box-shadow: none;
+}
+
+/* ---- bars ---- */
+.track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+.track > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--assoc);
+}
+
+/* ---- form controls ---- */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+    linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.select option {
+  background: var(--ground);
+  color: var(--ink);
+}
+.textarea {
+  height: auto;
+  min-height: 96px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-4);
+}
+.input.mono,
+.textarea.mono {
+  font-family: "Geist Mono", ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.field-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.field-help {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+/* ---- tables ---- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-4);
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.table tr:last-child td {
+  border-bottom: 0;
+}
+.table tbody tr.clickable {
+  cursor: pointer;
+}
+.table tbody tr.clickable:hover td,
+.table tbody tr.selected td {
+  background: var(--fill);
+}
+.table-wrap {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* ---- empty and loading ---- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 28px 26px;
+}
+.empty-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.empty-body {
+  color: var(--ink-3);
+  max-width: 62ch;
+}
+.skeleton {
+  border-radius: 10px;
+  background: var(--fill);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+/* ---- view layout ---- */
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.toolbar .grow {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.toolbar .note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+/* ---- states ---- */
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.state-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.state-body {
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+.unavailable {
+  color: var(--ink-4);
+  font-size: 12px;
+}
+
+/* Touch screens: controls reach the ~44 px finger target the platform
+   guidelines ask for; a mouse keeps the compact desktop sizes. */
+@media (pointer: coarse) {
+  .btn {
+    height: 44px;
+  }
+  .btn-sm {
+    height: 40px;
+    padding: 0 16px;
+  }
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .input,
+  .select {
+    height: 42px;
+    /* 16 px stops iOS from zooming the page when a field takes focus. */
+    font-size: 16px;
+  }
+  .textarea {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .icon-btn,
+  .nav-link {
+    transition:
+      background-color 0.12s ease,
+      color 0.12s ease;
+  }
+}

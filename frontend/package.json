@@ -1,0 +1,28 @@
+{
+  "name": "pseudolife-cortex-console",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Cortex Console v3: the Pseudolife-MCP web console (Svelte 5 + Vite).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/check-dist.mjs",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "typecheck": "npm run check",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tsconfig/svelte": "5.0.8",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.1",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

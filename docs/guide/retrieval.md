@@ -14,17 +14,24 @@ never carry — entries, fact/world/lesson claim text, and slot/entity-name
 embeddings are all encoded bare, and every stored-to-stored comparison
 (dedup, curation, alias candidates, the surprise gate) stays bare on BOTH
 ends. Two distinct threshold effects follow, and they should not be
-conflated. The `min_score` 0.2/0.25 recall floors (and `supersede()`'s
-embedding-fallback paraphrase probe) now gate a prefixed-query-to-document
+conflated. The `min_score` 0.2/0.25 recall floors gate a prefixed-query-to-document
 cosine rather than a doc-to-doc one — their *semantics* shifted, not just
 their scale, and they read somewhat more conservative at the shipped
 defaults. By contrast, `alias_candidate_min_cosine`,
 `curation_min_similarity` and the surprise gate remain doc-to-doc
 comparisons whose cosine *distributions* merely shift with the new model.
-All are left unrecalibrated pending live data. See
+`alias_candidate_min_cosine` was recalibrated from live data on 2026-09-29
+(0.5 to 0.7; see the CHANGELOG entry and
+`evals/results/merge-detector-replay-20260929.json`); the others are left
+unrecalibrated pending live data. See
 [Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
 for the config fields and the [schema version history](configuration.md#schema-version-history)
 for the v25 cutover itself.
+
+Explicit corrections do not use a similarity threshold: `memory_supersede`
+and `memory_consolidate` select entry IDs, or unique exact text for legacy
+calls. The earlier embedding fallback has been removed so a failed lookup
+cannot redirect a correction to a different note.
 
 ## Cross-encoder reranking
 
@@ -50,9 +57,19 @@ memory:
   reranker:
     enabled: true
     model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
-    top_n: 20            # rerank the top-N candidates only
+    top_n: 20            # maximum combined pool size for reranking
     fusion_weight: 0.7   # 1.0 = pure CE, 0.0 = pure bi-encoder
 ```
+
+Reranking scores the whole combined memory/reference pool or skips it.
+If the pool exceeds `top_n`, search preserves its original scores and order
+and reports `candidate_budget_exceeded` in the reranker parameters and trace.
+This bounds model work without treating fused scores and unscored originals
+as comparable. A widened candidate pool or large `top_k` can trigger this
+fallback; increase `top_n` deliberately if that additional work is wanted.
+Reserved reference slots remain available in either case. The parameters
+also record `candidate_count`, `scored_candidates`, and the
+`complete_pool_or_skip` scoring policy.
 
 First call lazy-loads the ~80 MB model from the HuggingFace Hub; later
 calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
@@ -136,29 +153,53 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
 ## Abstention & confidence floors
 
-Off by default (`memory.search_confidence_floor = 0.0`). Set it above zero
-and `memory_search` returns `low_confidence: true` whenever the top match
-scores below the floor, so the agent can abstain instead of answering from
-a weak hit. A cortex fact in the result always overrides it — but *which*
-cortex facts count is tunable via `memory.cortex.guard_min_score` (default
-`0.2`; a LongMemEval retrieval replay showed the old `0.3` floor served
-*zero* facts for 60% of questions, because terse fact embeddings rarely
-score 0.3 against a natural-language query even when they are the answer —
-while going below 0.2 measurably hurt by diluting the context with weak
-facts): only facts scoring at/above it are treated as a confident answer,
-so weak topically-adjacent facts stop suppressing abstention.
+`low_confidence: true` means **nothing matched**: search served no entry
+and no cortex fact cleared `memory.cortex.guard_min_score`.
+It is not an answerability signal. Over 1,072 real agent searches
+(2026-09-06 to 2026-09-25) it fired on none of them: all but one served
+entries, and that one served cortex facts. A question whose answer is not
+in the bank still returns close-scoring hits. The 2026-09-23
+review's four in-domain absent-answer probes topped out at dense cosine
+0.43-0.64, inside the range of real hits (median top cosine 0.61 across
+those agent searches). Judge the hits; do not read a served result as a
+found answer.
 
-The two are calibrated as a **pair**; the [`evals/`](../../evals/README.md)
-sweep recommends `guard_min_score = 0.65` + `search_confidence_floor = 0.70`
-for an abstention-on deployment (doubles abstention recall at zero
-false-abstain).
+`memory.search_confidence_floor` (default `0.0`, off) adds a score test:
+above zero, `memory_search` also returns `low_confidence: true` when the
+top served score (the fused score, not the raw cosine) is below the floor
+**and** no cortex fact clears the guard. **No value is calibrated for the
+current embedder.** Until 2026-09-25 this page recommended
+`guard_min_score = 0.65` + `search_confidence_floor = 0.70`, a pair
+measured on the MiniLM embedder (2026-06-19). On the agent searches above
+that pair would flag 26% of searches, including 20% of the searches whose
+hits the agent then reported using, and it caught 3 of the 4 absent-answer
+probes (`evals/serving_policy_replay.py`, artifact
+`evals/results/serving-policy-replay-20260925-r3.json`). Leave both knobs at
+their defaults until a real answerability signal exists.
+
+`memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
+are served at all (a LongMemEval retrieval replay showed the old `0.3`
+floor served *zero* facts for 60% of questions, because terse fact
+embeddings rarely score 0.3 against a natural-language query even when
+they are the answer, while going below 0.2 measurably hurt by diluting the
+context with weak facts). Any served fact suppresses `low_confidence`.
+
+The dense relevance floor, `memory.search.min_score` (default `0.25`), is a
+different knob: a dense candidate below it never enters the pool. On the
+same agent searches the weakest served dense hit was at cosine 0.39 at
+the 1st percentile, and below 0.30 in one search of 1,064, so today the
+floor rarely binds on a real search. Raising it is not a way to abstain.
 
 ## Superseded entries
 
-An entry the contradiction pipeline marked superseded is **still
-retrieved**, with its score multiplied by `0.55`. Current values therefore
-outrank their own history without the history disappearing, which is what
-lets an answer read "you used to have X, then you changed it to Y".
+An explicitly superseded entry, or one carrying a mark from an earlier
+version, is **still retrieved**, with its score multiplied by `0.55`.
+This favors current entries while keeping history accessible for answers
+such as "you used to have X, then you changed it to Y". Ordinary
+`memory_store` preserves earlier source notes when a potential conflict
+is detected; that detection alone does not mark or downrank them as
+superseded. Whole-note replacement remains available through
+`memory_supersede` and `memory_consolidate`.
 
 ```yaml
 memory:
@@ -185,6 +226,16 @@ candidates with raw_score, recency boost, source/supersession multipliers,
 and the `drop_reason` (or `kept=True`) for each. The `final_topk` block
 shows exactly which entries reached the result set and what score they
 carried.
+
+Scoping filters (`sources`, `episodes`, `tags`, and the
+`memory.hide_superseded` setting) apply
+before each band's candidate cap, not after it, so a scoped entry is not
+crowded out by out-of-scope neighbours that rank above it. Each band in
+the trace's `tiers` list reports `entry_count` (entries in the band),
+`eligible_count` (those that passed the filters) and `excluded_count`
+(those that did not); a band named outside a `bands=` filter shows
+`filtered_out: true` with every entry excluded. An `eligible_count` of 0
+means the filters, not the ranking, removed the entry you expected.
 
 Also useful for state-probe queries where recency bias is unwelcome:
 
@@ -265,8 +316,11 @@ the cosine ranking, marked `pinned: true`, when it is **in scope** — and
 scope is defined cheaply and precisely, with no second embedding pass:
 in `memory_search`'s cortex block, the query *names the fact's entity*
 (both sides go through the cortex's slot normalisation, so `payments db`
-matches `payments-db`, and the entity must occur as a separator-bounded
-run, so `db` does not match `payments-database`; a raw-string test — it
+matches `payments-db`, and the entity must occur as a word-bounded run
+with no letter, digit or combining mark touching it, so `db` does not
+match `payments-database` while `bench server?`, `bench server,` and
+`bench server's` all name `bench server`; an apostrophe inside a word
+binds it, so `don't` does not name `Don`; a raw-string test — it
 does not resolve graph aliases, so a constraint written under an alias
 later folded into another name is pinned by `memory_recall` but not by
 the cortex block, a known open follow-up now that
@@ -289,6 +343,32 @@ sinks below the fresh ranked facts — staleness is a trust decision and
 outranks the pin. The labels themselves are described in
 [memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35).
 
+**What the scope test means for rules.** In `memory_search` the pin's
+scope is *entity naming*, and a working session describes the moment a
+rule matters by the task, not by the rule's name. "About to start the
+bench server on the 4090" does not name `GPU pre-flight rule`, so that
+constraint is not pinned and is ranked only if cosine happens to favour
+it; "GPU pre-flight rule before a bench run" names it and pins it, floor
+and cap permitting (probed on the live bank, 2026-09-27, while checking a
+client's local memory files against it — the same held for a subagent
+model rule and a main-checkout rule). `memory_recall` scopes by seed
+instead: the mechanical driver seeds the vocabulary entities the query
+names, and falls back to entities mentioned in the seed hits only when
+the query names none, so a task-phrased recall can pin a rule the query
+never names — but once the query names any known entity, that fallback
+does not run. Two consequences. When you store a rule, name its entity
+the way the task would say it (`bench server`, not `GPU pre-flight
+rule`). The bounded match ends at whitespace, punctuation or a
+possessive `'s`, so "should I start the bench server?" and "the bench
+server's config" name it as well; in `memory_recall`, whose seeds come
+from a raw-text match over entity names, a `.` straight after the name
+does not end it. And a rule that must hold *however* the task is
+phrased — a safety rule, a "never do X" — belongs in the agent's
+standing-instruction surface too (the CLAUDE.md / AGENTS.md block, or
+the client's own always-loaded memory), with the bank holding its why,
+its history and its corrections: an always-loaded line fires without a
+query; a bank entry fires only when the query reaches it.
+
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`. A served fact that stands on
@@ -297,10 +377,10 @@ true` plus `re_verify_reason` — see below.
 
 **Re-verify: a flag, not a cascade.** The `re_verify` marker above appears
 on `memory_search`'s cortex block, `memory_fact_get`, and `memory_recall`
-(the default `verbose=False` projection carries it too). It is
-best-effort, computed at read time from evidence that still exists:
-`memory_traces.entry_id` is `ON DELETE CASCADE`, so a capacity eviction of
-the source entry loses the trail before it ever flags anything. Full
+(the default `verbose=False` projection carries it too). PostgreSQL preserves
+source correction events independently of evictable traces, so later removal
+of a corrected source does not clear the warning. Re-confirming the fact does;
+ordinary deletion of an uncorrected source creates no warning. Full
 contract: [memory model](memory-model.md#how-current-is-this-fact).
 
 **Output caps (issue #186).** A plain 3-hop query on a hub entity can

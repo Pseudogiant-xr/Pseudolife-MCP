@@ -17,13 +17,22 @@ Write -> validate a ``{dotted.path: value}`` patch, merge it into
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# One daemon process owns the bank/config (daemon.py's uvicorn.run has no
+# workers). Serialize Console writes through runtime publication, including
+# calls through different service objects sharing a path. This is a process
+# lock, not coordination with external editors or other daemon processes.
+_CONFIG_WRITE_LOCK = threading.Lock()
 
 # ── Knob registry ──────────────────────────────────────────────────────────
 # Each entry:
@@ -51,7 +60,9 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Abstention floor", "type": "float", "default": 0.0,
      "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
      "help": "When the top search score is below this, search returns "
-             "low_confidence so the agent can abstain. 0 = off."},
+             "low_confidence (memory_search also requires that no cortex "
+             "fact clears the cortex guard). Uncalibrated for the current "
+             "embedder. 0 = off."},
     {"path": "memory.top_k", "group": "Retrieval", "label": "Default top-k",
      "type": "int", "default": 8, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Episodic retrieval slots across bands."},
@@ -72,8 +83,9 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.reranker.enabled", "group": "Reranker",
      "label": "Cross-encoder reranker", "type": "bool", "default": False,
      "restart": False,
-     "help": "Re-score top-N candidates with ms-marco-MiniLM. ~80MB model "
-             "lazy-loaded on first use; ~200ms per search."},
+     "help": "Re-score the complete combined pool when it fits top-N; "
+             "larger pools keep their original order and scores. The ~80MB "
+             "ms-marco-MiniLM model loads on first scoring use."},
     {"path": "memory.reranker.fusion_weight", "group": "Reranker",
      "label": "Reranker fusion weight", "type": "float", "default": 0.7,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": True,
@@ -81,7 +93,8 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.reranker.top_n", "group": "Reranker",
      "label": "Reranker top-N", "type": "int", "default": 20, "min": 1,
      "max": 100, "step": 1, "restart": True,
-     "help": "How many candidates to rerank. Baked at init."},
+     "help": "Maximum combined memory/reference pool for reranking. Larger "
+             "pools keep their original ranking. Baked at init."},
     {"path": "memory.bm25.enabled", "group": "Reranker",
      "label": "BM25 hybrid pool", "type": "bool", "default": True,
      "restart": False,
@@ -114,6 +127,8 @@ KNOBS: list[dict[str, Any]] = [
              "'used' labels when a served entry is later fetched/"
              "reinforced. Training data for a learned reranker; purely "
              "observational, no retrieval behaviour changes. Also gates "
+             "the lesson-search log and the outcome used_ids record "
+             "(schema v44), and "
              "the sweep-thread startup condition alongside dream.enabled "
              "(issue #178) — sweep thread starts at boot, so toggling "
              "needs a restart."},
@@ -121,7 +136,8 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Event retention (days)", "type": "int", "default": 365,
      "min": 1, "max": 3650, "step": 1, "restart": False,
      "help": "Events older than this are pruned on the dream-sweep tick "
-             "(their use labels cascade)."},
+             "(their use labels cascade), and lesson-search rows with "
+             "them."},
     {"path": "memory.retrieval_log.use_window_seconds", "group": "Retrieval log",
      "label": "Use-label window (s)", "type": "int", "default": 3600,
      "min": 60, "max": 86400, "step": 60, "restart": False,
@@ -135,7 +151,9 @@ KNOBS: list[dict[str, Any]] = [
              "entry text truncated (memory_get returns it whole), the "
              "cortex block sized to the caller's top_k, and "
              "memory_fact_get's bookkeeping keys behind verbose=True. Off "
-             "restores the pre-2026-09-04 payloads. Projection only — "
+             "restores the pre-2026-09-04 payloads, except that superseded "
+             "hits keep their short replaced_by pointer and entries keep "
+             "their write date. Projection only — "
              "ranking and every eval number are unaffected."},
     {"path": "memory.mcp.entry_text_chars", "group": "MCP payloads",
      "label": "Search entry text cap", "type": "int", "default": 600,
@@ -145,8 +163,8 @@ KNOBS: list[dict[str, Any]] = [
              "Ignored when compact payloads are off. 600 (~150 tokens) "
              "clipped 88% of hits on the 2026-09-04 ledger bank and halved "
              "the served entry text; raise it for long-form notes whose "
-             "tail carries the answer. Never applies to superseded_by_text, "
-             "which is served whole."},
+             "tail carries the answer. Does not size a superseded hit's "
+             "replaced_by preview, which is fixed at 120 chars."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,
@@ -213,7 +231,7 @@ KNOBS: list[dict[str, Any]] = [
      "help": "New dream entity whose name-token Jaccard vs an existing name "
              "reaches this files a merge proposal for review. 0 = off."},
     {"path": "memory.dream.alias_candidate_min_cosine", "group": "Dream",
-     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.5,
+     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.7,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
      "help": "New dream entity whose name-embedding cosine vs an existing "
              "entity reaches this files a merge proposal for review (semantic "
@@ -304,8 +322,9 @@ KNOBS: list[dict[str, Any]] = [
              "proposals: \"shadow\" records verdicts without applying them; "
              "\"auto-reject\" additionally applies reject verdicts at/above "
              "the confidence gate (judge_reject_min_confidence, 0.8) and, "
-             "with the second opinion on, two agreeing rejects at mean >= "
-             "judge_reject_min_confidence_2 (0.7); \"auto\" additionally "
+             "with the second opinion on, two agreeing rejects from different "
+             "models at mean >= judge_reject_min_confidence_2 (0.7); "
+             "\"auto\" additionally "
              "folds a pair when two independent accepts agree on "
              "non-low-differential evidence at mean >= "
              "judge_accept_min_confidence (0.6) and only when the two "
@@ -324,10 +343,10 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Review-queue judges (all)", "type": "bool", "default": True,
      "restart": False,
      "help": "The one switch for every judge stage (merge, link, junk, "
-             "store-curation, candidates): off = no model verdicts at all, "
-             "the mechanical tick keeps running. The two apply-time "
-             "mechanics keep their own switches (analyzer_file_duplicates, "
-             "orphan_sweep)."},
+             "store-curation, candidates): off stops model verdicts and "
+             "ordinary-sweep analyzer filing and decision reconciliation. "
+             "Explicit deep apply mechanics retain their own switches "
+             "(analyzer_file_duplicates, orphan_sweep)."},
     {"path": "memory.deep_dream.judge_snippet_max_chars", "group": "Deep dream",
      "label": "Merge-judge snippet chars", "type": "int", "default": 240,
      "min": 0, "max": 20000, "step": 100, "restart": False,
@@ -345,21 +364,68 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Re-judge a pending merge proposal once more in a fresh batch "
              "(optionally judge_second_model) after its first verdict sat "
              "below the single-vote gate; the two-vote gates above apply "
-             "only when this is on."},
+             "only when this is on. Skipped, with no model call, while the "
+             "configuration makes the second opinion the first model again "
+             "(no second endpoint URL, and the second model empty or the "
+             "first's): that vote could authorize nothing."},
     {"path": "memory.deep_dream.judge_second_model", "group": "Deep dream",
      "label": "Merge judge second model", "type": "string", "default": None,
      "restart": False,
      "suggestions": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5",
                      "gpt-5.6-terra", "gpt-5.6-luna"],
-     "help": "Model for the merge judge's SECOND opinion, served by the same "
-             "endpoint as the first (judge_url, else the dream extractor; the "
-             "CLI shims honour claude-* / gpt-* names per request). Empty = "
-             "the same model in a fresh batch, which is enough to double-check "
-             "a reject but never authorizes a fold: \"auto\" accepts require "
-             "the two opinions to come from DIFFERENT models (2026-09-02 "
+     "help": "Model for the merge judge's SECOND opinion, served by the "
+             "second endpoint URL when set, else by the same endpoint as the "
+             "first (judge_url, else the dream extractor; the CLI shims "
+             "honour claude-* / gpt-* names per request). Empty (or the "
+             "first opinion's model) with no second endpoint URL = no second "
+             "opinion is asked at all, since that vote could authorize "
+             "nothing: both two-vote gates (reject since 2026-09-30, "
+             "\"auto\" accepts) require the two opinions to come from "
+             "DIFFERENT models (2026-09-02 "
              "panel: claude-fable-5 as the second voter went 6/6 accepts, 8/8 "
              "rejects on the 63-row ladder). Read on every sweep batch; each "
              "second opinion is one call to this model."},
+    # Every judge builds its endpoint from service.config per call
+    # (_judge_extractor / _judge_second_extractor), so these are live too.
+    {"path": "memory.deep_dream.judge_url", "group": "Deep dream",
+     "label": "Judge endpoint URL", "type": "string", "format": "url",
+     "default": None, "restart": False,
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1"],
+     "help": "OpenAI-compatible /v1 endpoint every review-queue judge "
+             "(merge, link, junk, store-curation, candidates) calls instead "
+             "of the dream extractor. Empty = the dream extractor. From "
+             "inside the container the host is host.docker.internal "
+             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Its bearer "
+             "key is env-only: PSEUDOLIFE_JUDGE_API_KEY, sent to this endpoint "
+             "and nowhere else. Read on every judge call. Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
+    {"path": "memory.deep_dream.judge_model", "group": "Deep dream",
+     "label": "Judge model", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["claude-opus-5-5", "claude-opus-5", "gpt-5.6-terra"],
+     "help": "Model name sent to the judge endpoint URL (ignored while that "
+             "is empty). Empty = \"judge\", the endpoint's launch default. "
+             "The CLI shims serve only names of their own family (claude-* "
+             "on the Claude shim, gpt-* / codex-* on the Codex shim) and "
+             "answer any other name with their launch default."},
+    {"path": "memory.deep_dream.judge_second_url", "group": "Deep dream",
+     "label": "Merge judge second endpoint URL", "type": "string",
+     "format": "url", "default": None, "restart": False,
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1"],
+     "help": "OpenAI-compatible /v1 endpoint for the merge judge's SECOND "
+             "opinion, serving the second model above (empty = its launch "
+             "default), so the two opinions can come from different "
+             "providers. Empty = the first opinion's endpoint. Its bearer key "
+             "is env-only: PSEUDOLIFE_JUDGE_SECOND_API_KEY, sent to this "
+             "endpoint and nowhere else. The two-vote gates need the two "
+             "opinions served by different models; a mismatch between the "
+             "model asked for and the model served is counted in the judge "
+             "result and logged. " "Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
     {"path": "memory.deep_dream.link_judge_mode", "group": "Deep dream",
      "label": "Link judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",
@@ -389,9 +455,10 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Autonomous verdicts on the lesson/world duplicate listings: "
              "\"auto-distinct\" applies distinct verdicts (a reversible "
              "dismissal) at/above curation_distinct_min_confidence (0.8); "
-             "\"auto\" additionally forgets the losing slot of a duplicate "
+             "\"auto\" additionally retires the losing slot of a duplicate "
              "verdict at/above curation_forget_min_confidence (0.9) after "
-             "folding the judge's carry-over into the survivor (lessons)."},
+             "verifying matching metadata and exact normalized guidance. "
+             "The survivor is unchanged; free-form rewrites stay for review."},
     {"path": "memory.deep_dream.candidate_judge_mode", "group": "Deep dream",
      "label": "Step-C candidate judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "off",
@@ -406,10 +473,10 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.deep_dream.analyzer_file_duplicates", "group": "Deep dream",
      "label": "File analyzer duplicates", "type": "bool", "default": True,
      "restart": False,
-     "help": "Each deep apply files the Console's live duplicate findings "
-             "into the merge queue (file/concept pairs into the link queue as "
-             "implements), so the judges see them; they were never filed "
-             "anywhere before 2026-09-02."},
+     "help": "Ordinary sweeps file a bounded slice of the Console's duplicate "
+             "findings into the merge queue (file/concept pairs into the link "
+             "queue as implements). Deep apply still scans the full graph. "
+             "Disabling filing does not disable repair of earlier decisions."},
     {"path": "memory.deep_dream.orphan_sweep", "group": "Deep dream",
      "label": "Unreachable-orphan sweep", "type": "bool", "default": False,
      "restart": False,
@@ -426,9 +493,10 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.dream.extractor_model_override", "group": "Extractor",
      "label": "Dreamer model override", "type": "string", "default": None,
      "restart": False,
-     "suggestions": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-                     "claude-fable-5", "gpt-5.6-sol", "gpt-5.6-terra",
-                     "gpt-5.6-luna"],
+     "suggestions": ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
+                     "claude-haiku-4-5", "claude-fable-5", "gpt-5.6-sol",
+                     "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol",
+                     "gpt-6-luna"],
      "help": "Model-only override for the primary extractor — wins over BOTH "
              "env and config ownership, so the dreamer model can be switched "
              "without re-owning the endpoint wiring. Any model id the wired "
@@ -474,8 +542,8 @@ KNOBS: list[dict[str, Any]] = [
              "settings source = config."},
     {"path": "memory.dream.extractor_model", "group": "Extractor",
      "label": "Model name", "type": "string", "default": None, "restart": False,
-     "suggestions": ["extractor", "claude-opus-5", "claude-sonnet-5",
-                     "claude-haiku-4-5", "gpt-5.6-terra"],
+     "suggestions": ["extractor", "claude-opus-5-5", "claude-opus-5",
+                     "claude-sonnet-5", "claude-haiku-4-5", "gpt-5.6-terra"],
      "help": "Model id the endpoint expects — any name the endpoint serves "
              "works (the bundled sidecar serves \"extractor\"; LM "
              "Studio/Ollama use their loaded-model names). Against the "
@@ -509,8 +577,10 @@ KNOBS: list[dict[str, Any]] = [
      "suggestions": ["http://pseudolife-extractor:8081/v1"],
      "help": "OpenAI-compatible /v1 endpoint used when the primary is "
              "unreachable (or mode = fallback). Empty disables selection "
-             "entirely — single-extractor behavior. Effective only when "
-             "settings source = config."},
+             "entirely — single-extractor behavior. It never receives the "
+             "primary's API key: a fallback that needs one reads "
+             "PSEUDOLIFE_DREAM_FALLBACK_API_KEY (env-only). Effective only "
+             "when settings source = config."},
     {"path": "memory.dream.fallback_model", "group": "Extractor",
      "label": "Fallback model", "type": "string", "default": None,
      "restart": False, "suggestions": ["extractor"],
@@ -525,14 +595,17 @@ KNOBS: list[dict[str, Any]] = [
      "type": "int", "default": 5, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Default lessons returned by lesson search."},
     {"path": "memory.lessons.signal_retention_days", "group": "Lessons",
-     "label": "Signal retention (days)", "type": "int", "default": 30, "min": 1,
+     "label": "Signal retention (days)", "type": "int", "default": 3650, "min": 1,
      "max": 3650, "step": 1, "restart": False,
-     "help": "Outcome signals older than this are pruned on the dream sweep."},
+     "help": "Outcome signals older than this are pruned on the dream sweep. "
+             "They are the only evidence behind a lesson."},
     {"path": "memory.lessons.synthesize_in_dream", "group": "Lessons",
      "label": "Synthesize in dream", "type": "bool", "default": True,
      "restart": False,
      "help": "Dream drains outcome signals into lessons. Off = signals are "
-             "still pruned by retention but never become lessons."},
+             "kept (the retention prune is skipped too) and never become "
+             "lessons. Back on, only signals younger than the retry window "
+             "(memory.lessons.signal_retry_days) are offered."},
     {"path": "memory.lessons.infer_outcomes", "group": "Lessons",
      "label": "Infer missing outcomes", "type": "bool", "default": True,
      "restart": False,
@@ -654,6 +727,8 @@ def _coerce(knob: dict, value: Any) -> Any:
         v = int(value)
     elif t == "float":
         v = float(value)
+        if not math.isfinite(v):
+            raise ValueError(f"{knob['path']}: must be finite")
     elif t == "enum":
         v = str(value)
         if v not in knob.get("options", []):
@@ -689,9 +764,40 @@ def config_path_for(service: Any) -> Path:
     return Path(getattr(service, "data_dir", ".")) / "config.yaml"
 
 
+_MISSING = object()
+
+
+def _nested_get(d: Any, path: str) -> Any:
+    cur = d
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return _MISSING
+        cur = cur[part]
+    return cur
+
+
+def _saved_file(service: Any) -> dict[str, Any]:
+    """config.yaml as last written, or {} when absent or unreadable (the read
+    must still answer; the file's problems surface at the next boot)."""
+    path = config_path_for(service)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def read_config(service: Any) -> dict[str, Any]:
-    """Effective knob values + metadata, grouped for the UI."""
+    """Effective knob values + metadata, grouped for the UI.
+
+    A restart knob is persisted by write_config but not applied, so its
+    ``value`` (the running one) alone hides what the next start will use, and
+    an editor comparing against it cannot undo a mistaken save. Such a knob
+    also carries ``saved``: the value in config.yaml, when it differs.
+    """
     cfg = service.config
+    saved_file = _saved_file(service)
     groups: dict[str, list[dict]] = {}
     for knob in KNOBS:
         try:
@@ -703,6 +809,15 @@ def read_config(service: Any) -> dict[str, Any]:
             "options", "restart", "help", "format", "suggestions")
             if knob.get(k) is not None}
         item["value"] = current
+        if knob.get("restart"):
+            saved = _nested_get(saved_file, knob["path"])
+            if saved is not _MISSING:
+                try:
+                    saved = _coerce(knob, saved)
+                except (TypeError, ValueError):
+                    saved = _MISSING     # the next boot refuses it, not ours to show
+            if saved is not _MISSING and saved != current:
+                item["saved"] = saved
         groups.setdefault(knob["group"], []).append(item)
     return {
         "config_path": str(config_path_for(service)),
@@ -718,9 +833,21 @@ def write_config(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     "backup": ...|None}``. Raises ``ValueError`` on an unknown/invalid knob
     (the caller maps that to a 400).
     """
+    with _CONFIG_WRITE_LOCK:
+        return _write_config_locked(service, patch)
+
+
+def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict) or not patch:
         raise ValueError("empty patch")
 
+    for path in patch:
+        # v54: the maintainer's RP ID and origin decide which passkeys the
+        # daemon accepts, and every environment principal can call this
+        # route; they are set in config.yaml on the daemon host only.
+        folded = str(path).strip().casefold()
+        if folded == "coordination.maintainer" or folded.startswith("coordination.maintainer."):
+            raise ValueError("config_protected")
     coerced: dict[str, Any] = {}
     for path, raw in patch.items():
         knob = _KNOB_BY_PATH.get(path)
@@ -740,14 +867,27 @@ def write_config(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     backup = None
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     if cfg_path.exists():
-        backup = str(cfg_path) + f".{time.strftime('%Y%m%d-%H%M%S')}.bak"
-        shutil.copy2(cfg_path, backup)
+        fd, backup = tempfile.mkstemp(
+            dir=cfg_path.parent,
+            prefix=cfg_path.name + f".{time.strftime('%Y%m%d-%H%M%S')}.",
+            suffix=".bak")
+        os.close(fd)
+        try:
+            shutil.copy2(cfg_path, backup)
+        except BaseException:
+            Path(backup).unlink(missing_ok=True)
+            raise
 
     # Atomic write: temp in the same dir, then os.replace.
-    tmp = cfg_path.with_suffix(cfg_path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
-    os.replace(tmp, cfg_path)
+    fd, tmp_name = tempfile.mkstemp(dir=cfg_path.parent, prefix=cfg_path.name + ".",
+                                    suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp, cfg_path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
     applied, restart = [], []
     for path, value in coerced.items():

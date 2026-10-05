@@ -323,7 +323,7 @@ def test_replay_with_conflicting_metadata_is_rejected(pg_url, pg_conn):
 
 def test_replay_missing_after_conflict_is_a_clean_input_error():
     from pseudolife_memory.re_evidence import EvidenceInputError
-    from pseudolife_memory.storage.postgres import PostgresStorage
+    from pseudolife_memory.storage.re_evidence import ReEvidenceArchiveStorage
 
     class Result:
         def fetchone(self):
@@ -336,8 +336,7 @@ def test_replay_missing_after_conflict_is_a_clean_input_error():
         def execute(self, *_args, **_kwargs):
             return Result()
 
-    storage = PostgresStorage.__new__(PostgresStorage)
-    storage._conn = Connection()
+    storage = ReEvidenceArchiveStorage(Connection())
     storage._txn = lambda: nullcontext()
     artifact = {
         "project": "srfn-client", "kind": "ghidra-function",
@@ -510,8 +509,8 @@ def test_portable_archive_round_trip_preserves_original_bytes(pg_url, pg_conn, t
         # rechecks emptiness instead of merging the archive into live state.
         from pseudolife_memory.re_evidence import _archive_scope_lock_key
 
-        blocker = PostgresStorage(pg_url)
-        importer = PostgresStorage(pg_url)
+        blocker = storage.re_evidence_archive_storage()
+        importer = storage.re_evidence_archive_storage()
         started = threading.Event()
         result: list[object] = []
 
@@ -544,7 +543,7 @@ def test_portable_archive_round_trip_preserves_original_bytes(pg_url, pg_conn, t
             # Ordinary production writers must honor the same scope lock, not
             # only competing importers. Otherwise they can commit after the
             # import's empty check and merge live state into the restore.
-            writer = PostgresStorage(pg_url)
+            writer = storage.re_evidence_archive_storage()
             writer_result: list[object] = []
             try:
                 with blocker._txn():
@@ -668,9 +667,18 @@ def test_archive_file_io_does_not_hold_the_service_lock(
     class PrimaryStorage:
         dsn = "postgresql://archive-test"
 
+        def verify_writer_session(self):
+            pass
+
+        def re_evidence_archive_storage(self):
+            return ArchiveStorage()
+
     class Connection:
         def transaction(self, **_kwargs):
             return nullcontext()
+
+        def execute(self, statement):
+            assert statement == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
 
     class ArchiveStorage:
         conn = Connection()
@@ -679,7 +687,8 @@ def test_archive_file_io_does_not_hold_the_service_lock(
             pass
 
     service._ensure_postgres_storage = lambda: PrimaryStorage()
-    monkeypatch.setattr(postgres, "PostgresStorage", lambda _dsn: ArchiveStorage())
+    monkeypatch.setattr(postgres, "PostgresStorage", lambda _dsn: pytest.fail(
+        "archive must not create another bank writer"))
 
     def file_io(_storage, **_kwargs):
         acquired = []
@@ -702,3 +711,67 @@ def test_archive_file_io_does_not_hold_the_service_lock(
         project="srfn-client", binary_id="client:test", path="proof.zip")
 
     assert result == {"operation": operation}
+
+
+def test_archive_connection_does_not_initialize_or_reacquire_bank_lease(monkeypatch):
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    primary = PostgresStorage.__new__(PostgresStorage)
+    connection = object()
+    monkeypatch.setattr(primary, "_connect", lambda: connection)
+    monkeypatch.setattr(primary, "_acquire_writer_lease", lambda _conn: pytest.fail(
+        "archive must reuse ownership rather than acquire another bank lease"))
+    archive = primary.re_evidence_archive_storage()
+    assert archive.conn is connection
+    assert not hasattr(archive, "set_meta")
+    assert not hasattr(archive, "insert_entry")
+
+
+def test_archive_runs_while_primary_holds_writer_lease(pg_url, tmp_path, monkeypatch):
+    from pseudolife_memory import re_evidence
+    from pseudolife_memory.service import MemoryService
+
+    service = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    monkeypatch.setenv("PSEUDOLIFE_RE_EVIDENCE_ARCHIVE_ROOT", str(tmp_path))
+    primary = service._ensure_postgres_storage()
+    try:
+        path = tmp_path / "evidence.json"
+        path.write_text(json.dumps(_sample_payload()), encoding="utf-8")
+        ingested = service.re_evidence_ingest(
+            path=str(path), project="archive-owner", binary_id="build:one")
+        service.re_claim_record(
+            project="archive-owner", binary_id="build:one", subject="00b72870",
+            claim="calls the indexed function", status="verified",
+            evidence_ids=[ingested["id"]])
+        export = re_evidence.export_evidence_archive
+
+        def assert_snapshot(storage, **kwargs):
+            assert storage.conn.execute("SHOW transaction_isolation").fetchone()[0] == "repeatable read"
+            assert storage.conn.execute("SHOW transaction_read_only").fetchone()[0] == "on"
+            return export(storage, **kwargs)
+
+        monkeypatch.setattr(re_evidence, "export_evidence_archive", assert_snapshot)
+        result = service.re_evidence_export(
+            project="archive-owner", binary_id="build:one", path="owned.zip")
+        assert result["artifacts"] == 1
+        with primary._txn():
+            primary.conn.execute("DELETE FROM re_claims WHERE project = 'archive-owner'")
+            primary.conn.execute("DELETE FROM re_evidence_artifacts WHERE project = 'archive-owner'")
+        restored = service.re_evidence_import(
+            project="archive-owner", binary_id="build:one", path="owned.zip")
+        assert restored["artifacts"] == restored["claims"] == 1
+        assert service.re_evidence_query(
+            project="archive-owner", binary_id="build:one")["claims"][0]["status"] == "verified"
+        # The archive connection must not take ownership away from the
+        # resident primary, including its lease epoch and canonical state.
+        primary.verify_writer_session()
+        with service._re_evidence_archive_storage() as archive:
+            with pytest.raises(RuntimeError, match="rollback probe"):
+                with archive._txn():
+                    archive.upsert_re_claim(
+                        project="archive-rollback", binary_id="build:one",
+                        subject="00b72870", claim="temporary", status="hypothesis")
+                    raise RuntimeError("rollback probe")
+        assert primary.re_evidence_stats("archive-rollback")["claims"] == {}
+    finally:
+        primary.close()

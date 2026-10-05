@@ -252,6 +252,8 @@ def main() -> int:
 
     from sentence_transformers import SentenceTransformer
 
+    import embedder_stamp
+
     questions = load_questions(args.questions)
     turns = sum(len(q["turns"]) for q in questions)
     keys = list(args.arms) + (["bge-base-prefix"] if args.with_prefix
@@ -279,6 +281,10 @@ def main() -> int:
             model = LlamaCppEmbedder(MODELS_DIR / fname, native_dim, out_dim,
                                      max_tokens=args.max_seq_length)
             device = "llama-server(cuda)"
+            # The GGUF's quant (in its file name, the "model" field) is
+            # its precision; there are no torch parameters to read.
+            embedder = embedder_stamp.describe_model(model, device=device,
+                                                     backend="llama.cpp")
         else:
             label, repo, prefix, passage_prefix = CANDIDATES[key]
             model = SentenceTransformer(repo,
@@ -286,6 +292,9 @@ def main() -> int:
             model.max_seq_length = min(int(model.max_seq_length or 512),
                                        args.max_seq_length)
             device = str(getattr(model, "device", "cpu"))
+            # A bare SentenceTransformer: no cpu_dtype applies, so the
+            # precision is whatever the installed stack loaded. Read back.
+            embedder = embedder_stamp.describe_model(model, device=device)
         t0 = time.perf_counter()
         rec, n_gold, per_gold = recall_at(model, questions, args.ks, prefix,
                                           passage_prefix, args.batch_size)
@@ -296,6 +305,7 @@ def main() -> int:
                      # swing on wording, so the artifact must pin what ran
                      "query_prefix": prefix, "passage_prefix": passage_prefix,
                      "device": device,
+                     "embedder": embedder,
                      "max_seq_length": int(model.max_seq_length),
                      "recall": {str(k): v for k, v in rec.items()},
                      "hits": {str(k): sum(per_gold[k]) for k in args.ks},
