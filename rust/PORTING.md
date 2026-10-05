@@ -42,6 +42,10 @@ both are set). Without either, the candidate takes the existing no-spawn wait
 and prints the named explanation `NO_CONFIGURED_SPAWN_NOTE`; it never invents
 `python` from PATH. This is `ported-with-substitution` for the Python oracle's
 `sys.executable` spawn. A configured command is passed as argv, without a shell.
+Malformed explicit serve commands print `INVALID_SERVE_COMMAND_NOTE` before
+the health probe and use the no-spawn waiting path, even when an interpreter
+is also configured. The waiting notes name disabled fallback spawning rather
+than claiming the caller set `PSEUDOLIFE_MCP_NO_SPAWN`.
 
 Unattended client updates retain their loopback/no-spawn/newer-version gates
 and require the explicit interpreter setting. The writer schedules them once,

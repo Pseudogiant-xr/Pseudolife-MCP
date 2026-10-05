@@ -356,3 +356,18 @@ required. Current documentation PR-head suites and integrated CI must pass
 before #560 is marked ready; these earlier results do not claim the dirty
 documentation head has been tested. Measurements and all four local judges
 retain their executed `690bb8ac` identities.
+
+## Phase 2b item b: truthful startup and nonfatal command configuration
+
+The lifecycle fix and startup regressions are integrated from frozen tree
+`a83878bfa389c0e009d18a3c6d28387267fb1fb5`. Missing configuration no longer claims
+that the caller set `PSEUDOLIFE_MCP_NO_SPAWN`; malformed explicit serve argv emits
+one named note before health and follows the no-spawn path. Healthy unconfigured
+daemons retain silent startup, and the dead `spawn_daemon` helper is removed.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds the original source/test
+blobs and retained watched-RED logs `fixes-red-b.log` (two failures) and
+`fixes-red-b-healthy-silence.log` (the caught healthy-startup regression). Final
+isolated Windows startup checks passed 12/12. This closes implementation item b;
+final integrated-head CI, suites and review remain pending. No later head is
+claimed tested by those isolated runs.

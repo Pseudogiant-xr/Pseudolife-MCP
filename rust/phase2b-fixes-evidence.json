@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "targeted-proof-summary",
+  "original_base_commit": "7f890590dcc634cc8ff531f6452676f5e8e10873",
+  "original_frozen_tree": "a83878bfa389c0e009d18a3c6d28387267fb1fb5",
+  "platform": "windows-native",
+  "scope": "Local isolated preparation; these runs do not validate any later integrated head.",
+  "raw_logs": "Retained privately; the hashes below bind their original bytes. No raw process stderr is published here.",
+  "items": {
+    "b": {
+      "implemented_source_blobs": {
+        "rust/shim/src/lifecycle.rs": "02a4e40fe5244544293b4aa9c9bb14b849ff6bd0",
+        "rust/shim/tests/nonboard_startup.rs": "6e98cfa7a1c9ea1aeb736637d70fa963589ef45f"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-b.log",
+          "sha256": "6dd1167f030bd3555a82db649b458fbb7ce8aff990cc70346592bc4737d57074",
+          "observed": "Two failures: malformed healthy startup disconnects and missing configuration falsely says NO_SPAWN is set; exit 101."
+        },
+        {
+          "reference": "fixes-red-b-healthy-silence.log",
+          "sha256": "afffa8d2c96ad6b91d23f4ab68c5d9c339f14dac0382bd20ae55d78f6c800c21",
+          "observed": "Self-check caught an introduced healthy-startup note expansion; narrowed before final proof."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-startup-final.log",
+          "sha256": "a1786c83703a54e4829a97172a54fecc81db13925b3561e644d0b33d1af4fe95",
+          "observed": "Final isolated source: Windows nonboard_startup 12/12, zero ignored, 0.57 seconds."
+        },
+        {
+          "reference": "fixes-clippy-startup-final.log",
+          "sha256": "b7511d88b39772e1e01f522f38b9b6d4bd23e11b054b55492080662b519a93c8",
+          "observed": "Final isolated library and startup clippy passed with warnings denied at -j1."
+        }
+      ],
+      "limitations": [
+        "Original frozen-tree proof only; final integrated-head acceptance pending."
+      ]
+    }
+  },
+  "remaining_gates": [
+    "merge current master after PR 546 lands and re-pin oracle",
+    "both-platform Rust and Parity CI on the final head",
+    "candidate-routed committed suites on both machines",
+    "fresh independent review since 7f890590",
+    "maintainer ready/merge decision"
+  ]
+}
