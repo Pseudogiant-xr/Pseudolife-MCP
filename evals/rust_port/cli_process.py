@@ -193,7 +193,8 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     original_path = Path(original[0])
     if not original_path.is_absolute():
         original_path = Path(shutil.which(original[0]) or root / original[0])
-    original_path = original_path.resolve(strict=True)
+    original_path = Path(os.path.abspath(original_path))
+    original_resolved = original_path.resolve(strict=True)
     before = dict(env)
     allowed = {"PYTHONPATH", "PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"} \
         if case["mode"] == "version" else set()
@@ -219,13 +220,19 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     invoked = Path(selected[0])
     if not invoked.is_absolute():
         invoked = Path(shutil.which(selected[0], path=env["PATH"]) or root / selected[0])
-    selected = [str(invoked.resolve(strict=True)), *selected[1:]]
+    invoked = Path(os.path.abspath(invoked))
+    resolved = invoked.resolve(strict=True)
+    # Invocation spelling selects a virtualenv even when its executable is a
+    # symlink to the base interpreter. Resolve only for identity and ownership.
+    selected = [str(invoked), *selected[1:]]
     identity = command_identity(selected, root)
     if selected[1:] != original[1:] or any(identity[key] != original_identity[key]
             for key in ("executable_sha256", "executable_bytes")):
         raise ValueError("prepared command must retain the original arm prefix and executable bytes")
-    if Path(selected[0]) != original_path \
-            and not Path(selected[0]).is_relative_to(home.resolve()):
+    if original_path.resolve(strict=True) != original_resolved:
+        raise ValueError("CLI preparation changed the original executable target")
+    if invoked != original_path and (not invoked.is_relative_to(home.resolve())
+                                     or not resolved.is_relative_to(home.resolve())):
         raise ValueError("CLI relocated executable must remain inside the home")
     return selected, identity, original_identity
 
@@ -265,21 +272,33 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
     try:
         selected, identity, original_identity = prepared_command(
             case, original, commands, root=root, home=home, env=env, prepare=prepare)
+        resolved_executable = Path(selected[0]).resolve(strict=True)
+        original_executable = Path(original[0])
+        if not original_executable.is_absolute():
+            original_executable = Path(shutil.which(original[0]) or root / original[0])
+        original_resolved_executable = original_executable.resolve(strict=True)
         for key, value in (("PSEUDOLIFE_MCP_DAEMON_URL", url), ("PSEUDOLIFE_MCP_NO_SPAWN", "1")):
             matching = {name: cell for name, cell in env.items() if name.upper() == key}
             if matching != {key: value}:
                 raise ValueError("CLI child must retain the owned daemon and no-spawn policy")
         arguments = [arg.format_map(values) for arg in case["argv"]]
         before = snapshot(home)
+        if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
+                or Path(selected[0]).resolve(strict=True) != resolved_executable \
+                or original_executable.resolve(strict=True) != original_resolved_executable:
+            raise ValueError("CLI command changed before process launch")
         response = run_cli(selected, arguments, cwd=root, env=env,
                            timeout=case.get("timeout_seconds", 10),
                            stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
         response["post_files_b64"] = snapshot(home)
-        if command_identity(selected, root) != identity or command_identity(original, root) != original_identity:
+        if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
+                or Path(selected[0]).resolve(strict=True) != resolved_executable \
+                or original_executable.resolve(strict=True) != original_resolved_executable:
             raise RuntimeError("CLI executable changed during capture")
         return {"request": copy.deepcopy(case), "environment": env,
                 "pre_files_b64": before, "response": response,
                 "execution": {"original_prefix": original, "selected_prefix": selected,
+                              "invoked_executable": selected[0], "resolved_executable": str(resolved_executable),
                               "effective_argv": [*selected, *arguments], "cwd": str(root),
                               "command_identity": identity}}
     finally:

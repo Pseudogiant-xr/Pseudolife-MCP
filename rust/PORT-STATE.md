@@ -26,6 +26,13 @@ producer, not every child. The eleven version rows, Windows corpus, all four
 timing cells and both current startup captures are unaffected. Original receipts
 remain intact; fixture repair and recapture of the fifteen Linux rows are pending.
 
+The fixture backports lexical invocation from `f4bf8a83` and closes its reviewed
+original-target gap: both original and selected executable targets remain bound
+through preparation and capture, including when an owned copy is selected.
+Targeted checks pass on Linux (127) and Windows (120, with seven Unix-only skips).
+Fresh review and recapture of the fifteen affected Linux rows remain pending;
+the historical receipts above are unchanged.
+
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
 | 0: Inventory, rulebook and disposable trial | Complete; phase 0b closes the historical gaps | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540), [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Historical source pin 136a34ae; trial corrections retained in PORTING.md; current-pin gap evidence below |
