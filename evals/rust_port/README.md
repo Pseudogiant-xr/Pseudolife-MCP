@@ -347,17 +347,28 @@ version/runtime identity and all other mode contracts stay deferred;
 Acceptance closes only help and the scoped CLI-DISPATCH cases; other modes
 remain deferred.
 
-Final local CLI receipts at `6e936887` are
-[`rust-port-phase2-cli-windows-6e936887.json`](../results/rust-port-phase2-cli-windows-6e936887.json)
-and [`rust-port-phase2-cli-linux-native-6e936887.json`](../results/rust-port-phase2-cli-linux-native-6e936887.json).
+Current local CLI receipts at `779c588c` are
+[`rust-port-phase2-cli-windows-779c588c.json`](../results/rust-port-phase2-cli-windows-779c588c.json)
+and [`rust-port-phase2-cli-linux-native-779c588c.json`](../results/rust-port-phase2-cli-linux-native-779c588c.json).
 Each has 15 passing self/candidate cases, 45 rejected mutations and five passing
-original outcomes for Python and Rust. The accepted Linux receipt uses native
-temporary/evidence storage; the earlier mounted-home collection failure remains
-private and is excluded. Both help measurement pairs and numerical repeat floors
-are linked in `rust/PORT-STATE.md`. These artifacts preserve their executed
-source/tree/binary/runtime identities through the subsequent docs-only merge;
-both-OS executing CI and its actual CLI outcomes pass in
-[run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017).
-CI's PR merge commit `014d37dc` has the same tree as `6e936887`. Only the
-UTF-8/scalar help/unknown-dispatch slice is accepted; the separate current
-documentation-head gates remain pending.
+original outcomes for Python and Rust. Native Linux temporary/evidence storage
+is used. Both help measurement pairs, numerical repeat floors and exact
+source/tree/binary/runtime identities are linked in `rust/PORT-STATE.md`.
+The lock implementation uses Rust 1.94 standard file locks; only `fs2` and its
+three unused `winapi` packages were pruned, with `libc` retained. Source validation
+passed 277 Linux and 296 Windows Rust tests without skips.
+[Run 37245992895](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37245992895)
+passed all four Rust/Parity jobs for PR head `779c588c`. Both retained CI CLI
+receipts verify the same 15 cases, 45 controls and five Python/five Rust outcomes
+at actual PR merge checkout `b5f485c9`, whose tree matches the local head.
+All nine reported PR checks passed at `779c588c`.
+Only the UTF-8/scalar help/unknown-dispatch slice is accepted; current
+documentation-head review/checks remain separate.
+
+Historical local CLI receipts at `6e936887` remain unchanged:
+[`Windows`](../results/rust-port-phase2-cli-windows-6e936887.json) and
+[`native Linux`](../results/rust-port-phase2-cli-linux-native-6e936887.json).
+Their help pairs and executing
+[CI run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017)
+retain their original identities in `rust/PORT-STATE.md`. The earlier mounted-home
+Linux collection failure remains private and is excluded from acceptance.
