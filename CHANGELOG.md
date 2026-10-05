@@ -78,6 +78,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names need the new shim, which release-mode `pseudolife-mcp update`
   installs with the clients; nothing else to do.
 
+### Fixed (2026-10-05 — a contested fact's served correction no longer tells the model to write over it)
+- A cortex fact flagged `contested: true` came back from `memory_search`
+  and `memory_fact_get` with a `correct_with` call to `memory_fact_set`,
+  and the response's `correction_note` said to run it now. The standing
+  memory instructions say the opposite: a contested slot is settled with
+  `memory_fact_resolve` after checking, because re-asserting
+  `memory_fact_set` only contests it further (seen 2026-10-04 on a live
+  recall). A contested fact's `correct_with` now names
+  `memory_fact_get(entity=..., attribute=...)` to read the contenders and
+  `memory_fact_resolve(..., accept=<the human's decision>) (core tier)` for
+  once a human decides; no `accept` value is filled in and no
+  `memory_fact_set` call is served. Contested wins over aged. Aged and
+  stale facts keep their `memory_fact_set` call and the run-it-now norm.
+  The shared `correction_note` now scopes "run its call NOW" to aged facts
+  and adds one sentence for contested ones. World facts are unchanged:
+  the world cortex never parks contenders. The standing block
+  (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
+  same.
+
+### Fixed (2026-10-05 — the standing texts teach what the server actually does)
+- The per-turn memory-change note told sessions to "`memory_store` a status
+  note" without naming the source, so a session following it literally
+  stored progress under the default source `agent`, which other sessions'
+  change notes never report and the dream mines. It now says
+  `memory_store(source="status")`, and `memory_store`'s `source` parameter
+  says that `"status"` marks in-flight progress notes, which peers see and
+  the dream skips.
+- `memory_outcome` states that `used_ids` credits only this session's
+  searches from the last hour in its first lines, instead of at the end of
+  the `used_ids` parameter text, which drops the rule.
+- The Claude Code plugin's subagent board guard now lets a subagent read
+  `memory_message(action="history")`, which is read-only (no ack, delivery
+  or wake); it used to be refused with the board writes. The refusal text,
+  `plugin/README.md` and the configuration guide list it with the allowed
+  reads. A plugin change: it reaches clients through the client update step
+  (`pseudolife-mcp update`, or `--all` / `python ops/update_clients.py` for
+  a checkout deploy); `plugin/hooks/hooks.json` is unchanged, so Codex users
+  approve nothing again.
+- Docs drift: README's `memory_history` row names its `as_of` parameter;
+  the providers guide's September Codex check notes today's tier counts
+  (full 38 tools, core 24); the configuration guide gives the minimal tier's
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens) and the full
+  memory-loop block as about 8 KB (it said 7.5 KB).
+
+### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
+- A memory tool called with an argument name it does not have used to
+  succeed with that argument thrown away: `memory_search(limit=3)` returned
+  the default 8 hits, `memory_outcome(note=...)` recorded no detail, and
+  `episode=` on `memory_world_set` vanished. Transcripts from 2026-10-04
+  showed both Claude and Codex models doing this hundreds of times (`limit`
+  on `memory_search` 140 calls and on `memory_lesson_search` 56). Such a
+  call is now an error result (`isError`) that names the parameter, offers
+  the likely one and lists what the tool accepts, for example
+  `unknown parameter 'limit' for memory_search; did you mean 'top_k'?
+  Accepted: query, top_k, ...`. Suggestions come from a small map of the
+  measured confusions (`limit` to `top_k` or `n`, `content` to `text`,
+  `note`/`notes`/`text` to `detail`) and from close spelling matches.
+  The refusal names the parameter and never echoes its value, since a
+  misnamed argument can carry a secret. Every tool's input schema now says `additionalProperties: false`
+  (29 bytes per tool; the largest schema, `memory_agents`, is 3,488 of its
+  4,000-byte cap). MCP request `_meta` is not an argument and is unaffected,
+  and stringified list arguments are still decoded.
+- The session-start episode line, the startup memory core and the resumed
+  or compacted session note now say to pass the episode to every memory
+  tool that accepts it, instead of "on every memory write": world, set,
+  resolve and graph writes take no `episode` parameter, so a model
+  following the old wording now gets a refusal there. Those writes are
+  still attributed to the session wherever the service stamps one (the
+  shim's per-session header).
+
 ### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
 - On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's
   shell printed "no bank found" and worked only as `docker exec

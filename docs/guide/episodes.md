@@ -42,8 +42,9 @@ reliably — without the agent having to remember:
      on first store — and sets it as the machine-scoped active-session
      pointer. The returned briefing text carries a one-line **handle
      advertisement**: the episode id (truncated) plus the instruction to
-     pass `episode="<id>"` on every memory write — the concurrency-correct
-     channel, so attribution stays right even when other sessions are open. A
+     pass `episode="<id>"` to every memory tool that accepts it — the
+     concurrency-correct channel, so attribution stays right even when other
+     sessions are open. A
      SessionEnd hook closes that session's episode and clears the pointer
      when the session ends. If a client crashes without firing SessionEnd,
      the pointer expires after `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`
