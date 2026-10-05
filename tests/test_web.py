@@ -1073,3 +1073,25 @@ def test_example_hook_instructions_serve_whole_and_carry_only_the_host_dialect()
         assert word not in CHECKIN_TEXT, word
     # Placeholders only: no user, host or drive-letter path.
     assert not re.search(r"[A-Z]:\\|/Users/|/home/\w", text)
+
+
+def test_fixture_board_serves_named_sessions_and_role_holders(svc):
+    """The devserver's Board (UI QA harness) shows a v55 roster: named rows
+    from each source, an unnamed one read as label and short id, the
+    maintainer fixture's delegate and coordinator, unread mail, and enough
+    rows that the roster scrolls in its own pane."""
+    svc.demo_board = True   # as the devserver sets it
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/agents", {"view": "coordination"}, {})
+    assert out["available"] is True and out["snapshot_at"]
+    agents = {a["agent_id"]: a for a in out["agents"]}
+    assert len(agents) >= 12
+    sources = {a["name_source"] for a in agents.values()}
+    assert {"harness", "agent", "title", ""} <= sources
+    unnamed = next(a for a in agents.values() if a["name_source"] == "")
+    assert unnamed["name"] == f"{unnamed['label']} {unnamed['agent_id'][:8]}"
+    roles = svc.maintainer_status()["roles"]["Pseudolife-MCP"]
+    for role in ("delegate", "coordinator"):
+        assert roles[role]["agent_id"] in agents
+        lease = next(l for l in out["leases"] if l["name"] == f"{role}:Pseudolife-MCP")
+        assert lease["holder"]["name"] == agents[roles[role]["agent_id"]]["name"]
+    assert any(a["pending_count"] for a in agents.values())

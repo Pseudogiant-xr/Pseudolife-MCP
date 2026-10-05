@@ -56,8 +56,13 @@ export interface RoleHolder {
   acquired_at: Epoch | null;
   /** "maintainer" or "operator" for a delegate; null when only the lease is known. */
   granted_by: string | null;
-  /** The lease listing's label for the holder, a fallback name. */
+  /** The lease listing's board name for the holder (v55), else its label: a
+   *  fallback name for a holder not in the recent roster. */
   label: string | null;
+  /** Whether maintainer mail rings it now; null when the daemon does not say. */
+  reachable: boolean | null;
+  /** Why it is not reachable (the daemon's no-path reason). */
+  reach_reason: string | null;
 }
 
 export interface ProjectRoleHolders {
@@ -92,7 +97,9 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         expires_at: r.expires_at ?? same?.expires_at ?? null,
         acquired_at: same?.holder?.acquired_at ?? null,
         granted_by: "granted_by" in r ? String(r.granted_by) : null,
-        label: same?.holder?.label || null,
+        label: same?.holder?.name || same?.holder?.label || null,
+        reachable: typeof r.reachable === "boolean" ? r.reachable : null,
+        reach_reason: typeof r.reason === "string" ? r.reason : null,
       };
     } else if (lease?.holder) {
       out[kind] = {
@@ -100,11 +107,32 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         expires_at: lease.expires_at ?? lease.holder.expires_at ?? null,
         acquired_at: lease.holder.acquired_at ?? null,
         granted_by: null,
-        label: lease.holder.label || null,
+        label: lease.holder.name || lease.holder.label || null,
+        reachable: null,
+        reach_reason: null,
       };
     }
   }
   return out;
+}
+
+/** The daemon's no-path reasons in words (UNREACHABLE_REASONS in storage/coordination.py). */
+const NO_PATH_REASONS: Record<string, string> = {
+  listener_expired: "its listener lapsed",
+  listener_unknown: "its listener has not reported yet",
+  wake_disabled: "it has no wake listener",
+};
+const noPathWords = (reason: string) => NO_PATH_REASONS[reason] ?? words(reason);
+
+/**
+ * Whether your messages ring a role holder now, for the Roles band; null
+ * when the daemon does not say (an older daemon, or only the lease known).
+ */
+export function reachText(h: RoleHolder): { ok: boolean; text: string } | null {
+  if (h.reachable === null) return null;
+  if (h.reachable) return { ok: true, text: "Reachable now: your messages ring it." };
+  const why = h.reach_reason ? ` (${noPathWords(h.reach_reason)})` : "";
+  return { ok: false, text: `No live wake listener${why}: your messages wait for its next turn.` };
 }
 
 /** The role an agent holds in its own project, if any. */
@@ -578,6 +606,7 @@ export function wakeText(wake: unknown): string {
       : wake && typeof wake === "object"
         ? (str((wake as Record<string, unknown>).decision) ?? str((wake as Record<string, unknown>).status) ?? "")
         : "";
+  const reason = wake && typeof wake === "object" ? str((wake as Record<string, unknown>).reason) : undefined;
   switch (w) {
     case "":
       return "";
@@ -587,9 +616,13 @@ export function wakeText(wake: unknown): string {
     case "woke":
       return "rang its session";
     case "no_path":
-      return "no live listener, read on its next turn";
+      return reason && reason !== "no_listener"
+        ? `no live listener (${noPathWords(reason)}), read on its next turn`
+        : "no live listener, read on its next turn";
     case "capped":
-      return "delivered, not rung: the hourly wake limit is reached";
+      return !reason || reason.endsWith("hour")
+        ? "delivered, not rung: the hourly wake limit is reached"
+        : "delivered, not rung: a wake limit is reached";
     case "hinted":
     case "hint":
       return "delivered as a hint";

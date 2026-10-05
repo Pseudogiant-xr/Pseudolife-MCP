@@ -25,8 +25,39 @@ export function agentTone(a: BoardAgent, now?: number | null): Tone {
   return "ok";
 }
 
+/** The session's name (the harness's title, the agent's own, or its session
+ *  title), else the registration label, else a short id. */
 export function agentName(a: BoardAgent): string {
-  return a.label || shortId(a.agent_id);
+  return a.name || a.label || shortId(a.agent_id);
+}
+
+/** Whether every word of `query` appears, ignoring case, in one of the
+ *  fields a person finds a session by: its name and label, its full id (so
+ *  the 8-character short id matches too), project, task and status. */
+export function matchesQuery(a: BoardAgent, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const hay = [agentName(a), a.label, a.agent_id, a.project, a.task, a.status].join("\n").toLowerCase();
+  return terms.every((t) => hay.includes(t));
+}
+
+export type Pin = "delegate" | "coordinator" | "mail";
+const PIN_ORDER: Pin[] = ["delegate", "coordinator", "mail"];
+
+/** The roster with the sessions the maintainer looks for first pinned to the
+ *  top: the delegate, the coordinator, then any with unread mail. Everything
+ *  else keeps the server's order (reachable first, most recently active). */
+export function orderRoster(
+  agents: BoardAgent[],
+  role: (a: BoardAgent) => "delegate" | "coordinator" | null,
+): { agent: BoardAgent; pin: Pin | null }[] {
+  const rows = agents.map((agent) => ({
+    agent,
+    pin: (role(agent) ?? (agent.pending_count ? "mail" : null)) as Pin | null,
+  }));
+  const rank = (p: Pin | null) => (p ? PIN_ORDER.indexOf(p) : PIN_ORDER.length);
+  // Array.prototype.sort is stable, so ties keep the server's order.
+  return rows.sort((x, y) => rank(x.pin) - rank(y.pin));
 }
 
 export function stateChip(a: BoardAgent, now?: number | null): { text: string; tone: Tone } {
@@ -84,8 +115,12 @@ export function leaseState(l: Lease): string {
 export function nameResolver(s: BoardSnapshot | null): (id: string | null | undefined) => string {
   const byId = new Map((s?.agents ?? []).map((a) => [a.agent_id, agentName(a)]));
   for (const l of s?.leases ?? []) {
-    if (l.holder?.label && !byId.has(l.holder.agent_id)) byId.set(l.holder.agent_id, l.holder.label);
-    for (const w of l.queue) if (w.label && !byId.has(w.agent_id)) byId.set(w.agent_id, w.label);
+    const holder = l.holder?.name || l.holder?.label;
+    if (l.holder && holder && !byId.has(l.holder.agent_id)) byId.set(l.holder.agent_id, holder);
+    for (const w of l.queue) {
+      const waiter = w.name || w.label;
+      if (waiter && !byId.has(w.agent_id)) byId.set(w.agent_id, waiter);
+    }
   }
   return (id) => (id ? (byId.get(id) ?? shortId(id)) : "someone");
 }
@@ -152,4 +187,14 @@ export function childSource(c: BoardChild): string {
 /** Waiters counted in `queued` but past the first ten the snapshot lists. */
 export function waitersOmitted(l: Lease): number {
   return Math.max(0, (l.queued ?? 0) - (l.queue?.length ?? 0));
+}
+
+/** Whether a scroll pane is at (or within `slack` px of) its end: a message
+ *  thread follows new messages only then, and stays put while the reader
+ *  has scrolled up to read history. */
+export function nearBottom(
+  m: { scrollTop: number; clientHeight: number; scrollHeight: number },
+  slack = 32,
+): boolean {
+  return m.scrollHeight - m.scrollTop - m.clientHeight <= slack;
 }

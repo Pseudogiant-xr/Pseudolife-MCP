@@ -1345,9 +1345,9 @@ class MemoryPolicyConfig:
     * ``compact`` (default) — the short core served since 2026-09-24
       (``STARTUP_MEMORY_CORE``), ahead of the briefing in one hook output;
     * ``none`` — no policy text; the briefing and the episode line still serve;
-    * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (7.5 KB), served
-      by the plugin's separate memory-policy hook, because block plus
-      briefing overflow the 9,500-byte budget of one hook output.
+    * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (about 8 KB),
+      served by the plugin's separate memory-policy hook, because block
+      plus briefing overflow the 9,500-byte budget of one hook output.
 
     ``ab_arms`` turns on an online A/B test: a non-empty list assigns each
     hook-registered session one arm by a stable hash of its client session

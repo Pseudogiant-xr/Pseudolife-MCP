@@ -29,8 +29,9 @@ operator principals.
 
 With database-owner access an agent could rewrite any memory, and run the
 operator commands that open the bank directly (`invite`, `lease break`,
-`board-audit`, and the maintainer-passkey commands that a pending change
-adds). Those need nothing but that access.
+`board-audit`, and the maintainer-passkey commands `pseudolife-mcp
+maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset` and `list`).
+Those need nothing but that access.
 
 ## The test login: `pseudolife-mcp test-login`
 
@@ -115,7 +116,7 @@ no longer copies `ops/.env` into WSL.
 |---|---|
 | Its own checkout of the repository (a clone in a folder it owns or is granted), with no `ops/.env` | The deployment checkout with `ops/.env` (the owner's password, the operator tokens) |
 | Its own Claude Code / Codex installs, logins and client configs | Docker Desktop (membership of `docker-users`), the compose stack, the daemon, backups, `pseudolife-mcp update` |
-| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands once that change lands |
+| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
 | A copy of `test-pg.env` | The owner's password, and anything else in the maintainer's profile |
 | Network access to `127.0.0.1:8765` (the daemon, gated by its bearer) and `127.0.0.1:5433` (Postgres, where only the test login works for it) | |
 
@@ -256,7 +257,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
-| `pseudolife-mcp maintainer list` (once the maintainer-passkey change lands) | fails, for the same reason |
+| `pseudolife-mcp maintainer list` | fails: no database URL, and no owner password to make one |
 
 *Not verified on the maintainer's machine:* the Windows account steps and
 the exact refusal texts above were written from the platform's documented

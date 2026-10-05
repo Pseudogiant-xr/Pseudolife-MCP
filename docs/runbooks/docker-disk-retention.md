@@ -19,7 +19,7 @@ automate aggressively.
 
 | Trigger | Script | Default policy |
 |---|---|---|
-| After every healthy deploy | `ops/update.ps1` / `.sh`, step 5 (last) | age 168h, 20GB ceiling, fstrim |
+| After every healthy deploy | `ops/update.ps1` / `.sh` (`pseudolife_memory/update_cli.py`), the build-cache prune after health (last) | age 168h, 20GB ceiling, fstrim |
 | Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1` | age 168h, 20GB ceiling, fstrim |
 
 The deploy hook only passes `-MaxAgeHours`; `-MaxUsedSpaceGB` therefore
@@ -234,9 +234,10 @@ genuinely pinned by live images it stalls, warns, and leaves the rest to
 the age pass on a later run.
 
 **Step ordering still helps the age pass free actual disk, and it is
-accidental.** `ops/prune-rollbacks.*` runs at `update.ps1`/`.sh` step 2b,
-*before* the build, retiring old rollback image tags; the build-cache age
-pass runs at step 5, *after* health. By the time `until=168h` fires, the
+accidental.** `ops/prune-rollbacks.*` runs in the deploy's rollback-tag prune
+(`pseudolife_memory/update_cli.py`), *before* the build, retiring old
+rollback image tags; the build-cache age pass runs as the deploy's last
+step, *after* health. By the time `until=168h` fires, the
 images that were pinning the >168h-old cache layers are already gone, so
 deleting those records frees their bytes too. Neither script enforces
 this ordering explicitly — a future change to `-KeepRollbacks` or to

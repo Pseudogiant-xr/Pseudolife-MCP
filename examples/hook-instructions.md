@@ -12,7 +12,7 @@ The full test suite (the conftest lock, one slot) and the GPU are the shared thi
 
 ## Pre-flight before a full run
 
-Check that the worktree's `ops/.env` carries the bench Postgres password; a run without it fails every database test with an auth error and still holds the lock for its whole length. Check no holder file exists under the locks directory and no status shows `suite=running`. A run with the lock switched off leaves no holder file, so the board check is not optional.
+Check that the test login exists (`~/.pseudolife-mcp/test-pg.env`, from `pseudolife-mcp test-login create`); without it a run logs in as the bank owner from the worktree's `ops/.env`; without that a full run is refused, and a targeted one fails every database test. Check no holder file exists under the locks directory and no status shows `suite=running`. A run with the lock switched off leaves no holder file, so the board check is not optional.
 
 ## Host-shaped symptoms
 
@@ -20,4 +20,4 @@ If a test, a tool or a process fails in a way that has nothing to do with your c
 
 ## Waiting and delivery
 
-A park does not arm a listener. Beyond the Stop hook's 59 minutes, Claude Code keeps one main-session background `pseudolife-mcp wait-mail --timeout 14400`, re-armed after a ring or timeout; Codex uses its doorbell. Otherwise say `next-turn-only`. `done` stays reachable: urgent mail from the maintainer, the maintainer's delegate for the project or the named clearer reopens it. `rung` means an armed path, not action. On `no_path`, follow its `fallback_paths` (Claude Desktop `send_message` starts a turn, also when the board is down); otherwise tell the maintainer when urgent.
+A park does not arm a listener. Claude Code's Stop hook listens while the session is open; Codex uses its doorbell. Otherwise say `next-turn-only`. `done` stays reachable: urgent mail from the maintainer, the maintainer's delegate for the project or the named clearer reopens it. `rung` means an armed path, not action. On `no_path`, follow its `fallback_paths` (Claude Desktop `send_message` starts a turn, also when the board is down); otherwise tell the maintainer when urgent.

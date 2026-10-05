@@ -415,6 +415,7 @@ deep material lives in the user guide:
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 | [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
 | [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
+| [Coordination recovery](docs/guide/coordination-recovery.md) | Agent mailboxes, maintainer passkeys and the board's audit log after a database restore |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -436,14 +437,14 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?, name?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and each row by its session's `name` (the title Claude Code or Codex shows, else one the agent set with `name`, else its `memory_session_title`, else its label and short id; [board names](docs/guide/configuration.md#board-names-and-finding-a-session)), and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's delegate for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
-| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
+| `memory_history(entity, attribute?, as_of?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps; `as_of` (ISO-8601 or epoch seconds) keeps only the versions written by then. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
@@ -473,7 +474,7 @@ keep their write `date`), and `memory_fact_get` likewise drops bookkeeping
 keys from its record; pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
+**Toolset tiers.** Three visibility tiers — `minimal` (10 tools), `core`
 (24), `full` (38) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
@@ -605,23 +606,15 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`:** the installers
-up to 0.16.1 added it by that shorthand, which Claude Code records as a
-`github` source (`"source": "github"` for `pseudolife-mcp` in
-`~/.claude/plugins/known_marketplaces.json`) and refreshes over SSH. On a
-machine with no GitHub SSH key every refresh fails ("SSH host key is not in
-your known_hosts file") and the plugin stops updating. Move it to the HTTPS
-URL: if `~/.claude/settings.json` declares it under `extraKnownMarketplaces`,
-change that entry's `source` to
-`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-first (the CLI refuses an add that differs from a declared source), then run:
-
-```bash
-claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
-```
-
-Do not `marketplace remove` it first: removing a marketplace uninstalls its
-plugins.
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`** (installers up
+to 0.16.1) is refreshed over SSH, which fails on a machine with no GitHub SSH
+key. `pseudolife-mcp update` and the installers move it to the HTTPS URL
+themselves, with backups. If that step reports a failure, the manual fallback
+is: in `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), set the
+`pseudolife-mcp` entry's `source` under `extraKnownMarketplaces` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`,
+then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+(never `marketplace remove` it: that uninstalls the plugin).
 
 **One command, no checkout:** the installed shim updates the whole install
 from a release:
@@ -824,8 +817,9 @@ Claude Code do it:
 ```
 
 The plugin replaces the settings.json hook, and the daemon serves a compact
-memory core and a live briefing as session context. The full CLAUDE.md block
-below is not served; append it if you want the complete guidance.
+memory core and a live briefing as session context. By default
+(`memory_policy.variant: compact`) the full CLAUDE.md block below is not
+served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
@@ -1047,9 +1041,11 @@ guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-Hooks serve at most that short guide; the detailed block reaches an agent
-only as a standing copy. For the complete guidance, for subagent
-visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+By default (`memory_policy.variant: compact`) hooks serve at most that
+short guide, and the detailed block reaches an agent only as a standing copy
+(the `full_separate_hook` variant serves it in a separate hook; see
+[Startup memory policy](docs/guide/configuration.md#startup-memory-policy-memory_policy)).
+For the complete guidance, for subagent visibility (subagents read `CLAUDE.md` but not hook output), or in place of
 hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
@@ -1333,7 +1329,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v54 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1391,7 +1387,7 @@ pseudolife-mcp-daemon`).
   and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
   that environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
+  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
@@ -1471,8 +1467,10 @@ rotated password can never produce a green run by accident. Full dev setup: [CON
 - **Reflection via MCP sampling** — would let the dream borrow *Claude
   itself* as the extractor;
   [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
-- **Cross-machine sync** — memory lives on one PC's disk; syncing via
-  rclone / syncthing is left as an exercise.
+- **Replication / offline copies** — one daemon owns one bank; other
+  machines use it over the network
+  ([remote bank](docs/guide/remote-bank.md)), but there is no replica or
+  offline mode.
 - **Automated world-knowledge ingestion** — populating the world cortex
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today
@@ -1620,10 +1618,14 @@ entity is deliberately classified.
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.
 The read surface does nudge, though: once a fact has aged past a third
-of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+of its TTL, `memory_search`, `memory_fact_get`, and
 `memory_world_search` attach a ready-made `correct_with` call to it — a
 filled-in `memory_fact_set(...)` the reading agent can run the moment it
-verifies the value, re-asserting or correcting at the same slot. The
+verifies the value, re-asserting or correcting at the same slot. A
+contested fact's `correct_with` instead names `memory_fact_get` to read
+the contenders and `memory_fact_resolve` (core tier) to run once a human
+decides, with no `accept` value filled in: re-asserting `memory_fact_set`
+only contests the slot further. The
 `stale: true` flag is the louder, later signal (twice the TTL);
 `correct_with` fires earlier so drift gets fixed at first contact.
 
@@ -1819,7 +1821,8 @@ against a slot that still holds a protected aggregate scalar — see
 [Conversion rules](#conversion-rules) below — parks as a scalar contender.
 Once a slot has actually converted to a set, this still holds: members
 themselves are never contested.) A set slot also caps at 100 concurrent
-members; further adds beyond the cap are dropped (`"member_capped"`) rather
+members; further adds beyond the cap are dropped (`"member_capped"`, with a
+`note`; see [Tool errors and refusals](#tool-errors-and-refusals)) rather
 than silently applied or queued.
 
 ### Conversion rules
@@ -2353,6 +2356,73 @@ freshness flags, which is what a caller acts on. The REST/Console reads
 > `search_path` to `public` (asserted on startup).
 > `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
 
+## Tool errors and refusals
+
+A memory tool call ends one of three ways: a result, a refusal returned as
+a tool error, or a success that changed nothing and says so in a `note`.
+
+**A refusal is a tool error.** It comes back with `isError: true`, and its
+text and structured content are the same JSON object:
+
+```json
+{
+  "error": "unknown_parameter",
+  "message": "unknown parameter 'limit' for memory_search; did you mean 'top_k'? Accepted: query, top_k, sources, ...",
+  "param": "limit",
+  "accepted": ["query", "top_k", "sources", "..."]
+}
+```
+
+`error` is a stable snake_case code and `message` one sentence naming the
+fix. `param`, `accepted` and `action` appear where the refusal knows them.
+The general codes are `invalid_argument`, `unknown_parameter`,
+`file_not_found` (`document_ingest`; paths resolve on the server's
+filesystem), `internal_error` (the cause stays in the daemon log) and
+`coordination_unavailable` (the board failed inside the call). A tool's own
+coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).
+On a write tool, `internal_error` and `coordination_unavailable` add
+`mutation: "unknown"`: the write may or may not have happened.
+
+**Arguments are checked before the tool runs.** Every tool's input schema
+says `additionalProperties: false`. An argument name the tool does not have
+is refused as `unknown_parameter`, with a did-you-mean suggestion and the
+accepted names. Before 0.17.0 such an argument was dropped without a word
+(`memory_search(limit=3)` returned the default 8 hits), so a caller that
+passed stray arguments now gets an error. Values are range-checked too:
+`top_k`, `memory_recent` `n` and the other counts must be at least 1
+(`top_k=0` and `memory_dream(limit=0)` are refused); `confidence` is within
+0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; `memory_fact_set`
+refuses a blank entity, attribute or value; and `memory_history` `as_of`
+takes an ISO-8601 date or epoch seconds, not words like "yesterday". Each
+is `invalid_argument` naming the parameter, never echoing its value.
+
+**A no-op stays a success, with a `note`.** The call returns its usual
+fields plus one sentence saying what happened and what to do:
+
+- `memory_store`: `empty`, `filtered_meta` (reads as a statement about the
+  memory system itself; rephrase as the fact), `below_surprise_threshold`
+  (a near-duplicate; no need to retry), `rejected`.
+- `memory_get` / `memory_reinforce`: `faded: true` (a wrong id, a forgotten
+  or evicted entry, or a file-mode bank).
+- `memory_set_add` / `memory_set_remove`: `member_invalid`,
+  `member_capped`, `member_not_found`, `member_remove_refused`.
+- `memory_graph_review`: `bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live` (also per result in a
+  batch).
+- `memory_forget` matching nothing (`deleted_count: 0` / `removed: 0`).
+- `memory_world_set`: `unsafe_source_url` (the fact is not stored; `source_url` must be http(s) or empty).
+- `memory_outcome` without Postgres or with lessons disabled (not kept; do
+  not retry).
+- `memory_supersede` / `memory_consolidate`: the refusal sentence is in
+  `note`, beside the code in `reason` (the REST routes keep it in `error`).
+
+**The board names what was wrong.** `memory_agents` and `memory_message`
+refusals say what to fix: `missing_parameter` what the action needs (`send
+needs request_id`), `unexpected_parameter` which parameter the action does
+not take and which action does, `unknown_coordination_action` the actions
+there are, and `invalid_text` which rule the body broke (blank, NUL, over
+8,192 UTF-8 bytes, not UTF-8).
+
 ---
 
 <!-- source: docs/guide/retrieval.md -->
@@ -2818,8 +2888,9 @@ extractor to be configured).
 
 The dream pass, its extractor tiers (regex floor / agent-driven / headless
 auto-sweep), the bundled CPU sidecar, upgrading to a bigger model, the
-Sonnet-primary fallback setup, cadence, deep dream, and the deliberate
-consolidation workflow. Part of the [user guide](../../README.md#documentation).
+Claude-primary fallback setup (default dreamer model `claude-opus-5-5`),
+cadence, deep dream, and the deliberate consolidation workflow. Part of the
+[user guide](../../README.md#documentation).
 
 A **dream** distils the recent associative stream (MIRAS) into canonical
 cortex facts: pull unconsolidated memories → extract
@@ -4085,8 +4156,9 @@ reliably — without the agent having to remember:
      on first store — and sets it as the machine-scoped active-session
      pointer. The returned briefing text carries a one-line **handle
      advertisement**: the episode id (truncated) plus the instruction to
-     pass `episode="<id>"` on every memory write — the concurrency-correct
-     channel, so attribution stays right even when other sessions are open. A
+     pass `episode="<id>"` to every memory tool that accepts it — the
+     concurrency-correct channel, so attribution stays right even when other
+     sessions are open. A
      SessionEnd hook closes that session's episode and clears the pointer
      when the session ends. If a client crashes without firing SessionEnd,
      the pointer expires after `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`
@@ -4338,7 +4410,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v54). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v55). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -4801,8 +4873,11 @@ at attach and heartbeat. Exit clears only the waiter's own marker, so one
 waiter's exit does not disarm another; adapter teardown leaves these records
 alone. An interrupted process's evidence expires within 60 seconds.
 
-In Claude Code, the agent arms it with the Bash or PowerShell tool and
-`run_in_background: true`. Claude Code reports the exit as a task notification,
+A Claude Code session with the plugin needs no waiter: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) listens for as
+long as the session stays open. Without the plugin's Stop hook (a hook-only
+install, or the hook turned off), the agent arms it with the Bash or
+PowerShell tool and `run_in_background: true`. Claude Code reports the exit as a task notification,
 which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 2026-09-23):
 
@@ -4814,12 +4889,15 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
    persists, continue pull-only.
 3. Before ending a turn that waits on a peer, make sure a waiter is armed.
 
-The Stop hook alone watches for at most 59 minutes. A park record can outlive
-that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
-four-hour timeout. Where Codex supports its doorbell, that is its durable host
-path. Where the host provides neither path, record `next-turn-only` in the
-park or status: a durable park is not evidence of a durable listener.
+Claude Code stops a `run_in_background` command at the tool's own `timeout`
+(30 minutes by default, at most 2 hours unless `BASH_MAX_TIMEOUT_MS` raises
+it, read in the 2.1.286 and 2.1.287 bundles on 2026-10-05) and re-invokes the
+session, so a four-hour `--timeout` never runs out on its own: pass the tool's
+largest timeout and a `--timeout` just under it (`--timeout 7000` with a
+7,200,000 ms tool timeout), and re-arm on that exit as on a timeout. Where
+Codex supports its doorbell, that is its durable host path. Where the host
+provides neither path, record `next-turn-only` in the park or status: a
+durable park is not evidence of a durable listener.
 
 Arm it from the main conversation: a command started by a foreground subagent
 ends with that subagent's final response, and `-p` runs end background commands
@@ -5007,7 +5085,10 @@ session whose urgent mail [reopens a done park](#reopening-a-done-park) in
 that project. It opens the bank the same way, grants AGENT (its id, or a
 unique prefix of 8 or more characters) the lease `delegate:<PROJECT>` for
 DURATION (default 1d, at most 7d), replacing any current delegate, and logs a
-`lease_delegate` with the operator as its actor. Leases named `delegate:` (and
+`lease_delegate` with the operator as its actor. Its JSON answer says whether
+the grantee has a live wake path (`reachable`, and the no-path `reason`), and
+when it has none, a warning on stderr says your messages to it wait for its
+next turn. Leases named `delegate:` (and
 `designated:`, their name before 0.16.1) are the operator's alone: a
 session's claim of one is refused `reserved_lease`, so a delegate cannot
 renew its own. It may release it to resign; revoke it with
@@ -5043,6 +5124,12 @@ current fence), but check `pseudolife-mcp lease list` before deploying and
 `lease break` any `delegate:` lease you find, so the board shows only real
 grants. The new park-gate wording in the plugin's hook fallbacks reaches
 clients only through the update's client step.
+
+**Upgrading from 0.16.x** (before schema v54): a session that held both a
+project's delegate and coordinator leases keeps renewing its coordinator
+lease after the upgrade; once that hold lapses or is released, it keeps the
+delegate role only. Revoke either role from the Console if you want one
+sooner.
 
 **Upgrading from 2026-10-03's first version**, where holding
 `coordinator:<project>` was the role: after the upgrade **no session can
@@ -5115,6 +5202,68 @@ type or target. Claims remain advisory: no edit, commit or push guard consumes
 the fence. Existing literal `claim:<text>` and generic resource leases keep
 their semantics and do not overlap repository file claims.
 
+### Board names and finding a session
+
+Each row on the board, in `memory_agents` list and in the Console's Board, is
+shown by its session's name (schema v55). The label is set once at
+registration (`PSEUDOLIFE_AGENT_LABEL`; Codex threads `codex`), so before v55
+nearly every row read `claude-code` or `codex`. A name comes from one of three
+sources, and a lower one never replaces a name a higher one set:
+
+1. **`agent`**: `memory_agents(action="update", name=...)`. It outranks the
+   harness title, so a session whose row shows a stale title (after `/clear`
+   the Claude Code shim still reads the old transcript) can correct it, and
+   it serves any harness that keeps no title file of its own. `name=""`
+   clears the agent's own name and brings back the newest harness title,
+   which the daemon keeps meanwhile.
+2. **`harness`**: the title the harness already shows for the session. The
+   Claude Code shim reads it from the session transcript,
+   `<config>/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl` (`config` is
+   `CLAUDE_CONFIG_DIR`, else `~/.claude`): the latest `custom-title` line
+   (the Desktop app's title or a rename), else the latest `agent-name`, else
+   the latest `ai-title` (the CLI's generated title). The Codex shim reads
+   each thread's name from `session_index.jsonl` under `CODEX_HOME` (else
+   `~/.codex`). The adapter sends it with its next heartbeat when it
+   changed, so a rename reaches the board within about 20 seconds, without
+   restarting the session. The reader looks at the end of the transcript
+   first, then reads at most 1 MiB per heartbeat and nothing at all while
+   the file is unchanged; any read or parse error just sends no name.
+   Harness titles are on by default. A generated title (`ai-title`) is
+   written from your first prompt, so it reaches the roster and the
+   coordination audit log; to keep titles off the board, set
+   `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` (or `false`, `no`, `off`) in the
+   environment the shim starts with (its MCP server `env` block). The shim
+   then reads no transcript and no `session_index.jsonl`, and a row falls
+   back to the agent's own name, the session title, then its label and short
+   id.
+3. **`title`**: a `memory_session_title` rename names the rows registered
+   under that session (their `episode` is its session key) when neither a
+   harness nor an agent has named them, and only rows of the retitling
+   caller's own principal: a retitle without a bearer names none.
+
+A row nothing has named reads as its label and the first 8 characters of its
+id (`claude-code 3f9a1c2e`), with `name_source: ""`; lease holders and lease
+waiters carry the same `name`. A name is one line of at most 120 characters.
+It follows the label rule (`invalid_name`): one that reads as `maintainer`
+anywhere, or as `daemon`, `passkey` or `verified` as a whole, look-alike
+letters included, is refused, and so is one shaped like a credential
+(`secret_like_body`). A harness name the daemon refuses is dropped, not
+retried, and the row keeps its label and short id. Each change of name writes
+one `update` event to the [audit log](#audit-log); an unchanged name sent
+again writes nothing. Claude Desktop's shared app-level server registers no
+board row, so it has no name either.
+
+In the Console's Board the session list is its own pane, sized to end at the
+bottom of the window, so a long board scrolls inside it while the Roles band
+stays in view. The search box above it filters by name, short or full id,
+task, status and project, every word of the query matching some field. The
+delegate, the coordinator and sessions with unread mail are pinned at the top.
+Each card shows its 8-character id; a click copies the full id. The Make
+delegate and Make coordinator buttons sit on each card, so a session found by
+search takes a role without scrolling.
+
+![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the delegate and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
+
 ### Maintainer messages and roles from the Console
 
 The Console's Board can send a session a message that carries your authority,
@@ -5131,16 +5280,32 @@ chat. It rings the session when it has a live wake listener, including one
 parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
 there is no separate urgent setting, and the payload's `urgent` field changes
 nothing.
+When a message is not rung, the thread says why (for example "no live
+listener (its listener lapsed)"); it waits for the session's next turn.
 The agent replies with `reply_to` and no `to`; replies appear in the Console's
-thread. The Sent log can withdraw a message: the recipient's next receive shows
-it as withdrawn, and an already-acknowledged one gets a follow-up.
+thread. Your inbox's pending-mail cap (256) counts each sender's own replies,
+so one session's replies cannot fill it for the others. The Sent log can
+withdraw a message: the recipient's next receive shows it as withdrawn, and
+an already-acknowledged one gets a follow-up. The thread
+in a role card scrolls in its own pane above the composer, so a long exchange
+never pushes the composer down the page: it opens on the newest message and
+follows each new one, unless you have scrolled up to read earlier ones.
+
+![A delegate card on the fixture devserver: the message thread scrolls in its own pane, newest message in view, with the composer below it](../images/cortex-console-board-thread.png)
 
 **Roles.** The Roles band on the Board shows, per project, the delegate (the
 session whose urgent mail reopens done parks there, see
 [Leases](#leases-pseudolife-mcp-lease)) and the coordinator. Make delegate asks
 how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
-the lease. Coordinator changes are signed too, although the role grants no
-authority: otherwise any session could evict another's coordinator. A session
+the lease. Under each holder the band shows "Reachable now" or "No live wake
+listener" with the reason; a grant or extend to a session with no live
+listener shows the same warning beside its success toast. A role change
+signs the role's holder as the dialog showed it (for Make delegate and Make
+coordinator, the other role's holder too): if either changes before your
+passkey tap, the change is refused (`409 role_changed`): the dialog closes,
+and the Console reloads the board so you can look again and retry. Coordinator changes
+are signed too, although the role grants no authority: otherwise any session
+could evict another's coordinator. A session
 holds one of the two roles at most: the delegate's own claim of the
 coordinator lease is refused `already_delegate`, and a session queued for it
 leaves the queue when it is made the delegate.
@@ -5170,12 +5335,22 @@ before changing anything (`--yes` answers for it), then:
    config file, with a backup beside it, and restarts the daemon container
    (`docker restart`: the same container and volumes). A lite daemon is not
    restarted for you: stop `pseudolife-mcp serve` and run the command again.
-3. Prints a one-time enrolment code, valid for 10 minutes. In the Console,
-   open Settings, Your passkeys, enter the code and a label, and create the
+3. Prints a one-time enrolment code, valid for 10 minutes. Open the
+   Console at the new address (`<origin>/ui/`). A browser keeps the
+   Console's token per address, so at a new address it has none: click
+   "Set a bearer token" and paste the token your Console uses at its usual
+   address (the daemon's `PSEUDOLIFE_MCP_TOKEN`; a single-token install
+   also keeps it in `~/.pseudolife-mcp/<principal>.token`). Then open
+   Settings, Your passkeys, enter the code and a label, and create the
    passkey. The command prints the new key's id prefix and label and asks
    whether the Console shows the same: `y` activates the key, anything else
    revokes it (someone else may have redeemed the code); run the command
    again to retry.
+
+`pseudolife-mcp doctor` reports the state in its `maintainer_passkeys`
+line: `off` (not configured), `on` with the RP ID, the origin and the number
+of active keys, or `invalid` with the rule the config breaks, which fails
+the report and names the fix.
 
 Run again, it reports what is in place and changes nothing (`--check`
 only answers: exit 0 set up, 1 not), and an installer re-run asks nothing
@@ -5665,9 +5840,13 @@ own two runs differed by up to 0.6 ms. Status-update latency was too noisy there
 to read (its two control runs were 1.8 ms apart), and with one writer at a time
 the run did not measure waiting on the append lock.
 
-The log is read by an operator, never by an agent: there is no MCP tool and no
-REST route for it. `pseudolife-mcp board-audit` reaches the bank directly,
-through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
+The log as a whole is read by an operator, never by an agent: no MCP tool or
+REST route exports or verifies it. The one slice an agent reads is its own
+mail: `memory_message(action="history")` and `POST /api/coordination/history`
+return the calling instance's retained sent and received messages
+([Delivery and recovery](#delivery-and-recovery)).
+`pseudolife-mcp board-audit` reaches the bank directly, through
+`PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
 `export` and `verify` read one read-only snapshot, so they are safe beside a
 running daemon:
 
@@ -6121,8 +6300,10 @@ mail as all of them. It refuses `memory_agents` `update`, `claim` and
 instructions, and its `memory_agents(action="list")` shows open sessions only,
 not the board. A Claude Code session makes those calls on its own per-session
 server. In the Desktop app's Code tab that works only while the two entries have
-different names: the installer registers both as `pseudolife-memory`, and
-where the names match, Desktop serves the Code tab from its app-level entry.
+different names: the installer registers the app-level entry as
+`pseudolife-desktop` and Claude Code's per-session server as
+`pseudolife-memory`, because where the names match, Desktop serves the Code
+tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
 write that carries no instance credential.
@@ -6169,14 +6350,15 @@ parent's cursor). Nothing in the shim can tell the two apart: a subagent's
 status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
-`memory_message(action="receive")` without `ack`, `memory_search`), and the
+`memory_message(action="receive")` without `ack`, the read-only
+`memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
 (`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
 puts in a subagent's hook input, and never in the parent's, and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list and receive pass, and so
-does every call the parent makes. The subagent reads the refusal as
+send and ack, whatever the server's name. Its list, receive and history
+pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
 update never reached the server, its list and the parent's update did). A
@@ -6257,15 +6439,16 @@ still rings it. Waiting on a merge click or a review that may still bring fixes?
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
 `maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
 a live listener. Check the sender's wake receipt; `no_path` means mail is
-queued for receive on a later turn. For waits over 59 minutes, especially
-`needs_approval` waiting on maintainer, arm `wait-mail` in the background or
-keep the Codex doorbell active; otherwise record that you are reachable
-on your next turn. [Reopening a done park](#reopening-a-done-park) says who
+queued for receive on a later turn. Claude Code's Stop hook keeps listening
+while the session stays open, and a Codex thread needs its doorbell active;
+without either, record that you are reachable on your next turn. [Reopening a done park](#reopening-a-done-park) says who
 counts as the maintainer and the coordinator.
 
-Before parking on a dependency that may take longer than 59 minutes, keep a
-host path armed as described under [wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-or [Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
+Before parking on a long dependency, make sure a host path is armed: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) in Claude Code
+(armed at every turn end while the session stays open),
+[wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail) without it, or the
+[Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
 limitation explicit. A sender checks the receipt instead of assuming that
 an installed hook wakes an idle recipient. On `no_path`, use the recipient
 host's messaging tool when available: Claude Desktop's session `send_message`
@@ -6429,7 +6612,7 @@ and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI or Desktop Code tab) | the Stop hook's 59-minute wait, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
+| Claude Code (CLI or Desktop Code tab) | the Stop hook's watcher, armed at every turn end while the session stays open, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional
@@ -6618,10 +6801,9 @@ also capped (below, and by the daemon's `wake` caps under
   bring fixes? Park needs_approval with park_clear_by set to the reviewer's
   agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires
   a live listener. Check the sender's wake receipt; no_path means mail is
-  queued for receive on a later turn. For waits over 59 minutes, especially
-  needs_approval waiting on maintainer, arm wait-mail in the background or
-  keep the Codex doorbell active; otherwise record that you are reachable
-  on your next turn." as the wake text and a `gate` ledger line (its
+  queued for receive on a later turn. Claude Code's Stop hook keeps listening
+  while this session stays open, and a Codex thread needs its doorbell active;
+  without either, record that you are reachable on your next turn." as the wake text and a `gate` ledger line (its
   fifth column is the message's length in UTF-8 bytes plus one, on every
   client). Once: the continuation's Stop carries `stop_hook_active: true` and
   is not asked (Claude Code also caps stop-hook continuations at eight in a
@@ -6665,16 +6847,32 @@ also capped (below, and by the daemon's `wake` caps under
   marker and leaves the shared `.wake` ownership stamp alone; the stamp
   without a matching live marker proves no liveness. Stale evidence expires
   within 60 seconds even after an interrupted process.
-- A watcher waits at most 3540 s after the turn that armed it; the hook's
-  `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
-  `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after a ring or its four-hour timeout; without that, its mail appears
-  on its next prompt and the ring listener expires. The watcher
-  also stops when Claude Code exits: at once on Linux and macOS, and within
-  a minute on Windows, where it lists the process through `ps -W` at arm
-  time and then once a minute (a Windows PID is invisible to `kill -0`). In
-  `claude -p` runs, Claude Code ends a waiting hook at teardown.
+- A watcher listens for as long as the session stays open: at most
+  1,209,540 s (14 days) after the turn that armed it, under the hook's
+  `timeout` of 1,209,600 s, which Claude Code enforces on `asyncRewake` hooks.
+  Fourteen days is twice the longest delegate lease, so a lease granted any
+  time in the week after a session's last turn is covered to its end
+  (maintainer requirement 2026-10-05: a session, the delegate above all, stays
+  reachable while it is open). Claude Code takes the timeout as is into a Node
+  timer (`timeout * 1000` ms, no ceiling, read in the 2.1.286 and 2.1.287
+  bundles), which fires at once above 2^31 - 1 ms, so it stays under 24.8
+  days. After its first 3540 s the watcher polls every 30 s instead of every
+  5 s, so a session idle for days does not keep starting processes every few
+  seconds; a ring then fires up to 30 s later. Before 2026-10-05 the watcher
+  stopped after 59 minutes, and a plugin from before then still does until
+  `pseudolife-mcp update` moves the clients. `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT`
+  (seconds) shortens it. The watcher
+  also stops when Claude Code exits. A clean exit removes the shim's digest,
+  which ends the watch within one poll (5 s, or 30 s after the first hour).
+  On Linux and macOS a crash is caught by `kill -0` at the next poll. On
+  Windows it lists the process through `ps -W` at arm time, then once a
+  minute for the first hour and every five minutes after (a Windows PID is
+  invisible to `kill -0`, and `ps -W` took 1.6-3.5 s on a loaded host); a
+  crashed session whose PID is reused, or that `ps -W` never lists, keeps its
+  watcher until the digest is swept as stale, about a day later. An idle
+  watcher spawns a `sleep` and an `mv` every 30 s, plus on Windows a `ps -W`
+  and an `awk` every five minutes: about 0.07 processes a second per session.
+  In `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json` and gets only the park gate, on every
   platform: on Windows through the entry's native command
   (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
@@ -6751,7 +6949,7 @@ memory_policy:
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
 | `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
-| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), about 8 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler
 (`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
@@ -7260,9 +7458,10 @@ every variant.
 
 ## Toolset tiers
 
-Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
-set-slot pair, the gate), `core` (24: + graph/recall, world facts, lessons,
-documents, episodes, stats, `memory_get`, `memory_fact_resolve`, coordination),
+Three visibility tiers — `minimal` (10 tools: the recall/capture loop with
+lesson search, the set-slot pair, the gate), `core` (24: + graph/recall, world
+facts, documents, episodes, stats, `memory_get`, `memory_fact_resolve`,
+coordination),
 `full` (38) — filtered per principal at `tools/list` (the named principal
 from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
 a credential share a tier view). The filter is
@@ -7275,8 +7474,8 @@ session expands its tier before calling a hidden tool. Defaults:
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
-Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
-`minimal`; clients that defer schemas client-side (Claude Code) barely
+Eager-loading clients (Claude Desktop) start at about 18 KB of manifest (10
+tools) on `minimal`; clients that defer schemas client-side (Claude Code) barely
 notice tiers at all.
 
 **Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes
@@ -7373,6 +7572,14 @@ is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
 from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
+
+**Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
+checkout. Run inside one, a 0.16.x updater can record the wrong version in the
+`runtime.json` of the runtime it installs (it reads a stale build's metadata
+from the checkout). The launcher picks a runtime by its number, not its
+label, so the right code still runs, but each rerun installs yet another
+runtime. A later update by 0.17.0 or newer installs a correctly labelled
+runtime and removes the mislabelled one once nothing runs from it.
 
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
@@ -7497,18 +7704,23 @@ its own and an update never replaces a folder a session is using:
   cache matching it proves nothing: the step reports `failed`, never
   `current`, quoting the CLI's line, and the run exits with the client-step
   code. Claude Code clones a GitHub-source marketplace over SSH, which fails
-  on a host with no github.com key in `known_hosts`. Add the key after
-  checking its fingerprint against GitHub's published ones, or point the
-  marketplace at HTTPS with
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
-  (it replaces the existing entry's source, and the installed plugin
-  follows it), then run the update again; the README's Updating section
-  has the same steps. Claude Code refuses that add while
-  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
-  with another source: change that entry's source to
-  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-  first (the step names the file when it finds one). Do not use
-  `claude plugin marketplace remove`, which uninstalls the plugin.
+  on a host with no github.com key in `known_hosts`.
+- Before the refresh, a marketplace still recorded with the `github` source
+  the installers used up to 0.16.1 is moved to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` (the installers do
+  the same on a rerun, through `ops/plugin_marketplace.py`). The step copies
+  `settings.json`, `known_marketplaces.json` and `installed_plugins.json`
+  to `plugins/backup-<time>-marketplace-https/`. It changes only the
+  `pseudolife-mcp` entry's source under `extraKnownMarketplaces` (Claude
+  Code refuses the add while that entry names another source), runs
+  `claude plugin marketplace add` with the HTTPS URL, and checks that
+  `known_marketplaces.json` followed. A refused add puts the entry back as
+  it was and fails the step; the refresh still runs. An HTTPS source, a fork, a local
+  directory or a pinned ref is left as it is. Both files are read under
+  `CLAUDE_CONFIG_DIR` when it is set. For any other github-source
+  marketplace, add github.com's key after checking its fingerprint against
+  GitHub's published ones, or follow the README's Updating section. Do not
+  use `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
@@ -8182,7 +8394,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v54**; migrations are additive
+The current Postgres meta version is **v55**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -8242,6 +8454,7 @@ The milestones:
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
+| v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -8381,6 +8594,23 @@ A backup taken before v42 restores without the log. Recovery never migrates a
 schema, so both commands still revoke and rebind, print that the operation is
 not recorded, and the next daemon start creates an empty log.
 
+## Maintainer passkeys across a restore
+
+A full backup holds the maintainer's passkeys (`maintainer_passkeys`, schema
+v54), unredeemed enrolment codes (`maintainer_bootstrap`), spent challenge
+nonces (`maintainer_nonces`) and the challenge secret (`maintainer_secret_v1`
+in `meta`), all as of the backup. `recover` does not touch them. A passkey
+revoked after the backup is active again, and one enrolled after it is gone.
+Before step 6, with `PSEUDOLIFE_MCP_DATABASE_URL` still pointing at the
+restored database, run `pseudolife-mcp maintainer list` and
+`pseudolife-mcp maintainer revoke <prefix>` any key you revoked since the
+backup. If you cannot tell, `pseudolife-mcp maintainer reset` revokes every
+key, rotates the secret and reopens enrolment; after step 6, enrol again with
+`pseudolife-mcp maintainer setup`.
+
+Portable exports never carry these tables or the secret (full backups only),
+so an imported bank starts with no passkeys.
+
 ## Failure and retention
 
 A failed private-state write rolls back credential issuance. A crash or uncertain
@@ -8507,8 +8737,11 @@ they do not enforce semantic compliance with every memory instruction:
    (approve setup or review the definitions in `/hooks` first).
 5. **Per-turn hooks** — with the plugin, a memory-change note printed only
    when new lessons or other sessions' status notes landed since the last
-   one, with a one-line reminder (recall before review, status questions are
-   memory questions, log outcomes); the `ops/install-hook.*` fallback
+   one, with a one-line reminder ("Memory loop: before a review, a design or
+   work in a new area, recall (`memory_search` + `memory_lesson_search`) and
+   compare memory against the files; `memory_store(source="status")` when
+   long work starts or ends; `memory_outcome` with `used_ids` when an outcome
+   lands."); the `ops/install-hook.*` fallback
    installs the same note (`pseudolife-mcp prompt-hook`, run through
    `docker exec -i` on the Docker tier, where the briefing runs), and
    re-running it replaces the fixed per-prompt line older installers wrote.
@@ -8728,7 +8961,10 @@ marketplace and replaces both its clone and the installed copy Codex runs
 hooks from (`~/.codex/plugins/cache/pseudolife-mcp/pseudolife-memory/local`).
 It then reads that copy back and reports `refreshed`. Measured on Codex
 0.160.0, the upgrade leaves `config.toml` unchanged and every hook keeps its
-approval hash, so nothing needs approving. Codex keeps one installed copy and
+approval hash, so nothing needs approving, unless the release changes an
+approved hook definition in `plugin/hooks/hooks.json`. 0.17.0 does: the
+Stop hook's `timeout` went from 3600 to 1209600, so Codex users approve the
+plugin's hooks once more after that update. Codex keeps one installed copy and
 replaces it in place, as an update from its plugin manager does, so there is
 no older copy kept beside it. The CLI and the desktop app share the Codex home, so
 both pick up the new scripts. The update finds the Codex CLI on PATH, through
@@ -8999,8 +9235,9 @@ startup timeout and may assemble an optional catalog earlier. See
 
 ### Discovery and approvals
 
-Prefer the needed catalog at connection time. An unconfigured daemon defaults
-to `full`; deployments can override that with a principal-specific tier map.
+Prefer the needed catalog at connection time. With `PSEUDOLIFE_MCP_TOOLSET`
+unset the daemon defaults to `full`; the bundled compose file sets it to
+`core`. Deployments can override that with a principal-specific tier map.
 For clients that retain their initial catalog, the operator can explicitly
 choose `codex:full` in `PSEUDOLIFE_MCP_TIER_MAP` for the intended identity and
 then reconnect. Do not change the shared default or another principal simply
@@ -9008,8 +9245,9 @@ to discover one tool. A bearer principal takes precedence over writer identity;
 check which identity the registration actually uses.
 
 A September 2026 Codex check expanded core to full: the server listed 35 tools
-and sent `list_changed`, but the running turn retained its initial 22 callable
-tools. That verifies a current-turn limit only. After expansion, check a fresh
+(the full tier then; 38 today) and sent `list_changed`, but the running turn
+retained its initial 22 callable tools (the core tier then; 24 today). That
+verifies a current-turn limit only. After expansion, check a fresh
 task/reconnection's actual callable catalog; do not infer success from the
 server inventory or notification. Client `enabled_tools`/`disabled_tools`
 filters can narrow it further.
@@ -9801,8 +10039,8 @@ to a doubtful one*, which is the next axis.
 Not every claim deserves to become canonical. Three mechanisms decide:
 
 - **Provenance tiers.** Writes carry an origin: `user` > `action` >
-  `agent`. A lower-tier claim cannot silently overwrite a higher-tier
-  value.
+  `agent` > `assistant`. A lower-tier claim cannot silently overwrite a
+  higher-tier value.
 - **Contender parking.** A competing value is parked *against* the slot
   instead of taking `current`. `memory_fact_get` shows both, search flags
   the slot `contested`, and `memory_fact_resolve` settles it.
@@ -9811,7 +10049,7 @@ Not every claim deserves to become canonical. Three mechanisms decide:
   claim parks as a contender, promotable only by an explicit human resolve
   or an independent second witness
   ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
-- **Authority, distinct from provenance.** `origin` (user/action/agent)
+- **Authority, distinct from provenance.** `origin` (user/action/agent/assistant)
   says *who* wrote a claim; a separate write-time `authority` label
   (`directive`/`observation`/`quoted`) says *how* it was said — a quoted
   third-party remark is demoted to a contender by the two-man rule rather
@@ -9982,11 +10220,11 @@ whose entire pitch is auditability should not fudge its own boundaries.
 | If you need | Use | Why not this |
 |---|---|---|
 | **Multi-tenant SaaS memory** — one deployment serving many customers with tenant isolation | Mem0, Zep Cloud | One daemon owns one **bank**, single-writer by construction. Principals are bearer-token identities for *your* agents, not tenants; there is no tenant boundary in the schema |
-| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There are no roles, no directory integration, and no compliance attestations |
+| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There is no SSO/OIDC, no org-wide RBAC, no directory integration, and no compliance attestations. The board's only roles are a project's delegate and coordinator, and maintainer actions need a passkey tap in the Console |
 | **Managed hosting** — someone else runs it, patches it, backs it up | Mem0, Zep Cloud | There is no cloud tier and there will not be one: a hosted service would dilute the zero-egress claim and add a business to run |
 | **An agent framework** — runtime, planner, tool loop, agent state | Letta, LangGraph | This is a memory server with no agent in it. Your coding agent is the intelligence |
 | **Memory for a non-MCP application** — a web app, a chatbot backend | Mem0, Cognee, Memori | The interface is MCP plus a REST console. There is no general-purpose SDK, and the tool docstrings are written for a coding agent to read |
-| **Cross-machine sync out of the box** | A hosted service | Memory lives on one machine's disk; syncing is left to rclone/syncthing |
+| **Cross-machine sync out of the box** | A hosted service | One daemon owns one bank; other machines use it over the network ([remote bank](remote-bank.md)), but there is no replica and no offline mode |
 | **A LoCoMo leaderboard number to put in a deck** | Anyone who publishes one | We publish a documented refusal instead — see above |
 
 Also worth saying: this is **solo-maintained, best-effort** software. It is
@@ -10004,7 +10242,7 @@ memory_fact_get("staging", "host")
 memory_history("staging", "host")
 
 # Is this bank extracting locally, or at all?
-curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | disabled
+curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | stalled | disabled
 
 # Every published number's run artifact:
 ls evals/results/
@@ -10080,15 +10318,30 @@ context: the per-turn digest previews up to five pending messages (sender
 label and a 100-character excerpt each), `memory_message(action="receive")`
 returns them in full, and a wake can start a turn in a parked session. A
 session that a hostile page has steered can therefore try to steer its
-peers. The mitigations are provenance-shaped too: every delivery is framed
+peers. The mitigations are provenance-shaped too: agent mail is framed
 as agent-origin under a daemon-verified sender, never as a user
-instruction, and peer text cannot grant user approval; mailbox access
+instruction, and peer text cannot grant user approval; only mail with
+`origin: "maintainer"`, signed by the maintainer's Console passkey, carries
+the maintainer's authority, and only the `receive` result's
+`maintainer_note` proves it; mailbox access
 needs a bearer whose principal is on `coordination.allowed_principals`
 (or a paired machine granted board access) and a registered adapter's own
 credential; wakes are policy-gated and capped; and an open install
 with no token keeps the board dormant. None of that stops a model from
 acting on a persuasive message, so treat peer mail like any other read
 content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).
+
+**The Console signs maintainer actions.** Maintainer mail and board role
+changes are proven by a passkey tap in the Console, so script running in
+the Console's origin could ask for a challenge at the moment the maintainer
+expects a prompt. Every `/ui/` response therefore carries a strict
+Content-Security-Policy (`default-src 'self'; script-src 'self'; style-src
+'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors
+'none'; form-action 'self'`), `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` (JSON
+API answers carry `nosniff` too). The Console has no inline script: its
+theme bootstrap is served as `/ui/theme.js`.
 
 ## Mechanism → threat map
 
@@ -10140,9 +10393,11 @@ problem than the limitation it hides.
   novel malicious content passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
-  (the token determines the writer id) but there is no signing, no
-  attestation, and no way to prove after the fact that a given writer
-  really made a given write. This is roadmap, not a promise.
+  (the token determines the writer id) but agent writers have no signing,
+  no attestation, and no way to prove after the fact that a given writer
+  really made a given write. This is roadmap, not a promise. The one
+  signed channel is the maintainer's: maintainer mail and board role
+  changes carry a WebAuthn passkey assertion made in the Console.
 - **Ranking as a defense.** Retrieval scoring is optimizable by an
   attacker who can influence stored text. Treat rank as convenience, not
   as a trust signal.
@@ -11221,8 +11476,9 @@ operator principals.
 
 With database-owner access an agent could rewrite any memory, and run the
 operator commands that open the bank directly (`invite`, `lease break`,
-`board-audit`, and the maintainer-passkey commands that a pending change
-adds). Those need nothing but that access.
+`board-audit`, and the maintainer-passkey commands `pseudolife-mcp
+maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset` and `list`).
+Those need nothing but that access.
 
 ## The test login: `pseudolife-mcp test-login`
 
@@ -11307,7 +11563,7 @@ no longer copies `ops/.env` into WSL.
 |---|---|
 | Its own checkout of the repository (a clone in a folder it owns or is granted), with no `ops/.env` | The deployment checkout with `ops/.env` (the owner's password, the operator tokens) |
 | Its own Claude Code / Codex installs, logins and client configs | Docker Desktop (membership of `docker-users`), the compose stack, the daemon, backups, `pseudolife-mcp update` |
-| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands once that change lands |
+| Its own principal and bearer token: `pseudolife-mcp invite` by the maintainer, `pseudolife-mcp pair` by the agent account | `pseudolife-mcp invite`, `lease break`, `lease delegate`, `board-audit`, `test-login create`, and the maintainer passkey and its commands (`pseudolife-mcp maintainer setup`, `enrol-code`, `confirm`, `revoke`, `reset`, `list`) |
 | A copy of `test-pg.env` | The owner's password, and anything else in the maintainer's profile |
 | Network access to `127.0.0.1:8765` (the daemon, gated by its bearer) and `127.0.0.1:5433` (Postgres, where only the test login works for it) | |
 
@@ -11448,7 +11704,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
-| `pseudolife-mcp maintainer list` (once the maintainer-passkey change lands) | fails, for the same reason |
+| `pseudolife-mcp maintainer list` | fails: no database URL, and no owner password to make one |
 
 *Not verified on the maintainer's machine:* the Windows account steps and
 the exact refusal texts above were written from the platform's documented

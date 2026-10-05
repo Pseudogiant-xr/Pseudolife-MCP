@@ -28,13 +28,20 @@ export interface Passkey {
   flagged_at?: Epoch | null;
 }
 
-export interface DelegateRole {
+/** Whether maintainer mail rings the holder now (daemon 2026-10-05 on). */
+export interface RoleReach {
+  reachable?: boolean;
+  /** The no-path reason a send would carry; null when reachable. */
+  reason?: string | null;
+}
+
+export interface DelegateRole extends RoleReach {
   agent_id: string;
   expires_at: Epoch | null;
   granted_by: "operator" | "maintainer" | string;
 }
 
-export interface CoordinatorRole {
+export interface CoordinatorRole extends RoleReach {
   agent_id: string;
   expires_at: Epoch | null;
 }
@@ -154,13 +161,15 @@ export interface RepudiateResult {
   follow_up: string | null;
 }
 
-export interface GrantResult {
+export interface GrantResult extends RoleReach {
   name: string;
   agent_id: string;
   fence: number;
   expires_at: Epoch;
   replaced: string | null;
   also_broken?: string | null;
+  /** Set when the grantee has no live wake path now. */
+  warning?: string;
 }
 
 export interface RevokeRoleResult {

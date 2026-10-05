@@ -1934,7 +1934,7 @@ def _require_mcp_sdk_v2() -> None:
     print(
         f"[shim] this environment's MCP SDK (mcp {installed}) predates v2 — "
         f"the shim needs mcp>=2.1 (no {_SDK_V2_PROBE_MODULE}).\n"
-        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<3"\n'
+        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<2.2"\n'
         f"  (or re-run the repo installer, which registers the project "
         f"venv's shim)",
         file=sys.stderr,
@@ -2171,6 +2171,14 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                 "1", "true", "yes", "on"}
             state_path = os.environ.get("PSEUDOLIFE_AGENT_STATE") or _session_state_path(url)
 
+            # v55: the board shows this session by the title Claude Code
+            # shows for it (custom or generated), read from its transcript.
+            claude_session = _claude_session_id()
+            harness_name = None
+            from pseudolife_memory.harness_names import ClaudeSessionTitle, harness_names_enabled
+            if claude_session is not None and harness_names_enabled():
+                harness_name = ClaudeSessionTitle(claude_session).poll
+
             def build_adapter():
                 snapshot = provider.snapshot()
                 return CoordinationAdapter(
@@ -2183,7 +2191,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     # map later sessions of this Claude Code process (after
                     # /clear or /resume) back to it; a host without an id
                     # gets hints only.
-                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))
+                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")),
+                    harness_name=harness_name)
 
             async def ask_board():
                 try:

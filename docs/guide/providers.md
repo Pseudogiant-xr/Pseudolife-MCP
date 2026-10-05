@@ -53,8 +53,11 @@ they do not enforce semantic compliance with every memory instruction:
    (approve setup or review the definitions in `/hooks` first).
 5. **Per-turn hooks** — with the plugin, a memory-change note printed only
    when new lessons or other sessions' status notes landed since the last
-   one, with a one-line reminder (recall before review, status questions are
-   memory questions, log outcomes); the `ops/install-hook.*` fallback
+   one, with a one-line reminder ("Memory loop: before a review, a design or
+   work in a new area, recall (`memory_search` + `memory_lesson_search`) and
+   compare memory against the files; `memory_store(source="status")` when
+   long work starts or ends; `memory_outcome` with `used_ids` when an outcome
+   lands."); the `ops/install-hook.*` fallback
    installs the same note (`pseudolife-mcp prompt-hook`, run through
    `docker exec -i` on the Docker tier, where the briefing runs), and
    re-running it replaces the fixed per-prompt line older installers wrote.
@@ -274,7 +277,10 @@ marketplace and replaces both its clone and the installed copy Codex runs
 hooks from (`~/.codex/plugins/cache/pseudolife-mcp/pseudolife-memory/local`).
 It then reads that copy back and reports `refreshed`. Measured on Codex
 0.160.0, the upgrade leaves `config.toml` unchanged and every hook keeps its
-approval hash, so nothing needs approving. Codex keeps one installed copy and
+approval hash, so nothing needs approving, unless the release changes an
+approved hook definition in `plugin/hooks/hooks.json`. 0.17.0 does: the
+Stop hook's `timeout` went from 3600 to 1209600, so Codex users approve the
+plugin's hooks once more after that update. Codex keeps one installed copy and
 replaces it in place, as an update from its plugin manager does, so there is
 no older copy kept beside it. The CLI and the desktop app share the Codex home, so
 both pick up the new scripts. The update finds the Codex CLI on PATH, through
@@ -545,8 +551,9 @@ startup timeout and may assemble an optional catalog earlier. See
 
 ### Discovery and approvals
 
-Prefer the needed catalog at connection time. An unconfigured daemon defaults
-to `full`; deployments can override that with a principal-specific tier map.
+Prefer the needed catalog at connection time. With `PSEUDOLIFE_MCP_TOOLSET`
+unset the daemon defaults to `full`; the bundled compose file sets it to
+`core`. Deployments can override that with a principal-specific tier map.
 For clients that retain their initial catalog, the operator can explicitly
 choose `codex:full` in `PSEUDOLIFE_MCP_TIER_MAP` for the intended identity and
 then reconnect. Do not change the shared default or another principal simply
@@ -554,8 +561,9 @@ to discover one tool. A bearer principal takes precedence over writer identity;
 check which identity the registration actually uses.
 
 A September 2026 Codex check expanded core to full: the server listed 35 tools
-and sent `list_changed`, but the running turn retained its initial 22 callable
-tools. That verifies a current-turn limit only. After expansion, check a fresh
+(the full tier then; 38 today) and sent `list_changed`, but the running turn
+retained its initial 22 callable tools (the core tier then; 24 today). That
+verifies a current-turn limit only. After expansion, check a fresh
 task/reconnection's actual callable catalog; do not infer success from the
 server inventory or notification. Client `enabled_tools`/`disabled_tools`
 filters can narrow it further.

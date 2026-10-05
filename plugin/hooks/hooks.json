@@ -76,7 +76,7 @@
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event Stop",
             "async": true,
             "asyncRewake": true,
-            "timeout": 3600
+            "timeout": 1209600
           }
         ]
       }

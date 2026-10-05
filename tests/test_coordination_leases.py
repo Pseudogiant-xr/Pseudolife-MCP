@@ -297,12 +297,15 @@ def test_list_queue_pages_preserve_exact_payload_and_bounds(store):
     store.test_time[0] = 1121.0  # read-only listing keeps the expired hold
 
     def expected(name):
-        owner = dict(held[name]["holder"], label="")
+        # A departed row has no label, so its board name (v55) is its short id.
+        owner = dict(held[name]["holder"], label="", name=holder["agent_id"][:8])
         return {"name": name, "holder": owner, "fence": held[name]["fence"],
                 "expires_at": 1120.0, "expected_end": 1010.0, "stale": True,
                 "queued": len(queued[name]),
                 "queue": [{"agent_id": agent["agent_id"],
                            "label": "" if index == 0 else "waiter",
+                           "name": (agent["agent_id"][:8] if index == 0
+                                    else f"waiter {agent['agent_id'][:8]}"),
                            "enqueued_at": 1000.0, "purpose": f"turn {index}"}
                           for index, agent in enumerate(queued[name][:LEASE_LIST_QUEUE])]}
 
@@ -416,8 +419,10 @@ def test_the_operator_grants_a_delegate_until_it_expires(store):
     a = store.register("alice", project="proj")
     b = store.register("alice", project="proj")
     out = store.grant_delegate("proj", a["agent_id"][:8], hold=3600)
-    assert out == {"name": "delegate:proj", "agent_id": a["agent_id"],
-                   "fence": 1, "expires_at": 4600.0, "replaced": None}
+    assert {k: v for k, v in out.items() if k not in ("reachable", "reason", "warning")} == {
+        "name": "delegate:proj", "agent_id": a["agent_id"],
+        "fence": 1, "expires_at": 4600.0, "replaced": None}
+    assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
     [row] = events(store, "lease_delegate")
     assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
     assert payload(row) == {"name": "delegate:proj", "fence": 1, "hold": 3600,

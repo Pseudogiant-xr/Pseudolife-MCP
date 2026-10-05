@@ -1,7 +1,9 @@
-<!-- The full standing memory-loop instructions. The SessionStart hook
-     (plugin or verified Codex hooks) does not serve this block: it serves a
-     compact core and a bounded briefing, and
-     <data_dir>/hook-instructions.md adds text after that core. For the
+<!-- The full standing memory-loop instructions. By default
+     (memory_policy.variant: compact) the SessionStart hook (plugin or
+     verified Codex hooks) does not serve this block: it serves a compact
+     core and a bounded briefing, and <data_dir>/hook-instructions.md adds
+     text after that core (the full_separate_hook variant serves this block
+     in a separate hook). For the
      full guidance, for subagents (they read CLAUDE.md, not hook output),
      or for setups without hooks, copy this block into your CLAUDE.md
      (Claude Code), AGENTS.md, or the equivalent standing-instructions file.
@@ -67,7 +69,7 @@ your starting point for re-verification, never the current answer).
 When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
 same slot) — a stale fact nobody corrects is one the next session will
-believe too. Recall results mark aged/contested facts with a ready-made
+believe too. Recall results mark aged facts with a ready-made
 `correct_with` call: run it the moment you notice the mismatch, filling in
 the verified value (re-assert the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
@@ -75,6 +77,9 @@ a contradiction you only narrate is work left undone.
 A cortex fact carrying `contested: true` has competing values parked
 against it — settle it with `memory_fact_resolve(entity, attribute, ...)`,
 not by re-asserting `memory_fact_set`, which only contests the slot further.
+A stored entry (not a slot) that is now wrong: `memory_supersede` (full
+tier; expand via `memory_toolset` until full) keeps it as history
+beside the fix.
 
 CAPTURE — as durable things arise (one claim per call):
 - Before writing, choose: PERSIST what stays true; CONTEXT ONLY for
@@ -134,5 +139,5 @@ near-duplicates; `stored=false` is not an error). The first memory call may
 lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
-(this briefing arrives via a hook, not MCP) — tell the user to run
+(these instructions arrive via a hook or a standing file, not MCP) — tell the user to run
 the repo installer (`ops/install.sh` / `ops\install.ps1`), which wires it.

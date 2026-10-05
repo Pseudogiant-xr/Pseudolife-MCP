@@ -98,7 +98,9 @@ def test_rest_lease_errors_map_to_stable_codes(pg_conn, pg_url):
             bad = await _post(client, a, "lease", {"name": "gpu", "ttl": 5})
             assert (bad.status_code, bad.json()) == (400, {"error": "invalid_ttl"})
             missing = await _post(client, a, "lease", {"ttl": 120})
-            assert (missing.status_code, missing.json()) == (400, {"error": "missing_parameter"})
+            # The detail names what the action lacked (review 2026-10-04, M1).
+            assert (missing.status_code, missing.json()) == (
+                400, {"error": "missing_parameter", "detail": "lease needs name"})
             stranger = await _post(client, a, "release", {"name": "gpu"})
             assert (stranger.status_code, stranger.json()) == (400, {"error": "lease_not_held"})
             reserved = await _post(client, a, "lease",
@@ -108,7 +110,9 @@ def test_rest_lease_errors_map_to_stable_codes(pg_conn, pg_url):
             assert anonymous.status_code == 401
             assert anonymous.json() == {"error": "instance_authentication_required"}
             extra = await _post(client, BEARER, "leases", {"name": "gpu", "owner": "x"})
-            assert (extra.status_code, extra.json()) == (400, {"error": "unexpected_parameter"})
+            assert (extra.status_code, extra.json()) == (400, {
+                "error": "unexpected_parameter",
+                "detail": "leases does not take owner; it takes limit, name"})
 
     _run(storage, drive)
 
