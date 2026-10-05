@@ -1,5 +1,91 @@
 # Rust port state
 
+## Episode leaf candidate
+
+Native `episode-start` and `episode-end` are implemented before shim attachment
+on the reviewed version dependency `db0d59cb`. Earlier uncommitted-source diagnostics
+against Python `eb0c13e9` (0.17.0/schema 55) match 83 process pairs and reject 332
+candidate-output controls on each platform. Comparisons cover exact CLI
+invocation, environment, streams, exit and home-file bytes, plus HTTP method,
+target, application body and required credential/redirect behavior. Raw generic
+HTTP framing and implicit headers remain diagnostic; no identical-wire claim or
+CLI normalization is made. Actual local-minute title values are retained without
+clock injection or replacement. Owned peer and process cleanup is verified.
+
+The native process tests, shared helper tests, format checks and locked
+clippy pass on both hosts. Existing Python episode/title tests remain unchanged
+and in-process; no native-routing credit is assigned to them. The dedicated leaf
+has 440 production lines and the shared JSON wrapper/parser has 733, versus 192
+in the two Python reference modules (1173/192 = 6.10938, excluding tests and
+existing dispatch glue). The parser derives from the reviewed lease parser;
+the current repair adds configured integer limits.
+The Python denominator contains title behavior outside these leaves; this is a
+size observation, not a coverage claim.
+
+Independent review blocked the first candidate after 37 additional paired Windows
+diagnostics and retained abnormal-termination captures. Nested JSON can overflow
+the main stack; accepted control/folded authorization values suppress the POST;
+relative-parent and non-ASCII drive titles differ; and a lone-surrogate cwd drops
+the start request. A subsequent repair preserves the measured public JSON depth
+boundary on an owned larger-stack thread and fixes the path/title handling. Both
+hosts retain all 83 original matches, 53 additional required-boundary matches
+and two nested-key matches. The three authorization-value mismatches remain;
+the corrected source has not received independent follow-up review.
+
+A later watched regression found that Unicode argv collection ran before episode
+selection: ignored opaque tails caused exit 101 on Linux and Windows. Episode
+selection now reads only the first OS argument before that collection; known
+episode modes ignore every tail, while other modes keep their existing argv
+handling. Eight no-network process pairs per host match the pinned public module
+and source-verified public main entry, covering both episode modes, opaque tails,
+absent keys and exact invalid-origin errors. The focused native regression and
+existing dispatcher tests pass on both hosts. The earlier 83-case receipts retain
+their original source and binary identities; they were not rerun for this repair.
+Independent follow-up review and the remaining authorization/clock decisions are
+still pending.
+
+The subsequent review found three further defects: configured integer limits
+changed whether requests were sent, the health JSON decoder admitted too much
+nesting, and lowercase extended UNC prefixes changed Windows titles. The current
+repair honors valid configured integer limits, applies the public caller's
+989-container bound to health text, and treats extended UNC prefixes without
+case sensitivity. Both hosts match 24 of 27 focused process pairs; the remaining
+three are the existing configured-bearer mismatches. All 18 additional health
+boundary pairs match on each host. Two native unit tests and five episode
+process tests pass per host; the existing three dispatcher tests also pass on
+Linux. Formatting and warning-denied clippy pass on both hosts. These current
+diagnostics preserve raw captures and do not upgrade historical corpus bindings
+or establish committed acceptance. Independent review verified these three
+repairs and found a further active-health-response timeout defect.
+
+The health and POST clients now use separate connect and read timeouts instead
+of total deadlines, retaining 250 ms and 5 s respectively. Current public-process
+diagnostics on Windows and Linux with Rust 1.94.0 match nine of eleven pairs:
+active health and POST bodies, stalled bodies, immediate success, health 503,
+health redirects, POST 503 and refused POST redirects. Two native unit tests,
+five episode process tests, three dispatch tests and formatting pass per host.
+The body change removes the demonstrated total-body cutoff; it does not provide
+socket inactivity semantics through the whole reply. Active partial headers and
+a valid partial chunk-size line still suppress the native POST while Python
+sends it, with every peer gap below 250 ms and completion after 250 ms. Both
+remaining mismatches are captured on both hosts, alongside the earlier RED
+body failure. The replacement-backend route was stopped on proxy compatibility;
+no dependency, HTTP parser or TLS implementation was added. Current independent
+review and the configured-bearer and minute-clock decisions remain pending.
+
+An earlier Linux repair capture crossed a local-minute boundary between arms:
+both titles match their own recorded invocation minutes, but their POST bodies
+differ. That raw mismatch remains unmatched; a later matching run does not
+establish equality across minute transitions. No clock normalization is adopted.
+
+The independent diagnostic captures confirm invalid/cold-origin behavior and
+same- and cross-origin redirect boundaries without changing fixture admission.
+Clean committed-source real-daemon proof, registry and workflow integration,
+measurements and current CI remain pending. HTTPS/proxy/trust behavior,
+locale-default stdin and socket inactivity across headers/chunk framing remain
+unresolved. The body-stall controls above do not establish those boundaries. No
+exclusion is adopted, and both episode modes remain deferred in the register.
+
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains

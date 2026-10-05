@@ -3,6 +3,8 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod episode;
+mod python_json;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");
@@ -26,8 +28,6 @@ const DEFERRED_MODES: &[&str] = &[
     "backup",
     "export",
     "import",
-    "episode-start",
-    "episode-end",
     "wait-mail",
     "lease",
     "maintainer",
@@ -141,4 +141,12 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
             ExitCode::FAILURE
         },
     )
+}
+
+/// Hook leaves read stdin before making an unauthenticated health request.
+pub async fn dispatch_episode(mode: Option<&str>) -> Option<ExitCode> {
+    match mode {
+        Some(mode @ ("episode-start" | "episode-end")) => Some(episode::run(mode).await),
+        _ => None,
+    }
 }

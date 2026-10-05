@@ -64,7 +64,7 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-fn python_text(value: &Value, nested: bool) -> String {
+pub(super) fn python_text(value: &Value, nested: bool) -> String {
     match value {
         Value::Null => "None".into(),
         Value::Bool(value) => if *value { "True" } else { "False" }.into(),
