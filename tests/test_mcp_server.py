@@ -168,17 +168,18 @@ def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
 
 
 _EXPECTED_MINIMAL = sorted([
-    # The 9-tool eager surface for minimal-tier clients (Claude Desktop).
+    # The 10-tool eager surface for minimal-tier clients (Claude Desktop).
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
     "memory_set_add", "memory_set_remove",
-    "memory_outcome", "memory_session_title", "memory_toolset",
+    "memory_outcome", "memory_lesson_search", "memory_session_title",
+    "memory_toolset",
 ])
 
 _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
     "memory_agents", "memory_message",
     "memory_fact_resolve", "memory_graph", "memory_recall",
     "memory_graph_relate", "memory_world_search", "memory_world_set",
-    "memory_lesson_search", "document_search", "document_ingest",
+    "document_search", "document_ingest",
     "memory_stats", "memory_get", "memory_episode_start", "memory_episode_end",
 ])
 
@@ -199,6 +200,16 @@ def test_visible_tool_names_per_tier() -> None:
     assert sorted(mod._visible_tool_names("minimal")) == _EXPECTED_MINIMAL
     assert sorted(mod._visible_tool_names("core")) == _EXPECTED_CORE
     assert mod._visible_tool_names("full") == set(mod._TOOL_TIERS)
+
+
+def test_lesson_search_is_visible_at_minimal() -> None:
+    """The served session-start rule says to recall with memory_search AND
+    memory_lesson_search, and memory_outcome (minimal) writes the lessons,
+    yet minimal-tier sessions could not read them back without an expand.
+    Moved to minimal by maintainer decision, 2026-10-05."""
+    from pseudolife_memory import mcp_server as mod
+    assert mod._TOOL_TIERS["memory_lesson_search"] == "minimal"
+    assert "memory_lesson_search" in mod._visible_tool_names("minimal")
 
 
 def test_tier_map_env_parsed(tmp_path: Path, monkeypatch) -> None:

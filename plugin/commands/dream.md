@@ -14,6 +14,11 @@ residue: rows whose verdict sat below a gate, a `split` second opinion, a
 such row carries the judge's `judge` / `judge2` blocks — treat them as
 leads, read the evidence, and disagree freely.
 
+`memory_dream`, `memory_graph_review` and `memory_forget` need the full
+tool tier: if your client does not list them, call
+`memory_toolset(action="expand")` (one tier per call) until it reports
+`current: "full"`, then rediscover tools.
+
 1. Call `memory_dream(action="status")` and read four things:
    - `deep_dream` — `{recommended, reason, new_entities, days_since}`:
      whether the mechanical pass is due. The tick normally handles this;

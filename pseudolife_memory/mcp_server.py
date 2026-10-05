@@ -1086,10 +1086,10 @@ def memory_search(
     """Search shared memory in natural language: past work, decisions,
     preferences, canonical facts and ingested documents. Call at task
     start and whenever prior context may matter. Exact value of a known
-    (entity, attribute): memory_fact_get. Core tier (expand if absent,
-    then rediscover): memory_recall for multi-hop questions,
-    memory_lesson_search for lessons, memory_world_search for cited
-    external facts, document_search for documents only.
+    (entity, attribute): memory_fact_get; lessons: memory_lesson_search.
+    Core tier (expand if absent, then rediscover): memory_recall for
+    multi-hop questions, memory_world_search for cited external facts,
+    document_search for documents only.
 
     Hits are leads about the PAST: check each against today's task and
     re-derive when its context differs. cortex facts come first and may
@@ -1340,7 +1340,8 @@ def memory_supersede(
 ) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
-    higher and shows both together.
+    higher and shows both together. Test junk or a never-true entry:
+    ``memory_forget``; a canonical slot: ``memory_fact_set``.
 
     Use exactly one selector. Missing, retired, or ambiguous targets cause
     no mutation; search again and resubmit an ID. No similarity fallback.
@@ -1417,8 +1418,7 @@ def memory_stats() -> dict[str, Any]:
 # board tools and two full-tier tools missing from it).
 _TIER_ADDS = {
     "core": "board (memory_agents/memory_message), graph + recall, world "
-            "facts, lessons, documents, stats, episodes, "
-            "memory_get/fact_resolve",
+            "facts, documents, stats, episodes, memory_get/fact_resolve",
     "full": "supersede/reinstate/forget/history/reinforce, recent, "
             "episode_summary, dream + graph-review, graph_unrelate, aliases, "
             "consolidation, relation-define",
@@ -1453,8 +1453,8 @@ async def memory_toolset(
     """Change your server-visible tool tier: minimal -> core -> full, one
     step per expand; collapse steps down; status shows the current tier
     and what each tier adds. Core adds the board (memory_agents,
-    memory_message), graph/recall, world facts, lessons, documents; full
-    adds supersede/forget/history, dream and graph-review admin. After
+    memory_message), graph/recall, world facts, documents; full adds
+    supersede/forget/history, dream and graph-review admin. After
     expand, rediscover tools in the client: list_changed_sent means the
     notification was sent, not client refresh. If a named tool is still
     absent at its required tier, report the visibility mismatch; do not
@@ -1553,23 +1553,22 @@ def memory_fact_get(
         description="Full record; the default drops bookkeeping keys.")]
     = False,
 ) -> dict[str, Any]:
-    """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
-    One value per slot. A null record means EMPTY, not unknown —
-    ``memory_search`` still finds context. A set-valued slot returns
-    ``{kind: "set", members, removed}`` instead — ``members: []`` means
-    EMPTY too.
+    """Look up the one CURRENT value at an ``(entity, attribute)`` slot;
+    open questions go to ``memory_search``. A null record means EMPTY, not
+    unknown. A set-valued slot returns ``{kind: "set", members, removed}``
+    instead — ``members: []`` means EMPTY too.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). Non-empty ``contenders`` = unsettled
-    conflict (see ``memory_fact_resolve``); on an empty slot,
+    conflict (see ``memory_fact_resolve`` (core)); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
     ``re_verify`` = a memory this fact was derived from has since been
     corrected; the value still stands but check it before acting. Set slots
     carry it too, at the slot. PostgreSQL keeps this warning after the
     corrected source memory is evicted or deleted; file mode has no durable
     retraction warning. ``verbose=True`` adds the record's provenance,
-    support and temporal stamp; ``memory_history`` shows the slot's version
-    chain.
+    support and temporal stamp; ``memory_history`` (full) shows the slot's
+    version chain.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {
@@ -1711,12 +1710,14 @@ def memory_fact_set(
             description='"constraint" = verbatim, pinned in recall; "auto" '
                         'infers only that.')] = "auto",
 ) -> dict[str, Any]:
-    """Assert a canonical fact — insert, confirm, or correct a slot.
+    """Assert a canonical fact — insert, confirm, or correct a slot's one
+    NOW value. Narrative, decisions, observations: memory_store; many
+    concurrent values: memory_set_add (a set-valued slot errors here).
 
     A new value at an existing slot supersedes the old (history kept).
     A conflicting write parks as a contender (``action="contested"``,
     winner under ``current``) — check with the human, settle via
-    ``memory_fact_resolve``.
+    ``memory_fact_resolve`` (core).
 
     ``authority`` / ``distortion_tolerance`` inherit the slot's labels
     unless restated.
@@ -1742,7 +1743,7 @@ def memory_set_add(
     not one NOW value). A scalar there converts to a set on first call —
     one-way — except number-led scalars ("32", "$1,500"), which are
     protected: the add parks as a contender (action="contested", settle
-    via memory_fact_resolve). Read with memory_fact_get.
+    via memory_fact_resolve (core)). Read with memory_fact_get.
 
     Returns: {action, entity, attribute, member, members_count}.
     """
@@ -2043,7 +2044,7 @@ def memory_outcome(
     return out
 
 
-@_tool(tier="core")
+@_tool(tier="minimal")
 def memory_lesson_search(
     query: Annotated[str, Field(
         description="The task at hand, described the way it would have "
@@ -2584,7 +2585,7 @@ def memory_graph_relate(
     "runs-on", "host-1")``. Entities auto-create and resolve through
     aliases; re-asserting an edge bumps its confidence. On a rejected
     relation, pick a suggestion, fall back to ``related-to``, or grow the
-    vocabulary deliberately via ``memory_relation_define``.
+    vocabulary deliberately via ``memory_relation_define`` (full).
 
     Returns: ``{src, relation, dst, confidence, warnings}`` or
     ``{error: "unknown_relation", suggestions}``.
@@ -2874,13 +2875,12 @@ def memory_recall(
     means no seed entity matched — fall back to ``memory_search``.
 
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
-    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
-    per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
-    the deeper hops the walk exists to reach; ``edges`` prefers links
-    between surviving entities; each entity's ``facts`` is capped
-    (currently 5). A fact carrying ``re_verify`` stands on a memory that
-    has since been corrected — the value still stands, but check it before
-    acting. A seed entity's ``constraint`` facts come first, marked
+    ``entities``/``edges``/``texts`` are capped with a per-hop
+    reservation, so a hub seed's own 1-hop ring can't crowd out the
+    deeper hops the walk exists to reach; ``edges`` prefers links between
+    surviving entities; each entity's ``facts`` is capped too. A fact
+    carrying ``re_verify`` stands on a memory that has since been
+    corrected — the value still stands, but check it before acting. A seed entity's ``constraint`` facts come first, marked
     ``pinned``. ``truncated: true`` (with ``searches_issued``) means a
     search ceiling or time budget stopped the walk early: some re-queries,
     and possibly deeper hops, were skipped, so supporting texts and deeper

@@ -468,7 +468,19 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # sibling routing, then review fixes (request_conflict, the receive
     # cursor contract): minimal 5,501, core 12,352, full 18,871 — caps
     # unchanged, 249 / 398 / 379 to spare.
-    budgets = {"minimal": 5750, "core": 12750, "full": 19250}
+    # 2026-10-05: the standing-text fixes (#583) and then each write tool's
+    # sibling routing and hidden-tier marks (#586), measured on the merged
+    # tree: minimal 5,748, core 12,572, full 19,186 (2 / 178 / 64 to spare).
+    # Minimal moves 5,750 -> 6,000 and full 19,250 -> 19,450, about 250 each
+    # again; core keeps its cap. The in-flight #587 adds no description
+    # text, only parameter text, which the budget below meters.
+    # 2026-10-05, later (maintainer decision): memory_lesson_search moves from
+    # core to minimal, so minimal-tier sessions can read back the lessons
+    # memory_outcome writes; memory_search and memory_toolset drop it from
+    # their core lists. Measured: minimal 6,345, core 12,560, full 19,174.
+    # Minimal moves 6,000 -> 6,600 (255 to spare); core (190) and full (276)
+    # keep their caps.
+    budgets = {"minimal": 6600, "core": 12750, "full": 19450}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -524,7 +536,12 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # memory_search its filter-scope wording: minimal 2,739, core 8,050,
     # full 11,711. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
     # headroom, measured on the text that landed rather than assumed.
-    param_budgets = {"minimal": 3000, "core": 8750, "full": 12500}
+    # 2026-10-05 (maintainer decision): memory_lesson_search moves to
+    # minimal, +137 there: minimal 2,879, core 8,274, full 11,935. The
+    # in-flight #587 adds about 40 more to minimal (its ranges stated in
+    # memory_search and memory_lesson_search parameter text), which would
+    # leave under 100 of 3,000; minimal moves to 3,250.
+    param_budgets = {"minimal": 3250, "core": 8750, "full": 12500}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (
@@ -738,3 +755,109 @@ def test_board_tools_describe_every_parameter_with_its_cap(
     # Expanding the server tier does not refresh a client's callable list
     # (observed from Codex 2026-10-04: status said full, catalog stayed 24).
     assert "not client refresh" in d["memory_toolset"]
+
+
+def test_lower_tier_descriptions_mark_higher_tier_tools(
+        tmp_path: Path, monkeypatch) -> None:
+    """A description that names a tool its own tier does not show must say
+    which tier does, or a session at the lower tier calls a tool its client
+    never listed (2026-10-04 review, H5: five "No such tool" errors and
+    about ten abandoned tool searches for hidden tools in two months, while
+    every session that expanded found them). The fixed form is the tier in
+    parentheses right after the first mention, ``memory_fact_resolve
+    (core)``, or a ``Core tier``/``Full tier`` label earlier in the same
+    sentence. memory_toolset is exempt: describing the tiers is its job."""
+    import re
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    from pseudolife_memory.toolset_tiers import TIERS
+    rank = {t: i for i, t in enumerate(TIERS)}
+    tiers = mod._TOOL_TIERS
+    names = re.compile(r"\b(" + "|".join(sorted(tiers, key=len, reverse=True))
+                       + r")\b`*")
+    unmarked, wrong = [], []
+    for t in asyncio.run(mod.mcp.list_tools()):
+        if t.name == "memory_toolset":
+            continue
+        props = (t.input_schema or {}).get("properties", {}) or {}
+        texts = [" ".join((t.description or "").split())] + [
+            " ".join((p.get("description") or "").split()) for p in props.values()]
+        for text in texts:
+            seen: set[str] = set()
+            for m in names.finditer(text):
+                named = m.group(1)
+                if named in seen or rank[tiers[named]] <= rank[tiers[t.name]]:
+                    continue
+                seen.add(named)
+                hint = re.match(r"\s*\((core|full)\)", text[m.end():])
+                sentence = re.split(r"[.;] ", text[:m.start()])[-1]
+                label = re.search(r"\b(Core|Full) tier\b", sentence)
+                given = (hint.group(1) if hint
+                         else label.group(1).lower() if label else None)
+                if given is None:
+                    unmarked.append(f"{t.name} -> {named}")
+                elif given != tiers[named]:
+                    wrong.append(f"{t.name} -> {named} ({given}, is {tiers[named]})")
+    assert unmarked == [], f"higher-tier tools named without a tier hint: {unmarked}"
+    assert wrong == [], f"tier hints that name the wrong tier: {wrong}"
+
+
+def test_tier_adds_prose_matches_the_registry(tmp_path: Path, monkeypatch) -> None:
+    """memory_toolset(status) serves ``_TIER_ADDS``, prose written by hand
+    over ``_TOOL_TIERS``; the 2026-10-04 review found it missing the board
+    tools and two full-tier tools. Each tool a tier adds maps to the word
+    that names it in that tier's prose, and the map must cover exactly the
+    registry's difference between neighbouring tiers, so a tool that is
+    added or moves tier fails here until the prose says so."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    words = {
+        "core": {
+            "memory_agents": "memory_agents", "memory_message": "memory_message",
+            "memory_graph": "graph", "memory_graph_relate": "graph",
+            "memory_recall": "recall", "memory_world_set": "world facts",
+            "memory_world_search": "world facts",
+            "document_ingest": "documents",
+            "document_search": "documents", "memory_stats": "stats",
+            "memory_episode_start": "episodes", "memory_episode_end": "episodes",
+            "memory_get": "memory_get", "memory_fact_resolve": "fact_resolve",
+        },
+        "full": {
+            "memory_supersede": "supersede", "memory_reinstate": "reinstate",
+            "memory_forget": "forget", "memory_history": "history",
+            "memory_reinforce": "reinforce", "memory_recent": "recent",
+            "memory_episode_summary": "episode_summary", "memory_dream": "dream",
+            "memory_graph_review": "graph-review",
+            "memory_graph_unrelate": "graph_unrelate", "memory_alias": "aliases",
+            "memory_consolidate": "consolidation",
+            "memory_consolidation_candidates": "consolidation",
+            "memory_relation_define": "relation-define",
+        },
+    }
+    assert set(mod._TIER_ADDS) == set(words)
+    below = {"core": "minimal", "full": "core"}
+    for tier, mapping in words.items():
+        added = mod._visible_tool_names(tier) - mod._visible_tool_names(below[tier])
+        assert set(mapping) == added, (
+            f"{tier} adds {sorted(added ^ set(mapping))} unlike this map; "
+            f"update _TIER_ADDS[{tier!r}] and the map together")
+        missing = sorted(n for n, w in mapping.items() if w not in mod._TIER_ADDS[tier])
+        assert missing == [], f"_TIER_ADDS[{tier!r}] does not name {missing}"
+
+
+def test_sibling_tools_route_to_each_other(tmp_path: Path, monkeypatch) -> None:
+    """The routing between the write tools lived on one side only (2026-10-04
+    review, M9/M10): memory_store said to use memory_fact_set for a canonical
+    value, but memory_fact_set never sent narrative to memory_store or many
+    concurrent values to memory_set_add, nor said a set slot refuses it; and
+    memory_supersede never sent test junk to memory_forget or a slot to
+    memory_fact_set. memory_recall quoted its caps as numbers that drift."""
+    d = _descriptions(tmp_path, monkeypatch)
+    fact_set = d["memory_fact_set"]
+    assert "memory_store" in fact_set and "memory_set_add" in fact_set
+    assert "set-valued slot errors" in fact_set
+    assert "open questions go to ``memory_search``" in d["memory_fact_get"]
+    supersede = d["memory_supersede"]
+    assert "memory_forget" in supersede and "memory_fact_set" in supersede
+    assert "currently" not in d["memory_recall"]

@@ -95,6 +95,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   credential, never its text. The codes are unchanged, so callers keyed on
   them keep working; the REST API carries the new sentences in its existing
   `detail` field.
+### Changed (2026-10-05 — each memory tool says which sibling fits instead, and marks tools your tier hides)
+- A model reading one tool's description now learns when another tool is
+  the right call. `memory_fact_set` sends a narrative, decision or
+  observation to `memory_store` and many concurrent values to
+  `memory_set_add`, and says it errors on a set-valued slot;
+  `memory_fact_get` sends open questions to `memory_search`;
+  `memory_supersede` sends test junk or a never-true entry to
+  `memory_forget` and a canonical slot to `memory_fact_set`. The standing
+  instructions (`examples/CLAUDE.memory.md`, served as the session-start
+  block) teach `memory_supersede` for a stored entry that is now wrong,
+  marked full tier, with "expand via `memory_toolset` until full" (a
+  minimal-tier session needs two expands to reach it); the guard that kept full-tier tools out of those
+  instructions now admits one only when every mention says "(full tier".
+- A description that names a tool the reader's tier hides now says which
+  tier shows it, in the form `memory_fact_resolve (core)` already used by
+  `memory_search`: on `memory_fact_get` (`memory_fact_resolve`,
+  `memory_history`), `memory_fact_set` and `memory_set_add`
+  (`memory_fact_resolve`) and `memory_graph_relate`
+  (`memory_relation_define`). The 2026-10-04 review counted five "No such
+  tool" errors and about ten abandoned searches for hidden tools; every
+  session that expanded found them. A test now fails when a lower-tier
+  description names a higher-tier tool without its tier, and another when
+  `memory_toolset(action="status")`'s hand-written tier summary drifts
+  from the registry.
+- The `/dream` and `/memory-status` plugin commands say their full-tier
+  tools need `memory_toolset(action="expand")`, one tier per call, until it
+  reports `current: "full"`; the daemon's compose default is core.
+- `memory_recall` no longer quotes its current output caps as numbers
+  (they drift); it says the lists are capped.
+- The `minimal` tier grows from 9 to 10 tools by maintainer decision:
+  `memory_lesson_search` moves there from `core`. The session-start rule
+  says to recall with `memory_search` and `memory_lesson_search`, and
+  `memory_outcome` (minimal) writes the lessons, but a minimal-tier session
+  could not read them back without expanding. Measured cost on minimal:
+  tool descriptions 5,748 to 6,345 characters, parameter descriptions
+  2,742 to 2,879, and the `tools/list` manifest about 16.8 KB to 18.2 KB
+  (compact JSON). `memory_search` and `memory_toolset` no longer list it
+  under core, and the README, configuration guide, System Atlas,
+  `ops/.env.example` and the compose file give the new count.
 
 ### Changed (2026-10-05 — a Claude Code session stays reachable while it is open; the Console shows whether the delegate is)
 - A maintainer message to an idle Claude Code session rang only during the
@@ -209,8 +248,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Docs drift: README's `memory_history` row names its `as_of` parameter;
   the providers guide's September Codex check notes today's tier counts
   (full 38 tools, core 24); the configuration guide gives the minimal tier's
-  manifest as about 16 KB for 9 tools (it said ~1.5k tokens) and the full
-  memory-loop block as about 8 KB (it said 7.5 KB).
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens; superseded the
+  same day: about 18 KB for 10 tools once `memory_lesson_search` moved to
+  the minimal tier, above) and the full memory-loop block as about 8 KB (it
+  said 7.5 KB).
 
 ### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
 - A memory tool called with an argument name it does not have used to
