@@ -97,8 +97,8 @@ to a doubtful one*, which is the next axis.
 Not every claim deserves to become canonical. Three mechanisms decide:
 
 - **Provenance tiers.** Writes carry an origin: `user` > `action` >
-  `agent`. A lower-tier claim cannot silently overwrite a higher-tier
-  value.
+  `agent` > `assistant`. A lower-tier claim cannot silently overwrite a
+  higher-tier value.
 - **Contender parking.** A competing value is parked *against* the slot
   instead of taking `current`. `memory_fact_get` shows both, search flags
   the slot `contested`, and `memory_fact_resolve` settles it.
@@ -107,7 +107,7 @@ Not every claim deserves to become canonical. Three mechanisms decide:
   claim parks as a contender, promotable only by an explicit human resolve
   or an independent second witness
   ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
-- **Authority, distinct from provenance.** `origin` (user/action/agent)
+- **Authority, distinct from provenance.** `origin` (user/action/agent/assistant)
   says *who* wrote a claim; a separate write-time `authority` label
   (`directive`/`observation`/`quoted`) says *how* it was said — a quoted
   third-party remark is demoted to a contender by the two-man rule rather
@@ -278,11 +278,11 @@ whose entire pitch is auditability should not fudge its own boundaries.
 | If you need | Use | Why not this |
 |---|---|---|
 | **Multi-tenant SaaS memory** — one deployment serving many customers with tenant isolation | Mem0, Zep Cloud | One daemon owns one **bank**, single-writer by construction. Principals are bearer-token identities for *your* agents, not tenants; there is no tenant boundary in the schema |
-| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There are no roles, no directory integration, and no compliance attestations |
+| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There is no SSO/OIDC, no org-wide RBAC, no directory integration, and no compliance attestations. The board's only roles are a project's delegate and coordinator, and maintainer actions need a passkey tap in the Console |
 | **Managed hosting** — someone else runs it, patches it, backs it up | Mem0, Zep Cloud | There is no cloud tier and there will not be one: a hosted service would dilute the zero-egress claim and add a business to run |
 | **An agent framework** — runtime, planner, tool loop, agent state | Letta, LangGraph | This is a memory server with no agent in it. Your coding agent is the intelligence |
 | **Memory for a non-MCP application** — a web app, a chatbot backend | Mem0, Cognee, Memori | The interface is MCP plus a REST console. There is no general-purpose SDK, and the tool docstrings are written for a coding agent to read |
-| **Cross-machine sync out of the box** | A hosted service | Memory lives on one machine's disk; syncing is left to rclone/syncthing |
+| **Cross-machine sync out of the box** | A hosted service | One daemon owns one bank; other machines use it over the network ([remote bank](remote-bank.md)), but there is no replica and no offline mode |
 | **A LoCoMo leaderboard number to put in a deck** | Anyone who publishes one | We publish a documented refusal instead — see above |
 
 Also worth saying: this is **solo-maintained, best-effort** software. It is
@@ -300,7 +300,7 @@ memory_fact_get("staging", "host")
 memory_history("staging", "host")
 
 # Is this bank extracting locally, or at all?
-curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | disabled
+curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | stalled | disabled
 
 # Every published number's run artifact:
 ls evals/results/

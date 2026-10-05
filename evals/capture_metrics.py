@@ -60,10 +60,11 @@ extractor shim) fire the same hooks and are indistinguishable from an
 interactive session that ignored memory; ``working_sessions`` (at least one
 memory interaction) is reported beside ``sessions`` for that reason.
 
-Not recorded by the bank, so reported as null with the reason:
-``memory_lesson_search`` calls (no retrieval-log row, no read counter) and
-the used_ids an outcome claimed that nothing served (the daemon returns
-``used_ids_unmatched`` to the caller but persists only credited ids).
+Not read by this script yet, so reported as null with the reason:
+``memory_lesson_search`` calls and the used_ids an outcome claimed that
+nothing served. Since schema v44 the bank persists both
+(``lesson_search_events``, and ``outcome_signals.used_ids`` with its
+``unmatched`` list).
 
 Baseline (2026-07-18, N=89 root episodes since 2026-06-27, BEFORE the
 auto-outcome stage deployed). Measured with the root-episode denominator
@@ -116,6 +117,9 @@ NON_SUBSTANTIVE_SOURCES = ("status", "log")
 _HOOK_KEY = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SHIM_KEY = re.compile(r"^[0-9a-f]{32}$")
 
+# The reason texts below predate schema v44, which persists both (see the
+# module docstring); tests/test_capture_metrics.py pins their wording, so
+# they change with the code that reads the new records.
 NOT_RECORDED = {
     "lesson_search_used": (
         "not recorded by the bank: memory_lesson_search writes no "

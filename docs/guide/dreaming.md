@@ -2,8 +2,9 @@
 
 The dream pass, its extractor tiers (regex floor / agent-driven / headless
 auto-sweep), the bundled CPU sidecar, upgrading to a bigger model, the
-Sonnet-primary fallback setup, cadence, deep dream, and the deliberate
-consolidation workflow. Part of the [user guide](../../README.md#documentation).
+Claude-primary fallback setup (default dreamer model `claude-opus-5-5`),
+cadence, deep dream, and the deliberate consolidation workflow. Part of the
+[user guide](../../README.md#documentation).
 
 A **dream** distils the recent associative stream (MIRAS) into canonical
 cortex facts: pull unconsolidated memories → extract

@@ -334,7 +334,7 @@ near-duplicates; `stored=false` is not an error). The first memory call may
 lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
-(this briefing arrives via a hook, not MCP) — tell the user to run
+(these instructions arrive via a hook or a standing file, not MCP) — tell the user to run
 the repo installer (`ops/install.sh` / `ops\\install.ps1`), which wires it.
 """
 
