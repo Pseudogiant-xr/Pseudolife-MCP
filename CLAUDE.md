@@ -394,31 +394,51 @@ took 143 CUDA OOMs.
   code conflict is resolved by hand and any local full suite required for
   the branch's own change has already passed. Run the test files covering
   the overlap, plus doc guards when docs overlap, and require fresh CI on
-  the updated merge ref. A manually resolved code conflict requires a local
+  the updated merge ref (unless the disjoint merge-forward bullet below
+  applies). A manually resolved code conflict requires a local
   full suite. Ordinary code branches with no local-full requirement do not
   acquire one merely by merging master forward. A pass carried forward
   under the review-fix rule below counts as the branch's passed run.
 - **A disjoint merge-forward needs no fresh pre-merge CI** (maintainer
   decision 2026-10-05, after #592 waited 25 minutes on a CHANGELOG-only
-  conflict). All of these must hold:
-  - The PR's previous head passed every required check.
-  - Since that run, master's new commits and the PR's own changes share no
-    file except docs-only files (CHANGELOG.md, other `*.md`, `llms*.txt`,
-    `docs/**`). Compare `git diff --name-only <old base>..origin/master`
-    with the PR's changed files.
-  - No code conflict was resolved by hand. The merge-forward commit changes
-    only docs-only files beyond what the PR already changed.
-  - Neither side touches shared ground: `pyproject.toml`, lock files,
-    `.github/workflows/`, `tests/conftest.py`, fixtures, imported test
-    helpers, or a module the other side's changed files import (grep
-    for it).
-  - The doc guards pass locally on the merged head when docs overlapped.
+  conflict). It never applies to `integrate/*` branches: their CI is the
+  only combined check of their PRs. All of these must hold:
+  - The PR's previous head passed `test`, `test-lite-linux`,
+    `test-lite-windows`, `test-lite-macos`, `frontend` and CodeQL. The
+    merge-forward commit is the only commit pushed since; a review fix
+    pushed with it needs its own CI.
+  - The two sides share no file except docs-only files, as the "Docs-only
+    changes" bullet defines them. Compute it, don't eyeball it:
+    `base=$(git merge-base <previous head> origin/master)`. Master's set is
+    `git diff --name-only $base..origin/master`, and the PR's set is
+    `git diff --name-only $base...<previous head>`.
+  - No hand resolution outside docs: `git show --remerge-diff --name-only
+    <merge commit>` lists only docs-only files. `llms-full.txt` is
+    regenerated with `python ops/gen_llms_txt.py`, never hand-merged.
+  - Neither side changes shared ground:
+    - `pyproject.toml`, lock files or `.github/workflows/`;
+    - `tests/conftest.py`, fixtures or imported test helpers;
+    - schema, DDL or migrations;
+    - generated outputs (`pseudolife_memory/web/static/`).
+  - Neither side's code reaches the other's only through a dynamic import,
+    a subprocess, or HTTP or MCP calls into a daemon whose behaviour the
+    other side changed.
+  - On the merged head, run locally every test file either side added or
+    changed since `$base`, plus the doc guards and every test naming a
+    touched doc path. All must pass. Read overlapping doc hunks for
+    contradictions; a clean doc auto-merge can still contradict itself.
 
-  Then merge without waiting for the new run. CI runs again on the push to
-  master (`ci.yml` triggers on it). The merger watches that run and, if it
-  fails, fixes forward or reverts at once. The PR comment says "disjoint
-  merge-forward: fresh CI skipped" and lists both file sets. When in doubt,
-  wait for CI.
+  Merging before `test` reports on the new head is a ruleset bypass (admin
+  merge), so only the maintainer or the maintainer's delegate does it. The
+  PR comment says "disjoint merge-forward: fresh CI skipped" and gives both
+  file sets.
+
+  CI runs again on the push to master (`ci.yml` triggers on it). That run
+  is the check, and a cancelled run is not a pass: a later master push
+  cancels an earlier run (`cancel-in-progress`). Watch the first master
+  run that completes on a commit containing the merge. If it fails, open a
+  revert PR at once, or a fix PR when the fix is obvious, and make no more
+  disjoint merges until master is green again. When in doubt, wait for CI.
 - **Review fixes after a passing local full suite need no new one** unless
   the fixes themselves fall under a class that requires one (shipping
   checklist item 3, including its platform-specific process rule). A review
@@ -446,7 +466,8 @@ took 143 CUDA OOMs.
   filename.
 - **Open the PR while a required local full suite is queued.** Review and CI
   may run in parallel. State “local full suite: queued” with the queued
-  head, then record its actual result. Merge only after all required local
+  head, then record its actual result. Except for a disjoint merge-forward,
+  merge only after all required local
   validation and current-merge-ref CI pass. Ordinary code PRs state the
   local selection and “local full suite: not required under the
   ordinary-code rule”. An old-head full pass is not evidence for a changed
