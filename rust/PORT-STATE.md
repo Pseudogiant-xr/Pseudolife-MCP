@@ -716,3 +716,11 @@ presentation exclusions. Fresh repair review, both-platform real daemon/storage
 and signal acceptance, CI and paired measurements remain pending. Historical
 receipts retain their original source and runtime identities. The CLI-LEASE
 parity row remains deferred.
+
+The first disposable Python 0.17.0/schema55 Windows check/list/run/release proof
+matches four process pairs using the fixture's environment bearer. Its earlier
+file-source attempt remains a failed board proof: Windows `chmod` did not make
+the token file owner-only. Fixture preparation now calls the pinned production
+secure token writer and binds the executed credentials module. File-source
+writer/read admission and targeted fixture checks pass; the same four-cell
+real-daemon proof on a committed helper head and fresh review remain pending.

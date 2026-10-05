@@ -56,6 +56,24 @@ def test_transitive_production_guard_and_admin_resolver_have_selected_root(monke
     assert "tests/fake_embedder.py" in provenance.SOURCE_PATHS
 
 
+def test_binding_includes_actual_secure_token_writer(monkeypatch):
+    from pseudolife_memory.credentials import _write_token_file
+    production = helper_maps(monkeypatch)[1][1]
+    assert _write_token_file in production["pseudolife_memory/credentials.py"]
+
+
+def test_secure_token_writer_from_another_tree_is_refused(tmp_path, monkeypatch):
+    foreign = tmp_path / "foreign.py"
+    foreign.write_text("def write_token_file(path, token):\n    return None\n")
+    namespace = {}
+    exec(compile(foreign.read_text(), str(foreign), "exec"), namespace)
+    monkeypatch.setattr(cli_process, "_write_token_file", namespace["write_token_file"])
+    production = helper_maps(monkeypatch)[1][1]
+    with pytest.raises(RuntimeError, match="another tree"):
+        provenance.require_instrument_binding(provenance.ROOT, {
+            "pseudolife_memory/credentials.py": production["pseudolife_memory/credentials.py"]})
+
+
 @pytest.mark.parametrize("name", PARENTS)
 @pytest.mark.parametrize("field", ["source_files_sha256", "source_files_git_blob"])
 def test_public_receipt_refuses_omitted_parent_identity(name, field):
@@ -123,7 +141,8 @@ def test_parent_counterfactual_refuses_binding_without_service(tmp_path, monkeyp
         provenance.require_instrument_binding(root, paths)
 
 
-@pytest.mark.parametrize("name", ["pseudolife_memory/storage/schema.py", "tests/pg_defaults.py"])
+@pytest.mark.parametrize("name", ["pseudolife_memory/credentials.py", "pseudolife_memory/storage/schema.py",
+                                 "tests/pg_defaults.py"])
 @pytest.mark.parametrize("field", ["source_files_sha256", "source_files_git_blob"])
 def test_public_receipt_requires_transitive_production_guard_identity(name, field):
     raw, _, _ = receipt()
@@ -145,7 +164,7 @@ def test_public_projection_retains_parent_and_transitive_hashes_without_paths():
     for field in ("source_files_sha256", "source_files_git_blob"):
         for name in (*PARENTS, "evals/rust_port/stdio_daemon.py"):
             assert summary["instrument_binding"][field][name] == raw["cli_instrument_binding"]["instrument"][field][name]
-        for name in ("pseudolife_memory/storage/schema.py", "tests/pg_defaults.py"):
+        for name in ("pseudolife_memory/credentials.py", "pseudolife_memory/storage/schema.py", "tests/pg_defaults.py"):
             assert summary["production_ownership"][field][name] == raw["cli_instrument_binding"]["production_ownership"][field][name]
     import json
     serialized = json.dumps(summary)
@@ -229,3 +248,4 @@ def test_actual_corpus_helper_binding_admits_committed_clean_disposable_tree(tmp
     for field in ("source_files_sha256", "source_files_git_blob"):
         assert set(binding["instrument"][field]) == set(CLI_HELPERS)
     assert "tests/fake_embedder.py" in binding["production_ownership"]["source_files_sha256"]
+    assert "pseudolife_memory/credentials.py" in binding["production_ownership"]["source_files_sha256"]

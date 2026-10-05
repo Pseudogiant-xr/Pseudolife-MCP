@@ -14,6 +14,8 @@ import sys
 import time
 import tomllib
 
+from pseudolife_memory.credentials import _write_token_file
+
 from .cli_corpus import corpus
 from .cli_public import public_summary
 from .harness import Policy, capture_platform, compare, isolated_env, run_cli, write_new
@@ -56,7 +58,8 @@ def cli_binding(root, oracle_root, *, extra_helpers=None):
         production = {path.resolve().relative_to(Path(oracle_root).resolve()).as_posix(): [path] for path in owners}
     except ValueError as error:
         raise RuntimeError("CLI ownership helper loaded from another production tree") from error
-    production.update({"pseudolife_memory/storage/schema.py": [schema.dsn_database_name,
+    production.update({"pseudolife_memory/credentials.py": [_write_token_file],
+                       "pseudolife_memory/storage/schema.py": [schema.dsn_database_name,
                           schema.refuse_production_database, schema.assert_disposable_database],
                        "tests/pg_defaults.py": [default_admin_url],
                        "tests/fake_embedder.py": [FakeSentenceTransformer]})
@@ -158,8 +161,7 @@ def fixture_env(home, commands, url):
         Path(env["XDG_RUNTIME_DIR"]).chmod(0o700)
     from evals.rust_baseline.transport import TOKEN
     token = Path(env["PSEUDOLIFE_MCP_TOKEN_FILE"])
-    token.write_bytes(TOKEN.encode("ascii"))
-    token.chmod(0o600)
+    _write_token_file(token, TOKEN)
     return env
 
 

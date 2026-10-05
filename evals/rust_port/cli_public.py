@@ -73,7 +73,8 @@ def public_summary(receipt):
                 and receipt["instrument_head"] == instrument["source_head"] and receipt["instrument_dirty"] is False)
         ownership = binding["production_ownership"]
         require(ownership is not None)
-        owner_files = ("pseudolife_memory/storage/schema.py", "tests/pg_defaults.py", "tests/fake_embedder.py")
+        owner_files = ("pseudolife_memory/credentials.py", "pseudolife_memory/storage/schema.py",
+                       "tests/pg_defaults.py", "tests/fake_embedder.py")
         if platform["os"] == "Windows":
             owner_files += ("pseudolife_memory/codex_doorbell.py",)
         ownership = binding_summary(ownership, owner_files)
