@@ -681,3 +681,20 @@ The scoped output contract is UTF-8 stdout/stderr with platform newlines. This i
 The local admission correction currently adds eight production Rust lines: 171 physical lines before `#[cfg(test)]` plus the unchanged 13 net dispatcher lines gives 184/125 = 1.472, using the same comments/blanks and asset/test exclusions. This is a proposed-source count, not a final captured-head ratio; historical 176/125 remains attached to its captures.
 
 Current publication state: #600 is draft on master at `95d5402d`, with successful runs 37489572403/37489572384 and all 14 checks green; the later local console/warm changes are not ready. #589 and #606 closed after verified survival in version and the evidence-only split. #609 is ready with all 14 checks green; retained ONNX/read-path copies remain separately scoped evidence. Receipt relocation has not yet moved or removed any tracked file.
+## Phase 2b native lease candidate
+
+Native `lease check`, `lease list` and `lease run` have a local implementation
+candidate. Operator actions remain deferred. Targeted Windows proofs against
+the historical Python 0.16.1 pin cover raw-surrogate identity, held/free names,
+exact 8191/8192/8193-byte output boundaries and nested-run precedence. The latest
+focused repair has 22 matching byte pairs, three matching closed-check stream
+pairs and 72 rejected candidate-output controls; two traceback cases use the
+explicitly deferred presentation boundary in PORTING. Earlier receipts retain
+their original candidate identities, including the corrected distinction
+between authenticated peer observations and local no-board observations.
+
+The seven native lease files contain 2625 lines against 1884 in the pinned
+Python lease module (1.39331); the Python denominator includes deferred operator
+modes. Current-master and shared-helper integration, fresh review, both-platform
+real daemon/storage and signal acceptance, CI and paired measurements remain
+pending. The CLI-LEASE parity row remains deferred.

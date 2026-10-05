@@ -11,6 +11,10 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
+        let lease_arguments: Vec<_> = std::env::args().skip(2).collect();
+        std::process::exit(pseudolife_stdio::cli::lease::main(&lease_arguments).await);
+    }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
     {

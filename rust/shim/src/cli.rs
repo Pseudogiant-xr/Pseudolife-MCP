@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+pub mod lease;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");
@@ -29,7 +30,6 @@ const DEFERRED_MODES: &[&str] = &[
     "episode-start",
     "episode-end",
     "wait-mail",
-    "lease",
     "maintainer",
 ];
 

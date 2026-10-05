@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -164,6 +165,9 @@ def fixture_env(home, commands, url):
 
 def cases(modes=("help",)):
     result = []
+    if "lease" in modes:
+        from .lease_corpus import cases as lease_cases
+        result.extend(lease_cases())
     if "help" in modes:
         for case in corpus()["cases"]:
             result.append({"id": case["id"], "mode": "help" if case["id"].startswith("help-")
@@ -247,7 +251,7 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     return selected, identity, original_identity
 
 
-def observe(case, command, commands, *, root, home, url, prepare=None):
+def observe(case, command, commands, *, root, home, url, prepare=None, process_scope=None):
     # Both arms occupy the same disposable path, reset before each launch. Path
     # text remains contractual; no broad home/path replacement is permitted.
     reset_home(home)
@@ -279,6 +283,18 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
                 raise ValueError("case file and directory environment overrides must remain inside the home")
     from .harness import _base_url
     _base_url(url)
+    admitted_env = copy.deepcopy(env)
+
+    def admit_environment():
+        for key, value in (("PSEUDOLIFE_MCP_DAEMON_URL", url), ("PSEUDOLIFE_MCP_NO_SPAWN", "1")):
+            if {name: cell for name, cell in env.items() if name.upper() == key} != {key: value}:
+                raise ValueError("CLI child must retain the owned daemon and no-spawn policy")
+        if len({key.upper() for key in env}) != len(env):
+            raise ValueError("CLI environment contains case aliases")
+        if env != admitted_env:
+            raise ValueError("CLI effective environment changed after admission")
+
+    admit_environment()
     for relative, encoded in case.get("pre_files_b64", {}).items():
         path = file_path(home, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -367,12 +383,13 @@ def candidate_controls(records):
     return result
 
 
-def paired_cases(spec, commands, *, root, home, url, prepare=None):
+def paired_cases(spec, commands, *, root, home, url, prepare=None, process_scope=None):
     records = []
     if not spec or len({case["id"] for case in spec}) != len(spec):
         raise ValueError("CLI process corpus needs nonempty unique case ids")
     for case in spec:
-        arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare)
+        arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare,
+                             process_scope=process_scope)
                 for arm, command in commands.items()}
         differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
         records.append({"id": case["id"], "mode": case["mode"], **arms,
@@ -382,7 +399,7 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None):
             "passed": all(record["passed"] for record in records) and all(c["rejected"] for c in controls)}
 
 
-def run(root, command, candidate_root, spec, resource, *, prepare=None):
+def run(root, command, candidate_root, spec, resource, *, prepare=None, process_scope=None):
     from evals.rust_baseline import daemon, transport
     from evals.rust_baseline.daemon import disposable_database, launched_daemon, private_directory
     from .full_bank import private_home_overrides
@@ -412,7 +429,7 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
         with launched_daemon(dsn, private, source_root=root, env_extra=private_home_overrides(private),
                              child_module="evals.rust_port.stdio_daemon", startup_timeout=90) as (_, url, cleanup):
             result = paired_cases(spec, commands, root=root, home=Path(private) / "cli-home", url=url,
-                                  prepare=prepare)
+                                  prepare=prepare, process_scope=process_scope)
     cleanup["database_dropped"] = True
     if command_identity(commands["oracle"], root) != identities["oracle"] or \
             candidate_identity(command, candidate_root) != identities["candidate"]:
@@ -440,7 +457,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="private exact raw receipt path")
     parser.add_argument("--public-out", type=Path, help="allowlisted summary requiring complete help/version coverage")
     parser.add_argument("--corpus", type=Path)
-    parser.add_argument("--modes", nargs="+", choices=("help", "version"), default=["help"])
+    parser.add_argument("--modes", nargs="+", choices=("help", "version", "lease"), default=["help"])
     clearance = parser.add_mutually_exclusive_group(required=True)
     clearance.add_argument("--board-checked-at")
     clearance.add_argument("--offline-resource-checked-at")

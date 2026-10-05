@@ -470,3 +470,14 @@ identity, not a build attestation. The paired measurements use three repeats
 of ten samples per arm, with separately sampled RSS and per-arm quantile floors.
 Current numeric tables and remaining acceptance gates are in PORT-STATE.md;
 full suites, final integrated-head CI and whole-change review remain pending.
+
+## Lease diagnostic boundaries
+
+Exact Python traceback presentation is deferred for two lease cases: timeout
+conversion overflowing the monotonic-clock float, and large `lease list` output
+written to a closed pipe. Both retain the Python exit code and terminal error
+line; timeout overflow starts no child and creates no lease state. Raw Python
+and native counterexamples remain separate from byte-identical acceptance
+cells. This exception excludes only the interpreter stack, source paths and
+line framing in those two cases. Other stderr, nested-run precedence, output
+buffering boundaries and Python-accepted JSON values remain in scope.
