@@ -131,23 +131,51 @@ def cases(modes=("help",)):
                            "stdin_b64": "", "environment_deltas": {}, "pre_files_b64": {},
                            "normalizations": []})
     if "version" in modes:
-        for argv in (["version"], ["--version"]):
-            result.append({"id": "version-bare-" + argv[0].lstrip("-"), "mode": "version",
-                           "argv": argv, "stdin_b64": "", "environment_deltas": {},
-                           "pre_files_b64": {}, "normalizations": []})
-        result[-1]["id"] = "version-bare-flag"
+        from .cli_version import cases as version_cases
+        result.extend(version_cases())
     return result
 
 
-def observe(case, command, commands, *, root, home, url, prepare=None):
-    # Both arms occupy the same disposable path, reset before each launch. Path
-    # text remains contractual; no broad home/path replacement is permitted.
+def reset_home(home):
+    """Reset the shared owned path after checking every entry before removal."""
     if remove_root_link(home):
         raise ValueError("CLI home contains a link or junction")
     if home.exists():
         # Validate entries before cleanup as well as before reading state.
         list(checked_files(home))
         shutil.rmtree(home)
+
+
+def prepared_command(case, command, commands, *, root, home, env, prepare):
+    """Bind relocated prefixes to the original arm and preserve owned policies."""
+    original = list(command)
+    original_identity = command_identity(original, root)
+    owned = {"HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "CUDA_VISIBLE_DEVICES",
+             "OMP_NUM_THREADS", "MKL_NUM_THREADS", "PYTHONIOENCODING", "PATH", "CODEX_HOME",
+             "TMP", "TEMP", "TMPDIR", "HF_HOME", "TORCH_HOME", "TORCHINDUCTOR_CACHE_DIR",
+             "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_MCP_NO_SPAWN"}
+    owned.update(key.upper() for key in env if key.upper().startswith("XDG_"))
+    before = {key: {name: value for name, value in env.items() if name.upper() == key} for key in owned}
+    selected = original if prepare is None else prepare(case, home, env, list(original), copy.deepcopy(commands))
+    if any({name: value for name, value in env.items() if name.upper() == key} != before[key] for key in owned):
+        raise ValueError("CLI preparation must retain owned daemon, isolation and CPU policies")
+    if not isinstance(selected, list) or not selected or not all(isinstance(arg, str) and arg for arg in selected):
+        raise ValueError("prepared command requires a nonempty string prefix")
+    invoked = Path(selected[0])
+    if not invoked.is_absolute():
+        invoked = Path(shutil.which(selected[0], path=env["PATH"]) or root / selected[0])
+    selected = [str(invoked.resolve(strict=True)), *selected[1:]]
+    identity = command_identity(selected, root)
+    if selected[1:] != original[1:] or any(identity[key] != original_identity[key]
+            for key in ("executable_sha256", "executable_bytes")):
+        raise ValueError("prepared command must retain the original arm prefix and executable bytes")
+    return selected, identity, original_identity
+
+
+def observe(case, command, commands, *, root, home, url, prepare=None):
+    # Both arms occupy the same disposable path, reset before each launch. Path
+    # text remains contractual; no broad home/path replacement is permitted.
+    reset_home(home)
     env = fixture_env(home, commands, url)
     if case.get("normalizations"):
         raise ValueError("no cli-state normalizations are authorized in this corpus yet")
@@ -175,23 +203,13 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(base64.b64decode(encoded, validate=True))
     original = list(command)
-    original_identity = command_identity(original, root)
     try:
-        selected = original if prepare is None else prepare(case, home, env, list(original), copy.deepcopy(commands))
+        selected, identity, original_identity = prepared_command(
+            case, original, commands, root=root, home=home, env=env, prepare=prepare)
         for key, value in (("PSEUDOLIFE_MCP_DAEMON_URL", url), ("PSEUDOLIFE_MCP_NO_SPAWN", "1")):
             matching = {name: cell for name, cell in env.items() if name.upper() == key}
             if matching != {key: value}:
                 raise ValueError("CLI child must retain the owned daemon and no-spawn policy")
-        if not isinstance(selected, list) or not selected or not all(isinstance(arg, str) and arg for arg in selected):
-            raise ValueError("prepared command requires a nonempty string prefix")
-        invoked = Path(selected[0])
-        if not invoked.is_absolute():
-            invoked = Path(shutil.which(selected[0], path=env["PATH"]) or root / selected[0])
-        selected = [str(invoked.resolve(strict=True)), *selected[1:]]
-        identity = command_identity(selected, root)
-        if selected[1:] != original[1:] or any(identity[key] != original_identity[key]
-                for key in ("executable_sha256", "executable_bytes")):
-            raise ValueError("prepared command must retain the original arm prefix and executable bytes")
         arguments = [arg.format_map(values) for arg in case["argv"]]
         before = snapshot(home)
         response = run_cli(selected, arguments, cwd=root, env=env,
@@ -275,6 +293,9 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
     if identities["candidate"]["public_cli_module"] or identities["candidate"]["executable_sha256"] == \
             identities["oracle"]["executable_sha256"]:
         raise ValueError("CLI candidate must be a distinct native executable")
+    if prepare is None and any(case.get("mode") == "version" for case in spec):
+        from .cli_version import make_prepare
+        prepare = make_prepare(root, source["oracle_head"])
     with disposable_database() as dsn, private_directory() as private:
         with launched_daemon(dsn, private, source_root=root, env_extra=private_home_overrides(private),
                              child_module="evals.rust_port.stdio_daemon", startup_timeout=90) as (_, url, cleanup):
@@ -290,7 +311,7 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
             "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "policy": STATE_POLICY, "normalizations": [], "daemon_cleanup": cleanup, **result,
             "coverage": {"kind": "additive-process-corpus", "modes": sorted({c["mode"] for c in spec})},
-            "limitations": ["Default corpus covers help and unknown dispatch; version bare is opt-in.",
+            "limitations": ["Default corpus covers help and unknown dispatch; version installer-schema cases are opt-in.",
                             "Other modes require explicit recorded cases; no mode status is implied.",
                             "UTF-8 only; cp1252 is deferred.",
                             "Raw home snapshots and environment deltas are private evidence."]}

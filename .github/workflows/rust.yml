@@ -120,7 +120,7 @@ jobs:
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - name: Run CLI process fixture and help drift guards
-        run: python -m pytest -q evals/rust_port/test_cli_dispatch_lane.py evals/rust_port/test_cli_process.py evals/rust_baseline/test_cli_measurement.py
+        run: python -m pytest -q evals/rust_port/test_cli_dispatch_lane.py evals/rust_port/test_cli_process.py evals/rust_port/test_cli_version.py evals/rust_baseline/test_cli_measurement.py
       - name: Run unchanged candidates and differential judges
         shell: pwsh
         run: |
@@ -185,7 +185,7 @@ jobs:
           raise SystemExit(result.returncode)
           '@
           $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
-          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --offline-resource-checked-at $resourceCheckedAt
+          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --modes help version --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()

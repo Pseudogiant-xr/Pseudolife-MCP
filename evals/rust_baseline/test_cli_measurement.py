@@ -49,3 +49,119 @@ def test_mismatched_version_bytes_refuse_before_any_timed_samples(tmp_path, monk
     with pytest.raises(RuntimeError, match="byte control failed"):
         cli_measurement.measure(args, {})
     assert len(calls) == 2
+
+
+def installed_instrument(tmp_path, monkeypatch):
+    args, calls = instrument(tmp_path, monkeypatch)
+    oracle = tmp_path / "python"
+    oracle.write_bytes(b"python fixture")
+    args.candidate.write_bytes(b"native fixture")
+    monkeypatch.setattr(cli_measurement.sys, "executable", str(oracle))
+    from evals.rust_port.phase1_receipts import command_identity
+    monkeypatch.setattr(cli_measurement, "command_identity", command_identity)
+    monkeypatch.setattr(cli_measurement, "candidate_identity", command_identity)
+    case = {"id": "version-installed", "mode": "version", "argv": ["--version"],
+            "stdin_b64": "", "environment_deltas": {}, "pre_files_b64": {}, "normalizations": []}
+    prepared = []
+
+    def prepare(case, home, env, command, commands):
+        import shutil
+        prepared.append((home, dict(env), dict(commands)))
+        for arm, prefix in commands.items():
+            target = home / arm
+            shutil.copy2(prefix[0], target)
+        return [str(home / ("oracle" if command == commands["oracle"] else "candidate")), *command[1:]]
+
+    return args, case, prepare, prepared, calls
+
+
+def test_installed_measurement_resets_one_home_before_timer_and_retains_binding(tmp_path, monkeypatch):
+    args, case, prepare, prepared, calls = installed_instrument(tmp_path, monkeypatch)
+    started = []
+    monkeypatch.setattr(cli_measurement.time, "perf_counter", lambda: started.append(len(prepared)) or 1.0)
+
+    def observed(command, argv, **kwargs):
+        home = Path(kwargs["env"]["HOME"])
+        assert not (home / "dirty").exists()
+        (home / "dirty").write_bytes(b"same response state")
+        calls.append(argv)
+        import base64
+        return {"exit_code": 0, "stdout_b64": base64.b64encode(str(home).encode()).decode(), "stderr_b64": ""}
+
+    from pathlib import Path
+    monkeypatch.setattr(cli_measurement, "run_cli", observed)
+    receipt = cli_measurement.measure(args, {}, prepare=prepare, case=case)
+    assert len(prepared) == len(calls) == 62
+    assert len({home for home, _, _ in prepared}) == 1
+    assert started[::2] == list(range(3, 63))
+    assert all(env["CUDA_VISIBLE_DEVICES"] == "-1" and env["PSEUDOLIFE_MCP_NO_SPAWN"] == "1"
+               for _, env, _ in prepared)
+    assert all(set(commands) == {"oracle", "candidate"} for _, _, commands in prepared)
+    assert receipt["prepared_case"] == case
+    assert all(len(rows) == 30 for rows in receipt["runs"].values())
+    assert all("execution" in row for rows in receipt["runs"].values() for row in rows)
+
+
+@pytest.mark.parametrize("mutation", ["bytes", "tail", "cpu", "spawn"])
+def test_installed_measurement_refuses_changed_prepared_binding_before_launch(tmp_path, monkeypatch, mutation):
+    args, case, prepare, prepared, calls = installed_instrument(tmp_path, monkeypatch)
+
+    def changed(*arguments):
+        command = prepare(*arguments)
+        if mutation == "bytes":
+            from pathlib import Path
+            Path(command[0]).write_bytes(b"substituted")
+        elif mutation == "tail":
+            command.append("substituted")
+        else:
+            arguments[2]["CUDA_VISIBLE_DEVICES" if mutation == "cpu" else "PSEUDOLIFE_MCP_NO_SPAWN"] = "0"
+        return command
+
+    monkeypatch.setattr(cli_measurement, "run_cli", lambda *a, **k: pytest.fail("must not launch"))
+    with pytest.raises(ValueError):
+        cli_measurement.measure(args, {}, prepare=changed, case=case)
+    assert not calls
+
+
+def test_installed_control_file_difference_refuses_before_timing(tmp_path, monkeypatch):
+    args, case, prepare, prepared, calls = installed_instrument(tmp_path, monkeypatch)
+
+    def observed(command, argv, **kwargs):
+        from pathlib import Path
+        home = Path(kwargs["env"]["HOME"])
+        (home / "state").write_bytes(b"candidate" if len(command) == 1 else b"oracle")
+        calls.append(argv)
+        return {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_measurement, "run_cli", observed)
+    monkeypatch.setattr(cli_measurement.time, "perf_counter", lambda: pytest.fail("must not time"))
+    with pytest.raises(RuntimeError, match="byte control failed"):
+        cli_measurement.measure(args, {}, prepare=prepare, case=case)
+    assert len(calls) == 2
+
+
+def test_installed_layout_selects_public_installer_case_without_private_adapter(tmp_path, monkeypatch):
+    args, _, prepare, prepared, calls = installed_instrument(tmp_path, monkeypatch)
+    args.layout = "installed"
+    monkeypatch.setattr(cli_measurement, "require_pinned_source", lambda root: {"oracle_head": "f" * 40})
+    from evals.rust_port import cli_version
+    selected = []
+    monkeypatch.setattr(cli_version, "make_prepare", lambda root, pin: selected.append((root, pin)) or prepare)
+    receipt = cli_measurement.measure(args, {})
+    assert selected == [(tmp_path, "f" * 40)]
+    assert receipt["prepared_case"]["layout_kind"] == "default"
+    assert receipt["prepared_case"]["argv"] == ["--version"]
+    assert len(calls) == len(prepared) == 62
+
+
+def test_installed_output_change_during_sampling_is_rejected(tmp_path, monkeypatch):
+    args, case, prepare, prepared, calls = installed_instrument(tmp_path, monkeypatch)
+
+    def changed(command, argv, **kwargs):
+        calls.append(argv)
+        return {"exit_code": 0, "stdout_b64": "" if len(calls) <= 2 else "YQ==", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_measurement, "run_cli", changed)
+    with pytest.raises(RuntimeError, match="bytes changed during measurement"):
+        cli_measurement.measure(args, {}, prepare=prepare, case=case)
+    assert len(calls) == 3

@@ -1,5 +1,7 @@
 """Paired CLI cold-start-to-exit measurement using the existing repeat floors."""
 import argparse
+import base64
+import copy
 import json
 from pathlib import Path
 import sys
@@ -9,12 +11,13 @@ import time
 from .common import lease_gate, provenance
 from .shim_measurement import artifact_identity, metric_cells, require_pinned_source
 from evals.rust_port.cli_corpus import STREAM_CONTRACT
+from evals.rust_port.cli_process import prepared_command, remove_root_link, reset_home, snapshot
 from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
 from evals.rust_port.provenance import require_import_root, runtime_metadata
 
 
-def measure(args, resource):
+def measure(args, resource, *, prepare=None, case=None):
     mode = getattr(args, "mode", "help")
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
     if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv) \
@@ -33,31 +36,96 @@ def measure(args, resource):
     identity = candidate_identity(commands["rust"], args.candidate_root)
     python_identity = command_identity(commands["python"], root)
     binary = artifact_identity(args.candidate, args.candidate_sha256)
+    layout = getattr(args, "layout", "bare")
+    if layout == "installed" and prepare is None:
+        if mode != "version":
+            raise ValueError("installed CLI measurement currently covers version only")
+        from evals.rust_port.cli_version import cases, make_prepare
+        case = next(row for row in cases() if row["id"] == "version-default-commit")
+        case["argv"] = list(argv)
+        prepare = make_prepare(root, pin["oracle_head"])
+    if (prepare is None) != (case is None):
+        raise ValueError("prepared measurement requires both a callback and a recorded case")
+    if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
+                             or case.get("environment_deltas") or case.get("pre_files_b64")):
+        raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
+    prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
+
+        def invoke(arm, label, *, timed=False):
+            if prepare is None:
+                home = directory / label
+                env = isolated_env(home)
+                selected = commands[arm]
+                binding = None
+            else:
+                home = directory / "cli-home"
+                reset_home(home)
+                env = isolated_env(home)
+                env.update({"XDG_DATA_HOME": str(home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                            "PYTHONDONTWRITEBYTECODE": "1"})
+                prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
+                try:
+                    selected, selected_identity, original_identity = prepared_command(
+                        case, commands[arm], prefixes, root=root, home=home, env=env, prepare=prepare)
+                    binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(home),
+                               "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
+                                             "effective_argv": [*selected, *argv], "cwd": str(root),
+                                             "command_identity": selected_identity}}
+                except BaseException:
+                    remove_root_link(home)
+                    raise
+            input_options = {"stdin": base64.b64decode(case.get("stdin_b64", ""), validate=True)} \
+                if case is not None else {}
+            try:
+                started = time.perf_counter() if timed else None
+                response = run_cli(selected, argv, cwd=root, env=env, timeout=10, **input_options)
+                elapsed = (time.perf_counter() - started) * 1000 if timed else None
+                if binding is not None:
+                    binding["post_files_b64"] = snapshot(home)
+                    if command_identity(selected, root) != selected_identity \
+                            or command_identity(commands[arm], root) != original_identity:
+                        raise RuntimeError("CLI executable changed during measurement capture")
+                return response, elapsed, binding
+            finally:
+                if prepare is not None:
+                    remove_root_link(home)
+
         # The untimed exact-byte control must pass before any timing is recorded.
-        controls = {arm: run_cli(command, argv, cwd=root,
-                                env=isolated_env(directory / f"control-{arm}"), timeout=10)
-                    for arm, command in commands.items()}
+        controls = {}
+        for arm in commands:
+            controls[arm], _, binding = invoke(arm, f"control-{arm}")
+            if binding is not None:
+                prepared_controls[arm] = binding
         if controls["python"] != controls["rust"] or controls["python"]["exit_code"] != 0:
             raise RuntimeError("CLI byte control failed; measurement not comparable")
+
+        def files_and_environment(binding):
+            return {key: value for key, value in binding.items() if key != "execution"}
+
+        if prepared_controls and files_and_environment(prepared_controls["python"]) != \
+                files_and_environment(prepared_controls["rust"]):
+            raise RuntimeError("CLI byte control failed for prepared files or environment")
         for repeat in range(args.repeats):
             resource_checks.append(resource if repeat == 0 or args.smoke else lease_gate(
                 args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at))
             for sample in range(args.samples):
                 order = ("python", "rust") if (repeat * args.samples + sample) % 2 == 0 else ("rust", "python")
                 for arm in order:
-                    env = isolated_env(directory / f"{repeat}-{sample}-{arm}")
-                    started = time.perf_counter()
-                    response = run_cli(commands[arm], argv, cwd=root, env=env, timeout=10)
-                    elapsed = (time.perf_counter() - started) * 1000
+                    response, elapsed, binding = invoke(arm, f"{repeat}-{sample}-{arm}", timed=True)
                     if response != controls[arm]:
                         raise RuntimeError("CLI bytes changed during measurement")
+                    if binding is not None and files_and_environment(binding) != \
+                            files_and_environment(prepared_controls[arm]):
+                        raise RuntimeError("CLI files or environment changed during measurement")
                     runs[arm].append({"repeat": repeat, "sample": sample,
                                       "arm_order": list(order), "cold_start_to_exit_ms": elapsed,
-                                      "executable_bytes": (python_identity if arm == "python" else identity)["executable_bytes"]})
+                                      "executable_bytes": (python_identity if arm == "python" else identity)["executable_bytes"],
+                                      **({"execution": binding["execution"], "files_and_environment_match_control": True}
+                                         if binding is not None else {})})
     require_pinned_source(root)
     if candidate_identity(commands["rust"], args.candidate_root) != identity \
             or command_identity(commands["python"], root) != python_identity:
@@ -66,7 +134,8 @@ def measure(args, resource):
             "capture_platform": capture_platform(), "provenance": provenance(source_root=root),
             "python_oracle": pin, "candidate_identity": identity,
             "candidate_executable": binary, "python_executable": python_identity,
-            "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT,
+            "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
+            "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
             "resource_check": resource,
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
@@ -76,7 +145,7 @@ def measure(args, resource):
             "limitations": ["Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
-                            "Timing includes owned-process setup, complete output collection and clean exit.",
+                            "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
                             "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
                             "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
                             "Smoke is plumbing evidence only." if args.smoke else "Final samples require the caller's quiet CPU window."]}
@@ -89,7 +158,9 @@ def main():
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256")
     parser.add_argument("--mode", choices=("help", "version"), default="help")
-    parser.add_argument("--argv-json", help="Optional argv for the selected mode (bare layout only)")
+    parser.add_argument("--argv-json", help="Optional argv for the selected mode")
+    parser.add_argument("--layout", choices=("bare", "installed"), default="bare",
+                        help="Installed layout uses the installer-schema version case and stable shared home")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--samples", type=int, default=10)
