@@ -849,10 +849,10 @@ def memory_search(
     """Search shared memory in natural language: past work, decisions,
     preferences, canonical facts and ingested documents. Call at task
     start and whenever prior context may matter. Exact value of a known
-    (entity, attribute): memory_fact_get. Core tier (expand if absent,
-    then rediscover): memory_recall for multi-hop questions,
-    memory_lesson_search for lessons, memory_world_search for cited
-    external facts, document_search for documents only.
+    (entity, attribute): memory_fact_get; lessons: memory_lesson_search.
+    Core tier (expand if absent, then rediscover): memory_recall for
+    multi-hop questions, memory_world_search for cited external facts,
+    document_search for documents only.
 
     Hits are leads about the PAST: check each against today's task and
     re-derive when its context differs. cortex facts come first and may
@@ -1179,8 +1179,7 @@ def memory_stats() -> dict[str, Any]:
 # board tools and two full-tier tools missing from it).
 _TIER_ADDS = {
     "core": "board (memory_agents/memory_message), graph + recall, world "
-            "facts, lessons, documents, stats, episodes, "
-            "memory_get/fact_resolve",
+            "facts, documents, stats, episodes, memory_get/fact_resolve",
     "full": "supersede/reinstate/forget/history/reinforce, recent, "
             "episode_summary, dream + graph-review, graph_unrelate, aliases, "
             "consolidation, relation-define",
@@ -1215,8 +1214,8 @@ async def memory_toolset(
     """Change your server-visible tool tier: minimal -> core -> full, one
     step per expand; collapse steps down; status shows the current tier
     and what each tier adds. Core adds the board (memory_agents,
-    memory_message), graph/recall, world facts, lessons, documents; full
-    adds supersede/forget/history, dream and graph-review admin. After
+    memory_message), graph/recall, world facts, documents; full adds
+    supersede/forget/history, dream and graph-review admin. After
     expand, rediscover tools in the client: list_changed_sent means the
     notification was sent, not client refresh. If a named tool is still
     absent at its required tier, report the visibility mismatch; do not
@@ -1792,7 +1791,7 @@ def memory_outcome(
     return out
 
 
-@_tool(tier="core")
+@_tool(tier="minimal")
 def memory_lesson_search(
     query: Annotated[str, Field(
         description="The task at hand, described the way it would have "

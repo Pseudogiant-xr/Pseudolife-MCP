@@ -2998,9 +2998,10 @@ every variant.
 
 ## Toolset tiers
 
-Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
-set-slot pair, the gate), `core` (24: + graph/recall, world facts, lessons,
-documents, episodes, stats, `memory_get`, `memory_fact_resolve`, coordination),
+Three visibility tiers — `minimal` (10 tools: the recall/capture loop with
+lesson search, the set-slot pair, the gate), `core` (24: + graph/recall, world
+facts, documents, episodes, stats, `memory_get`, `memory_fact_resolve`,
+coordination),
 `full` (38) — filtered per principal at `tools/list` (the named principal
 from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
 a credential share a tier view). The filter is
@@ -3013,7 +3014,7 @@ session expands its tier before calling a hidden tool. Defaults:
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
-Eager-loading clients (Claude Desktop) start at about 16 KB of manifest (9
+Eager-loading clients (Claude Desktop) start at about 18 KB of manifest (10
 tools) on `minimal`; clients that defer schemas client-side (Claude Code) barely
 notice tiers at all.
 

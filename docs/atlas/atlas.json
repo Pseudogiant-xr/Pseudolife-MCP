@@ -401,7 +401,7 @@
    "d": [
     "Resolution: principal override → tier map → stored principal's tier → env default (unset = full; compose sets core)",
     "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
-    "core = 24 of 38 tools; minimal = 9; mailbox operations additionally require an adapter-held instance credential"
+    "core = 24 of 38 tools; minimal = 10; mailbox operations additionally require an adapter-held instance credential"
    ]
   },
   {

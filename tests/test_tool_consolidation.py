@@ -480,7 +480,13 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Minimal moves 5,750 -> 6,000 and full 19,250 -> 19,450, about 250 each
     # again; core keeps its cap. The in-flight #587 adds no description
     # text, only parameter text, which the budget below meters.
-    budgets = {"minimal": 6000, "core": 12750, "full": 19450}
+    # 2026-10-05, later (maintainer decision): memory_lesson_search moves from
+    # core to minimal, so minimal-tier sessions can read back the lessons
+    # memory_outcome writes; memory_search and memory_toolset drop it from
+    # their core lists. Measured: minimal 6,345, core 12,560, full 19,174.
+    # Minimal moves 6,000 -> 6,600 (255 to spare); core (190) and full (276)
+    # keep their caps.
+    budgets = {"minimal": 6600, "core": 12750, "full": 19450}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -536,7 +542,12 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # memory_search its filter-scope wording: minimal 2,739, core 8,050,
     # full 11,711. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
     # headroom, measured on the text that landed rather than assumed.
-    param_budgets = {"minimal": 3000, "core": 8750, "full": 12500}
+    # 2026-10-05 (maintainer decision): memory_lesson_search moves to
+    # minimal, +137 there: minimal 2,879, core 8,274, full 11,935. The
+    # in-flight #587 adds about 40 more to minimal (its ranges stated in
+    # memory_search and memory_lesson_search parameter text), which would
+    # leave under 100 of 3,000; minimal moves to 3,250.
+    param_budgets = {"minimal": 3250, "core": 8750, "full": 12500}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (
@@ -813,7 +824,7 @@ def test_tier_adds_prose_matches_the_registry(tmp_path: Path, monkeypatch) -> No
             "memory_graph": "graph", "memory_graph_relate": "graph",
             "memory_recall": "recall", "memory_world_set": "world facts",
             "memory_world_search": "world facts",
-            "memory_lesson_search": "lessons", "document_ingest": "documents",
+            "document_ingest": "documents",
             "document_search": "documents", "memory_stats": "stats",
             "memory_episode_start": "episodes", "memory_episode_end": "episodes",
             "memory_get": "memory_get", "memory_fact_resolve": "fact_resolve",

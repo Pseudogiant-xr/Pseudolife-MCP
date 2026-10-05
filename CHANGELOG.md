@@ -35,6 +35,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reports `current: "full"`; the daemon's compose default is core.
 - `memory_recall` no longer quotes its current output caps as numbers
   (they drift); it says the lists are capped.
+- The `minimal` tier grows from 9 to 10 tools by maintainer decision:
+  `memory_lesson_search` moves there from `core`. The session-start rule
+  says to recall with `memory_search` and `memory_lesson_search`, and
+  `memory_outcome` (minimal) writes the lessons, but a minimal-tier session
+  could not read them back without expanding. Measured cost on minimal:
+  tool descriptions 5,748 to 6,345 characters, parameter descriptions
+  2,742 to 2,879, and the `tools/list` manifest about 16.8 KB to 18.2 KB
+  (compact JSON). `memory_search` and `memory_toolset` no longer list it
+  under core, and the README, configuration guide, System Atlas,
+  `ops/.env.example` and the compose file give the new count.
 
 ### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
 - Nearly every board row read `claude-code` or `codex`: the label is set
