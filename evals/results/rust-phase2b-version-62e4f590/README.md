@@ -11,7 +11,7 @@ These local release receipts retain measured commit
 `ab2d84ec76db706b8dbc4e6252d822f4ada05600`. The Python oracle is
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, actual package/distribution
 0.17.0 and schema 55. Capture runtimes differ: Windows CPython 3.11.9 and
-Linux CPython 3.11.15. Each receipt binds the actual runtime executable,
+Linux CPython 3.11.15. Each receipt binds the capture producer's runtime executable,
 source, candidate binary and executed helper hashes. Windows release SHA256
 is `64193340ed20df5dc0183e761043e57616a848ee4184d352865d23680d96874b`;
 Linux release SHA256 is
@@ -25,6 +25,16 @@ The original raw comparisons remain private; [manifest.json](manifest.json)
 binds their hashes and byte counts. Projections preserve the complete case
 inventory, provenance, controls and owned daemon/database cleanup.
 There are no comparison normalizations.
+
+The Linux corpus needs a runtime qualification: its fifteen help/unknown-dispatch
+oracle children invoked the base interpreter after the fixture resolved the
+virtualenv executable's symlink. The recorded 26 byte matches and 104 rejected
+controls remain factual for those executions, but the fifteen rows do not prove
+parity against the admitted virtualenv. `capture_runtime` identifies the capture
+producer, not each child. The eleven version rows, Windows corpus, all four
+measurement cells and both current startup captures are unaffected by this
+defect. Original receipts and counts are retained; recapture of the fifteen Linux
+rows after the fixture repair remains pending.
 
 Version cases cover bare `version`/`--version`; installed default commit,
 flag with ignored tail, requirement and checkout without commit; paired root/

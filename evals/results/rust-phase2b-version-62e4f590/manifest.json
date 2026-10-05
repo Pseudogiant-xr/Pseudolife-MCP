@@ -246,5 +246,32 @@
       }
     ],
     "pending_gate": "Derived-name identity substitution is not approved; comparison policy unchanged."
+  },
+  "oracle_child_runtime_erratum": {
+    "affected_receipt": "cli-corpus-linux.json",
+    "affected_source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "cause": "Fixture symlink resolution changed fifteen Linux oracle child invocations from the virtualenv executable to its base interpreter.",
+    "affected_mode_cases": {
+      "help": 5,
+      "unknown_dispatch": 10
+    },
+    "affected_oracle_child_invocations": 15,
+    "original_byte_matches_retained": 26,
+    "original_candidate_controls_rejected_retained": 104,
+    "admitted_virtualenv_parity_proven_for_affected_rows": false,
+    "capture_runtime_scope": "Capture producer identity; not a runtime probe of every child.",
+    "unaffected": {
+      "linux_version_rows": 11,
+      "windows_corpus": true,
+      "paired_measurement_cells": 4,
+      "timed_arm_samples": 240,
+      "untimed_controls": 8,
+      "current_startup_capture_sets": 2
+    },
+    "original_receipts_and_counts_preserved": true,
+    "followup": "Fixture repair and recapture of only the fifteen affected Linux rows remain pending.",
+    "derived_name_substitution_approved": false,
+    "comparison_policy_changed": false,
+    "cli_version_status": "deferred"
   }
 }

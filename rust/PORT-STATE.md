@@ -18,6 +18,14 @@ The current version-branch manifests enumerate 423 test files, all 191 current-p
 
 The native version candidate and shared CLI fixture have fresh independent code approval at `62e4f590` and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](../evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
+The Linux release corpus's fifteen help/unknown-dispatch oracle children invoked
+the base interpreter after fixture symlink resolution. Its 26 byte matches and
+104 rejected controls remain recorded facts, but those fifteen rows do not prove
+parity against the admitted virtualenv. Capture-runtime metadata identifies the
+producer, not every child. The eleven version rows, Windows corpus, all four
+timing cells and both current startup captures are unaffected. Original receipts
+remain intact; fixture repair and recapture of the fifteen Linux rows are pending.
+
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
 | 0: Inventory, rulebook and disposable trial | Complete; phase 0b closes the historical gaps | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540), [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Historical source pin 136a34ae; trial corrections retained in PORTING.md; current-pin gap evidence below |
