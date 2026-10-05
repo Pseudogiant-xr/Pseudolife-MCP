@@ -25,8 +25,13 @@ BYTE_POLICY = Policy(source_text_paths=(), ignored_values=())
 
 
 def cli_binding(root, oracle_root, *, extra_helpers=None):
-    from . import cli_version, harness, processes
-    from evals.rust_baseline.common import lease_gate
+    from . import cli_version, harness, processes, stdio_daemon
+    from evals import memory_policy_bench, memory_policy_daemon
+    from evals.rust_baseline import daemon, daemon_child
+    from evals.rust_baseline.common import child_environment, lease_gate
+    from pseudolife_memory.storage import schema
+    from tests.fake_embedder import FakeSentenceTransformer
+    from tests.pg_defaults import default_admin_url
     helpers = {"evals/rust_port/cli_process.py": [Path(__file__), prepared_command, reset_home, snapshot, remove_root_link],
                "evals/rust_port/cli_corpus.py": [corpus],
                "evals/rust_port/cli_public.py": [public_summary],
@@ -36,7 +41,13 @@ def cli_binding(root, oracle_root, *, extra_helpers=None):
                "evals/rust_port/provenance.py": [require_import_root, runtime_metadata, require_instrument_binding],
                "evals/rust_port/stdio_capture.py": [require_phase1_source],
                "evals/rust_port/processes.py": [harness.owned_process, processes.execution_sources],
-               "evals/rust_baseline/common.py": [lease_gate]}
+               "evals/rust_baseline/common.py": [lease_gate, child_environment, daemon.child_environment],
+               "evals/memory_policy_bench.py": [memory_policy_bench.scrubbed_env, memory_policy_bench.production_database],
+               "evals/memory_policy_daemon.py": [memory_policy_daemon.check_database, memory_policy_daemon.check_port,
+                    memory_policy_daemon._server_check, daemon_child.check_database,
+                    daemon_child.check_port, daemon_child._server_check],
+               "evals/rust_baseline/daemon_child.py": [daemon_child.main, daemon_child.install_readiness_identity],
+               "evals/rust_port/stdio_daemon.py": [stdio_daemon.main]}
     for name, loaded in (extra_helpers or {}).items():
         helpers.setdefault(name, []).extend(loaded)
     owners = processes.execution_sources()[1:]
@@ -44,6 +55,10 @@ def cli_binding(root, oracle_root, *, extra_helpers=None):
         production = {path.resolve().relative_to(Path(oracle_root).resolve()).as_posix(): [path] for path in owners}
     except ValueError as error:
         raise RuntimeError("CLI ownership helper loaded from another production tree") from error
+    production.update({"pseudolife_memory/storage/schema.py": [schema.dsn_database_name,
+                          schema.refuse_production_database, schema.assert_disposable_database],
+                       "tests/pg_defaults.py": [default_admin_url],
+                       "tests/fake_embedder.py": [FakeSentenceTransformer]})
     return {"instrument": require_instrument_binding(root, helpers),
             "production_ownership": require_instrument_binding(oracle_root, production) if production else None}
 

@@ -7,7 +7,8 @@ CLI_HELPERS = (
     "evals/rust_port/harness.py", "evals/rust_port/phase1_receipts.py", "evals/rust_port/processes.py",
     "evals/rust_port/provenance.py", "evals/rust_port/stdio_capture.py", "evals/rust_port/full_bank.py",
     "evals/rust_baseline/common.py", "evals/rust_baseline/daemon.py",
-    "evals/rust_baseline/daemon_child.py", "evals/rust_baseline/transport.py")
+    "evals/rust_baseline/daemon_child.py", "evals/rust_baseline/transport.py",
+    "evals/rust_port/stdio_daemon.py", "evals/memory_policy_bench.py", "evals/memory_policy_daemon.py")
 
 
 def require(condition):
@@ -71,10 +72,12 @@ def public_summary(receipt):
                 and candidate["source_tree"] == instrument["source_tree"]
                 and receipt["instrument_head"] == instrument["source_head"] and receipt["instrument_dirty"] is False)
         ownership = binding["production_ownership"]
-        require(ownership is not None or platform["os"] != "Windows")
-        ownership = binding_summary(ownership, ("pseudolife_memory/codex_doorbell.py",)) if ownership else None
-        if ownership:
-            require(ownership["source_head"] == receipt["source_head"])
+        require(ownership is not None)
+        owner_files = ("pseudolife_memory/storage/schema.py", "tests/pg_defaults.py", "tests/fake_embedder.py")
+        if platform["os"] == "Windows":
+            owner_files += ("pseudolife_memory/codex_doorbell.py",)
+        ownership = binding_summary(ownership, owner_files)
+        require(ownership["source_head"] == receipt["source_head"])
         runtime = runtime_summary(receipt["capture_runtime"])
         cleanup = {name: receipt["daemon_cleanup"][name] for name in (
             "readiness_identity_verified", "daemon_stopped", "children_stopped", "database_dropped")}

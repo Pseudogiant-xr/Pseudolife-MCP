@@ -28,7 +28,12 @@ def receipt():
               "command_identities": {"candidate": command, "oracle": {**command, "public_cli_module": True}},
               "cli_instrument_binding": {"instrument": {"source_head": "b" * 40, "source_tree": "c" * 40,
                    "source_dirty": False, "source_root": secret_path, "source_files_sha256": files,
-                   "source_files_git_blob": {key: "f" * 40 for key in files}}, "production_ownership": None},
+                   "source_files_git_blob": {key: "f" * 40 for key in files}}, "production_ownership": {
+                       "source_head": "e" * 40, "source_tree": "c" * 40, "source_dirty": False,
+                       "source_files_sha256": {key: "d" * 64 for key in (
+                           "pseudolife_memory/storage/schema.py", "tests/pg_defaults.py", "tests/fake_embedder.py")},
+                       "source_files_git_blob": {key: "f" * 40 for key in (
+                           "pseudolife_memory/storage/schema.py", "tests/pg_defaults.py", "tests/fake_embedder.py")}}},
               "daemon_cleanup": {key: True for key in ("readiness_identity_verified", "daemon_stopped", "children_stopped", "database_dropped")},
               "records": [], "candidate_output_controls": []}
     result["daemon_cleanup"]["actual_child_runtime"] = copy.deepcopy(result["capture_runtime"])

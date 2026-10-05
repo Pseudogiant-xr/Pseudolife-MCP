@@ -20,7 +20,8 @@ HISTORICAL_SCHEMA = 52
 ORACLE_HEAD = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
 ORACLE_SCHEMA = 53
 SOURCE_PATHS = ("pseudolife_memory", "pyproject.toml", "tests/pg_defaults.py",
-                "tests/test_cli_dispatch.py", "tests/conftest.py")
+                "tests/test_cli_dispatch.py", "tests/conftest.py", "tests/fake_embedder.py")
+PARENT_ISOLATION_HELPERS = ("evals/memory_policy_bench.py", "evals/memory_policy_daemon.py")
 
 
 def schema_version(path):
@@ -87,14 +88,16 @@ def source_metadata(root=ROOT, *, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_
     if head.returncode or current_difference.returncode not in (0, 1) or untracked.returncode:
         raise RuntimeError("historical oracle source comparison unavailable")
     instrument = _git(ROOT, "rev-parse", "HEAD")
-    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline")
+    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline",
+                             *PARENT_ISOLATION_HELPERS)
     if instrument.returncode or instrument_status.returncode:
         raise RuntimeError("instrument source provenance unavailable")
     return {"source_head": head.stdout.strip(), "instrument_head": instrument.stdout.strip(),
             "instrument_dirty": bool(instrument_status.stdout.strip()),
             "instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted([*Path(__file__).parent.glob("*.py"),
-                                                      *Path(__file__).parent.glob("*.json")])},
+                                                      *Path(__file__).parent.glob("*.json"),
+                                                      *(ROOT / name for name in PARENT_ISOLATION_HELPERS)])},
             "process_helper_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in execution_sources()},
             "source_schema": schema_version(Path(root) / "pseudolife_memory/storage/schema.py"),
