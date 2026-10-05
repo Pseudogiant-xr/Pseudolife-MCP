@@ -156,7 +156,11 @@ instead). Both run `ops/wsl-suite.sh`, which tags the run with
 `PSEUDOLIFE_SUITE_RUN_ID` and, once pytest exits (also on Ctrl+C or a
 hangup), stops every process still carrying that marker and names each on
 stderr; it exits 130, 129 or 143 for an interrupt, hangup or TERM, else
-with pytest's code. A run dispatched to the second machine refuses a test
+with pytest's code. Before it clones, a run removes the test copies and
+environments other runs left unused for 3 days
+(`PSEUDOLIFE_SUITE_PRUNE_DAYS`) or past the 8 most recent of each
+(`PSEUDOLIFE_SUITE_KEEP`), skipping any a run holds;
+`PSEUDOLIFE_SUITE_PRUNE=off` turns that off. A run dispatched to the second machine refuses a test
 server that holds a production bank, and checks again once it holds the
 suite lock, since a server that refused the first connection may be up by
 then.

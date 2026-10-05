@@ -256,7 +256,10 @@ took 143 CUDA OOMs.
   launcher tests the worktree's committed HEAD from a copy on WSL's own
   filesystem (it refuses uncommitted changes to tracked files: commit
   first), keeps a uv environment per checkout under `~/.venvs/pseudolife`
-  in WSL, forwards the test login file (`~/.pseudolife-mcp/test-pg.env`;
+  in WSL (copies under `~/.cache/pseudolife-suite/work`; each run prunes
+  those unused for 3 days or past the 8 most recent, under their locks:
+  `PSEUDOLIFE_SUITE_PRUNE_DAYS`, `PSEUDOLIFE_SUITE_KEEP`,
+  `PSEUDOLIFE_SUITE_PRUNE=off`), forwards the test login file (`~/.pseudolife-mcp/test-pg.env`;
   only without one does it copy the worktree's `ops/.env`), needs the
   models in WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and
   forwards the bearer, so the run still shows as the `full-suite` lease; from Windows,

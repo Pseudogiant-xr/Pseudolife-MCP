@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-05 — suite runs clean up the test copies and environments earlier runs left)
+- The WSL and second-machine full-suite runners (`ops/wsl-suite.sh`, behind
+  `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`) kept a test copy (~600 MB)
+  and a uv environment (~220 MB) per checkout and never removed them: on
+  2026-10-05 the second machine's disk went from 62% to 88% in one day (13
+  copies, 7.8 GB, plus 2.9 GB of environments; it had filled on
+  2026-10-04), and WSL on the maintainer's host held 18 copies (11 GB) and
+  3.3 GB. Each run now prunes them before it clones: copies and
+  environments unused for `PSEUDOLIFE_SUITE_PRUNE_DAYS` days (default 3),
+  then the least recently used past `PSEUDOLIFE_SUITE_KEEP` of each
+  (default 8), and lock files whose directory is gone once they are as old,
+  and prints one line saying what went and how much it freed.
+  `PSEUDOLIFE_SUITE_PRUNE=off` (or `0`, `false`, `no`) turns it off; `ops/remote-suite.ps1`
+  forwards all three to the second machine. It removes a copy or
+  environment only while holding its lock (taken without waiting, so one a
+  run is using stays), never the run's own, never one a process works in
+  or runs from (its working directory or argv[0] inside), and an
+  environment only while also holding its copy's lock (which runs of older
+  commits still take). It removes only real directories directly inside
+  the two roots it owns, checked after resolving them, prunes nothing while
+  a root is itself a symlink, and renames each out of the way before deleting it, so an
+  interrupted prune leaves nothing a later run would reuse half-deleted.
+  Mirrors are left alone. A run now holds a shared lock on its environment
+  (`<env>.lock` beside it) for its whole length, and reopens a lock file
+  the pruner removed while it waited. Pruning never fails a run.
+
 ### Fixed (2026-10-05 — refusals that look like successes now say why, and bad numbers are refused up front)
 - Several tools answered a refusal or a no-op as a plain success with only
   a code, so a model often missed it or retried blind. Each such result now
