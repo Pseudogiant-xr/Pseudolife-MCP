@@ -372,7 +372,8 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
     leak the store's own add_member/remove_member vocabulary at the MCP
     boundary — service.cortex_write remaps it to name memory_set_add /
     memory_set_remove (Task 4), and the generic async-offload wrapper turns
-    the ValueError into this surface's uniform {error, message} shape."""
+    the ValueError into this surface's MCP tool error: ``isError`` with
+    ``{error: invalid_argument, message}``, never the Python class name."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
@@ -380,9 +381,11 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
 
     _invoke("memory_set_add",
            {"entity": "project", "attribute": "tags", "member": "rust"})
-    out = _invoke("memory_fact_set",
-                 {"entity": "project", "attribute": "tags", "value": "go"})
-    assert out["error"] == "ValueError"
+    result = asyncio.run(mod.mcp.call_tool(
+        "memory_fact_set", {"entity": "project", "attribute": "tags", "value": "go"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument"
     assert out["message"] == (
         "slot holds a set; use memory_set_add / memory_set_remove")
 
@@ -1264,11 +1267,13 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
     fed the FULL registry, not the filtered view. v2: the transport filter
     never touches the MCPServer tool registry, so a hidden tool's call-time
     input validation must still fire after a filtered list."""
-    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
     asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
-    with pytest.raises(ToolError, match="valid integer"):
-        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    result = asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument" and out["param"] == "n"
+    assert "valid integer" in out["message"]
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
