@@ -433,6 +433,39 @@ def test_shim_surfaces_the_daemons_real_error_message(shared_daemon):
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
+def test_shim_forwards_the_daemons_unknown_parameter_refusal(shared_daemon):
+    """The served schema now says ``additionalProperties: false``; the shim
+    must still forward the call (it does not validate input) so the client
+    gets the daemon's refusal with its suggestion, not a proxy-side schema
+    message or a silent success."""
+    import asyncio
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                tools = {t.name: t for t in (await s.list_tools()).tools}
+                assert tools["memory_search"].input_schema[
+                    "additionalProperties"] is False
+                res = await s.call_tool("memory_search",
+                                        {"query": "probe", "limit": 3})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert res.is_error, text
+                assert "did you mean 'top_k'?" in text, text
+
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+
+
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
 
 

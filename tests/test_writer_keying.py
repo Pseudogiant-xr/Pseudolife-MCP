@@ -146,7 +146,7 @@ def test_fact_write_attributes_writer_from_header(daemon):
     asyncio.run(_call_with_writer(
         daemon["url"], "codex-test", "memory_fact_set",
         {"entity": "keying-probe", "attribute": "owner",
-         "value": "codex", "support": "user"},
+         "value": "codex", "origin": "user"},
     ))
     row = _fact_row(daemon["db"], "keying-probe")
     assert row is not None, "fact row not persisted"

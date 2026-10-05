@@ -443,7 +443,7 @@ is agent context every session, so it stays lean.
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
-| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
+| `memory_history(entity, attribute?, as_of?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps; `as_of` (ISO-8601 or epoch seconds) keeps only the versions written by then. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
@@ -1620,10 +1620,14 @@ entity is deliberately classified.
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.
 The read surface does nudge, though: once a fact has aged past a third
-of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+of its TTL, `memory_search`, `memory_fact_get`, and
 `memory_world_search` attach a ready-made `correct_with` call to it — a
 filled-in `memory_fact_set(...)` the reading agent can run the moment it
-verifies the value, re-asserting or correcting at the same slot. The
+verifies the value, re-asserting or correcting at the same slot. A
+contested fact's `correct_with` instead names `memory_fact_get` to read
+the contenders and `memory_fact_resolve` (core tier) to run once a human
+decides, with no `accept` value filled in: re-asserting `memory_fact_set`
+only contests the slot further. The
 `stale: true` flag is the louder, later signal (twice the TTL);
 `correct_with` fires earlier so drift gets fixed at first contact.
 
@@ -4085,8 +4089,9 @@ reliably — without the agent having to remember:
      on first store — and sets it as the machine-scoped active-session
      pointer. The returned briefing text carries a one-line **handle
      advertisement**: the episode id (truncated) plus the instruction to
-     pass `episode="<id>"` on every memory write — the concurrency-correct
-     channel, so attribution stays right even when other sessions are open. A
+     pass `episode="<id>"` to every memory tool that accepts it — the
+     concurrency-correct channel, so attribution stays right even when other
+     sessions are open. A
      SessionEnd hook closes that session's episode and clears the pointer
      when the session ends. If a client crashes without firing SessionEnd,
      the pointer expires after `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`
@@ -6236,14 +6241,15 @@ parent's cursor). Nothing in the shim can tell the two apart: a subagent's
 status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
-`memory_message(action="receive")` without `ack`, `memory_search`), and the
+`memory_message(action="receive")` without `ack`, the read-only
+`memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
 (`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
 puts in a subagent's hook input, and never in the parent's, and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list and receive pass, and so
-does every call the parent makes. The subagent reads the refusal as
+send and ack, whatever the server's name. Its list, receive and history
+pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
 update never reached the server, its list and the parent's update did). A
@@ -6818,7 +6824,7 @@ memory_policy:
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
 | `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
-| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), about 8 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler
 (`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
@@ -7342,8 +7348,8 @@ session expands its tier before calling a hidden tool. Defaults:
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
-Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
-`minimal`; clients that defer schemas client-side (Claude Code) barely
+Eager-loading clients (Claude Desktop) start at about 16 KB of manifest (9
+tools) on `minimal`; clients that defer schemas client-side (Claude Code) barely
 notice tiers at all.
 
 **Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes
@@ -9076,8 +9082,9 @@ to discover one tool. A bearer principal takes precedence over writer identity;
 check which identity the registration actually uses.
 
 A September 2026 Codex check expanded core to full: the server listed 35 tools
-and sent `list_changed`, but the running turn retained its initial 22 callable
-tools. That verifies a current-turn limit only. After expansion, check a fresh
+(the full tier then; 38 today) and sent `list_changed`, but the running turn
+retained its initial 22 callable tools (the core tier then; 24 today). That
+verifies a current-turn limit only. After expansion, check a fresh
 task/reconnection's actual callable catalog; do not infer success from the
 server inventory or notification. Client `enabled_tools`/`disabled_tools`
 filters can narrow it further.

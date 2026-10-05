@@ -238,10 +238,11 @@ listed for review and left alone. By hand:
   (Claude Code marks it with `agent_id` in the hook input) the hook denies
   `memory_agents` update, claim and release and `memory_message` send and
   ack on any server name, with a reason telling it to ask its parent; list,
-  receive and every other tool pass, and so does everything the parent
-  calls. No daemon request. A payload it cannot read is let through. Codex
-  lists this entry too; there it allows every call, because a Codex child
-  has a board address of its own. See
+  receive, the read-only `memory_message` history and every other tool
+  pass, and so does everything the parent calls. No daemon request. A
+  payload it cannot read is let through. Codex lists this entry too; there
+  it allows every call, because a Codex child has a board address of its
+  own. See
   [Configuration](../docs/guide/configuration.md#delivery-and-recovery).
 - **Subagent board hooks** (SubagentStart / SubagentStop, schema v50; off
   with the board, `PSEUDOLIFE_AGENT_COORDINATION=0`) — list a Claude Code
