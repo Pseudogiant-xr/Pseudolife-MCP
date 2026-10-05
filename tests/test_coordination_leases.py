@@ -297,12 +297,15 @@ def test_list_queue_pages_preserve_exact_payload_and_bounds(store):
     store.test_time[0] = 1121.0  # read-only listing keeps the expired hold
 
     def expected(name):
-        owner = dict(held[name]["holder"], label="")
+        # A departed row has no label, so its board name (v55) is its short id.
+        owner = dict(held[name]["holder"], label="", name=holder["agent_id"][:8])
         return {"name": name, "holder": owner, "fence": held[name]["fence"],
                 "expires_at": 1120.0, "expected_end": 1010.0, "stale": True,
                 "queued": len(queued[name]),
                 "queue": [{"agent_id": agent["agent_id"],
                            "label": "" if index == 0 else "waiter",
+                           "name": (agent["agent_id"][:8] if index == 0
+                                    else f"waiter {agent['agent_id'][:8]}"),
                            "enqueued_at": 1000.0, "purpose": f"turn {index}"}
                           for index, agent in enumerate(queued[name][:LEASE_LIST_QUEUE])]}
 

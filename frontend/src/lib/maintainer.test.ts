@@ -168,6 +168,13 @@ describe("roles", () => {
     expect(reachText(rolesFor("P", null, [lease("delegate:P", "d2")]).delegate!)).toBeNull();
   });
 
+  it("names a holder by the lease's board name (v55) before its label", () => {
+    const named = lease("delegate:Pseudolife-MCP", "d1");
+    named.holder = { ...named.holder!, name: "Docs review and bulk merge" };
+    expect(rolesFor("Pseudolife-MCP", status, [named]).delegate?.label).toBe("Docs review and bulk merge");
+    expect(rolesFor("Pseudolife-MCP", null, [named]).delegate?.label).toBe("Docs review and bulk merge");
+  });
+
   it("trusts the served map over a lease that names someone else", () => {
     const r = rolesFor("Pseudolife-MCP", status, [lease("delegate:Pseudolife-MCP", "other")]);
     expect(r.delegate?.agent_id).toBe("d1");

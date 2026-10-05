@@ -30,9 +30,11 @@ logger = logging.getLogger(__name__)
 _PARAMETERS = {
     "context": {"agent_id", "nonce", "read_only"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled",
-                 "parent_thread"},
+                 "parent_thread", "name", "name_source"},
+    # v55: ``name`` on update is the agent's own; the heartbeat's is the
+    # harness's (the shim's adapter, from the title the harness shows).
     "update": {"project", "task", "status", "expect", "children", "park_reason", "park_needs",
-               "park_clear_by", "park_resume", "park_expires"},
+               "park_clear_by", "park_resume", "park_expires", "name"},
     "agents": {"project", "task", "limit"},
     # v45 resource leases. ``leases`` lists with the bearer alone, like the
     # awareness roster; acquiring and releasing act as the caller's instance.
@@ -40,7 +42,7 @@ _PARAMETERS = {
     "release": {"name"},
     "leases": {"name", "limit"},
     "attach": {"attachment_id", "wake_enabled", "ring", "ring_armed_until"},
-    "heartbeat": {"attachment_id", "generation", "active", "ring_armed_until"},
+    "heartbeat": {"attachment_id", "generation", "active", "ring_armed_until", "name"},
     "detach": {"attachment_id", "generation"},
     "send": {"to", "text", "request_id", "reply_to", "clears", "urgent"},
     "receive": {"after", "limit", "attachment_id", "generation"},
@@ -105,6 +107,9 @@ PUBLIC_ERROR_CODES = frozenset({
     "invalid_parent", "child_send_refused",
     # v54: ``daemon``, ``maintainer`` or a reserved row named as a recipient.
     "recipient_reserved",
+    # v55: a board name too long, malformed, from a source the caller may
+    # not claim, or naming a reserved sender.
+    "invalid_name",
 })
 
 
@@ -700,6 +705,19 @@ def console_snapshot(service, *, limit=50) -> dict:
         raise CoordinationRefused(public_error(exc), public_detail(exc)) from None
 
 
+def title_board_names(service, episodes, title, *, principal=None) -> int:
+    """Name the board rows of a retitled session (v55, source ``title``):
+    ``episodes`` are the session keys the rename resolved. The caller
+    (``set_session_title``) has released the service lock and ignores any
+    failure: the board side never fails a retitle."""
+    cfg = service.config.coordination
+    if not cfg.enabled or not getattr(service, "_db_url", None) or service._storage is None:
+        return 0
+    _ensure_tier(service, full=False)
+    with service._coordination_lock:
+        return _store(service).title_names(episodes, title, principal=principal)
+
+
 def send_recipients(result) -> list[str]:
     """The agent ids a send result says were reached: one, or a burst's."""
     if "receipts" in result:
@@ -746,7 +764,7 @@ def _present(**fields):
 def agents(service, *, action="list", project=None, task=None, status=None, lease=None,
            worktree=None, repository_id=None, path=None,
            expect=None, children=None, park_reason=None, park_needs=None, park_clear_by=None,
-           park_resume=None, park_expires=None):
+           park_resume=None, park_expires=None, name=None):
     """Model surface: scope is relevance, never an identity or permission key.
 
     ``claim`` and ``release`` are session-held resource leases (v45): a
@@ -768,7 +786,7 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
                     park_expires=park_expires)
     if park_reason is not None:
         park["park_reason"] = park_reason or None
-    if (children is not None or park) and action != "update":
+    if (children is not None or park or name is not None) and action != "update":
         raise ValueError("unexpected_parameter")
     if action == "list":
         if status is not None or lease is not None or expect is not None:
@@ -782,7 +800,8 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
         if lease is not None:
             raise ValueError("unexpected_parameter")
         return dispatch(service, "update", {**_present(project=project, task=task, status=status,
-                                                       expect=expect, children=children), **park})
+                                                       expect=expect, children=children,
+                                                       name=name), **park})
     if action not in {"claim", "release"}:
         raise ValueError("unknown_coordination_action")
     if lease is None:

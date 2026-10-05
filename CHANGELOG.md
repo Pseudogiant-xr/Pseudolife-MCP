@@ -39,6 +39,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The park prompt (Stop-hook gate) and the no-path fallback text no longer
   tell Claude Code sessions to arm `wait-mail` for waits over 59 minutes.
 
+### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
+- Nearly every board row read `claude-code` or `codex`: the label is set
+  once at registration, so the maintainer could not tell sessions apart or
+  find one to make delegate. Schema **v55** gives each row a name, kept
+  current from the title the harness already shows: Claude Code's session
+  title (the transcript's latest `custom-title`, else `agent-name`, else
+  `ai-title`; formats re-checked on Claude Code 2.1.287) and Codex's thread
+  name (`session_index.jsonl`; Codex 0.160.0). The shim reads it with
+  bounded reads on its heartbeat and sends it only when it changed, so a
+  rename reaches the board within a heartbeat, with no restart (a `/rename`
+  or a renamed Desktop session appends a new `custom-title` line; a renamed
+  Codex thread a new index line). `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` in the
+  shim's environment turns the title reading off. A name the
+  agent sets (`memory_agents(action="update", name=...)`) outranks it, so a
+  session can correct a stale title (after `/clear` the shim still reads the
+  old transcript); `""` clears it and brings the harness title back. Below
+  both: the session's `memory_session_title`, for the caller's own
+  principal only. An unnamed row
+  reads as its label and the first 8 characters of its id, in
+  `memory_agents` list, the Console, lease holders and lease waiters.
+  Names follow the label rule: one that reads as `maintainer`, `daemon`,
+  `passkey` or `verified` is refused, so such a session falls back to its
+  label and short id.
+- Console Board: the session list is its own pane, sized to end at the
+  bottom of the window, so a long board scrolls inside it and the Roles
+  band stays in view. A search box filters by name, short or full id,
+  task, status and project; the delegate, the coordinator and sessions
+  with unread mail are pinned at the top. Each card shows its 8-character
+  id, which copies the full id on click, and keeps its Make delegate /
+  Make coordinator buttons, so a session found by search can take a role
+  at once. A role card's message thread scrolls in its own pane above the
+  composer, opening on the newest message and following new ones unless
+  you have scrolled up, so a long exchange no longer pushes the composer
+  and the Board down the page.
+- The schema change is additive (three columns added only when missing,
+  plus a partial index on `episode`) and runs on daemon start. The harness
+  names need the new shim, which release-mode `pseudolife-mcp update`
+  installs with the clients; nothing else to do.
+
 ### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
 - On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's
   shell printed "no bank found" and worked only as `docker exec

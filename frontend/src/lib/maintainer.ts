@@ -56,7 +56,8 @@ export interface RoleHolder {
   acquired_at: Epoch | null;
   /** "maintainer" or "operator" for a delegate; null when only the lease is known. */
   granted_by: string | null;
-  /** The lease listing's label for the holder, a fallback name. */
+  /** The lease listing's board name for the holder (v55), else its label: a
+   *  fallback name for a holder not in the recent roster. */
   label: string | null;
   /** Whether maintainer mail rings it now; null when the daemon does not say. */
   reachable: boolean | null;
@@ -96,7 +97,7 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         expires_at: r.expires_at ?? same?.expires_at ?? null,
         acquired_at: same?.holder?.acquired_at ?? null,
         granted_by: "granted_by" in r ? String(r.granted_by) : null,
-        label: same?.holder?.label || null,
+        label: same?.holder?.name || same?.holder?.label || null,
         reachable: typeof r.reachable === "boolean" ? r.reachable : null,
         reach_reason: typeof r.reason === "string" ? r.reason : null,
       };
@@ -106,7 +107,7 @@ export function rolesFor(project: string, status: MaintainerStatus | null, lease
         expires_at: lease.expires_at ?? lease.holder.expires_at ?? null,
         acquired_at: lease.holder.acquired_at ?? null,
         granted_by: null,
-        label: lease.holder.label || null,
+        label: lease.holder.name || lease.holder.label || null,
         reachable: null,
         reach_reason: null,
       };
