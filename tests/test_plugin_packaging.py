@@ -406,10 +406,12 @@ def test_memory_loop_block_teaches_entry_correction():
     stale stored entry, so a model wanting to correct one had no taught
     path (2026-10-04 review, M10: memory_supersede was called 4 times by
     Claude and 3 by Codex in two months). memory_supersede is full tier,
-    which the block says where it names it."""
+    which the block says where it names it, and a minimal-tier session
+    needs two expands to reach it, so the block says to expand until full."""
     from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "`memory_supersede` (full tier" in text
+    assert "`memory_toolset` until full" in text
 
 
 def test_memory_loop_block_matches_examples():

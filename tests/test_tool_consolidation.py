@@ -474,7 +474,13 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # sibling routing, then review fixes (request_conflict, the receive
     # cursor contract): minimal 5,501, core 12,352, full 18,871 — caps
     # unchanged, 249 / 398 / 379 to spare.
-    budgets = {"minimal": 5750, "core": 12750, "full": 19250}
+    # 2026-10-05: the standing-text fixes (#583) and then each write tool's
+    # sibling routing and hidden-tier marks (#586), measured on the merged
+    # tree: minimal 5,748, core 12,572, full 19,186 (2 / 178 / 64 to spare).
+    # Minimal moves 5,750 -> 6,000 and full 19,250 -> 19,450, about 250 each
+    # again; core keeps its cap. The in-flight #587 adds no description
+    # text, only parameter text, which the budget below meters.
+    budgets = {"minimal": 6000, "core": 12750, "full": 19450}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"

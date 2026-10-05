@@ -16,7 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `memory_forget` and a canonical slot to `memory_fact_set`. The standing
   instructions (`examples/CLAUDE.memory.md`, served as the session-start
   block) teach `memory_supersede` for a stored entry that is now wrong,
-  marked full tier; the guard that kept full-tier tools out of those
+  marked full tier, with "expand via `memory_toolset` until full" (a
+  minimal-tier session needs two expands to reach it); the guard that kept full-tier tools out of those
   instructions now admits one only when every mention says "(full tier".
 - A description that names a tool the reader's tier hides now says which
   tier shows it, in the form `memory_fact_resolve (core)` already used by
