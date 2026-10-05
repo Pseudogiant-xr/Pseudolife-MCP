@@ -238,6 +238,20 @@ def test_a_long_idle_watcher_polls_slower_but_keeps_its_listener_lease():
     assert _constant("FAST_WAIT") == 3540
 
 
+def test_an_idle_watcher_spawns_little_per_poll():
+    """Delegate review of #585 (2026-10-05): with ~30 sessions open on the
+    maintainer's Windows host, an idle watcher's spawns add up. After the
+    first hour the Windows parent check (`ps -W` plus awk, 1.6-3.5 s on a
+    loaded host) runs every IDLE_PARENT_CHECK seconds, and the listener
+    renewal reads the clock with bash's printf where bash has it (4.2 and
+    later) instead of spawning date: a poll spawns only its sleep and mv."""
+    assert _constant("PARENT_CHECK") < _constant("IDLE_PARENT_CHECK") == 300
+    script = HOOK.read_text(encoding="utf-8")
+    renew = script.split("renew_listener() {", 1)[1].split("\n}\n", 1)[0]
+    assert "date" not in renew and "epoch_now" in renew
+    assert re.search(r"printf -v \w+ '%\(%s\)T' -1", script)
+
+
 def test_a_watcher_with_no_parent_to_check_keeps_the_one_hour_bound():
     """Review of the 14-day watcher (2026-10-05): with no Claude Code process
     to watch (no CLAUDE_PID), nothing but the digest's removal would end it,

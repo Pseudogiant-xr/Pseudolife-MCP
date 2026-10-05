@@ -17,9 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lease, so a session is reachable for as long as it stays open without
   arming anything. Claude Code takes a hook's `timeout` as is (no ceiling)
   into a Node timer, so the value stays under its 24.8-day limit. After the
-  first hour the watcher polls every 30 s instead of every 5 s, so a
-  session idle for days does not keep starting Git Bash processes; a ring
-  then fires up to 30 s after it is decided. **Codex users approve the
+  first hour the watcher polls every 30 s instead of every 5 s, checks on
+  Windows that Claude Code still runs every five minutes instead of every
+  minute, and reads the clock without spawning `date` (bash 4.2 and later),
+  so a session idle for days spawns about 0.07 processes a second (a
+  `sleep` and an `mv` every 30 s, plus `ps -W` and `awk` every five minutes
+  on Windows); a ring then fires up to 30 s after it is decided. **Codex users approve the
   plugin's hooks once more**: the Stop entry's `timeout` changed (3600 to
   1209600), and Codex hashes it for the Stop event.
 - Granting or extending a role (Console or `pseudolife-mcp lease

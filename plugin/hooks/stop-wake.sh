@@ -115,8 +115,13 @@ IDLE_POLL=30
 MAX_WAKES=20
 WAKE_WINDOW=3600
 # Under Git Bash the parent is a Windows PID that only `ps -W` lists; it is
-# checked at arm time and then this often (seconds), not at every poll.
+# checked at arm time and then this often (seconds), not at every poll, and
+# every IDLE_PARENT_CHECK seconds after FAST_WAIT. `ps -W` took 1.6-3.5 s on
+# the loaded 2026-09-23 test machine, and with ~30 sessions open a minute's
+# checks add up (delegate review of #585, 2026-10-05); a clean exit removes
+# the digest, which ends the watch within a poll anyway.
 PARENT_CHECK=60
+IDLE_PARENT_CHECK=300
 
 # Read the two settings the way the shim and doctor do: trimmed and
 # lower-cased, blank meaning unset. Only a non-empty value costs a spawn.
@@ -477,10 +482,18 @@ still_owner() {
     IFS= read -r current < "$LEASE"
     [ "$current" = "$TOKEN" ]
 }
+# Sets NOW_EPOCH to the time in epoch seconds: bash's own printf from bash
+# 4.2 (Git Bash, Linux), a date spawn only on macOS's bash 3.2.
+if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2))); then
+    epoch_now() { printf -v NOW_EPOCH '%(%s)T' -1; }
+else
+    epoch_now() { NOW_EPOCH=$(date +%s); }
+fi
 renew_listener() {
     local now expiry remaining
     still_owner || return 1
-    now=$(date +%s)
+    epoch_now
+    now=$NOW_EPOCH
     remaining=$((WAIT - SECONDS))
     [ "$remaining" -gt 0 ] || return 1
     [ "$remaining" -le "$LISTENER_LEASE" ] || remaining=$LISTENER_LEASE
@@ -529,7 +542,9 @@ parent_alive() {
         kill -0 "$PARENT"
         return
     fi
-    [ $((SECONDS - PARENT_CHECKED)) -ge "$PARENT_CHECK" ] || return 0
+    local every=$PARENT_CHECK
+    [ "$SECONDS" -lt "$FAST_WAIT" ] || every=$IDLE_PARENT_CHECK
+    [ $((SECONDS - PARENT_CHECKED)) -ge "$every" ] || return 0
     PARENT_CHECKED=$SECONDS
     windows_pid_listed "$PARENT"
     [ $? -ne 1 ]

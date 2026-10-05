@@ -2356,10 +2356,17 @@ also capped (below, and by the daemon's `wake` caps under
   stopped after 59 minutes, and a plugin from before then still does until
   `pseudolife-mcp update` moves the clients. `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT`
   (seconds) shortens it. The watcher
-  also stops when Claude Code exits: at once on Linux and macOS, and within
-  a minute on Windows, where it lists the process through `ps -W` at arm
-  time and then once a minute (a Windows PID is invisible to `kill -0`). In
-  `claude -p` runs, Claude Code ends a waiting hook at teardown.
+  also stops when Claude Code exits. A clean exit removes the shim's digest,
+  which ends the watch within one poll (5 s, or 30 s after the first hour).
+  On Linux and macOS a crash is caught by `kill -0` at the next poll. On
+  Windows it lists the process through `ps -W` at arm time, then once a
+  minute for the first hour and every five minutes after (a Windows PID is
+  invisible to `kill -0`, and `ps -W` took 1.6-3.5 s on a loaded host); a
+  crashed session whose PID is reused, or that `ps -W` never lists, keeps its
+  watcher until the digest is swept as stale, about a day later. An idle
+  watcher spawns a `sleep` and an `mv` every 30 s, plus on Windows a `ps -W`
+  and an `awk` every five minutes: about 0.07 processes a second per session.
+  In `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json` and gets only the park gate, on every
   platform: on Windows through the entry's native command
   (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
