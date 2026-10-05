@@ -37,7 +37,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the step with the CLI's line. The refresh still runs after a failed
   move, since it changed nothing and SSH works on some hosts. A file that
   cannot be backed up or written is a `failed` line, not a crash. A
-  symlinked `settings.json` is edited at its target. An HTTPS source is left untouched
+  symlinked `settings.json` is edited at its target, and the file keeps its
+  permission bits. An add that moved the record and then failed or timed
+  out (it is bounded at 300 s, with git's credential prompt off) leaves
+  `settings.json` on HTTPS to match the record. A `settings.json` that is
+  not valid JSON fails the step only where a move needs it, not on a host
+  already on HTTPS. An HTTPS source is left untouched
   and reported current in one line. A fork, a local directory or a pinned
   ref is somebody's choice and is left as it is, as is every other
   marketplace. It never runs `marketplace remove`, which uninstalls the

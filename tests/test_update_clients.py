@@ -1300,6 +1300,7 @@ def test_the_installer_helper_reports_in_one_line(cli, tmp_path, capsys):
     assert uc.marketplace_main() == 0
     current = capsys.readouterr().out
     assert current.count("\n") == 1 and "nothing to change" in current
+    _record_marketplace(cli.home, tmp_path / "marketplace", GITHUB_SOURCE)
     (cli.home / "settings.json").write_text("{", encoding="utf-8")
     assert uc.marketplace_main() == 1
     assert "not valid JSON" in capsys.readouterr().out
@@ -1684,3 +1685,88 @@ def test_codex_plugin_approval_check_survives_a_malformed_config(cli, state):
         config.write(f"\n[hooks]\nstate = {state}\n")
     shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
     assert uc.check_codex_hooks(ROOT)["state"] in ("current", "needs-approval")
+
+
+# ── delegate review of #596 (2026-10-05) ────────────────────────────────────
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_private_settings_file_keeps_its_mode(cli, tmp_path):
+    """settings.json can hold secrets in its env block; a 0600 file must not
+    come back 0644 from the umask after the rewrite."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    settings.chmod(0o600)
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "migrated", result
+    assert settings.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("answer", [(1, "✘ Failed to add marketplace: Cleaning up old marketplace cache failed"),
+                                    (uc.TIMED_OUT, "TimeoutExpired: Command 'claude' timed out after 180 seconds")],
+                         ids=["exit-1", "timed-out"])
+def test_an_add_that_failed_after_moving_the_record_leaves_settings_matching_it(cli, tmp_path, answer):
+    """The add can re-point known_marketplaces.json and then fail or time
+    out. Putting settings back to the github source then would leave the two
+    disagreeing, the state in which Claude Code lists no marketplace at all,
+    so settings stays on HTTPS to match the record and the step says so."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    real_add = cli._marketplace_add
+
+    def moves_then_fails(source):
+        real_add(source)
+        return answer
+    cli._marketplace_add = moves_then_fails
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "already records" in result["detail"]
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    known = json.loads((uc.plugins_root() / "known_marketplaces.json").read_text(encoding="utf-8"))
+    assert known["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+
+
+@pytest.mark.parametrize("known, state", [(HTTPS_SOURCE, "current"), (GITHUB_SOURCE, "failed"), (None, "failed")],
+                         ids=["already-https", "github", "no-record"])
+def test_an_unreadable_settings_file_fails_only_where_the_move_needs_it(cli, tmp_path, known, state):
+    """A host already on HTTPS (every 0.17 install) has nothing to move, so
+    a settings.json that is not valid JSON must not fail its plugin step on
+    every update; only a github record, or none, needs the file read."""
+    if known is None:
+        _plugin_fixture(cli, tmp_path, differ=False)
+        (uc.plugins_root() / "known_marketplaces.json").unlink()
+    else:
+        _plugin_fixture(cli, tmp_path, differ=False, source=known)
+    settings = cli.home / "settings.json"
+    settings.write_text('{"env": {"X": "1"},', encoding="utf-8")
+    moved = uc.migrate_marketplace(cli.tools["claude"])
+    assert moved["state"] == state, moved
+    assert settings.read_text(encoding="utf-8") == '{"env": {"X": "1"},'
+    assert _marketplace_adds(cli) == []
+
+
+def test_the_add_is_bounded_and_never_prompts(cli, tmp_path):
+    """An installer must not sit for run_cli's default ten minutes on a hung
+    clone, and git must never wait on a credential prompt nobody sees."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    uc.update_plugin(ROOT)
+    (index,) = [i for i, c in enumerate(cli.calls) if c[1:4] == ["plugin", "marketplace", "add"]]
+    kw = cli.run_kwargs[index]
+    assert kw.get("timeout") == uc.MARKETPLACE_ADD_TIMEOUT < 600
+    assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_the_installer_line_survives_a_console_that_cannot_encode_it(cli, monkeypatch):
+    """A Windows console piped into PowerShell encodes stdout as cp1252: a
+    path it cannot encode must not turn a successful move into a traceback
+    the installer reports as a failure."""
+    import io
+    buffer = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(buffer, encoding="cp1252"))
+    monkeypatch.setattr(uc, "migrate_marketplace", lambda claude=None: {
+        "state": "migrated", "detail": "moved (backups in C:\\Users\\Ελένη\\.claude\\plugins\\backup)"})
+    assert uc.marketplace_main() == 0
+    sys.stdout.flush()
+    assert b"backups in" in buffer.getvalue()

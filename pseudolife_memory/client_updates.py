@@ -766,6 +766,11 @@ def _marketplace_remedy(out: str) -> str:
 # SSH, which fails on a host with no GitHub SSH key (homelab box, 2026-10-04).
 _SHORTHAND_REPO = "pseudogiant-xr/pseudolife-mcp"
 _HTTPS_SOURCE = {"source": "git", "url": MARKETPLACE_HTTPS}
+# The add re-clones the marketplace: Claude Code 2.1.287 gives its cache
+# refresh and its clone 120 s each (it prints both limits, 2026-10-05), so
+# this bounds the pair with a minute to spare, well inside run_cli's 600 s
+# default an installer would otherwise sit through.
+MARKETPLACE_ADD_TIMEOUT = 300
 
 
 def _source_kind(source: object) -> str:
@@ -792,11 +797,17 @@ def _entry_source(data: object) -> object:
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Replace ``path`` with ``data`` in one rename, so a reader (a Claude
     Code session) sees the old file or the new one, never half of either.
-    A symlinked file (dotfiles) is written at its target, keeping the link."""
+    A symlinked file (dotfiles) is written at its target, keeping the link,
+    and the file keeps its permission bits: settings.json can hold secrets
+    in its env block, and a 0600 file must not come back 0644 from the umask."""
     path = Path(os.path.realpath(path))
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        try:
+            shutil.copymode(path, tmp)
+        except OSError:
+            pass
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -849,19 +860,22 @@ def migrate_marketplace(claude: str | None = None) -> dict:
     settings = claude_config_dir() / "settings.json"
     plugins_dir = plugins_root()
     known_file = plugins_dir / "known_marketplaces.json"
+    known = _entry_source(_read_json(known_file))
     data: dict | None = None
     if settings.is_file():
         try:
             data = json.loads(settings.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             data = None
-        if not isinstance(data, dict):
+        # Only a move needs the file: a record already on HTTPS (every
+        # install since 0.17.0) or somebody's own source has nothing to move.
+        if not isinstance(data, dict) and _source_kind(known) not in ("https", "other"):
             return {"state": "failed",
                     "detail": f"{settings} is not valid JSON, so the {MARKETPLACE} marketplace's source could not "
                               "be checked; nothing was changed. Fix that file, then run this again"}
+        data = data if isinstance(data, dict) else {}
     declared_marketplaces = (data or {}).get("extraKnownMarketplaces")
     declared = _entry_source(declared_marketplaces)
-    known = _entry_source(_read_json(known_file))
     kinds = {_source_kind(declared), _source_kind(known)}
     if kinds == {"none"}:
         return {"state": "absent", "detail": f"no {MARKETPLACE} plugin marketplace is recorded"}
@@ -911,12 +925,20 @@ def migrate_marketplace(claude: str | None = None) -> dict:
             why += f"; putting its entry in {settings} back failed ({exc}), so restore that file from {backup}"
         return failed(why)
 
-    code, out = run_cli([claude, "plugin", "marketplace", "add", MARKETPLACE_HTTPS])
+    code, out = run_cli([claude, "plugin", "marketplace", "add", MARKETPLACE_HTTPS],
+                        timeout=MARKETPLACE_ADD_TIMEOUT, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     lines = [line.strip() for line in out.splitlines() if line.strip()]
     said = next((line for line in lines if "Failed" in line), lines[-1] if lines else f"exit {code}")
+    now = _entry_source(_read_json(known_file))
+    if code != 0 and _source_kind(now) == "https":
+        # The add moved the record and then failed or timed out. Settings
+        # back on the github source would disagree with it, the state in
+        # which Claude Code lists no marketplace at all, so they stay.
+        return failed(f"claude plugin marketplace add {MARKETPLACE_HTTPS} failed ({said}) after {known_file} "
+                      f"already records the HTTPS source, so {settings} was left on HTTPS to match; check the "
+                      f"clone with claude plugin marketplace update {MARKETPLACE} (backups in {backup})")
     if code != 0:
         return undo(f"claude plugin marketplace add {MARKETPLACE_HTTPS} failed ({said})")
-    now = _entry_source(_read_json(known_file))
     if _source_kind(now) != "https":
         return undo(f"claude plugin marketplace add {MARKETPLACE_HTTPS} exited 0 ({said}) but {known_file} still "
                     f"records {json.dumps(now)}")
@@ -950,7 +972,11 @@ def marketplace_main() -> int:
     1 only on a failure."""
     result = migrate_marketplace()
     if result["state"] != "absent":
-        print(result["detail"][:1].upper() + result["detail"][1:] + ".")
+        line = result["detail"][:1].upper() + result["detail"][1:] + "."
+        # A Windows console piped into PowerShell encodes as cp1252; a path
+        # it cannot encode must not turn a finished move into a traceback.
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(line.encode(encoding, "replace").decode(encoding))
     return 1 if result["state"] == "failed" else 0
 
 
