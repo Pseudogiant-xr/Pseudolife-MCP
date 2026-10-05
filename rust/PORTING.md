@@ -157,13 +157,15 @@ behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
 casefold differences. `shim/src/board/unicode14.rs` records those corrections
 and the 701 category-C ranges, with dedicated normalization assertions.
-This compatibility table pins CPython 3.11's Unicode 14 for repository claims;
-it does not pin every Rust text operation to Python. Wake-reason sanitization
-uses Rust `char::is_alphanumeric` and `char::is_whitespace` by the maintainer's
-2026-10-05 phase 2 decision (`ported-with-substitution`); it still compacts,
-limits to 60 characters, filters punctuation and falls back to `unknown`.
-Unicode 14's U+001C separator is therefore filtered rather than split in a wake
-reason. Claim casefold/category-C/NFC behavior keeps `unicode14.rs` unchanged.
+Wake-reason sanitization also uses the pinned Unicode 14 predicates: categories
+L* or N* for `str.isalnum`, and the Python whitespace set including U+001C–001F
+for `str.isspace`. The same file retains 733 alphanumeric ranges; the existing
+casefold and category-C tables stay intact. The full-range SHA256 contract hashes
+one alphanumeric byte followed by one whitespace byte for every code point,
+including surrogates. `evals/rust_port/unicode14_reason.py` computes it with the
+pinned CPython 3.11 runtime. Sanitization still compacts, limits to 60 characters,
+filters punctuation and falls back to `unknown`; the separate `reason14.rs`
+asset remains deleted.
 
 ## HTTP and authentication
 

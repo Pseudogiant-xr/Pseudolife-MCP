@@ -371,3 +371,19 @@ blobs and retained watched-RED logs `fixes-red-b.log` (two failures) and
 isolated Windows startup checks passed 12/12. This closes implementation item b;
 final integrated-head CI, suites and review remain pending. No later head is
 claimed tested by those isolated runs.
+
+## Phase 2b item c: restored Unicode 14 wake reasons
+
+The committed Python generator and Rust full-range contract hash two predicate
+bytes per code point from U+0000 through U+10FFFF, including surrogates, to
+`f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe`. The
+CPython 3.11 / Unicode 14 table preserves L* and N* alphanumeric categories and
+Python whitespace, including U+001C–001F. Existing claim tables remain intact;
+`reason14.rs` stays deleted.
+
+[Local proof summary](phase2b-fixes-evidence.json) retains watched RED
+`fixes-red-bcd.log`: the separator and full-range hash both failed before the
+fix. Both restored contract tests passed in the isolated Windows targeted run.
+Implementation item c is closed; the row's earlier Rust-predicate substitution
+is withdrawn, with final integrated-head acceptance still pending before a
+`ported` status.

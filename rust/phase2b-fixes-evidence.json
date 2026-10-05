@@ -39,6 +39,33 @@
       "limitations": [
         "Original frozen-tree proof only; final integrated-head acceptance pending."
       ]
+    },
+    "c": {
+      "implemented_source_blobs": {
+        "rust/shim/src/board/liveness.rs": "a2ea148bd54ae6fd6f033fdd910fe1d98344aa71",
+        "rust/shim/src/board/unicode14.rs": "70f1d81bf51e9fb5bd30b73f82c5e6e2eb058696",
+        "rust/shim/tests/board_ring_contract.rs": "b9fd5f43b074974fd41d8f1267d8e810c8db03a1",
+        "evals/rust_port/unicode14_reason.py": "a55293a64a8e1743f37dac25379397011907c786"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-bcd.log",
+          "sha256": "7b6b02e2f1c972fa54a1d18f38496f38c48c9899d0c97eb4e3d445c20cae6231",
+          "observed": "Two failures: U+001C whitespace and full-range digest mismatches; exit 101."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows board_ring_contract 8/8, including both restored Unicode 14 contracts; this batch preceded the final startup-only narrowing."
+        }
+      ],
+      "limitations": [
+        "The original isolated table and test blobs are unchanged by the later startup-only correction.",
+        "CPython 3.11.9 unicodedata version 14.0.0 was verified; expected digest is f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe.",
+        "Current integrated-head parity acceptance pending."
+      ]
     }
   },
   "remaining_gates": [
