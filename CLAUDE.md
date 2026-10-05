@@ -84,8 +84,9 @@ exactly; they exist because each one was violated at least once.
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
    required analysis checks. If master has moved since that integration was
    tested, update the branch and wait for fresh CI; rerunning an old job
-   tests its old merge commit. Independent review remains required, and the
-   maintainer owns the merge.
+   tests its old merge commit. The one exception is a disjoint merge-forward
+   (see "A disjoint merge-forward" under "Running tests"). Independent review
+   remains required, and the maintainer owns the merge.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
@@ -397,6 +398,27 @@ took 143 CUDA OOMs.
   full suite. Ordinary code branches with no local-full requirement do not
   acquire one merely by merging master forward. A pass carried forward
   under the review-fix rule below counts as the branch's passed run.
+- **A disjoint merge-forward needs no fresh pre-merge CI** (maintainer
+  decision 2026-10-05, after #592 waited 25 minutes on a CHANGELOG-only
+  conflict). All of these must hold:
+  - The PR's previous head passed every required check.
+  - Since that run, master's new commits and the PR's own changes share no
+    file except docs-only files (CHANGELOG.md, other `*.md`, `llms*.txt`,
+    `docs/**`). Compare `git diff --name-only <old base>..origin/master`
+    with the PR's changed files.
+  - No code conflict was resolved by hand. The merge-forward commit changes
+    only docs-only files beyond what the PR already changed.
+  - Neither side touches shared ground: `pyproject.toml`, lock files,
+    `.github/workflows/`, `tests/conftest.py`, fixtures, imported test
+    helpers, or a module the other side's changed files import (grep
+    for it).
+  - The doc guards pass locally on the merged head when docs overlapped.
+
+  Then merge without waiting for the new run. CI runs again on the push to
+  master (`ci.yml` triggers on it). The merger watches that run and, if it
+  fails, fixes forward or reverts at once. The PR comment says "disjoint
+  merge-forward: fresh CI skipped" and lists both file sets. When in doubt,
+  wait for CI.
 - **Review fixes after a passing local full suite need no new one** unless
   the fixes themselves fall under a class that requires one (shipping
   checklist item 3, including its platform-specific process rule). A review
