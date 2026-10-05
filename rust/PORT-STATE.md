@@ -474,6 +474,9 @@ final head; #560 remains draft.
 The default-on `codex-delivery` feature makes the `tokio-tungstenite` dependency
 and its transitive `webpki-roots` optional. The disabled dependency graph excludes
 both crates; Cargo.lock retains their entries for the default build. Windows
-check and Clippy pass for both profiles, with 9 default delivery tests and 43
-disabled-feature pull, channel and doorbell tests passing. Linux validation and
-the final integrated-head review remain pending; no parity status changes.
+and Linux check and Clippy pass for both profiles, with 9 default delivery/bridge
+tests and 43 disabled-feature pull, channel and doorbell tests passing on each
+platform. The [Linux receipt](../evals/results/rust-phase2b-codex-delivery-4173ef98/linux.json)
+binds these results to `4173ef98` and retains the initial zero-test library
+filters as unaccepted setup history. Current-master integration and the final
+integrated-head review remain pending; no parity status changes.
