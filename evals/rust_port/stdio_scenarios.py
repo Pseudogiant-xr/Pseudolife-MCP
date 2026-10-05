@@ -10,7 +10,7 @@ from .harness import capture_platform
 from .stdio import capture
 from .stdio_capture import initialize, modern_meta
 from .stdio_corpus import ERAS
-from .stdio_judge import StdioPolicy, concurrent_policy, judge
+from .stdio_judge import StdioPolicy, concurrent_policy, judge, retain_stderr
 from .stdio_scenario_fixture import ScenarioFixture
 
 
@@ -77,7 +77,7 @@ def startup(root, command, contract):
                 health["init_refusal"] = "synthetic initialization refusal"
             fixture = ScenarioFixture(health)
             url = fixture.url
-        pair = []
+        pair, contract_differences = [], []
         try:
             with private_directory() as private:
                 credential_file = None
@@ -97,10 +97,11 @@ def startup(root, command, contract):
                     result = capture(prefix, cwd=root, home=Path(private) / arm, url=url,
                                      exercise=exercise, env_extra=extras, boundary_errors=arm == "candidate")
                     records = fixture.records[before:] if fixture else []
-                    result.update(arm=arm, case=case, upstream_requests=records)
-                    differences.extend({"case": case, "arm": arm, **difference} for difference in
+                    result.update(arm=arm, era=ERAS[0], case=case, upstream_requests=records)
+                    contract_differences.extend({"case": case, "arm": arm, **difference} for difference in
                                        startup_difference(result, contract, case, url, credential_file, records))
                     pair.append(result)
+                differences.extend(retain_stderr(contract_differences, *pair))
                 differences.extend({"case": case, **difference} for difference in judge(*pair, StdioPolicy()))
         finally:
             cleanup = fixture.close() if fixture else {"closed_endpoint_released": True}
