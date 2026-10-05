@@ -304,16 +304,23 @@ def _age(path: Path, days: float) -> None:
     os.utime(path, (stamp, stamp), follow_symlinks=False)
 
 
+def _age_tree(path: Path, days: float) -> None:
+    for p in sorted(path.rglob("*"), reverse=True):
+        _age(p, days)
+    _age(path, days)
+
+
 def _copy(home: Path, entry: str, days: float) -> Path:
     """A test copy as a run leaves it: a .git, some files, and its lock."""
     path = home / WORK / entry
     (path / ".git").mkdir(parents=True)
     (path / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="ascii")
-    (path / "payload").write_bytes(b"x" * 300_000)
+    # Random, so a compressing filesystem still reports its size.
+    (path / "payload").write_bytes(os.urandom(300_000))
     lock = home / WORK / f"{entry}.lock"
     lock.touch()
-    for p in (path / ".git" / "HEAD", path / ".git", path, lock):
-        _age(p, days)
+    _age_tree(path, days)
+    _age(lock, days)
     return path
 
 
@@ -322,10 +329,8 @@ def _env(home: Path, key: str, days: float, lock: bool = False) -> Path:
     path = home / VENVS / key
     (path / "bin").mkdir(parents=True)
     (path / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="ascii")
-    (path / "bin" / "python").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
-    (path / "bin" / "python").chmod(0o755)
-    for p in (path / "pyvenv.cfg", path / "bin", path):
-        _age(p, days)
+    _stub(path / "bin" / "python")
+    _age_tree(path, days)
     if lock:
         (home / VENVS / f"{key}.lock").touch()
         _age(home / VENVS / f"{key}.lock", days)
@@ -338,10 +343,15 @@ def _env_of(home: Path, entry: str) -> str:
     return f"{name}-{_sha8(f'{home}/{WORK.as_posix()}/{entry}')}"
 
 
-def _stub(path: Path) -> None:
+def _stub(path: Path, body: str = "exit 0") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="ascii")
     path.chmod(0o755)
+
+
+_SCRUBBED = {"PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
+             "PSEUDOLIFE_SUITE_ENV_FILE": None, "PSEUDOLIFE_SUITE_PRUNE": None,
+             "PSEUDOLIFE_SUITE_PRUNE_DAYS": None, "PSEUDOLIFE_SUITE_KEEP": None}
 
 
 def _launch(tmp_path: Path, **env: str | None) -> subprocess.CompletedProcess:
@@ -349,12 +359,9 @@ def _launch(tmp_path: Path, **env: str | None) -> subprocess.CompletedProcess:
     its own environment outside the pruned root."""
     _stub(tmp_path / "venv" / "bin" / "python")
     _stub(tmp_path / "stubs" / "uv")
-    base = {"HOME": str(tmp_path / "home"),
+    base = {**_SCRUBBED, "HOME": str(tmp_path / "home"),
             "PATH": f"{tmp_path / 'stubs'}{os.pathsep}{os.environ['PATH']}",
-            "PSEUDOLIFE_SUITE_VENV": str(tmp_path / "venv"),
-            "PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
-            "PSEUDOLIFE_SUITE_PRUNE": None, "PSEUDOLIFE_SUITE_PRUNE_DAYS": None,
-            "PSEUDOLIFE_SUITE_KEEP": None}
+            "PSEUDOLIFE_SUITE_VENV": str(tmp_path / "venv")}
     base.update(env)
     return subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
                           timeout=120, env=hermetic_env(**base))
@@ -366,9 +373,9 @@ def _pruned_lines(stderr: str) -> list[str]:
 
 @_LINUX_ONLY
 def test_a_run_prunes_stale_copies_and_environments(tmp_path):
-    """Stale copies go with their environments; a recent copy, a copy whose
-    lock is held (a run is using it), and their environments stay, and one
-    line says what went and how much it freed."""
+    """Stale copies go with their environments and locks; a recent copy, a
+    copy whose lock is held (a run is using it), and their environments
+    stay, and one line says what went and how much it freed."""
     import fcntl
 
     home = tmp_path / "home"
@@ -392,42 +399,52 @@ def test_a_run_prunes_stale_copies_and_environments(tmp_path):
     assert not (home / WORK / "e36d1995-stale.lock").exists()
     assert not (home / VENVS / "gone-checkout-0badf00d.lock").exists()
     assert (home / WORK / "e36d1995-busy.lock").exists()
+    assert not list((home / WORK).glob(".trash-*")), "a renamed copy was left"
     lines = _pruned_lines(proc.stderr)
     assert len(lines) == 1, proc.stderr
     assert "pruned 1 test copy and 2 environments" in lines[0], lines[0]
+    assert "removed 1 orphaned lock file" in lines[0], lines[0]
     assert "freeing 0.0 MB" not in lines[0], lines[0]  # 300 KB of payload
 
 
 @_LINUX_ONLY
 def test_pruning_keeps_the_newest_copies_past_the_cap(tmp_path):
     """Past PSEUDOLIFE_SUITE_KEEP the least recently used copies go, even
-    when none is stale."""
+    when none is stale; a recent copy's lock file stays behind it."""
     home = tmp_path / "home"
     copies = [_copy(home, f"e36d1995-c{i}", days=i * 0.1) for i in range(5)]
     proc = _launch(tmp_path, PSEUDOLIFE_SUITE_KEEP="2")
     assert proc.returncode == 0, proc.stderr
     assert [c.exists() for c in copies] == [True, True, False, False, False], proc.stderr
+    # A run from before the pruner may be waiting on it (see the script).
+    assert (home / WORK / "e36d1995-c4.lock").exists()
 
 
 @_LINUX_ONLY
-def test_pruning_removes_orphaned_locks_but_not_held_ones(tmp_path):
-    """A lock file whose copy is gone is removed, unless a run holds it: a
-    run takes the lock before it clones the copy."""
+def test_pruning_removes_old_orphaned_locks_but_not_held_or_recent_ones(tmp_path):
+    """A lock file whose copy is gone is removed once it is as old as a
+    stale copy, unless a run holds it: a run takes the lock before it clones
+    the copy, and that run's environment stays too."""
     import fcntl
 
     home = tmp_path / "home"
     (home / WORK).mkdir(parents=True)
     (home / VENVS).mkdir(parents=True)
     orphans = [home / WORK / "e36d1995-gone.lock", home / VENVS / "gone-0badf00d.lock"]
+    recent = home / WORK / "e36d1995-recent.lock"
     held_path = home / WORK / "e36d1995-cloning.lock"
-    for lock in (*orphans, held_path):
+    for lock in (*orphans, recent, held_path):
         lock.touch()
+    for lock in (*orphans, held_path):
+        _age(lock, 10)
+    cloning_env = _env(home, _env_of(home, "e36d1995-cloning"), days=10)
     with open(held_path, "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         proc = _launch(tmp_path)
     assert proc.returncode == 0, proc.stderr
     assert not any(o.exists() for o in orphans), proc.stderr
-    assert held_path.exists()
+    assert held_path.exists() and recent.exists(), proc.stderr
+    assert cloning_env.exists(), proc.stderr
     assert "removed 2 orphaned lock files" in proc.stderr, proc.stderr
 
 
@@ -458,8 +475,8 @@ def test_pruning_spares_an_environment_a_process_runs_from(tmp_path):
 
 @_LINUX_ONLY
 def test_pruning_never_follows_a_symlink_out_of_its_root(tmp_path):
-    """A stale entry that is a symlink stays, and so does what it points
-    at: only real directories inside the two roots are removed."""
+    """A stale entry or lock file that is a symlink stays, and so does what
+    it points at: only real directories inside the two roots are removed."""
     home = tmp_path / "home"
     outside = tmp_path / "outside"
     (outside / ".git").mkdir(parents=True)
@@ -472,12 +489,30 @@ def test_pruning_never_follows_a_symlink_out_of_its_root(tmp_path):
         link.symlink_to(outside, target_is_directory=True)
         _age(link, 10)
         links.append(link)
-    _age(outside, 10)
+    # A dangling lock link would otherwise be created, outside the root.
+    (home / WORK / "e36d1995-link.lock").symlink_to(tmp_path / "made-outside")
+    _age_tree(outside, 10)
     proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE_DAYS="0", PSEUDOLIFE_SUITE_KEEP="0")
     assert proc.returncode == 0, proc.stderr
     assert (outside / "keep").read_text(encoding="ascii") == "data"
     assert all(link.is_symlink() for link in links), proc.stderr
+    assert not (tmp_path / "made-outside").exists(), proc.stderr
     assert not _pruned_lines(proc.stderr), proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_finishes_what_an_interrupted_prune_left(tmp_path):
+    """A copy renamed for deletion by a prune that was stopped is deleted by
+    the next run, whatever its age; one whose pruner still runs stays."""
+    home = tmp_path / "home"
+    (home / WORK).mkdir(parents=True)
+    dead = home / WORK / ".trash-999999999-e36d1995-old"
+    live = home / WORK / f".trash-{os.getpid()}-e36d1995-busy"
+    for trash in (dead, live):
+        (trash / ".git").mkdir(parents=True)
+    proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert not dead.exists() and live.exists(), proc.stderr
 
 
 @_LINUX_ONLY
@@ -488,11 +523,14 @@ def test_pruning_can_be_turned_off(tmp_path):
     assert stale.exists() and not _pruned_lines(proc.stderr), proc.stderr
 
 
-@_LINUX_ONLY
-@pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
-def test_a_copy_mode_run_never_prunes_its_own_copy_or_environment(tmp_path):
-    """With nothing to keep (0 days, a cap of 0) a copy-mode run still keeps
-    the copy it tests and the environment it runs, and prunes the rest."""
+# --- copy mode: the run's own copy and environment, and its locks
+
+
+def _copy_mode(tmp_path: Path) -> tuple[Path, str, dict[str, str | None]]:
+    """A repository with one commit, and the settings for a copy-mode run of
+    it named "mine". Returns the copy's entry name, the environment's path
+    and the environment variables; pytest's stand-in is that environment's
+    python, which exits 0."""
     home = tmp_path / "home"
     repo = tmp_path / "repo"
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
@@ -504,23 +542,102 @@ def test_a_copy_mode_run_never_prunes_its_own_copy_or_environment(tmp_path):
                          capture_output=True, text=True).stdout.strip()
     common = str(repo / ".git")
     entry = f"{_sha8(common)}-mine"
-    own_env = _env(home, _env_of(home, entry), days=10, lock=True)
-    (home / WORK).mkdir(parents=True, exist_ok=True)
-    (home / WORK / f"{entry}.lock").touch()
-    _age(home / WORK / f"{entry}.lock", 10)
+    env_path = _env(home, _env_of(home, entry), days=0, lock=True)
+    _stub(tmp_path / "stubs" / "uv")
+    env = {**_SCRUBBED, "HOME": str(home),
+           "PATH": f"{tmp_path / 'stubs'}{os.pathsep}{os.environ['PATH']}",
+           "PSEUDOLIFE_SUITE_COMMIT": sha, "PSEUDOLIFE_SUITE_GIT_COMMON": common,
+           "PSEUDOLIFE_SUITE_NAME": "mine", "PSEUDOLIFE_SUITE_VENV": None}
+    return home / WORK / entry, env_path, env
+
+
+_NEEDS_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
+
+
+@_LINUX_ONLY
+@_NEEDS_GIT
+def test_a_copy_mode_run_never_prunes_its_own_copy_or_environment(tmp_path):
+    """A run's own copy and environment stay however old they are, and count
+    toward the kept number: with a cap of 1 the other, recent copy goes."""
+    own, own_env, env = _copy_mode(tmp_path)
+    first = subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
+                           timeout=120, env=hermetic_env(**env))
+    assert first.returncode == 0 and (own / "README").exists(), first.stderr
+    home = tmp_path / "home"
+    _age_tree(own, 10)
+    _age_tree(own_env, 10)
+    for lock in (own.with_name(own.name + ".lock"), own_env.with_name(own_env.name + ".lock")):
+        _age(lock, 10)
     other = _copy(home, "e36d1995-other", days=0)
     other_env = _env(home, _env_of(home, "e36d1995-other"), days=0)
-    _stub(tmp_path / "stubs" / "uv")
-    proc = subprocess.run(
-        [BASH, str(SCRIPT)], capture_output=True, text=True, timeout=120,
-        env=hermetic_env(HOME=str(home),
-                         PATH=f"{tmp_path / 'stubs'}{os.pathsep}{os.environ['PATH']}",
-                         PSEUDOLIFE_SUITE_COMMIT=sha, PSEUDOLIFE_SUITE_GIT_COMMON=common,
-                         PSEUDOLIFE_SUITE_NAME="mine", PSEUDOLIFE_SUITE_VENV=None,
-                         PSEUDOLIFE_SUITE_DISPATCHED=None, PSEUDOLIFE_SUITE_PRUNE=None,
-                         PSEUDOLIFE_SUITE_PRUNE_DAYS="0", PSEUDOLIFE_SUITE_KEEP="0"))
+    proc = subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True, timeout=120,
+                          env=hermetic_env(**{**env, "PSEUDOLIFE_SUITE_KEEP": "1"}))
     assert proc.returncode == 0, proc.stderr
-    assert (home / WORK / entry / "README").exists(), proc.stderr
+    assert (own / "README").exists(), proc.stderr
     assert (own_env / "bin" / "python").exists(), proc.stderr
     assert not other.exists() and not other_env.exists(), proc.stderr
     assert "pruned 1 test copy and 1 environment " in proc.stderr, proc.stderr
+
+
+def _held(path: Path) -> bool:
+    """Whether some process holds a lock on the file now at ``path``."""
+    import fcntl
+
+    with open(path, "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+
+
+@_LINUX_ONLY
+@_NEEDS_GIT
+@pytest.mark.parametrize("which", ["copy", "environment"])
+def test_a_run_reopens_a_lock_file_removed_while_it_waited(tmp_path, which):
+    """A run waiting on a lock file that a pruner then deletes takes the new
+    file at that path, not the deleted one: otherwise a later run would
+    take the new file at once and both would use the same copy."""
+    import fcntl
+
+    own, own_env, env = _copy_mode(tmp_path)
+    first = subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
+                           timeout=120, env=hermetic_env(**env))
+    assert first.returncode == 0, first.stderr
+    ready = tmp_path / "ready"
+    _stub(own_env / "bin" / "python",
+          f'touch "{ready}"\nwhile [ -e "{ready}" ]; do sleep 0.1; done\nexit 0')
+    lock = (own.with_name(own.name + ".lock") if which == "copy"
+            else own_env.with_name(own_env.name + ".lock"))
+    log = tmp_path / "launcher.log"
+    holder = open(lock, "a")
+    launcher = None
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with open(log, "w") as out:
+            launcher = subprocess.Popen([BASH, str(SCRIPT)], stdout=out, stderr=out,
+                                        env=hermetic_env(**env))
+        fd = 9 if which == "copy" else 7
+        deadline = time.monotonic() + 60
+        # The launcher has opened the lock and is about to wait on it.
+        while not (Path(f"/proc/{launcher.pid}/fd/{fd}").exists()
+                   and os.readlink(f"/proc/{launcher.pid}/fd/{fd}") == str(lock)):
+            assert launcher.poll() is None, log.read_text()
+            assert time.monotonic() < deadline, log.read_text()
+            time.sleep(0.05)
+        time.sleep(0.3)
+        lock.unlink()  # as the pruner does, while holding it
+        holder.close()
+        while not ready.exists():
+            assert launcher.poll() is None, log.read_text()
+            assert time.monotonic() < deadline, log.read_text()
+            time.sleep(0.05)
+        assert lock.exists() and _held(lock), (
+            f"the run holds the deleted {which} lock, not the one at its path")
+        ready.unlink()
+        assert launcher.wait(timeout=60) == 0, log.read_text()
+    finally:
+        holder.close()
+        if launcher is not None and launcher.poll() is None:
+            launcher.kill()
+            launcher.wait(timeout=10)

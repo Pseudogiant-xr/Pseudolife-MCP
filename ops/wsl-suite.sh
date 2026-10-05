@@ -105,6 +105,7 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     # Opening it truncates the file, which stamps its mtime: the pruner below
     # reads that as the copy's last use. The pruner deletes a lock file only
     # while holding it, so one deleted while this run waited is opened again.
+    tries=0
     while :; do
         exec 9>"$root.lock"
         if ! flock -n 9; then
@@ -112,41 +113,51 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
             flock 9
         fi
         [[ "$root.lock" -ef /dev/fd/9 ]] && break
+        (( ++tries < 5 )) || { echo "wsl-suite: $root.lock kept being replaced while this run waited; refusing" >&2; exit 2; }
     done
 fi
 
 key="$name-$(printf '%s' "$root" | sha256sum | cut -c1-8)"
 venv_root="$HOME/.venvs/pseudolife"
 venv="${PSEUDOLIFE_SUITE_VENV:-$venv_root/$key}"
-if [[ -z "${PSEUDOLIFE_SUITE_VENV:-}" ]] && command -v flock >/dev/null 2>&1; then
+if [[ "$venv" == "$venv_root"/* ]] && command -v flock >/dev/null 2>&1; then
     # Held shared for the whole run (two runs of one worktree may share an
     # environment, as before); the pruner deletes an environment only while
-    # holding this lock exclusively. Its mtime is the environment's last use.
+    # holding this lock exclusively. Opening it stamps the environment's
+    # last use, as for the copy's lock.
     mkdir -p "$venv_root"
+    tries=0
     while :; do
         exec 7>"$venv.lock"
         flock -s 7
         [[ "$venv.lock" -ef /dev/fd/7 ]] && break
+        (( ++tries < 5 )) || { echo "wsl-suite: $venv.lock kept being replaced while this run waited; refusing" >&2; exit 2; }
     done
 fi
 
 # Removes the test copies and environments earlier runs left behind: those
 # unused for PSEUDOLIFE_SUITE_PRUNE_DAYS days (default 3), then the least
 # recently used past PSEUDOLIFE_SUITE_KEEP of each (default 8), and lock
-# files whose directory is gone. PSEUDOLIFE_SUITE_PRUNE=off turns it off.
-# Measured 2026-10-05: nothing removed them, and at ~600 MB a copy and
-# ~220 MB an environment the second machine's disk went from 62% to 88% in
-# one day (13 copies, 7.8 GB, plus 2.9 GB of environments; it had filled
-# once on 2026-10-04), while WSL here held 18 copies (11 GB) and 3.3 GB.
+# files whose directory is gone once they are as old.
+# PSEUDOLIFE_SUITE_PRUNE=off turns it off. Measured 2026-10-05: nothing
+# removed them, and at ~600 MB a copy and ~220 MB an environment the second
+# machine's disk went from 62% to 88% in one day (13 copies, 7.8 GB, plus
+# 2.9 GB of environments; it had filled once on 2026-10-04), while WSL here
+# held 18 copies (11 GB) and 3.3 GB.
 #
 # It never fails the run, and it removes only a direct, non-symlink child of
 # the two roots this script owns, checked after resolving it. It removes a
 # copy or an environment only while holding its lock (taken without
 # waiting: a held lock means a run is using it) and never this run's own.
-# An environment also stays while any process runs from it, or while the
-# lock of the copy it belongs to is held: a commit dispatched from before
-# this pruner takes no environment lock, but it does hold its copy's.
-# Mirrors are shared by every copy of a repository and are left alone.
+# An environment also stays while any process runs from it, and goes only
+# while the lock of the copy it belongs to is held here too: a commit
+# dispatched from before this pruner takes no environment lock, but it does
+# take its copy's. A copy's lock file outlives the copy (a run from before
+# the pruner may be waiting on it, and would not reopen a new one) and goes
+# only once it is unused as long. A directory is renamed to .trash-<pid>-
+# before it is deleted, so an interrupted delete never leaves a half copy a
+# later run would take for whole; later runs finish such leftovers. Mirrors
+# are shared by every copy of a repository and are left alone.
 prune_suite_cache() {
     set +eu
     [[ "${PSEUDOLIFE_SUITE_PRUNE:-}" == off ]] && return 0
@@ -156,6 +167,7 @@ prune_suite_cache() {
         return 0
     fi
     [[ "$HOME" == /?* ]] || return 0
+    command -v flock >/dev/null 2>&1 || return 0
     local work_dir="$HOME/.cache/pseudolife-suite/work"
     local work_root="" env_root="" now max_age
     [[ -d "$work_dir" ]] && work_root="$(realpath -e -- "$work_dir")"
@@ -168,11 +180,17 @@ prune_suite_cache() {
     own_copy="$(realpath -m -- "$root")"
     own_env="$(realpath -m -- "$venv")"
 
-    # Newest mtime among the paths given that exist, else 0.
+    # Newest mtime among the paths given that exist; 0 when none could be
+    # read, which may_go takes as "in use".
     last_use() {
         local t
         t="$(stat -c %Y -- "$@" 2>/dev/null | sort -n | tail -n 1)"
         printf '%s' "${t:-0}"
+    }
+    # Whether an entry last used at $1 may go: past the age limit, or past
+    # the kept count; never when its last use is unknown.
+    may_go() {
+        (( $1 > 0 )) && { (( count > keep )) || (( now - $1 > max_age )); }
     }
     # Whether $1 is a directory directly inside root $2 (both resolved),
     # and not reached through a symlink.
@@ -182,18 +200,26 @@ prune_suite_cache() {
         real="$(realpath -e -- "$1")" || return 1
         [[ "$real" == "$1" && "$(dirname -- "$real")" == "$2" ]]
     }
-    # Removes owned directory $1 of root $2; adds its size to `freed`.
+    # Deletes owned directory $1 of root $2, renamed out of the way first;
+    # adds its size to `freed`.
     remove_owned() {
         owned_child "$1" "$2" || return 1
-        local kib
-        kib="$(du -sk -- "$1" 2>/dev/null | cut -f1)"
-        rm -rf --one-file-system -- "$1" || return 1
+        local trash="$1" kib
+        if [[ "${1##*/}" != .trash-* ]]; then
+            trash="$2/.trash-$BASHPID-${1##*/}"
+            [[ ! -e "$trash" ]] || return 1
+            mv -- "$1" "$trash" || return 1
+        fi
+        kib="$(du -sk -- "$trash" 2>/dev/null | cut -f1)"
+        rm -rf --one-file-system -- "$trash"
         freed=$(( freed + ${kib:-0} ))
     }
     # Opens lock file $1 on a new descriptor, stored in `fd`, and takes it
     # exclusively without waiting. Appending keeps its mtime; one created
-    # here is dated 1970, so it never reads as a recent use.
+    # here is dated 1970, so it never reads as a recent use. A symlink is
+    # never followed.
     try_lock() {
+        [[ -L "$1" ]] && return 1
         local made=0
         [[ -e "$1" ]] || made=1
         exec {fd}>>"$1" || return 1
@@ -224,11 +250,22 @@ prune_suite_cache() {
             "$(printf '%s' "$work_dir/$entry" | sha256sum | cut -c1-8)"
     }
 
-    local -i copies=0 envs=0 locks=0 freed=0 fd=0
-    local path t line
-    local -i count=0
+    local -i copies=0 envs=0 locks=0 freed=0 fd=0 copy_fd=0 count=0 removed=0
+    local path t line lock_root pid
     local -a order=()
-    local -A kept_env=()
+    local -A kept_env=() copy_lock=()
+
+    # What an interrupted prune left, unless that pruner still runs.
+    for lock_root in "$work_root" "$env_root"; do
+        [[ -n "$lock_root" ]] || continue
+        for path in "$lock_root"/.trash-*; do
+            [[ -d "$path" ]] || continue
+            pid="${path##*/.trash-}"
+            pid="${pid%%-*}"
+            [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && continue
+            remove_owned "$path" "$lock_root"
+        done
+    done
 
     # Test copies, oldest first. A copy holds a .git; anything else here is
     # not one this script made and stays.
@@ -244,36 +281,23 @@ prune_suite_cache() {
         while IFS= read -r line; do
             [[ -n "$line" ]] || continue
             path="${line#* }"
-            if (( count <= keep )) && (( now - ${line%% *} <= max_age )); then
-                kept_env["$(env_of "$path")"]=1
-                continue
-            fi
-            if ! try_lock "$path.lock"; then
-                kept_env["$(env_of "$path")"]=1
-                continue
-            fi
-            # A run may have finished with it since it was read.
-            t="$(last_use "$path.lock" "$path" "$path/.git/HEAD" "$path/.git/index")"
-            if (( count <= keep )) && (( now - t <= max_age )); then
+            removed=0
+            if may_go "${line%% *}" && try_lock "$path.lock"; then
+                # A run may have finished with it since it was read.
+                t="$(last_use "$path.lock" "$path" "$path/.git/HEAD" "$path/.git/index")"
+                if may_go "$t" && remove_owned "$path" "$work_root"; then
+                    copies+=1
+                    count=$(( count - 1 ))
+                    removed=1
+                fi
                 exec {fd}>&-
-                kept_env["$(env_of "$path")"]=1
-                continue
             fi
-            if remove_owned "$path" "$work_root"; then
-                rm -f -- "$path.lock"
-                copies+=1
-                count=$(( count - 1 ))
-            else
-                kept_env["$(env_of "$path")"]=1
-            fi
-            exec {fd}>&-
+            (( removed )) || kept_env["$(env_of "$path")"]=1
         done < <(printf '%s\n' "${order[@]}" | sort -n)
         [[ "$own_copy" == "$work_root"/* ]] && kept_env["$(env_of "$own_copy")"]=1
-        # A held lock with no copy yet is a run about to clone one: its
-        # environment stays too. A free one is removed below.
+        # Every copy lock, by the environment its run would use.
         for path in "$work_root"/*.lock; do
-            [[ -f "$path" && ! -e "${path%.lock}" ]] || continue
-            if try_lock "$path"; then exec {fd}>&-; else kept_env["$(env_of "${path%.lock}")"]=1; fi
+            [[ -f "$path" && ! -L "$path" ]] && copy_lock["$(env_of "${path%.lock}")"]="$path"
         done
     fi
 
@@ -291,33 +315,38 @@ prune_suite_cache() {
             [[ -n "$line" ]] || continue
             path="${line#* }"
             [[ -n "${kept_env[$path]:-}" ]] && continue
-            (( count <= keep )) && (( now - ${line%% *} <= max_age )) && continue
-            try_lock "$path.lock" || continue
-            t="$(last_use "$path.lock" "$path" "$path/pyvenv.cfg" "$path"/lib/python*/site-packages)"
-            if { (( count <= keep )) && (( now - t <= max_age )); } \
-                    || runs_from "$path" "$venv_root/${path##*/}"; then
+            may_go "${line%% *}" || continue
+            copy_fd=0
+            if [[ -n "${copy_lock[$path]:-}" ]]; then
+                try_lock "${copy_lock[$path]}" || continue
+                copy_fd=$fd
+            fi
+            if try_lock "$path.lock"; then
+                t="$(last_use "$path.lock" "$path" "$path/pyvenv.cfg" "$path"/lib/python*/site-packages)"
+                if may_go "$t" && ! runs_from "$path" "$venv_root/${path##*/}" \
+                        && remove_owned "$path" "$env_root"; then
+                    rm -f -- "$path.lock"
+                    envs+=1
+                    count=$(( count - 1 ))
+                fi
                 exec {fd}>&-
-                continue
             fi
-            if remove_owned "$path" "$env_root"; then
-                rm -f -- "$path.lock"
-                envs+=1
-                count=$(( count - 1 ))
-            fi
-            exec {fd}>&-
+            (( copy_fd )) && exec {copy_fd}>&-
         done < <(printf '%s\n' "${order[@]}" | sort -n)
     fi
 
-    # Lock files whose copy or environment is gone (removed by hand, or by
-    # a run that stopped between the two removals).
-    local lock_root
+    # Lock files whose copy or environment is gone (removed by hand, or kept
+    # past their copy, as above), once they are unused as long.
     for lock_root in "$work_root" "$env_root"; do
         [[ -n "$lock_root" ]] || continue
         for path in "$lock_root"/*.lock; do
             [[ -f "$path" && ! -L "$path" && ! -e "${path%.lock}" ]] || continue
             [[ "${path%.lock}" == "$own_copy" || "${path%.lock}" == "$own_env" ]] && continue
             try_lock "$path" || continue
-            [[ -e "${path%.lock}" ]] || { rm -f -- "$path" && locks+=1; }
+            t="$(last_use "$path")"
+            if (( t > 0 && now - t > max_age )) && [[ ! -e "${path%.lock}" ]]; then
+                rm -f -- "$path" && locks+=1
+            fi
             exec {fd}>&-
         done
     done
