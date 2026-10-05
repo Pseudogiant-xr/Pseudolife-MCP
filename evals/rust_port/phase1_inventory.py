@@ -12,6 +12,9 @@ from .provenance import ROOT
 
 def regenerate(exploration, root=ROOT):
     require_phase1_source(root)
+    spec = importlib.util.spec_from_file_location("phase1_pinned_inventory", root / "rust/contract_inventory.py")
+    inventory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inventory)
     evidence = json.loads(Path(exploration).read_text(encoding="utf-8"))
     candidate_nodes = []
     functions = []
@@ -30,7 +33,8 @@ def regenerate(exploration, root=ROOT):
                 "equivalent": "pending" if item.get("planned_equivalent") else None,
                 "required_equivalent": item.get("planned_equivalent"),
                 "acceptance": "pending", "source_sha256": hashlib.sha256(pinned).hexdigest()})
-    if len(candidate_nodes) != 8 or len(functions) != 189:
+    inventory.validate_phase1_functions(functions, oracle=ORACLE_HEAD, root=root)
+    if len(candidate_nodes) != 10:
         raise RuntimeError("unexpected Phase 1 classification cardinality")
     manifest_path = root / "evals/rust_port/oracle_tests.json"
     manifest = json.loads(manifest_path.read_text())
@@ -53,13 +57,10 @@ def regenerate(exploration, root=ROOT):
     for file in buckets["files"]:
         if file["path"] == "tests/test_shim.py":
             file.update(bucket="candidate", candidate_nodes=candidate_nodes, remaining_nodes="oracle",
-                        reason="Eight public shim launch functions; each other function classified separately.")
+                        reason="Ten public shim launch functions; each other function classified separately. Runtime acceptance remains pending.")
     buckets["counts"] = dict(Counter(file["bucket"] for file in buckets["files"]))
     buckets["candidate_node_count"] = len(manifest["mapped"])
     buckets_path.write_text(json.dumps(buckets, indent=2) + "\n", encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("phase1_pinned_inventory", root / "rust/contract_inventory.py")
-    inventory = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(inventory)
     (root / "rust/phase1-contract-inventory.json").write_text(
         json.dumps(inventory.snapshot(oracle=ORACLE_HEAD), indent=2) + "\n", encoding="utf-8")
     return {"candidate_functions": len(candidate_nodes), "classified_functions": len(functions),

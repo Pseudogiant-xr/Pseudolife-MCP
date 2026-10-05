@@ -8,7 +8,7 @@
     "oracle": 68,
     "candidate": 2
   },
-  "candidate_node_count": 13,
+  "candidate_node_count": 15,
   "files": [
     {
       "path": "tests/test_abstain.py",
@@ -2114,7 +2114,7 @@
       "path": "tests/test_shim.py",
       "bucket": "candidate",
       "equivalent": "pending",
-      "reason": "Eight public shim launch functions; each other function classified separately.",
+      "reason": "Ten public shim launch functions; each other function classified separately. Runtime acceptance remains pending.",
       "candidate_nodes": [
         "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations",
         "tests/test_shim.py::test_shim_survives_idle_gap",
@@ -2123,7 +2123,9 @@
         "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
         "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
         "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
-        "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself"
+        "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself",
+        "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+        "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal"
       ],
       "remaining_nodes": "oracle"
     },
@@ -2510,7 +2512,7 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes",
@@ -2521,7 +2523,7 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_initializes_after_instruction_fetch_refused_and_recovers",
@@ -2532,7 +2534,7 @@
       "equivalent": "rust-unit:rust/shim/tests/shim_contract.rs::test_shim_initializes_after_instruction_fetch_refused_and_recovers",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2558,7 +2560,7 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
@@ -2569,7 +2571,7 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_forwards_stringified_list_param",
@@ -2580,7 +2582,7 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
@@ -2591,18 +2593,40 @@
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
+    },
+    {
+      "nodeid": "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+      "line": 436,
+      "bucket": "candidate",
+      "scope": "phase1",
+      "reason": "Public no-mode Python module launch checks unchanged daemon tool-body and argument-binding refusals over stdio. Candidate routing is covered by adapter unit tests; the real public test has not executed against this candidate, and runtime acceptance remains pending.",
+      "equivalent": null,
+      "required_equivalent": null,
+      "acceptance": "pending",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
+    },
+    {
+      "nodeid": "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
+      "line": 487,
+      "bucket": "candidate",
+      "scope": "phase1",
+      "reason": "Public no-mode Python module launch checks additionalProperties false and forwards the unknown-parameter refusal with its suggestion over stdio. Candidate routing is covered by adapter unit tests; the real public test has not executed against this candidate, and runtime acceptance remains pending.",
+      "equivalent": null,
+      "required_equivalent": null,
+      "acceptance": "pending",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_session_headers_include_writer_and_session",
-      "line": 439,
+      "line": 523,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_session_headers_include_writer_and_session",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2620,14 +2644,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_post_episode_is_best_effort",
-      "line": 449,
+      "line": 533,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_http.rs::test_post_episode_is_best_effort",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2645,14 +2669,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_claude_code_shim_joins_the_host_session_and_leaves_its_lifecycle_to_it",
-      "line": 500,
+      "line": 584,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_claude_code_shim_joins_the_host_session_and_leaves_its_lifecycle_to_it",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2671,14 +2695,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_without_a_host_session_opens_no_root_and_closes_only_its_own",
-      "line": 531,
+      "line": 615,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_shim_without_a_host_session_opens_no_root_and_closes_only_its_own",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2697,25 +2721,25 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
-      "line": 545,
+      "line": 629,
       "bucket": "candidate",
       "scope": "phase1",
       "reason": "Public no-mode Python module launch drives real shim over stdio and fixture/daemon HTTP; no implementation substitutions.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window",
-      "line": 602,
+      "line": 686,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_spawn_daemon_never_allocates_a_console_window",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2733,36 +2757,36 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shipped_package_never_spawns_with_detached_process",
-      "line": 637,
+      "line": 721,
       "bucket": "internal",
       "scope": "oracle-tooling-or-other-python-surface",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_reap_daemon_kills_only_the_daemon_this_test_started",
-      "line": 735,
+      "line": 819,
       "bucket": "internal",
       "scope": "oracle-tooling-or-other-python-surface",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_probe_health_returns_the_payload_of_a_degraded_daemon",
-      "line": 775,
+      "line": 859,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_http.rs::test_probe_health_returns_the_payload_of_a_degraded_daemon",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2780,14 +2804,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_surfaces_a_boot_refusal_instead_of_spawning_over_it",
-      "line": 797,
+      "line": 881,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_shim_surfaces_a_boot_refusal_instead_of_spawning_over_it",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2805,14 +2829,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_attaches_to_a_degraded_daemon_and_says_so",
-      "line": 821,
+      "line": 905,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_shim_attaches_to_a_degraded_daemon_and_says_so",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2830,14 +2854,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_no_spawn_env_waits_for_the_daemon_instead_of_spawning",
-      "line": 835,
+      "line": 919,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_no_spawn_env_waits_for_the_daemon_instead_of_spawning",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2855,14 +2879,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_no_spawn_env_starts_without_the_daemon_and_names_the_docker_remedy",
-      "line": 858,
+      "line": 942,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_no_spawn_env_starts_without_the_daemon_and_names_the_docker_remedy",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2880,14 +2904,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_no_spawn_env_falsy_value_still_spawns",
-      "line": 880,
+      "line": 964,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_no_spawn_env_falsy_value_still_spawns",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2905,14 +2929,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_concurrent_shims_spawn_exactly_one_daemon",
-      "line": 913,
+      "line": 997,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_concurrent_shims_spawn_exactly_one_daemon",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2930,14 +2954,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_spawn_lock_is_released_after_the_daemon_is_up",
-      "line": 969,
+      "line": 1053,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_spawn_lock_is_released_after_the_daemon_is_up",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -2955,14 +2979,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_sdk_guard_passes_on_a_v2_environment",
-      "line": 1006,
+      "line": 1090,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Python-only SDK import preflight retired in the Rust candidate by the maintainer decision recorded in PORTING.md; the existing Python oracle test remains unchanged.",
       "equivalent": "retired-by-decision",
       "required_equivalent": null,
       "acceptance": "retired-by-decision",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "retired-by-decision",
         "decision": "Maintainer 2026-10-05 phase 2 brief, section 1; PORTING.md no-python-before-first-frame",
@@ -2976,14 +3000,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic",
-      "line": 1014,
+      "line": 1098,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Python-only SDK import preflight retired in the Rust candidate by the maintainer decision recorded in PORTING.md; the existing Python oracle test remains unchanged.",
       "equivalent": "retired-by-decision",
       "required_equivalent": null,
       "acceptance": "retired-by-decision",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "retired-by-decision",
         "decision": "Maintainer 2026-10-05 phase 2 brief, section 1; PORTING.md no-python-before-first-frame",
@@ -2997,14 +3021,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_sdk_guard_survives_a_fully_absent_mcp",
-      "line": 1042,
+      "line": 1126,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Python-only SDK import preflight retired in the Rust candidate by the maintainer decision recorded in PORTING.md; the existing Python oracle test remains unchanged.",
       "equivalent": "retired-by-decision",
       "required_equivalent": null,
       "acceptance": "retired-by-decision",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "retired-by-decision",
         "decision": "Maintainer 2026-10-05 phase 2 brief, section 1; PORTING.md no-python-before-first-frame",
@@ -3018,14 +3042,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_startup_exits_when_the_daemon_needs_a_credential_and_none_is_set",
-      "line": 1072,
+      "line": 1156,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_startup_exits_when_the_daemon_needs_a_credential_and_none_is_set",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3043,14 +3067,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_startup_credential_check_is_silent_when_auth_is_off",
-      "line": 1097,
+      "line": 1181,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_final_assertions.rs::test_startup_credential_check_is_silent_when_auth_is_off",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3068,14 +3092,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_startup_credential_check_passes_with_a_token_or_a_usable_token_file",
-      "line": 1109,
+      "line": 1193,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_startup_credential_check_passes_with_a_token_or_a_usable_token_file",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3093,14 +3117,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_startup_exits_when_the_configured_token_file_is_unusable",
-      "line": 1130,
+      "line": 1214,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_startup_exits_when_the_configured_token_file_is_unusable",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3118,14 +3142,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential",
-      "line": 1157,
+      "line": 1241,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3143,14 +3167,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_non_loopback_daemon_url_never_spawns_a_local_daemon",
-      "line": 1180,
+      "line": 1264,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_non_loopback_daemon_url_never_spawns_a_local_daemon",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3168,14 +3192,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_non_loopback_daemon_url_starts_without_the_daemon_and_names_the_remote_remedy",
-      "line": 1209,
+      "line": 1293,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_non_loopback_daemon_url_starts_without_the_daemon_and_names_the_remote_remedy",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3193,14 +3217,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_external_daemon_waits_fit_the_host_startup_budget",
-      "line": 1234,
+      "line": 1318,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_external_daemon_waits_fit_the_host_startup_budget",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3218,14 +3242,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_run_shim_starts_the_proxy_without_a_daemon_it_could_not_reach",
-      "line": 1247,
+      "line": 1331,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_degraded_start_still_names_an_unusable_token_file",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3243,14 +3267,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_handshake_cache_round_trips_per_daemon_url",
-      "line": 1276,
+      "line": 1360,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_handshake_cache_round_trips_per_daemon_url",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3268,14 +3292,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_handshake_cache_is_best_effort",
-      "line": 1292,
+      "line": 1376,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_cache.rs::test_handshake_cache_is_best_effort",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3293,14 +3317,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_handshake_cache_lives_under_the_agent_state_dir",
-      "line": 1308,
+      "line": 1392,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_cache.rs::test_handshake_cache_lives_under_the_agent_state_dir",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3322,14 +3346,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_handshake_cache_leaves_no_scratch_file_when_the_replace_fails",
-      "line": 1325,
+      "line": 1409,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_cache.rs::test_handshake_cache_leaves_no_scratch_file_when_the_replace_fails",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3347,14 +3371,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_remote_startup_wait_is_bounded_from_the_first_probe",
-      "line": 1341,
+      "line": 1425,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_runtime.rs::test_remote_startup_wait_is_bounded_from_the_first_probe",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3372,14 +3396,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_handshake_cache_keeps_only_the_most_recent_urls",
-      "line": 1364,
+      "line": 1448,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_cache.rs::test_handshake_cache_keeps_only_the_most_recent_urls",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3397,14 +3421,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_caches_the_handshake_of_a_healthy_daemon",
-      "line": 1441,
+      "line": 1525,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Mixed subprocess and direct private Python cache reads/writes; strict brief boundary excludes Python-object access. Required cache-file wire/unit equivalent preserves format.",
       "equivalent": "rust-unit:rust/shim/tests/shim_contract.rs::test_shim_caches_the_handshake_of_a_healthy_daemon",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3422,14 +3446,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_starts_without_its_daemon_and_recovers_when_it_answers",
-      "line": 1483,
+      "line": 1567,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Mixed subprocess and direct private Python cache reads/writes; strict brief boundary excludes Python-object access. Required cache-file wire/unit equivalent preserves format.",
       "equivalent": "rust-unit:rust/shim/tests/shim_contract.rs::test_shim_starts_without_its_daemon_and_recovers_when_it_answers",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3447,14 +3471,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_loopback_daemon_url_forms_still_spawn",
-      "line": 1571,
+      "line": 1655,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_loopback_daemon_url_forms_still_spawn",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3472,25 +3496,25 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_shim_mcp_dependency_stays_on_the_daemon_line",
-      "line": 1600,
+      "line": 1684,
       "bucket": "internal",
       "scope": "oracle-tooling-or-other-python-surface",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_is_loopback_url_is_keyed_on_the_host_only",
-      "line": 1631,
+      "line": 1715,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/auth_lifecycle_url.rs::test_is_loopback_url_is_keyed_on_the_host_only",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3508,14 +3532,14 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_remote_daemon_probes_use_the_remote_timeout",
-      "line": 1641,
+      "line": 1725,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_startup.rs::test_remote_daemon_probes_use_the_remote_timeout",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -3533,36 +3557,36 @@
     },
     {
       "nodeid": "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
-      "line": 1666,
+      "line": 1750,
       "bucket": "candidate",
       "scope": "phase1",
       "reason": "Public no-mode Python module launch drives real shim over stdio and fixture/daemon HTTP; no implementation substitutions.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself",
-      "line": 1739,
+      "line": 1823,
       "bucket": "candidate",
       "scope": "phase1",
       "reason": "Public no-mode Python module launch drives real shim over stdio and fixture/daemon HTTP; no implementation substitutions.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11"
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c"
     },
     {
       "nodeid": "tests/test_shim.py::test_degraded_start_still_names_an_unusable_token_file",
-      "line": 1794,
+      "line": 1878,
       "bucket": "internal",
       "scope": "phase1",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_degraded_start_still_names_an_unusable_token_file",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "1d2c122f200f2f43acd1e0f5c66542ac72b06a1ec2075fdf3564966d830efc11",
+      "source_sha256": "a961b1fcc658f5d72984f60a569cf7a6db040c4931db49d7a75d7e1b6f64b94c",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -6297,7 +6321,7 @@
     }
   ],
   "phase1_function_counts": {
-    "candidate": 8,
+    "candidate": 10,
     "oracle": 1,
     "internal": 180
   }

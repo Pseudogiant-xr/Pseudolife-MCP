@@ -19,7 +19,7 @@ def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(in
     assert inventory.PHASE1_ORACLE == "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
     result = inventory.validate_phase1()
     assert result["test_files"] == 423
-    assert result["candidate_nodes"] == 13
+    assert result["candidate_nodes"] == 15
     assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 353}
 
 
@@ -85,8 +85,8 @@ def test_both_audits_reject_incomplete_candidates(inventory, monkeypatch, phase1
 def test_phase1_scoped_equivalents_preserve_complete_ownership(inventory):
     manifest = json.loads(inventory.source("rust/phase1-test-buckets.json"))
     functions = manifest["phase1_functions"]
-    assert len(functions) == 189
-    assert manifest["phase1_function_counts"] == {"candidate": 8, "oracle": 1, "internal": 180}
+    assert len(functions) == 191
+    assert manifest["phase1_function_counts"] == {"candidate": 10, "oracle": 1, "internal": 180}
     scoped = [item for item in functions if item["bucket"] == "internal" and item["scope"] == "phase1"]
     assert len(scoped) == 125
     assert all(item["required_equivalent"] or item.get("equivalence_evidence") for item in scoped)
@@ -138,7 +138,7 @@ def test_phase1_rejects_incomplete_completed_equivalents(inventory, monkeypatch,
 
 
 @pytest.mark.parametrize("fault,error", [
-    ("missing-function", "missing per-function Phase 1 ownership"),
+    ("missing-function", "missing or extra per-function Phase 1 ownership"),
     ("claimed-acceptance", "Phase 1 acceptance requires execution evidence"),
     ("claimed-equivalent", "proposed target is not a passed equivalent"),
 ])

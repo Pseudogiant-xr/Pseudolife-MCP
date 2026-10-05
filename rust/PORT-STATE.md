@@ -1,7 +1,7 @@
 # Rust port state
 
 The version branch targets the current Python oracle at master
-`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); master integration and current-head validation remain pending.
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
@@ -14,7 +14,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The current version-branch manifests enumerate 423 test files, 189 unchanged function mappings and 13 routed nodes. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
+The current version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 15 routed nodes (10 public stdio and 5 CLI). The two new public refusal nodes are candidate mappings with pending runtime execution and acceptance; source-identity checks and adapter-routing unit checks do not close those gates. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
 
 The native version candidate and shared CLI fixture remain pending current-head review, both-platform public process evidence and paired measurements. Earlier 0.16.1 process captures are historical prototypes. The fixture binds loaded preparation and capture helpers to committed files; hosted artifacts contain an allowlisted summary, while raw comparison receipts remain private. These implementation changes do not advance the version parity row.
 
