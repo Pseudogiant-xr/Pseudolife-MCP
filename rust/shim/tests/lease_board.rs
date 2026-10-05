@@ -355,8 +355,9 @@ fn signal_child() {
 
 #[cfg(unix)]
 #[test]
-#[allow(unsafe_code)]
 fn sigterm_stops_owned_child_before_releasing_local_lock() {
+    use rustix::process::{Pid, Signal, kill_process, test_kill_process};
+
     let home = Home::new();
     let ready = home.0.join("child-ready");
     let helper = std::env::current_exe().unwrap();
@@ -378,7 +379,11 @@ fn sigterm_stops_owned_child_before_releasing_local_lock() {
         thread::sleep(Duration::from_millis(10));
     }
     let pid = child.id();
-    assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGTERM) }, 0);
+    kill_process(
+        Pid::from_raw(pid.try_into().unwrap()).unwrap(),
+        Signal::TERM,
+    )
+    .unwrap();
     let stopped = Instant::now() + Duration::from_secs(10);
     let status = loop {
         if let Some(s) = child.try_wait().unwrap() {
@@ -395,10 +400,9 @@ fn sigterm_stops_owned_child_before_releasing_local_lock() {
     let file = fs::File::open(home.0.join("lease-resource.lock")).unwrap();
     assert!(file.try_lock().is_ok());
     let child_pid = fs::read_to_string(ready).unwrap().parse::<i32>().unwrap();
-    assert_eq!(unsafe { libc::kill(child_pid, 0) }, -1);
     assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
+        test_kill_process(Pid::from_raw(child_pid).unwrap()),
+        Err(rustix::io::Errno::SRCH)
     );
 }
 

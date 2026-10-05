@@ -729,5 +729,10 @@ At `07761381`, the Windows token-file proof passes four real-daemon pairs and
 16 output controls without an environment bearer; owned cleanup is verified.
 Independent review approves the token-writer change at that head. The first
 Linux build exits 101 because the Unix lock path names a nonexistent Rustix
-`ACCES` constant. This successor uses `ACCESS`; its Linux build, selected tests
-and real-daemon proof remain pending. The original compiler failure is retained.
+`ACCES` constant. Successor `8a1ead9b` uses `ACCESS`; its Linux build and six
+lease units pass, but the Unix signal test fails compilation under its existing
+`forbid(unsafe_code)` lint. This candidate uses safe Rustix signal and liveness
+APIs while preserving that lint and the test assertions. Linux fmt and all-target
+compilation pass, followed by six lease units, 13 lease-board tests and 15
+lease-CLI tests. The real-daemon proof on a committed successor remains pending.
+Both original compiler failures are retained.
