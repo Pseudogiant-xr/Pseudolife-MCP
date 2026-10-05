@@ -188,7 +188,8 @@ class CoordinationAdapter:
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
                  label="", project="", task="", episode=None, client=None,
                  delivery_transport="channel", provider=None, initial_snapshot=None,
-                 legacy_state_path=None, digest_path=None, ring_path=None, parent_thread=None):
+                 legacy_state_path=None, digest_path=None, ring_path=None, parent_thread=None,
+                 harness_name=None):
         parsed = urlsplit(url)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -279,6 +280,15 @@ class CoordinationAdapter:
             if delivery_transport != "codex":
                 raise AdapterError("a parent thread names a Codex subagent's parent")
             self._registration["parent_thread"] = parent_thread
+        # v55: ``harness_name`` returns the title the harness shows for this
+        # session (harness_names.py), or None. The heartbeat loop asks it in
+        # a worker thread and sends the name only when it changed; a daemon
+        # that predates the parameter retires it for the process, and a name
+        # the daemon refuses is not sent again until it changes.
+        self._harness_name = harness_name if callable(harness_name) else None
+        self._name_supported = True
+        self._sent_name = None
+        self._refused_name = None
         self._client = client
         self._owns_client = client is None
         self._identity = None
@@ -1009,6 +1019,8 @@ class CoordinationAdapter:
         self._identity = {key: result[key] for key in ("agent_id", "credential")}
         if self._context is not None:
             self._identity.update(version=2, **self._context)
+        # A new address starts unnamed: the next heartbeat names it again.
+        self._sent_name = None
         self._save_new_identity(reservation)
 
     def _retire_stale_state(self):
@@ -1286,7 +1298,21 @@ class CoordinationAdapter:
         carries it."""
         self._turn_seen = True
 
-    async def _heartbeat(self):
+    async def _current_name(self):
+        """The harness's title for this session when it differs from what
+        was last sent (and was not refused), else None. Read in a worker
+        thread: the reader does bounded file I/O."""
+        if self._harness_name is None or not self._name_supported:
+            return None
+        try:
+            name = await asyncio.to_thread(self._harness_name)
+        except Exception:  # noqa: BLE001 - a name never fails a heartbeat
+            return None
+        if not isinstance(name, str) or not name or name in (self._sent_name, self._refused_name):
+            return None
+        return name
+
+    async def _heartbeat(self, *, name=False):
         body = self._attachment()
         if self._ring_liveness_supported and self.ring_path:
             body["ring_armed_until"] = self._ring_armed_until()
@@ -1294,11 +1320,24 @@ class CoordinationAdapter:
         if report_turn:
             body["active"] = True
             self._turn_seen = False
+        if name:
+            current = await self._current_name()
+            if current is not None:
+                body["name"] = current
         while True:
             try:
                 result = await self._post("heartbeat", body, retry=True)
                 break
             except AdapterError as error:
+                if "name" in body and error.code == "unexpected_parameter":
+                    # Checked first: a daemon older than v55 must not cost
+                    # the fields it does take.
+                    self._name_supported = False
+                    body.pop("name")
+                    continue
+                if "name" in body and error.code in {"invalid_name", "secret_like_body"}:
+                    self._refused_name = body.pop("name")
+                    continue
                 if error.code == "unexpected_parameter" and "ring_armed_until" in body:
                     self._ring_liveness_supported = False
                     body.pop("ring_armed_until")
@@ -1312,6 +1351,8 @@ class CoordinationAdapter:
                 raise
         if result.get("generation") != self._generation:
             raise AdapterError("coordination attachment is no longer current")
+        if "name" in body:
+            self._sent_name = body["name"]
         self._update_pending_count(result)
         self._backoff_level = 0
 
@@ -1401,7 +1442,7 @@ class CoordinationAdapter:
                 if self._permanent_failure:
                     continue
                 if self._failure is None:
-                    await self._heartbeat()
+                    await self._heartbeat(name=True)
             except AdapterError as error:
                 self._record_failure(error)
 

@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v54). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v55). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -785,6 +785,68 @@ type or target. Claims remain advisory: no edit, commit or push guard consumes
 the fence. Existing literal `claim:<text>` and generic resource leases keep
 their semantics and do not overlap repository file claims.
 
+### Board names and finding a session
+
+Each row on the board, in `memory_agents` list and in the Console's Board, is
+shown by its session's name (schema v55). The label is set once at
+registration (`PSEUDOLIFE_AGENT_LABEL`; Codex threads `codex`), so before v55
+nearly every row read `claude-code` or `codex`. A name comes from one of three
+sources, and a lower one never replaces a name a higher one set:
+
+1. **`agent`**: `memory_agents(action="update", name=...)`. It outranks the
+   harness title, so a session whose row shows a stale title (after `/clear`
+   the Claude Code shim still reads the old transcript) can correct it, and
+   it serves any harness that keeps no title file of its own. `name=""`
+   clears the agent's own name and brings back the newest harness title,
+   which the daemon keeps meanwhile.
+2. **`harness`**: the title the harness already shows for the session. The
+   Claude Code shim reads it from the session transcript,
+   `<config>/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl` (`config` is
+   `CLAUDE_CONFIG_DIR`, else `~/.claude`): the latest `custom-title` line
+   (the Desktop app's title or a rename), else the latest `agent-name`, else
+   the latest `ai-title` (the CLI's generated title). The Codex shim reads
+   each thread's name from `session_index.jsonl` under `CODEX_HOME` (else
+   `~/.codex`). The adapter sends it with its next heartbeat when it
+   changed, so a rename reaches the board within about 20 seconds, without
+   restarting the session. The reader looks at the end of the transcript
+   first, then reads at most 1 MiB per heartbeat and nothing at all while
+   the file is unchanged; any read or parse error just sends no name.
+   Harness titles are on by default. A generated title (`ai-title`) is
+   written from your first prompt, so it reaches the roster and the
+   coordination audit log; to keep titles off the board, set
+   `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` (or `false`, `no`, `off`) in the
+   environment the shim starts with (its MCP server `env` block). The shim
+   then reads no transcript and no `session_index.jsonl`, and a row falls
+   back to the agent's own name, the session title, then its label and short
+   id.
+3. **`title`**: a `memory_session_title` rename names the rows registered
+   under that session (their `episode` is its session key) when neither a
+   harness nor an agent has named them, and only rows of the retitling
+   caller's own principal: a retitle without a bearer names none.
+
+A row nothing has named reads as its label and the first 8 characters of its
+id (`claude-code 3f9a1c2e`), with `name_source: ""`; lease holders and lease
+waiters carry the same `name`. A name is one line of at most 120 characters.
+It follows the label rule (`invalid_name`): one that reads as `maintainer`
+anywhere, or as `daemon`, `passkey` or `verified` as a whole, look-alike
+letters included, is refused, and so is one shaped like a credential
+(`secret_like_body`). A harness name the daemon refuses is dropped, not
+retried, and the row keeps its label and short id. Each change of name writes
+one `update` event to the [audit log](#audit-log); an unchanged name sent
+again writes nothing. Claude Desktop's shared app-level server registers no
+board row, so it has no name either.
+
+In the Console's Board the session list is its own pane, sized to end at the
+bottom of the window, so a long board scrolls inside it while the Roles band
+stays in view. The search box above it filters by name, short or full id,
+task, status and project, every word of the query matching some field. The
+delegate, the coordinator and sessions with unread mail are pinned at the top.
+Each card shows its 8-character id; a click copies the full id. The Make
+delegate and Make coordinator buttons sit on each card, so a session found by
+search takes a role without scrolling.
+
+![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the delegate and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
+
 ### Maintainer messages and roles from the Console
 
 The Console's Board can send a session a message that carries your authority,
@@ -803,7 +865,12 @@ there is no separate urgent setting, and the payload's `urgent` field changes
 nothing.
 The agent replies with `reply_to` and no `to`; replies appear in the Console's
 thread. The Sent log can withdraw a message: the recipient's next receive shows
-it as withdrawn, and an already-acknowledged one gets a follow-up.
+it as withdrawn, and an already-acknowledged one gets a follow-up. The thread
+in a role card scrolls in its own pane above the composer, so a long exchange
+never pushes the composer down the page: it opens on the newest message and
+follows each new one, unless you have scrolled up to read earlier ones.
+
+![A delegate card on the fixture devserver: the message thread scrolls in its own pane, newest message in view, with the composer below it](../images/cortex-console-board-thread.png)
 
 **Roles.** The Roles band on the Board shows, per project, the delegate (the
 session whose urgent mail reopens done parks there, see
@@ -3852,7 +3919,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v54**; migrations are additive
+The current Postgres meta version is **v55**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3912,6 +3979,7 @@ The milestones:
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
+| v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
