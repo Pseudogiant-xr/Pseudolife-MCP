@@ -257,7 +257,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
-| `pseudolife-mcp maintainer list` | fails, for the same reason |
+| `pseudolife-mcp maintainer list` | fails: no database URL, and no owner password to make one |
 
 *Not verified on the maintainer's machine:* the Windows account steps and
 the exact refusal texts above were written from the platform's documented

@@ -5322,7 +5322,7 @@ The tier counts have moved as well: on 2026-10-05 `minimal` holds 10 tools,
 `pseudolife_memory/mcp_server.py`), so the manifest rows above price smaller
 tiers than ship now. `MEMORY_LOOP_BLOCK` is served only when
 `memory_policy.variant` is `full_separate_hook`, by the plugin's separate
-memory-policy hook, and has grown to about 8,100 characters.
+memory-policy hook, and has grown to about 8,200 characters.
 
 ## What a call costs — before and after the cuts
 

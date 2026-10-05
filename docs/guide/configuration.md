@@ -900,8 +900,8 @@ listener" with the reason; a grant or extend to a session with no live
 listener shows the same warning beside its success toast. A role change
 signs the role's holder as the dialog showed it (for Make delegate and Make
 coordinator, the other role's holder too): if either changes before your
-passkey tap, the change is refused (`409 role_changed`) and the dialog shows
-the board as it now is, so you can look again and retry. Coordinator changes
+passkey tap, the change is refused (`409 role_changed`): the dialog closes,
+and the Console reloads the board so you can look again and retry. Coordinator changes
 are signed too, although the role grants no authority: otherwise any session
 could evict another's coordinator. A session
 holds one of the two roles at most: the delegate's own claim of the
@@ -3172,7 +3172,7 @@ earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
-checkout. Run inside one, a 0.16.x updater records the wrong version in the
+checkout. Run inside one, a 0.16.x updater can record the wrong version in the
 `runtime.json` of the runtime it installs (it reads a stale build's metadata
 from the checkout). The launcher picks a runtime by its number, not its
 label, so the right code still runs, but each rerun installs yet another

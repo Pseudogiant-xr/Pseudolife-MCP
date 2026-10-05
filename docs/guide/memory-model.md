@@ -899,7 +899,7 @@ fields plus one sentence saying what happened and what to do:
   `stale_review`, `nothing_retired`, `slot_live` (also per result in a
   batch).
 - `memory_forget` matching nothing (`deleted_count: 0` / `removed: 0`).
-- `memory_world_set`: `unsafe_source_url` (only http(s) URLs are kept).
+- `memory_world_set`: `unsafe_source_url` (the fact is not stored; `source_url` must be http(s) or empty).
 - `memory_outcome` without Postgres or with lessons disabled (not kept; do
   not retry).
 - `memory_supersede` / `memory_consolidate`: the refusal sentence is in

@@ -2418,7 +2418,7 @@ fields plus one sentence saying what happened and what to do:
   `stale_review`, `nothing_retired`, `slot_live` (also per result in a
   batch).
 - `memory_forget` matching nothing (`deleted_count: 0` / `removed: 0`).
-- `memory_world_set`: `unsafe_source_url` (only http(s) URLs are kept).
+- `memory_world_set`: `unsafe_source_url` (the fact is not stored; `source_url` must be http(s) or empty).
 - `memory_outcome` without Postgres or with lessons disabled (not kept; do
   not retry).
 - `memory_supersede` / `memory_consolidate`: the refusal sentence is in
@@ -5310,8 +5310,8 @@ listener" with the reason; a grant or extend to a session with no live
 listener shows the same warning beside its success toast. A role change
 signs the role's holder as the dialog showed it (for Make delegate and Make
 coordinator, the other role's holder too): if either changes before your
-passkey tap, the change is refused (`409 role_changed`) and the dialog shows
-the board as it now is, so you can look again and retry. Coordinator changes
+passkey tap, the change is refused (`409 role_changed`): the dialog closes,
+and the Console reloads the board so you can look again and retry. Coordinator changes
 are signed too, although the role grants no authority: otherwise any session
 could evict another's coordinator. A session
 holds one of the two roles at most: the delegate's own claim of the
@@ -7582,7 +7582,7 @@ earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
-checkout. Run inside one, a 0.16.x updater records the wrong version in the
+checkout. Run inside one, a 0.16.x updater can record the wrong version in the
 `runtime.json` of the runtime it installs (it reads a stale build's metadata
 from the checkout). The launcher picks a runtime by its number, not its
 label, so the right code still runs, but each rerun installs yet another
@@ -8608,7 +8608,7 @@ Before step 6, with `PSEUDOLIFE_MCP_DATABASE_URL` still pointing at the
 restored database, run `pseudolife-mcp maintainer list` and
 `pseudolife-mcp maintainer revoke <prefix>` any key you revoked since the
 backup. If you cannot tell, `pseudolife-mcp maintainer reset` revokes every
-key, rotates the secret and reopens enrolment; enrol again with
+key, rotates the secret and reopens enrolment; after step 6, enrol again with
 `pseudolife-mcp maintainer setup`.
 
 Portable exports never carry these tables or the secret (full backups only),
@@ -11707,7 +11707,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
-| `pseudolife-mcp maintainer list` | fails, for the same reason |
+| `pseudolife-mcp maintainer list` | fails: no database URL, and no owner password to make one |
 
 *Not verified on the maintainer's machine:* the Windows account steps and
 the exact refusal texts above were written from the platform's documented

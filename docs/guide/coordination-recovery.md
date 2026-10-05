@@ -108,7 +108,7 @@ Before step 6, with `PSEUDOLIFE_MCP_DATABASE_URL` still pointing at the
 restored database, run `pseudolife-mcp maintainer list` and
 `pseudolife-mcp maintainer revoke <prefix>` any key you revoked since the
 backup. If you cannot tell, `pseudolife-mcp maintainer reset` revokes every
-key, rotates the secret and reopens enrolment; enrol again with
+key, rotates the secret and reopens enrolment; after step 6, enrol again with
 `pseudolife-mcp maintainer setup`.
 
 Portable exports never carry these tables or the secret (full backups only),
