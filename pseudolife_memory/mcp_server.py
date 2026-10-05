@@ -83,6 +83,7 @@ from pydantic_core import PydanticCustomError  # noqa: E402
 from pseudolife_memory.service import (  # noqa: E402
     _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
 from pseudolife_memory.memory.cortex import MAX_CURRENT_MEMBERS  # noqa: E402
+from pseudolife_memory.memory.meta_filter import is_meta_statement  # noqa: E402
 
 # Checks beyond Field's own bounds (ge/le/min_length) also run while the
 # arguments are bound, so a bad value is refused with a readable message
@@ -252,8 +253,12 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
     daemon log: the model learned nothing from them and retried blindly
     (review 2026-10-04, M1)."""
     if isinstance(exc, FileNotFoundError):
-        return {"error": "file_not_found",
-                "message": f"{exc}: paths are resolved on the server's filesystem"}
+        # document_ingest's own message already says whose filesystem, with
+        # the Docker hint the Console's REST route shows too: say it once.
+        text = str(exc)
+        if "server's filesystem" not in text:
+            text += ": paths are resolved on the server's filesystem"
+        return {"error": "file_not_found", "message": text}
     if not isinstance(exc, (ValueError, TypeError)):
         payload = {"error": "internal_error",
                    "message": "The server failed while running this call (the cause is in "
@@ -672,6 +677,22 @@ _STORE_NOTES = {
     "rejected": "Not stored: the admission gate refused it; nothing was "
                 "written.",
 }
+_EXACT_DUPLICATE_NOTE = ("Not stored: it repeats a memory already held word "
+                         "for word; no need to retry.")
+
+
+def _store_noted(out: Any, text: str, source: str) -> Any:
+    """``service.store`` reports every drop at surprise 0.0 as
+    ``filtered_meta``. With ``surprise_threshold`` above 0 (default 0, which
+    stores duplicates) that includes an exact duplicate, whose novelty is
+    0.0 at the gate; the meta filter's own check tells the two apart."""
+    if isinstance(out, dict) and out.get("reason") == "filtered_meta":
+        memory = service.config.memory
+        meta = memory.meta_filter.enabled and is_meta_statement(
+            (text or "").strip(), role=source)
+        if memory.surprise_threshold > 0 and not meta:
+            out.setdefault("note", _EXACT_DUPLICATE_NOTE)
+    return _noted(out, _STORE_NOTES)
 # Keyed on the service's reason text, which is a sentence for these two.
 _OUTCOME_NOTES = {
     "signals require Postgres storage": "Outcome not kept: this bank runs "
@@ -785,10 +806,10 @@ def memory_store(
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
-    return _noted(service.store(
+    return _store_noted(service.store(
         text=text, source=source, tags=tags, origin=origin, episode=episode,
         authority=authority, distortion_tolerance=distortion_tolerance),
-        _STORE_NOTES)
+        text, source)
 
 
 def _restates_fact(entry_text: str, value: str) -> bool:

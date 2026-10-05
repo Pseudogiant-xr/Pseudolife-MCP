@@ -15,6 +15,7 @@ findings M2 and M3).
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -38,49 +39,57 @@ class _Stub:
         return _call
 
 
-def _refused(mod, tool: str, args: dict) -> str:
-    from mcp.server.mcpserver.exceptions import ToolError
-    with pytest.raises(ToolError) as info:
-        asyncio.run(mod.mcp.call_tool(tool, args))
-    return str(info.value)
+def _refused(mod, tool: str, args: dict, param: str) -> str:
+    """A binding refusal is the surface's JSON tool error (``isError``,
+    ``invalid_argument``) naming ``param``; returns its message."""
+    result = asyncio.run(mod.mcp.call_tool(tool, args))
+    text = "".join(getattr(item, "text", "") for item in result.content)
+    assert result.is_error, f"{tool} {args} came back success-shaped: {text}"
+    payload = json.loads(text)
+    assert payload["error"] == "invalid_argument", payload
+    assert payload["param"] == param, payload
+    return payload["message"]
 
 
 # ── M3: ranges refused at binding ─────────────────────────────────────────
 
 _OUT_OF_RANGE = [
-    ("memory_search", {"query": "q", "top_k": -3}),
-    ("memory_search", {"query": "q", "top_k": 0}),
-    ("memory_recent", {"n": 0}),
-    ("memory_world_search", {"query": "q", "top_k": 0}),
-    ("memory_lesson_search", {"query": "q", "top_k": 0}),
-    ("document_search", {"query": "q", "top_k": 0}),
-    ("memory_recall", {"query": "q", "top_k": 0}),
-    ("memory_consolidation_candidates", {"query": "q", "top_k": 0}),
-    ("memory_consolidation_candidates", {"query": "q", "max_clusters": 0}),
-    ("memory_consolidation_candidates", {"query": "q", "min_cluster_size": 0}),
-    ("memory_dream", {"action": "pull", "limit": 0}),
+    ("memory_search", {"query": "q", "top_k": -3}, "top_k"),
+    ("memory_search", {"query": "q", "top_k": 0}, "top_k"),
+    ("memory_recent", {"n": 0}, "n"),
+    ("memory_world_search", {"query": "q", "top_k": 0}, "top_k"),
+    ("memory_lesson_search", {"query": "q", "top_k": 0}, "top_k"),
+    ("document_search", {"query": "q", "top_k": 0}, "top_k"),
+    ("memory_recall", {"query": "q", "top_k": 0}, "top_k"),
+    ("memory_consolidation_candidates", {"query": "q", "top_k": 0}, "top_k"),
+    ("memory_consolidation_candidates", {"query": "q", "max_clusters": 0},
+     "max_clusters"),
+    ("memory_consolidation_candidates", {"query": "q", "min_cluster_size": 0},
+     "min_cluster_size"),
+    ("memory_dream", {"action": "pull", "limit": 0}, "limit"),
     ("memory_fact_set", {"entity": "e", "attribute": "a", "value": "v",
-                         "confidence": 1.5}),
+                         "confidence": 1.5}, "confidence"),
     ("memory_fact_set", {"entity": "e", "attribute": "a", "value": "v",
-                         "confidence": -0.1}),
+                         "confidence": -0.1}, "confidence"),
     ("memory_world_set", {"entity": "e", "attribute": "a", "value": "v",
-                          "confidence": 2}),
+                          "confidence": 2}, "confidence"),
     ("memory_graph_relate", {"src": "a", "relation": "uses", "dst": "b",
-                             "confidence": 1.01}),
-    ("memory_outcome", {"task": "t", "outcome": "success", "polarity": "x"}),
-    ("memory_fact_set", {"entity": "  ", "attribute": "a", "value": "v"}),
-    ("memory_fact_set", {"entity": "e", "attribute": "", "value": "v"}),
-    ("memory_fact_set", {"entity": "e", "attribute": "a", "value": " "}),
+                             "confidence": 1.01}, "confidence"),
+    ("memory_outcome", {"task": "t", "outcome": "success", "polarity": "x"},
+     "polarity"),
+    ("memory_fact_set", {"entity": "  ", "attribute": "a", "value": "v"}, "entity"),
+    ("memory_fact_set", {"entity": "e", "attribute": "", "value": "v"}, "attribute"),
+    ("memory_fact_set", {"entity": "e", "attribute": "a", "value": " "}, "value"),
 ]
 
 
-@pytest.mark.parametrize(("tool", "args"), _OUT_OF_RANGE)
+@pytest.mark.parametrize(("tool", "args", "param"), _OUT_OF_RANGE)
 def test_out_of_range_arguments_are_refused_before_the_body_runs(
-        tmp_path: Path, monkeypatch, tool: str, args: dict) -> None:
+        tmp_path: Path, monkeypatch, tool: str, args: dict, param: str) -> None:
     mod = _reload(tmp_path, monkeypatch)
     stub = _Stub()
     monkeypatch.setattr(mod, "service", stub)
-    _refused(mod, tool, args)
+    _refused(mod, tool, args, param)
     assert stub.calls == [], f"{tool} reached the service with {args}"
 
 
@@ -89,7 +98,7 @@ def test_negative_top_k_names_the_parameter(tmp_path: Path, monkeypatch) -> None
     "selected index k out of range"; the refusal now names the field."""
     mod = _reload(tmp_path, monkeypatch)
     monkeypatch.setattr(mod, "service", _Stub())
-    message = _refused(mod, "memory_search", {"query": "q", "top_k": -3})
+    message = _refused(mod, "memory_search", {"query": "q", "top_k": -3}, "top_k")
     assert "top_k" in message and "greater than or equal to 1" in message
 
 
@@ -150,7 +159,7 @@ def test_relative_as_of_is_refused_with_the_accepted_formats(
     stub = _Stub()
     monkeypatch.setattr(mod, "service", stub)
     message = _refused(mod, "memory_history",
-                       {"entity": "e", "attribute": "a", "as_of": "yesterday"})
+                       {"entity": "e", "attribute": "a", "as_of": "yesterday"}, "as_of")
     assert "ISO-8601" in message and "epoch seconds" in message
     assert stub.calls == []
     for ok in ("2026-10-01", "2026-10-01T12:30:00+00:00", 1_790_000_000,
@@ -177,6 +186,23 @@ def test_missing_ingest_path_says_it_was_looked_up_on_the_server(
         svc.ingest_document(str(missing))
     message = str(info.value)
     assert str(missing) in message and "server" in message
+
+
+def test_missing_ingest_path_names_the_server_once_over_mcp(
+        tmp_path: Path, monkeypatch) -> None:
+    """The MCP error mapping adds the server's-filesystem clause to a
+    missing file; the service's own message already says it, so the tool
+    error must not say it twice."""
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.service, "_ensure_init", lambda: None)
+    monkeypatch.setattr(mod.service, "_reference", object(), raising=False)
+    monkeypatch.setattr(mod.service, "_embedder", object(), raising=False)
+    missing = tmp_path / "nope.pdf"
+    result = asyncio.run(mod.mcp.call_tool("document_ingest", {"path": str(missing)}))
+    assert result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["error"] == "file_not_found"
+    assert payload["message"].count("server's filesystem") == 1, payload["message"]
 
 
 # ── M2: notes on success-shaped refusals ──────────────────────────────────
@@ -208,6 +234,41 @@ def test_filtered_meta_note_says_to_rephrase_as_the_fact(
     out = _invoke("memory_store", {"text": "x"})
     assert "memory system itself" in out["note"]
     assert "Rephrase" in out["note"]
+
+
+_META_TEXT = "I don't have any deploy notes saved in memory"
+_PLAIN_TEXT = "the deploy uses blue-green rollout"
+
+
+@pytest.mark.parametrize(("threshold", "meta_filter", "text", "words"), [
+    # surprise_threshold 0 (the default) stores exact duplicates, so a drop
+    # at surprise 0.0 is the meta filter's.
+    (0.0, True, _META_TEXT, "memory system itself"),
+    # Above 0 an exact duplicate (novelty 0.0) is dropped at the gate and
+    # the service reports it under the same code.
+    (0.3, True, _PLAIN_TEXT, "word for word"),
+    (0.3, True, _META_TEXT, "memory system itself"),
+    # The MCP daemon turns the meta filter off by default; then a drop at
+    # 0.0 can only be a duplicate, however the text reads.
+    (0.3, False, _META_TEXT, "word for word"),
+])
+def test_filtered_meta_note_tells_a_duplicate_from_meta(
+        tmp_path: Path, monkeypatch, threshold: float, meta_filter: bool,
+        text: str, words: str) -> None:
+    """service.store reports every drop at surprise 0.0 as
+    ``filtered_meta``; with a surprise threshold above 0 that includes an
+    exact duplicate, which needs no rephrasing (review of #587,
+    2026-10-05)."""
+    mod = _reload(tmp_path, monkeypatch)
+    memory = mod.service.config.memory
+    monkeypatch.setattr(memory, "surprise_threshold", threshold)
+    monkeypatch.setattr(memory.meta_filter, "enabled", meta_filter)
+    _with(mod, monkeypatch, "store", {"stored": False, "surprise": 0.0,
+                                      "reason": "filtered_meta",
+                                      "cortex_promoted": 0})
+    out = _invoke("memory_store", {"text": text})
+    assert out["reason"] == "filtered_meta"
+    assert words in out["note"], out["note"]
 
 
 def test_a_stored_memory_carries_no_note(tmp_path: Path, monkeypatch) -> None:
