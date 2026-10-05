@@ -724,3 +724,10 @@ the token file owner-only. Fixture preparation now calls the pinned production
 secure token writer and binds the executed credentials module. File-source
 writer/read admission and targeted fixture checks pass; the same four-cell
 real-daemon proof on a committed helper head and fresh review remain pending.
+
+At `07761381`, the Windows token-file proof passes four real-daemon pairs and
+16 output controls without an environment bearer; owned cleanup is verified.
+Independent review approves the token-writer change at that head. The first
+Linux build exits 101 because the Unix lock path names a nonexistent Rustix
+`ACCES` constant. This successor uses `ACCESS`; its Linux build, selected tests
+and real-daemon proof remain pending. The original compiler failure is retained.

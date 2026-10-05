@@ -74,7 +74,7 @@ fn try_lock(file: &File) -> io::Result<bool> {
 fn try_lock(file: &File) -> io::Result<bool> {
     match rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => Ok(true),
-        Err(e) if e == rustix::io::Errno::WOULDBLOCK || e == rustix::io::Errno::ACCES => Ok(false),
+        Err(e) if e == rustix::io::Errno::WOULDBLOCK || e == rustix::io::Errno::ACCESS => Ok(false),
         Err(e) => Err(e.into()),
     }
 }
