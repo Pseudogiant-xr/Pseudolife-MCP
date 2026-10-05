@@ -351,24 +351,28 @@ def test_rest_refuses_a_secret_with_400_and_no_echo(pg_conn, pg_url):
                 "http://fixture/api/coordination/register", headers=BEARER,
                 json={"label": "third", "capabilities": {GITHUB: False}})
             assert response.status_code == 400, response.text
-            assert response.json() == {"error": "secret_like_body"}
+            # The detail names the field, never the text (review 2026-10-04, M1).
+            assert response.json()["error"] == "secret_like_body"
+            assert response.json()["detail"].startswith("capabilities looks like a credential")
             assert GITHUB not in response.text
-            for action, payload, secret in (
+            for action, payload, secret, field in (
                     ("send", {"to": recipient, "text": f"key: {ANTHROPIC}",
-                              "request_id": "secret-1"}, ANTHROPIC),
-                    ("update", {"status": f"jwt {JWT}"}, JWT),
-                    ("lease", {"name": "gpu", "purpose": PEM_RSA}, PEM_RSA)):
+                              "request_id": "secret-1"}, ANTHROPIC, "text"),
+                    ("update", {"status": f"jwt {JWT}"}, JWT, "status"),
+                    ("lease", {"name": "gpu", "purpose": PEM_RSA}, PEM_RSA, "purpose")):
                 response = await client.post(f"http://fixture/api/coordination/{action}",
                                              headers=sender, json=payload)
                 assert response.status_code == 400, (action, response.text)
-                assert response.json() == {"error": "secret_like_body"}
+                assert response.json()["error"] == "secret_like_body"
+                assert response.json()["detail"].startswith(f"{field} looks like a credential")
                 assert secret not in response.text
             # The operator's redaction is not an agent action on any transport.
             response = await client.post("http://fixture/api/coordination/redact",
                                          headers=sender,
                                          json={"message_id": "0" * 32, "reason": "no"})
             assert response.status_code == 400
-            assert response.json() == {"error": "unknown_coordination_action"}
+            assert response.json()["error"] == "unknown_coordination_action"
+            assert "redact" not in response.json()["detail"]
 
     try:
         asyncio.run(asyncio.wait_for(drive(), 20))

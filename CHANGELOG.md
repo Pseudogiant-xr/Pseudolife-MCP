@@ -44,6 +44,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of "Invalid isoformat string". `document_ingest`'s not-found
   error now says the path was looked up on the server's filesystem.
 
+### Fixed (2026-10-05 — a refused tool call is a tool error that says what to fix)
+- When a tool refused a call, the model got a success-shaped result such as
+  `{"error": "CoordinationRefused", "message": "missing_parameter"}`: a
+  Python class name and no word on which parameter was wrong. Transcripts
+  from 2026-10-04 show every `missing_parameter` retry by Claude and Codex
+  sessions was a guess. A refusal raised in a tool body is now an MCP tool
+  error (`isError: true`) whose text and structured content are one JSON
+  object: `error` (a stable snake_case code, never a class name), `message`
+  (one sentence naming the fix), and, where the refusal knows them,
+  `param`, `accepted`, `action`, and `mutation: "unknown"` when a write
+  tool failed in a way that leaves a write in doubt. A coded `ValueError`
+  keeps its code (`missing_parameter`, `invalid_park`, ...); one in prose is
+  `invalid_argument` with that prose; a missing file is `file_not_found`;
+  anything else is `internal_error`, whose class and text stay in the
+  daemon log. No-ops (a dropped near-duplicate, an empty read, queued mail,
+  a `withheld` or `no_path` wake receipt) stay successes, and success
+  payloads are unchanged. Refusals tools return as `{"error": ...}` dicts
+  (`unknown_action`, `bulk_confirm_required`, ...) are unchanged.
+  `invalid_argument` carries no `mutation` field, so it is meant for raises
+  that come before any write; `coordination_unavailable`, which the board
+  reports for an unexpected failure inside its call, says
+  `mutation: "unknown"` on a write tool.
+- Arguments refused before the tool runs (a wrong type, a value outside an
+  enum, a missing required argument, an unknown argument name) come back in
+  the same shape. Before, the client got pydantic's text: `1 validation
+  error for memory_searchArguments`, the value passed (`input_value=...`)
+  and a pydantic docs link. Now it is `invalid_argument` with `param` (the
+  first refused argument) and a message naming each refused argument and
+  what was wrong with it (`top_k: Input should be a valid integer, ...`),
+  never the value. An unknown argument name is `unknown_parameter`, with
+  the same sentence as before (`unknown parameter 'limit' for
+  memory_search; did you mean 'top_k'?`) and `accepted` listing the tool's
+  parameters.
+- The board names what was wrong: `missing_parameter` says what the action
+  needs (`send needs request_id`), `unexpected_parameter` names the
+  parameter, what the action takes and which action takes it instead, and
+  `unknown_coordination_action` lists the actions. `invalid_park` says which
+  of its five causes applied (an unknown `park_reason`, with the six
+  accepted ones; a park field over its length; a bad or more than 7 days
+  ahead `park_expires`; park fields with no park to refine), `invalid_text`
+  which rule the body broke (blank, NUL, over 8,192 UTF-8 bytes with its
+  size, not UTF-8), and `secret_like_body` which field looked like a
+  credential, never its text. The codes are unchanged, so callers keyed on
+  them keep working; the REST API carries the new sentences in its existing
+  `detail` field.
+
 ### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
 - Nearly every board row read `claude-code` or `codex`: the label is set
   once at registration, so the maintainer could not tell sessions apart or

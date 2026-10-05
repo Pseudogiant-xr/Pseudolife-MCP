@@ -102,11 +102,9 @@ def test_dream_unknown_action_is_rejected(tmp_path: Path, monkeypatch) -> None:
     """Over MCP the ``Literal`` schema rejects a bad action with a message
     that lists the legal values; direct (in-process) callers still get the
     structured ``unknown_action`` fallback."""
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'status'"):
-        _invoke("memory_dream", {"action": "snooze"})
+    refused = _invoke("memory_dream", {"action": "snooze"})
+    assert refused["error"] == "invalid_argument" and "'status'" in refused["message"]
     out = mod.memory_dream("snooze")
     assert out.get("error") == "unknown_action"
     assert "status" in out.get("actions", [])
@@ -178,11 +176,9 @@ def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_forget_validates_scope_and_required_args(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'memory'"):  # Literal schema gate
-        _invoke("memory_forget", {"scope": "everything"})
+    refused = _invoke("memory_forget", {"scope": "everything"})  # Literal schema gate
+    assert refused["error"] == "invalid_argument" and "'memory'" in refused["message"]
     assert mod.memory_forget("everything").get("error") == "unknown_scope"
     assert _invoke("memory_forget", {"scope": "fact"}).get("error") == "entity_required"
     # scope=memory with no filter: service refuses wholesale deletion.
@@ -232,11 +228,9 @@ def test_graph_review_actions_route_to_the_right_service_calls(
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'list'"):  # Literal schema gate
-        _invoke("memory_graph_review", {"action": "bless"})
+    refused = _invoke("memory_graph_review", {"action": "bless"})  # Literal schema gate
+    assert refused["error"] == "invalid_argument" and "'list'" in refused["message"]
     assert mod.memory_graph_review("bless").get("error") == "unknown_action"
     assert _invoke("memory_graph_review", {"action": "accept_link"}).get("error") == "proposal_id_required"
     assert _invoke("memory_graph_review", {"action": "propose"}).get("error") == "proposals_required"

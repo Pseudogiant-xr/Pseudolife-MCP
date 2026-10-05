@@ -56,11 +56,10 @@ def test_optional_none_and_encoded_lists_keep_their_meaning(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("value", [{"a": 1}, [1, 2], 123, True])
 def test_non_string_old_text_is_still_rejected(tmp_path, monkeypatch, value):
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = reload_mcp_filemode(tmp_path, monkeypatch)
     received = []
     monkeypatch.setattr(mod.service, "supersede", lambda **kwargs: received.append(kwargs))
-    with pytest.raises(ToolError, match="Input should be a valid string"):
-        invoke_tool("memory_supersede", {"old_text": value, "new_text": "replacement"})
+    out = invoke_tool("memory_supersede", {"old_text": value, "new_text": "replacement"})
+    assert out["error"] == "invalid_argument" and out["param"] == "old_text"
+    assert "Input should be a valid string" in out["message"]
     assert received == []

@@ -162,6 +162,36 @@ def test_send_rejects_unencodable_body_without_leaking_it(store):
         store.send(*creds(a), to=b["agent_id"], text="\ud800", request_id="r")
 
 
+@pytest.mark.parametrize("text,said", [
+    ("   ", "blank"),
+    (None, "blank"),
+    ("a\x00b", "NUL"),
+    ("é" * 4097, "8194 UTF-8 bytes"),
+    ("\ud800", "UTF-8"),
+])
+def test_invalid_text_says_which_rule_the_body_broke(store, text, said):
+    """invalid_text covered blank, NUL, over-long and unencodable bodies
+    with one bare code (review 2026-10-04, M1); the detail says which,
+    with a byte count and never the text."""
+    a, b = pair(store)
+    with pytest.raises(CoordinationError, match="invalid_text") as caught:
+        store.send(*creds(a), to=b["agent_id"], text=text, request_id="r")
+    assert caught.value.param == "text"
+    assert said in caught.value.detail
+    assert "é" not in caught.value.detail
+
+
+@pytest.mark.parametrize("field", ["text", "request_id", "clears"])
+def test_a_credential_shaped_send_field_is_named(store, field):
+    a, b = pair(store)
+    shaped = "gh" + "p_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+    fields = {"text": "hello", "request_id": "r1", field: shaped}
+    with pytest.raises(CoordinationError, match="secret_like_body") as caught:
+        store.send(*creds(a), to=b["agent_id"], **fields)
+    assert caught.value.param == field and field in caught.value.detail
+    assert shaped not in caught.value.detail
+
+
 def test_limits_are_explicit_and_send_rate_is_atomic(store):
     a, b = pair(store)
     with pytest.raises(CoordinationError, match="invalid_text"):
@@ -823,35 +853,56 @@ def test_a_park_record_is_set_kept_cleared_and_listed(store):
 
 def test_park_fields_without_a_reason_need_a_park_to_refine(store):
     a = store.register("alice")
-    with pytest.raises(CoordinationError, match="invalid_park"):
+    with pytest.raises(CoordinationError, match="invalid_park") as caught:
         store.update(*creds(a), park_needs="GPU free")
+    assert caught.value.param == "park_reason"
+    assert "park_reason" in caught.value.detail
     assert store.authenticate(*creds(a))["park_reason"] is None
 
 
-@pytest.mark.parametrize("fields", [
-    {"park_reason": "sleeping"}, {"park_reason": 7},
-    {"park_reason": "blocked", "park_needs": "x" * 121},
-    {"park_reason": "blocked", "park_resume": "x" * 241},
-    {"park_reason": "blocked", "park_clear_by": "x" * 121},
-    {"park_reason": "blocked", "park_expires": "soon"},
-    {"park_reason": "blocked", "park_expires": -1},
-    {"park_reason": "blocked", "park_expires": True},
-    {"park_reason": "blocked", "park_needs": 5},
+# Each refusal names its cause: invalid_park covered five of them with one
+# bare code, and models retried by guessing (review 2026-10-04, M1).
+@pytest.mark.parametrize("fields,param,said", [
+    ({"park_reason": "sleeping"}, "park_reason", "waiting_peer"),
+    ({"park_reason": 7}, "park_reason", "waiting_peer"),
+    ({"park_reason": "blocked", "park_needs": "x" * 121}, "park_needs", "120"),
+    ({"park_reason": "blocked", "park_resume": "x" * 241}, "park_resume", "240"),
+    ({"park_reason": "blocked", "park_clear_by": "x" * 121}, "park_clear_by", "120"),
+    ({"park_reason": "blocked", "park_expires": "soon"}, "park_expires", "epoch"),
+    ({"park_reason": "blocked", "park_expires": -1}, "park_expires", "epoch"),
+    ({"park_reason": "blocked", "park_expires": True}, "park_expires", "epoch"),
+    ({"park_reason": "blocked", "park_needs": 5}, "park_needs", "120"),
 ])
-def test_park_records_are_bounded(store, fields):
+def test_park_records_are_bounded(store, fields, param, said):
     a = store.register("alice")
     store.update(*creds(a), park_reason="blocked", park_needs="kept")
-    with pytest.raises(CoordinationError, match="invalid_park"):
+    with pytest.raises(CoordinationError, match="invalid_park") as caught:
         store.update(*creds(a), **fields)
+    assert caught.value.param == param
+    assert param in caught.value.detail and said in caught.value.detail
+    assert "nothing was updated" in caught.value.detail
     assert store.authenticate(*creds(a))["park_needs"] == "kept"
+
+
+def test_an_unknown_park_reason_lists_the_accepted_ones(store):
+    from pseudolife_memory.storage.coordination import PARK_REASONS
+    a = store.register("alice")
+    with pytest.raises(CoordinationError, match="invalid_park") as caught:
+        store.update(*creds(a), park_reason="sleeping")
+    assert caught.value.accepted == list(PARK_REASONS)
+    assert all(reason in caught.value.detail for reason in PARK_REASONS)
+    assert "sleeping" not in caught.value.detail
 
 
 def test_credential_shaped_park_text_is_refused(store):
     a = store.register("alice")
     shaped = "gh" + "p_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
     for field in ("park_needs", "park_resume", "park_clear_by"):
-        with pytest.raises(CoordinationError, match="secret_like_body"):
+        with pytest.raises(CoordinationError, match="secret_like_body") as caught:
             store.update(*creds(a), park_reason="blocked", **{field: shaped})
+        # The refusal names the field, never the text.
+        assert caught.value.param == field and field in caught.value.detail
+        assert shaped not in caught.value.detail
 
 
 def test_a_park_update_is_logged_with_what_it_replaced(store):
@@ -1984,8 +2035,10 @@ def test_a_new_park_expires_by_default_and_is_capped(store):
     assert out["park_expires"] == 2000.0 + PARK_DEFAULT_TTL
     assert store.update(*creds(a), park_expires=2000.0 + PARK_MAX_TTL)["park_expires"] == \
         2000.0 + PARK_MAX_TTL
-    with pytest.raises(CoordinationError, match="invalid_park"):
+    with pytest.raises(CoordinationError, match="invalid_park") as caught:
         store.update(*creds(a), park_expires=2000.0 + PARK_MAX_TTL + 1)
+    assert caught.value.param == "park_expires"
+    assert "7 days" in caught.value.detail
 
 
 def test_a_park_after_a_lapsed_one_is_a_new_park(store):

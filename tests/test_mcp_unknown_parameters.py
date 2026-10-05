@@ -56,6 +56,10 @@ def test_search_with_limit_is_an_error_naming_top_k(tmp_path, monkeypatch):
     assert "unknown parameter 'limit' for memory_search" in text
     assert "did you mean 'top_k'?" in text
     assert "Accepted: query, top_k," in text
+    payload = json.loads(text)
+    assert payload["error"] == "unknown_parameter"
+    assert payload["param"] == "limit"
+    assert payload["accepted"][:2] == ["query", "top_k"]
     assert calls == []
 
 
@@ -103,7 +107,10 @@ def test_episode_on_a_tool_without_one_is_refused(tmp_path, monkeypatch):
     assert result.is_error, _text(result)
     text = _text(result)
     assert "unknown parameter 'episode' for memory_world_set" in text
-    assert "episode" not in text.split("Accepted:", 1)[1]
+    payload = json.loads(text)
+    assert payload["param"] == "episode"
+    assert "episode" not in payload["accepted"]
+    assert "episode" not in payload["message"].split("Accepted:", 1)[1]
     assert calls == []
 
 
@@ -140,7 +147,8 @@ def test_the_refusal_never_echoes_the_value(tmp_path, monkeypatch):
     assert result.is_error, _text(result)
     text = _text(result)
     assert "unknown parameter 'api_key' for memory_store" in text
-    for leak in ("sk-ant", "SECRET", "TAIL", "input_value"):
+    for leak in ("sk-ant", "SECRET", "TAIL", "input_value", "input_type",
+                 "errors.pydantic.dev"):
         assert leak not in text, text
     assert calls == []
 
