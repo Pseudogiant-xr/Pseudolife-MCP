@@ -3,10 +3,10 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod version;
+
 const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
-    "version",
-    "--version",
     "serve",
     "embedded",
     "coordination-recovery",
@@ -98,6 +98,19 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     if matches!(mode, "help" | "-h" | "--help") {
         return Some(
             if io::stdout().lock().write_all(&text_bytes(HELP)).is_ok() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            },
+        );
+    }
+    if matches!(mode, "version" | "--version") {
+        return Some(
+            if io::stdout()
+                .lock()
+                .write_all(&text_bytes(&version::text()))
+                .is_ok()
+            {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
