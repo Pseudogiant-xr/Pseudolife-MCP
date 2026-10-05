@@ -31,8 +31,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `autoUpdate`, so those are put back. The plugin record stays as it was
   (all measured on Claude Code 2.1.287 in a throwaway `CLAUDE_CONFIG_DIR`).
 - A refused add (for example, managed settings still declaring the old
-  source), or a record that did not move, restores `settings.json` and
-  fails the step with the CLI's line. An HTTPS source is left untouched
+  source), or a record that did not move, puts this marketplace's
+  `settings.json` entry back as it was (the add writes that declaration
+  itself), keeping anything else written to the file meanwhile, and fails
+  the step with the CLI's line. The refresh still runs after a failed
+  move, since it changed nothing and SSH works on some hosts. A file that
+  cannot be backed up or written is a `failed` line, not a crash. A
+  symlinked `settings.json` is edited at its target. An HTTPS source is left untouched
   and reported current in one line. A fork, a local directory or a pinned
   ref is somebody's choice and is left as it is, as is every other
   marketplace. It never runs `marketplace remove`, which uninstalls the

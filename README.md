@@ -606,8 +606,8 @@ themselves, with backups. If that step reports a failure, the manual fallback
 is: in `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), set the
 `pseudolife-mcp` entry's `source` under `extraKnownMarketplaces` to
 `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`,
-then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
-Never `marketplace remove` it: that uninstalls the plugin.
+then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+(never `marketplace remove` it: that uninstalls the plugin).
 
 **One command, no checkout:** the installed shim updates the whole install
 from a release:

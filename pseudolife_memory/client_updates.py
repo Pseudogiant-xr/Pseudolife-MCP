@@ -62,6 +62,7 @@ checkout being installed.
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 import locale
@@ -691,13 +692,16 @@ def update_plugin(repo: Path | None = None) -> dict:
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
     moved = migrate_marketplace(claude)
-    if moved["state"] == "failed":
-        return {"state": "failed", "marketplace_source": "failed",
-                "detail": f"{moved['detail']}; then {_plugin_retry(repo)}"}
+    # A move that failed changed nothing, and the refresh may still work
+    # (SSH is set up on some hosts), so it runs either way.
     result = _update_from_marketplace(claude, plugins_dir, record, repo)
     result["marketplace_source"] = moved["state"]
     if moved["state"] == "migrated":
         result["detail"] = f"{moved['detail']}; {result['detail']}"
+    elif moved["state"] == "failed":
+        result["state"] = "failed"
+        result["detail"] = (f"{moved['detail']}; once that is fixed, {_plugin_retry(repo)} moves it. The plugin "
+                            f"step went on: {result['detail']}")
     return result
 
 
@@ -787,16 +791,37 @@ def _entry_source(data: object) -> object:
 
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Replace ``path`` with ``data`` in one rename, so a reader (a Claude
-    Code session) sees the old file or the new one, never half of either."""
+    Code session) sees the old file or the new one, never half of either.
+    A symlinked file (dotfiles) is written at its target, keeping the link."""
+    path = Path(os.path.realpath(path))
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
-def _restore(backup: Path, path: Path) -> None:
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.restore")
-    shutil.copy2(backup, tmp)
-    os.replace(tmp, path)
+def _put_entry_back(settings: Path, entry: object, existed: bool) -> None:
+    """Set this marketplace's settings.json entry back to ``entry`` (None:
+    no entry), keeping whatever else the file now holds, such as a running
+    session's write made while the add ran. A file this created holding
+    nothing else is removed."""
+    data = json.loads(settings.read_text(encoding="utf-8-sig")) if settings.is_file() else {}
+    marketplaces = data.get("extraKnownMarketplaces")
+    current = marketplaces.get(MARKETPLACE) if isinstance(marketplaces, dict) else None
+    if current == entry:
+        return
+    if entry is None:
+        marketplaces.pop(MARKETPLACE)
+        if not existed and data == {"extraKnownMarketplaces": {}}:
+            settings.unlink()
+            return
+    else:
+        if not isinstance(marketplaces, dict):
+            marketplaces = data["extraKnownMarketplaces"] = {}
+        marketplaces[MARKETPLACE] = entry
+    _write_json_atomic(settings, data)
 
 
 def migrate_marketplace(claude: str | None = None) -> dict:
@@ -812,7 +837,8 @@ def migrate_marketplace(claude: str | None = None) -> dict:
     record as it was (measured on 2.1.287, 2026-10-05). settings.json,
     known_marketplaces.json and installed_plugins.json are copied to a
     backup folder first. A refused add, or a record the add did not move,
-    restores settings.json, so a failure leaves nothing half-done. Nothing
+    puts this marketplace's settings.json entry back as it was (the add
+    declares it itself), so a failure leaves nothing half-done. Nothing
     else is touched: another marketplace, or this one recorded from any
     other source, is left as it is. Never ``marketplace remove``: it
     uninstalls the plugin.
@@ -851,27 +877,39 @@ def migrate_marketplace(claude: str | None = None) -> dict:
         return {"state": "failed",
                 "detail": f"the {MARKETPLACE} plugin marketplace is recorded as a github source, which updates "
                           "over SSH, and the claude CLI is not on PATH to move it to HTTPS; nothing was changed"}
+    def failed(why: str) -> dict:
+        return {"state": "failed", "detail": f"the {MARKETPLACE} plugin marketplace could not be moved from its "
+                                             f"github source (SSH) to HTTPS: {why}"}
+
+    existed = settings.is_file()
+    original = (copy.deepcopy(declared_marketplaces.get(MARKETPLACE))
+                if isinstance(declared_marketplaces, dict) else None)
     backup = plugins_dir / f"backup-{time.strftime('%Y%m%d-%H%M%S')}-marketplace-https"
     counter = 0
     while backup.exists():
         counter += 1
         backup = backup.with_name(f"{backup.name.rsplit('.', 1)[0]}.{counter}")
-    backup.mkdir(parents=True)
-    for path in (settings, known_file, plugins_dir / "installed_plugins.json"):
-        if path.is_file():
-            shutil.copy2(path, backup / path.name)
+    try:
+        backup.mkdir(parents=True)
+        for path in (settings, known_file, plugins_dir / "installed_plugins.json"):
+            if path.is_file():
+                shutil.copy2(path, backup / path.name)
+        if _source_kind(declared) == "github":
+            declared_marketplaces[MARKETPLACE]["source"] = dict(_HTTPS_SOURCE)
+            _write_json_atomic(settings, data)
+    except OSError as exc:
+        return failed(f"could not back up or edit {settings} ({exc}); nothing was changed")
     record = _plugin_record(plugins_dir)
-    edited = _source_kind(declared) == "github"
-    if edited:
-        declared_marketplaces[MARKETPLACE]["source"] = dict(_HTTPS_SOURCE)
-        _write_json_atomic(settings, data)
 
     def undo(why: str) -> dict:
-        if edited:
-            _restore(backup / settings.name, settings)
-            why += f"; {settings} was restored from {backup}"
-        return {"state": "failed", "detail": f"the {MARKETPLACE} plugin marketplace could not be moved from its "
-                                             f"github source (SSH) to HTTPS: {why}"}
+        # Only this marketplace's entry goes back, whether this edited it or
+        # the add declared it: the add writes the declaration itself.
+        try:
+            _put_entry_back(settings, original, existed)
+            why += f"; its entry in {settings} was put back as it was"
+        except (OSError, ValueError, AttributeError) as exc:
+            why += f"; putting its entry in {settings} back failed ({exc}), so restore that file from {backup}"
+        return failed(why)
 
     code, out = run_cli([claude, "plugin", "marketplace", "add", MARKETPLACE_HTTPS])
     lines = [line.strip() for line in out.splitlines() if line.strip()]
@@ -884,16 +922,18 @@ def migrate_marketplace(claude: str | None = None) -> dict:
                     f"records {json.dumps(now)}")
     # The add rewrites the declared entry as just its source, dropping keys
     # such as autoUpdate (measured on 2.1.287, 2026-10-05): put them back.
-    kept = {k: v for k, v in ((declared_marketplaces or {}).get(MARKETPLACE) or {}).items() if k != "source"}
+    kept = {k: v for k, v in (original if isinstance(original, dict) else {}).items() if k != "source"}
+    lost = ""
     if kept:
         try:
             after = json.loads(settings.read_text(encoding="utf-8-sig"))
             entry = after["extraKnownMarketplaces"][MARKETPLACE]
-        except (OSError, ValueError, KeyError, TypeError):
-            entry = None
-        if isinstance(entry, dict) and any(k not in entry for k in kept):
-            entry.update({k: v for k, v in kept.items() if k not in entry})
-            _write_json_atomic(settings, after)
+            if isinstance(entry, dict) and any(k not in entry for k in kept):
+                entry.update({k: v for k, v in kept.items() if k not in entry})
+                _write_json_atomic(settings, after)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            lost = (f"; the add dropped {', '.join(sorted(kept))} from its entry in {settings} and putting them "
+                    f"back failed ({exc}): copy them from {backup}")
     if record and not _plugin_record(plugins_dir):
         return {"state": "failed",
                 "detail": f"the {MARKETPLACE} plugin marketplace now fetches over HTTPS, but {PLUGIN_ID} is no "
@@ -901,7 +941,7 @@ def migrate_marketplace(claude: str | None = None) -> dict:
                           f"{backup})"}
     return {"state": "migrated",
             "detail": f"the {MARKETPLACE} plugin marketplace moved from its github source (SSH) to HTTPS, "
-                      f"{MARKETPLACE_HTTPS} (backups in {backup})"}
+                      f"{MARKETPLACE_HTTPS} (backups in {backup}){lost}"}
 
 
 def marketplace_main() -> int:

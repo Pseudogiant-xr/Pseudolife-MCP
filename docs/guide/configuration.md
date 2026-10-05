@@ -3268,8 +3268,8 @@ its own and an update never replaces a folder a session is using:
   `pseudolife-mcp` entry's source under `extraKnownMarketplaces` (Claude
   Code refuses the add while that entry names another source), runs
   `claude plugin marketplace add` with the HTTPS URL, and checks that
-  `known_marketplaces.json` followed. A refused add restores
-  `settings.json` and fails the step. An HTTPS source, a fork, a local
+  `known_marketplaces.json` followed. A refused add puts the entry back as
+  it was and fails the step; the refresh still runs. An HTTPS source, a fork, a local
   directory or a pinned ref is left as it is. Both files are read under
   `CLAUDE_CONFIG_DIR` when it is set. For any other github-source
   marketplace, add github.com's key after checking its fingerprint against

@@ -1137,37 +1137,101 @@ def test_a_marketplace_someone_pointed_elsewhere_is_not_touched(cli, tmp_path, s
     assert settings.read_bytes() == before
 
 
-def test_a_refused_add_restores_settings_and_stops(cli, tmp_path):
+def test_a_refused_add_puts_the_entry_back_and_the_refresh_still_runs(cli, tmp_path):
     """Claude Code refuses the add while managed settings (which no user
-    process may edit) still declare the old source. The settings edit is
-    undone, so nothing is left half-done, and the step fails with the CLI's
-    own line before any refresh runs."""
+    process may edit) still declare the old source. Only this marketplace's
+    entry goes back, so a running session's write to settings.json made
+    while the add ran survives (review finding, 2026-10-05). The move
+    changed nothing, so the refresh still runs (SSH works on some hosts),
+    and the step fails with the CLI's own line."""
     _plugin_fixture(cli, tmp_path, differ=True, source=GITHUB_SOURCE)
     settings = cli.home / "settings.json"
     settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE), indent=2), encoding="utf-8")
-    before = settings.read_bytes()
-    cli.marketplace_add = REFUSED_ADD
+
+    def session_writes_then_refused(source):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        data["theme"] = "dark"   # a running Claude Code session saves a setting meanwhile
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        return REFUSED_ADD
+    cli._marketplace_add = session_writes_then_refused
     result = uc.update_plugin(ROOT)
     assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
     assert "its source doesn't match its extraKnownMarketplaces entry" in result["detail"]
-    assert "restored" in result["detail"]
-    assert settings.read_bytes() == before
+    assert "put back as it was" in result["detail"]
+    assert json.loads(settings.read_text(encoding="utf-8")) == {**_settings_with(GITHUB_SOURCE), "theme": "dark"}
     acted = _claude_calls(cli)
-    assert not any(c[:3] == ["plugin", "marketplace", "update"] or c[:2] == ["plugin", "update"] for c in acted)
+    assert ["plugin", "marketplace", "update", "pseudolife-mcp"] in acted
+    assert any(c[:2] == ["plugin", "update"] for c in acted)
 
 
-def test_an_add_that_does_not_re_point_the_record_is_a_failure(cli, tmp_path):
+@pytest.mark.parametrize("declared", ["github", "undeclared", "no-settings-file"])
+def test_an_add_that_does_not_re_point_the_record_is_a_failure(cli, tmp_path, declared):
     """The read-back is the proof: a zero exit that leaves
-    known_marketplaces.json on the github source is not a migration."""
+    known_marketplaces.json on the github source is not a migration. The add
+    declares the marketplace in settings.json itself, so the entry is put
+    back as it was even where this never edited it (review finding,
+    2026-10-05): otherwise settings and known disagree and Claude Code
+    lists no marketplace at all."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    original = None
+    if declared != "no-settings-file":
+        original = _settings_with(GITHUB_SOURCE if declared == "github" else None)
+        settings.write_text(json.dumps(original), encoding="utf-8")
+
+    def declares_but_does_not_re_point(source):
+        data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+        data.setdefault("extraKnownMarketplaces", {})["pseudolife-mcp"] = {
+            "source": {"source": "git", "url": source}}
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        return 0, "✔ Marketplace 'pseudolife-mcp' already on disk"
+    cli._marketplace_add = declares_but_does_not_re_point
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "still records" in result["detail"]
+    if original is None:
+        assert not settings.exists()
+    else:
+        assert json.loads(settings.read_text(encoding="utf-8")) == original
+
+
+def test_a_symlinked_settings_file_keeps_its_link(cli, tmp_path):
+    """settings.json linked from a dotfiles checkout is edited at its target;
+    replacing the link with a plain file would cut it off (review finding,
+    2026-10-05)."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    target = tmp_path / "dotfiles" / "settings.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    link = cli.home / "settings.json"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "migrated", result
+    assert link.is_symlink()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["autoUpdate"] is True
+
+
+def test_a_settings_file_that_cannot_be_backed_up_is_a_failed_line_not_a_crash(cli, tmp_path, monkeypatch):
+    """A file another process holds, or a plugins directory that cannot be
+    written: the step says so and changes nothing, and the ladder goes on
+    (review finding, 2026-10-05)."""
     _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
     settings = cli.home / "settings.json"
     settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
     before = settings.read_bytes()
-    cli.marketplace_add = (0, "✔ Marketplace 'pseudolife-mcp' already on disk")
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(uc.shutil, "copy2", denied)
     result = uc.update_plugin(ROOT)
     assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
-    assert "still records" in result["detail"]
-    assert settings.read_bytes() == before
+    assert "Permission denied" in result["detail"] and "nothing was changed" in result["detail"]
+    assert settings.read_bytes() == before and _marketplace_adds(cli) == []
 
 
 def test_an_add_that_drops_the_plugin_record_is_named(cli, tmp_path):
