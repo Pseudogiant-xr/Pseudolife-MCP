@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod doorbell_seen;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");
@@ -13,7 +14,6 @@ const DEFERRED_MODES: &[&str] = &[
     "board-audit",
     "briefing",
     "prompt-hook",
-    "doorbell-prompt-seen",
     "doctor",
     "connect",
     "invite",
@@ -116,6 +116,9 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
                 ExitCode::FAILURE
             },
         );
+    }
+    if mode == "doorbell-prompt-seen" {
+        return Some(doorbell_seen::run());
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (

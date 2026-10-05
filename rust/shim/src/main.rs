@@ -2,6 +2,10 @@
 use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("doorbell-prompt-seen")) {
+        return pseudolife_stdio::cli::dispatch(Some("doorbell-prompt-seen"))
+            .expect("prompt-arrival leaf is dispatched before attachment");
+    }
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if let Some(code) = pseudolife_stdio::cli::dispatch(arguments.first().map(String::as_str)) {
         return code;

@@ -1,5 +1,63 @@
 # Rust port state
 
+## Doorbell prompt receipt candidate
+
+Native `doorbell-prompt-seen` is implemented against the
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remains deferred.
+Source-bound diagnostics for the preceding candidate match 110 Windows and 109
+Linux ordinary public process cases and reject 440 and 436 candidate exit/stream/file
+mutations. Valid configured integer limits (640, unlimited and 5000) and the
+Windows surrogate username path counterexample are included. The genuine
+pre-code Python proof and first native pair independently verify nonce receipt,
+unchanged pending state, private files and cleanup. Final captures bind their
+own later binaries rather than reusing the first pair's identity.
+
+Separate fault and metadata probes retain fourteen unmatched Python traceback
+cases and two legacy migration clock-byte differences per platform. Native
+exception paths match the observed exit, state and final diagnostic line,
+including platform newline; interpreter traceback frames remain unmatched.
+These cases are not accepted or excluded. The Windows missing-home RuntimeError
+probe also retains unmatched traceback frames. Four Windows symlink cases lack
+creation privilege and remain unproven. Interruption during atomic replacement
+is also unproven.
+
+The preceding candidate passed seven native unit tests, three existing dispatch
+tests and nine additive fixture/control tests on both hosts, plus formatting and
+warning-denied clippy. Follow-up review found that valid signed-zero integer
+limits still suppressed receipts. Parsing the limit as a signed integer repairs
+`-0` and `-0000`; new source-bound probes match all 12 Windows and 10 Linux pairs,
+including stdin and pending-file counterexamples. Seven native unit tests pass
+again on each host, with explicit signed-zero boundary regressions. These narrow
+checks do not rebind the preceding full corpus to the new binary.
+Original tests and the generic process fixture remain unchanged. Initial
+independent review requested changes; the repaired tree still requires review.
+Committed acceptance, CI and measurement remain
+outstanding. No full-port or performance claim follows from these cells.
+
+The external pytest adapter now routes the four unchanged CoordinationPrompt
+hook nodes through their original shell launcher and marker-writing Python
+runner to the native process. Python and routed arms pass all four nodes on
+Windows and Linux; each arm observes sixteen hooks and twelve child calls.
+Fixture, public-mode and shell-capability controls pass 22 tests per host.
+Linux controls use an external bridge to the existing Git metadata; the two
+initial Git-path failures remain recorded. The hook adapter has independent
+review approval; its assertions do not settle the byte and fault gaps above.
+
+Automatic CLI dispatch now selects the five historical dispatcher nodes plus
+the four admitted hook nodes, with deterministic ordering and no duplicates.
+Its runtime gate derives the package version from the selected pinned source
+and retains Python 3.11, source-origin and installed-distribution checks.
+Preparatory `process_tests` captures pass all nine nodes in Python and native
+arms on both hosts, with 33 dispatcher controls passing per host. The candidate
+Rust source is still dirty; the committed-clean-source acceptance gate remains
+intact, and these component captures are not full acceptance receipts.
+
+The three leaf modules contain 1,297 physical production lines, including
+comments and blank lines but excluding their `cfg(test)` sections: receipt
+handling 330, private file machinery 239 and Python JSON domain parser 728.
+Dispatch edits are additional. Eval/test code and evidence assets are excluded
+from this count; it does not establish the required line-ratio closure.
+
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains
