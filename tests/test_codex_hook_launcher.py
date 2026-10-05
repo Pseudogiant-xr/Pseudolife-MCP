@@ -340,7 +340,9 @@ def test_real_codex_keeps_trusting_the_manual_hooks_across_a_refresh(tmp_path, m
 # discovery.rs, confirmed 2026-10-03). Scripts are not hashed. When a raw
 # definition changes, update this review pin, check Codex's normalized trust
 # behavior and describe it in the CHANGELOG; approve only if Codex asks.
-CODEX_APPROVED_HOOKS = "639c4367cc121ce9d7fb755b0a514559949ab41b5803c4ba0f5b7bc10332b265"
+# 2026-10-05: Stop timeout 3600 -> 1209600 (the Claude Code watcher lasts while
+# the session is open). Stop is not clamped, so Codex asks for approval once.
+CODEX_APPROVED_HOOKS = "db7941284dd05bb685de699f3e252fc1732962227b348320a74c1c61c29357cb"
 
 
 @pytest.mark.parametrize("event, cap", [

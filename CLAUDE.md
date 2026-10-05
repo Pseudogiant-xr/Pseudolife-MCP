@@ -335,12 +335,20 @@ took 143 CUDA OOMs.
   holder is idle from process stats, a quiet board or an old timestamp:
   ask them. This host's dialect for the served check-in's rules is
   `examples/hook-instructions.md`.
-- **A park record does not keep a wake listener alive.** Claude Code's Stop
-  watcher expires after 59 minutes. For a longer wait, arm one main-session
-  background `pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring
-  or timeout; in Codex, use the doorbell where the host supports it. Without
-  a durable host path, say `next-turn-only` in the park/status and tell the
-  maintainer when an urgent dependency cannot wait. Inspect send receipts:
+- **A park record does not keep a wake listener alive; the host does.**
+  Claude Code's Stop-hook watcher is armed at every turn end and listens
+  while the session stays open (14 days; it stopped after 59 minutes before
+  2026-10-05), so a plugin session needs no `wait-mail` once its clients
+  carry the 2026-10-05 plugin (`update --all` or `ops/update_clients.py`;
+  until a session restarts on it, the 59-minute hook still runs). Without the
+  plugin's Stop hook, arm a main-session background `pseudolife-mcp
+  wait-mail`, but Claude Code stops a background task at the Bash tool's
+  `timeout` (30 minutes by default, 2 hours at most): pass the maximum and
+  `--timeout 7000`, and re-arm after a ring or timeout. In Codex, use the
+  doorbell where the host supports it. Without a durable host path, say
+  `next-turn-only` in the park/status and tell the maintainer when an
+  urgent dependency cannot wait. The delegate especially: the Roles band
+  and a grant say when a role holder has no live listener. Inspect send receipts:
   `rung` means a currently armed path, not that the recipient acted; for
   `no_path`, use recipient host messaging when available (Claude Desktop's
   session `send_message` starts a user turn), otherwise expect its next turn.

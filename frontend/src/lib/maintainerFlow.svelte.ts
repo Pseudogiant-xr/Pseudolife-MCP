@@ -232,6 +232,18 @@ function changed<T>(r: T | null): T | null {
   return r;
 }
 
+/**
+ * After a grant or extend: a role holder with no live wake listener still
+ * gets the role, but your messages to it wait for its next turn, so say so
+ * beside the success toast (maintainer requirement 2026-10-05).
+ */
+function warnUnreachable(r: GrantResult | null): GrantResult | null {
+  if (r && r.reachable === false) {
+    toast(r.warning || "It has no live wake listener now: your messages wait for its next turn.", "warn", 12000);
+  }
+  return r;
+}
+
 /** After a passkey change: re-read the key list. */
 function keysChanged<T>(r: T | null): T | null {
   if (r) void loadMaintainer();
@@ -264,7 +276,7 @@ export function grantDelegate(t: Target, current: { holder: RoleHolder; name: st
     complete: (s) => maintainerApi.role(s),
     success: (_r, hold) => `${q(t.name)} is your delegate for ${holdLabel(hold)}.`,
     failure: "The delegate did not change",
-  }).then(changed);
+  }).then(changed).then(warnUnreachable);
 }
 
 export function extendDelegate(t: Target) {
@@ -279,7 +291,7 @@ export function extendDelegate(t: Target) {
     complete: (s) => maintainerApi.role(s),
     success: (_r, hold) => `Your delegate now ends in ${holdLabel(hold)}.`,
     failure: "The delegate was not extended",
-  }).then(changed);
+  }).then(changed).then(warnUnreachable);
 }
 
 export function revokeDelegate(t: Target) {
@@ -311,7 +323,7 @@ export function assignCoordinator(t: Target, current: { holder: RoleHolder; name
     complete: (s) => maintainerApi.role(s),
     success: () => `${q(t.name)} is the coordinator.`,
     failure: "The coordinator did not change",
-  }).then(changed);
+  }).then(changed).then(warnUnreachable);
 }
 
 export function revokeCoordinator(t: Target) {

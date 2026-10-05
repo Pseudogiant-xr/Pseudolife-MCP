@@ -265,10 +265,9 @@ PARK_GATE_MESSAGE = (
     "still bring fixes? Park needs_approval with park_clear_by set to the "
     "reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires "
     "a live listener. Check the sender's wake receipt; no_path means mail is "
-    "queued for receive on a later turn. For waits over 59 minutes, especially "
-    "needs_approval waiting on maintainer, arm wait-mail in the background or "
-    "keep the Codex doorbell active; otherwise record that you are reachable "
-    "on your next turn.")
+    "queued for receive on a later turn. Claude Code's Stop hook keeps listening "
+    "while this session stays open, and a Codex thread needs its doorbell active; "
+    "without either, record that you are reachable on your next turn.")
 
 
 def park_gate(service, headers: Mapping[str, str], *, agent, since,
