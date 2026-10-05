@@ -44,6 +44,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus a partial index on `episode`) and runs on daemon start. The harness
   names need the new shim, which release-mode `pseudolife-mcp update`
   installs with the clients; nothing else to do.
+
 ### Fixed (2026-10-05 — a contested fact's served correction no longer tells the model to write over it)
 - A cortex fact flagged `contested: true` came back from `memory_search`
   and `memory_fact_get` with a `correct_with` call to `memory_fact_set`,
@@ -62,6 +63,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the world cortex never parks contenders. The standing block
   (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
   same.
+
 ### Fixed (2026-10-05 — the standing texts teach what the server actually does)
 - The per-turn memory-change note told sessions to "`memory_store` a status
   note" without naming the source, so a session following it literally
@@ -86,6 +88,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (full 38 tools, core 24); the configuration guide gives the minimal tier's
   manifest as about 16 KB for 9 tools (it said ~1.5k tokens) and the full
   memory-loop block as about 8 KB (it said 7.5 KB).
+
 ### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
 - A memory tool called with an argument name it does not have used to
   succeed with that argument thrown away: `memory_search(limit=3)` returned
