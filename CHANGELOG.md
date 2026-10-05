@@ -159,8 +159,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Docs drift: README's `memory_history` row names its `as_of` parameter;
   the providers guide's September Codex check notes today's tier counts
   (full 38 tools, core 24); the configuration guide gives the minimal tier's
-  manifest as about 16 KB for 9 tools (it said ~1.5k tokens) and the full
-  memory-loop block as about 8 KB (it said 7.5 KB).
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens; superseded the
+  same day: about 18 KB for 10 tools once `memory_lesson_search` moved to
+  the minimal tier, above) and the full memory-loop block as about 8 KB (it
+  said 7.5 KB).
 
 ### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
 - A memory tool called with an argument name it does not have used to
