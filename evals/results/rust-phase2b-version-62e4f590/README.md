@@ -124,3 +124,15 @@ f709/0.16.1 contract retained separately. Derived-name identity substitution
 remains unapproved and its comparison policy is unchanged. Hosted acceptance
 and fresh independent review of the repair remain pending; CLI-VERSION stays
 deferred. The earlier run and local measurement records above remain historical.
+
+## Bounded Linux follow-up at `804e829e`
+
+The [fifteen-row recapture](../rust-phase2b-version-804e829e/README.md) now passes
+all five help and ten unknown-dispatch pairs against the admitted virtualenv,
+with all sixty candidate output/file-state controls rejected. It uses the
+reviewed lexical-invocation repair at clean `804e829e` and the unchanged original
+`62e4f590` release ELF. The pending recapture statements above describe the
+historical packet before this follow-up. Original receipts, the erratum,
+eleven version rows, Windows corpus, timings, startup captures and hosted
+failures remain intact. This bounded receipt is not a new complete 26-row gate;
+CLI-VERSION, hosted acceptance and derived-name policy gates remain unchanged.

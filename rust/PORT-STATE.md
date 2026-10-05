@@ -24,14 +24,25 @@ the base interpreter after fixture symlink resolution. Its 26 byte matches and
 parity against the admitted virtualenv. Capture-runtime metadata identifies the
 producer, not every child. The eleven version rows, Windows corpus, all four
 timing cells and both current startup captures are unaffected. Original receipts
-remain intact; fixture repair and recapture of the fifteen Linux rows are pending.
+remain intact; the bounded fifteen-row follow-up below records the repaired
+Linux invocation evidence.
 
 The fixture backports lexical invocation from `f4bf8a83` and closes its reviewed
 original-target gap: both original and selected executable targets remain bound
 through preparation and capture, including when an owned copy is selected.
 Targeted checks pass on Linux (127) and Windows (120, with seven Unix-only skips).
-Fresh review and recapture of the fifteen affected Linux rows remain pending;
-the historical receipts above are unchanged.
+Independent scoped review approved the repair at clean `804e829e`; the
+[bounded Linux follow-up](../evals/results/rust-phase2b-version-804e829e/README.md)
+passes fifteen actual pairs (five help, ten unknown dispatch) and rejects all
+sixty candidate output/file-state controls. Its measured instrument is
+`804e829ebb2d0f1e9c80894959420bc814aeaac3`, tree
+`297f037211e648d69d1d5a3353750ff2369fedea`, over the current 0.17.0/schema-55
+oracle with CPython 3.11.15. All fifteen oracle invocations retain the admitted
+lexical virtualenv path; a separate same-fixture child probe confirms that
+virtualenv context. The retained ELF is the source-equivalent `62e4f590` build.
+Historical receipts remain unchanged. This is not a new complete twenty-six-row
+gate; CLI-VERSION, required hosted CI/evidence-successor review, the separate
+merge gates and the unapproved derived-name substitution policy remain unchanged.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|

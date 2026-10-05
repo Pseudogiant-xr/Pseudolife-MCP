@@ -273,5 +273,28 @@
     "derived_name_substitution_approved": false,
     "comparison_policy_changed": false,
     "cli_version_status": "deferred"
+  },
+  "linux_help_dispatch_recap_followup": {
+    "public_receipt": "../rust-phase2b-version-804e829e/cli-help-dispatch-linux.json",
+    "readme": "../rust-phase2b-version-804e829e/README.md",
+    "public_sha256": "5b430d5e26b695b6dbb871895d16706b9757b0e29a0cffc4f7ca749f4165d292",
+    "public_bytes": 19347,
+    "measured_instrument_head": "804e829ebb2d0f1e9c80894959420bc814aeaac3",
+    "measured_instrument_tree": "297f037211e648d69d1d5a3353750ff2369fedea",
+    "rust_binary_build_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "rust_sources_equivalent_to_instrument_head": true,
+    "cases_passed": 15,
+    "candidate_controls_rejected": 60,
+    "mode_cases": {
+      "help": 5,
+      "unknown_dispatch": 10,
+      "version": 0
+    },
+    "oracle_invocation_retains_admitted_venv_path_count": 15,
+    "complete_help_version_gate": false,
+    "original_receipts_and_erratum_preserved": true,
+    "derived_name_substitution_approved": false,
+    "comparison_policy_changed": false,
+    "cli_version_status": "deferred"
   }
 }
