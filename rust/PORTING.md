@@ -55,7 +55,10 @@ initialize instructions, plus all authentication checks. An update launch
 diagnostic appears only after that launch succeeds. An explicit serve command
 alone does not identify a Python interpreter for client updates. This changes
 the scheduling and initialize version note by the same maintainer decision;
-the candidate remains uninstalled by the port.
+the candidate remains uninstalled by the port. Installer-backed client update
+parity is deferred to Phase 5: this candidate proves the explicit-interpreter
+launch and scheduling seam against a disposable sentinel module, not a client
+installation or an implicit interpreter lookup.
 
 ## Types and serialization
 

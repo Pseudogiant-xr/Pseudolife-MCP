@@ -92,6 +92,59 @@
         "Valid shim/channel argument behavior is preserved; broader Phase 2 dispatcher integration remains separate.",
         "Original argv production and test blobs are unchanged by the later startup-only correction; current integrated-head acceptance pending."
       ]
+    },
+    "e": {
+      "implemented_source_blobs": {
+        "rust/shim/tests/nonboard_final_assertions.rs": "5b465578406a96d0799f3337ca18f0032a507553",
+        "rust/shim/tests/common/mod.rs": "2a405dc266725f4662686ea3156b5e1db62f7a90",
+        "rust/shim/src/board/doorbell_windows.rs": "9e5298832581e06825e5d3d001b41a85f6f9db9e",
+        "rust/.config/nextest.toml": "3ca534675bf850c1ac781f51c12ac9e2045b90b2",
+        ".github/workflows/rust.yml": "de0c2194062b66cafac0de6443720ec4a8a5e92f"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-e-bounds.log",
+          "sha256": "9532cf3d812ffb692dcbd1678d28a855611044ea5ad8c5f9eaf54393837f3e24",
+          "observed": "Blocking accept ignored cancellation; the old fixture was released before the assertion failed, exit 101."
+        },
+        {
+          "reference": "fixes-red-e-doorbell.log",
+          "sha256": "ec2c0f040a914d2018aced769acaface28198d62074589d12d0813fec4778a17",
+          "observed": "Fixture leader returned 0 after a descendant exited 2; one failing propagation case, exit 101."
+        },
+        {
+          "reference": "fixes-red-e-timeouts.log",
+          "sha256": "d58d3a56ecf5f93a28a42369a3679f2e46dc84ce0aa4e6ccf3468f0a9262bc2d",
+          "observed": "Static contract against unchanged baseline Git blobs found no nextest config or Parity judge step timeout; exit 1. Performed after implementation, not a runtime timeout trial."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows targeted integration proof passed the built-binary updater sentinel and bounded cancellation checks; this batch preceded the final startup-only narrowing."
+        },
+        {
+          "reference": "fixes-green-doorbell.log",
+          "sha256": "3353b32ae0c380391f07066ea0b34a3954b9a7f8571b5490fb799bc5127c3403",
+          "observed": "Native Windows doorbell group 10/10, with 36 unrelated unit tests filtered, 5.93 seconds."
+        },
+        {
+          "reference": "fixes-green-nextest.log",
+          "sha256": "082a9cd1d9416ac3a54a0818710a1a9a29a00bd8dd4c0409a2b2ba9c83280532",
+          "observed": "Targeted Windows nextest 36/36, zero skips, 0.626 seconds; parsed the new timeout config before the final startup-only narrowing."
+        },
+        {
+          "reference": "fixes-green-e-timeouts.log",
+          "sha256": "2f47254191ca1f6ae7d73a92bfb7d4739e5960a32490d4254b709827f77ef7ec",
+          "observed": "Static candidate timeout contract passed, exit 0."
+        }
+      ],
+      "limitations": [
+        "Updater callback coverage is a positive proof; no callback-omission RED is claimed.",
+        "Production callback wiring is unchanged; the sentinel module is disposable and performs no installation.",
+        "The e source/test/config blobs are unchanged by the later startup-only correction; current integrated-head acceptance pending."
+      ]
     }
   },
   "remaining_gates": [

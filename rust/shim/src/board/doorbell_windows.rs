@@ -630,14 +630,31 @@ mod tests {
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap();
-            let _ = worker.wait();
+            let status = worker.wait().unwrap();
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
         } else {
+            if std::env::var_os("DOORBELL_FIXTURE_WORKER_FAILURE").is_some() {
+                std::process::exit(2);
+            }
             std::fs::write(root.join("worker.pid"), std::process::id().to_string()).unwrap();
             std::fs::write(root.join("ticks"), "alive").unwrap();
             // The test owns the sole writer through cleanup assertions. EOF is
             // an unwind signal, never a timer that can fake successful cleanup.
             std::io::stdin().read_to_end(&mut Vec::new()).unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn fixture_propagates_unsuccessful_descendant() {
+        let home = Home::new();
+        let status = command(&home)
+            .env("DOORBELL_FIXTURE_WORKER_FAILURE", "1")
+            .status()
+            .await
+            .unwrap();
+        assert_eq!(status.code(), Some(2));
     }
 
     async fn fallback(phase: Phase, name: &str) {
@@ -671,8 +688,11 @@ mod tests {
         assert!(alive, "fallback worker was not alive before cleanup");
         assert!(terminated(leader), "fallback leader remained alive");
         assert!(terminated(worker), "fallback descendant remained alive");
-        // The fixture leader may return success after taskkill stops its child.
-        status.expect("fallback leader wait failed after cleanup");
+        assert!(
+            !status
+                .expect("fallback leader wait failed after cleanup")
+                .success()
+        );
         drop(keepalive);
         evidence(
             json!({"scenario":name,"platform":"windows","leader_pid":leader,"worker_pid":worker,"worker_alive_before_cleanup":true,"connected_grandchild":true,"leader_terminated":true,"worker_terminated":true,"native_taskkill_fallback":true}),

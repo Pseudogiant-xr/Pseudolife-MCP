@@ -400,3 +400,25 @@ with Unix surrogateescape, and an unpaired UTF-16 surrogate on Windows.
 GREEN case. Implementation item d is closed. The Unix corpus is implemented
 but unexecuted locally; current-head both-platform validation remains pending.
 The broader Phase 2 CLI dispatcher is not part of this item.
+
+## Phase 2b item e: bounded fixtures and updater callback proof
+
+The two update-health accept/join paths now share a cancellable nonblocking
+fixture with a five-second accept deadline, bounded header reads/writes and an
+8 KiB header cap. The Windows doorbell test preserves unsuccessful descendant
+status and restores its `!status.success()` assertion. Nextest uses 60-second
+slow periods and terminates after two; Parity install/build/judge steps are
+bounded at 10/10/15 minutes within the unchanged 25-minute job.
+
+The built binary sends its first flushed client frame before a disposable
+explicit-interpreter updater writes its sentinel. The test observes no update
+at upstream startup, then pins callback argv and result after the client frame.
+It makes no latency assertion and performs no client installation.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds watched RED
+`fixes-red-e-bounds.log` and `fixes-red-e-doorbell.log`, plus the static baseline
+configuration RED `fixes-red-e-timeouts.log` (not a runtime timeout trial). The
+isolated Windows targeted run passed the updater sentinel and cancellation
+checks; the native doorbell group passed 10/10. The callback proof is positive
+only: production callback wiring was already correct and is unchanged.
+Implementation item e is closed; final integrated-head validation is pending.
