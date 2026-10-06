@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Added (2026-10-07 — native lease candidate and help drift guards)
+
+- Add a scoped native Rust `lease check`, `lease list` and `lease run`
+  candidate, shared isolated lease test homes and pinned Python help/usage
+  drift guards. The candidate remains uninstalled and
+  [CLI-LEASE stays deferred](rust/PORT-STATE.md#lease-shared-fixture-and-help-guard-follow-up).
+
 ## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
 
 ### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)
