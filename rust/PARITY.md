@@ -315,6 +315,24 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 
 ## Test-file buckets
 
+The real-bank stdio judge declares `completed-readiness-wait-notice` as a
+semantic normalization at `/stderr`. The producer is the shim's existing
+no-spawn path: Python and Rust can print a five-second readiness wait notice
+after an unsuccessful initial probe, then complete the same exchange.
+Normalization requires matching stdout under the existing byte comparator,
+successful integer exit 0 in both arms, at least one stdout frame, genuine
+process evidence, and stderr consisting only of the exact notice or empty bytes.
+The notice is limited to HTTP loopback `127.0.0.1`, a decimal port 1–65535, the
+existing five-second text, and one LF or CRLF terminator. It never suppresses
+extra diagnostics, timeout/boundary errors, or output/exit mismatches. Startup,
+fault, EOF and concurrent-call policies remain strict; transport headers are
+outside this rule. Raw streams remain in private captures and both arms' raw
+stderr is also retained in each applied normalization event in public receipts.
+The regression test retains the exact 172-byte Windows notice, with synthetic
+matched frames; it is not a replay of historical stdout. The original cause of
+the initial probe miss remains unproven, and this rule changes no production
+lifecycle, timeout or diagnostic behavior.
+
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
 The Phase 1 pinned oracle contains 423 `tests/test_*.py` files: 68 oracle, 2 candidate and 353 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 191 functions as 8 candidates, 3 public oracle cases and 180 internal cases. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four current 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below; full suites and final integrated-head review/CI remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.

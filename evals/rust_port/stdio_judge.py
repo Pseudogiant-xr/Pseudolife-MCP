@@ -9,6 +9,11 @@ from .harness import DuplicateJSONKey, Policy, compare, strict_json_loads
 from .wire import replacements
 
 STDERR_EVIDENCE_LIMIT = 64 * 1024
+READINESS_WAIT_RULE = "completed-readiness-wait-notice"
+_READINESS_WAIT_NOTICE = re.compile(
+    rb"\[shim\] no daemon at http://127\.0\.0\.1:([1-9][0-9]{0,4})" + re.escape(
+        " and PSEUDOLIFE_MCP_NO_SPAWN is set — waiting up to 5s for it instead of spawning a fallback "
+        "(Docker may still be starting)...".encode("utf-8")) + rb"\r?\n")
 
 
 def needs_stderr_evidence(difference, *, include_boundaries=True):
@@ -70,6 +75,7 @@ class StdioPolicy:
     stderr_allowlist: tuple = ()
     eof_orders: tuple = ()
     non_eof_orders: tuple = ()
+    readiness_wait_notice: bool = False
 
 
 def normalized_frame(raw, policy):
@@ -102,10 +108,51 @@ def observation(transcript, policy):
             "stderr": b"".join(retained), "exit_code": transcript["exit_code"]}
 
 
+def _readiness_wait_matches(expected, actual, policy, left, right):
+    if (not policy.readiness_wait_notice or policy.stderr_allowlist or
+            policy.eof_orders or policy.non_eof_orders or
+            "boundary_error" in left or "boundary_error" in right or not left["frames"]):
+        return False
+    if any(type(side["exit_code"]) is not int or side["exit_code"] != 0 for side in (left, right)):
+        return False
+    # Establish all other observations under the existing comparator first.
+    if compare({key: value for key, value in left.items() if key != "stderr"},
+               {key: value for key, value in right.items() if key != "stderr"},
+               Policy(ignored_values=(), source_text_paths=())):
+        return False
+    raw = [base64.b64decode(transcript["stderr_b64"], validate=True) for transcript in (expected, actual)]
+    if raw[0] == raw[1]:
+        return False
+    for stderr in raw:
+        if stderr:
+            notice = _READINESS_WAIT_NOTICE.fullmatch(stderr)
+            if notice is None or int(notice[1]) > 65535:
+                return False
+    # Accepted differences need the same genuine evidence as failed ones.
+    return stderr_evidence_complete(retain_stderr([{"path": "/stderr"}], expected, actual))
+
+
+def readiness_wait_evidence(expected, actual, policy):
+    """Retain raw bytes and process provenance for this accepted stderr change."""
+    for transcript in (expected, actual):
+        try:
+            base64.b64decode(transcript["stderr_b64"], validate=True)
+        except (KeyError, TypeError, ValueError):
+            return []
+    left, right = observation(expected, policy), observation(actual, policy)
+    if not _readiness_wait_matches(expected, actual, policy, left, right):
+        return []
+    return retain_stderr([{"path": "/stderr", "rule": READINESS_WAIT_RULE,
+                           "condition": "matching stdout and successful exit 0; sole exact notice or empty stderr"}],
+                         expected, actual)
+
+
 def _judge(expected, actual, policy):
     left, right = observation(expected, policy), observation(actual, policy)
     if "boundary_error" in left:
         raise ValueError("oracle stdio transcript is malformed")
+    if _readiness_wait_matches(expected, actual, policy, left, right):
+        left["stderr"] = right["stderr"] = b""
     if "boundary_error" not in right and policy.eof_orders:
         # Only the final two EOF errors can permute; every frame retains exact
         # bytes and multiplicity. The accepted tuples come from frozen evidence.
