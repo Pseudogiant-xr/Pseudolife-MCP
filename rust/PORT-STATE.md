@@ -77,14 +77,58 @@ instrument/production bindings and unchanged runtime/helper/binary identities;
 the broad oracle dirty flag describes its eval overlay. These files are local
 evidence, not tracked or published acceptance assets.
 
+A separate local Linux process-interruption capture at
+`fccb8cad64f3c553f86bc6886b64b7446dc270f9` traces four genuine Python/native Rust
+invocations: each arm stops at the owned receipt rename syscall entry and at its
+successful exit. Both stops follow observed successful staged-file `fsync` and
+`close`. The capture reuses the existing version2-positive stdin and privately
+prepared pending bytes, with a prior `prior\n` seen receipt. Oracle, runtime,
+loaded helper, committed Rust source and retained executable bindings match
+before and after each cell; the executable hashes above remain unchanged.
+
+At entry, the prior seen bytes survive alongside a complete nonce-plus-LF staged
+orphan; the pending bytes remain unchanged. At successful exit, seen contains
+the complete new receipt and the staged file is absent. Every interrupted child
+ends with SIGKILL (-9); all six traced thread IDs, including both Rust CLONE
+threads, are reaped and absent. Each ordinary untraced retry returns exit 0 with
+empty stdout/stderr, demonstrating reusable locking and a complete nonce-plus-LF
+receipt. Entry retries preserve the original orphan. Complete pre/post/retry
+file bytes, raw names, streams, selected private metadata and syscall facts were
+archived before removing all four verified owned fixtures. Captured files pass
+private validation with mode `0o600`, `nlink=1` and uid/gid 1000; ACL entries were
+not captured.
+
+The raw entry file maps differ at the actual orphan names: Python
+`digests/.bell-r9s9lzww` and Rust
+`digests/.bell-17709f2064ff4a179d88337c3476b445`. Their bytes match, but neither
+name nor its metadata key is normalized or excluded. Successful-exit file maps
+and selected metadata match exactly. Raw absolute syscall operands and process
+facts remain different and retained. The first Python-entry supervisor recorded
+proof exit 0 before its outer WSL exit-recording wrapper failed with exit 1; that
+failure remains intact. A private shell-file launcher completed the remaining
+three cells with outer exit 0, without repeating the first cell. An initial
+private audit also failed on Windows parsing of a Linux path; `PurePosixPath`
+corrected that audit without changing or rerunning the proof.
+
+Untracked local receipts are `doorbell-atomic-python-entry.json`,
+`doorbell-atomic-python-success-exit.json`, `doorbell-atomic-rust-entry.json` and
+`doorbell-atomic-rust-success-exit.json`. The summary is
+`doorbell-atomic-interruption-audit.json` (SHA256
+`b72de20e3cbd903725b12eed6f1ded916ff91ee2fc952e5fe770089749124f14`);
+the raw artifact index is `doorbell-atomic-interruption-manifest.json` (SHA256
+`d3ce7ba88e28975e8031371263df200f3ec67f163ceb8de81ea64156ba28422f`).
+This bounded Linux process-interruption evidence does not prove Windows
+interruption, power-loss persistence, post-rename directory sync or full-mode
+fault acceptance.
+
 Separate fault and metadata probes retain fourteen unmatched Python traceback
 cases and two legacy migration clock-byte differences per platform. Native
 exception paths match the observed exit, state and final diagnostic line,
 including platform newline; interpreter traceback frames remain unmatched.
 These cases are not accepted or excluded. The Windows missing-home RuntimeError
 probe also retains unmatched traceback frames. Four Windows symlink cases lack
-creation privilege and remain unproven. Interruption during atomic replacement
-is also unproven.
+creation privilege and remain unproven. Windows interruption during atomic
+replacement remains unproven.
 
 The preceding candidate passed seven native unit tests, three existing dispatch
 tests and nine additive fixture/control tests on both hosts, plus formatting and
@@ -99,7 +143,8 @@ independent review requested changes; the measurement instrument subsequently
 received scoped approval. Full-mode fault/traceback,
 migration clock policy, hosted CI and evidence-successor
 review remain outstanding. No ported status or full-port claim follows from
-the ordinary corpus, bounded positive proof or debug-path measurements.
+the ordinary corpus, bounded positive or interruption proofs, or debug-path
+measurements.
 
 The external pytest adapter now routes the four unchanged CoordinationPrompt
 hook nodes through their original shell launcher and marker-writing Python
