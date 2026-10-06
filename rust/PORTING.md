@@ -7,7 +7,7 @@ Historical phase 1 close-out evidence retains Python 0.16.1 at
 
 Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
 
-The [local version evidence at `62e4f590`](../evals/results/rust-phase2b-version-62e4f590/README.md)
+The [local version evidence at `62e4f590`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md)
 records both-platform release corpora and bare/installed paired measurements.
 It preserves the Windows installed median/p95 regression and distinct runtime
 versions, with no aggregate speedup or causal claim. CLI-VERSION remains deferred
@@ -243,7 +243,7 @@ small. Reject unlisted normalization and non-finite values.
 
 The same-ONNX-graph embedding tolerance is **not yet established**. The current
 configuration guide documents torch fallback for the default Qwen model because
-it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](../evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
+it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/13dbe0b032527bf110acbaf4f1ea1ae00ca20cef/evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
 identifies a disposable fp32 graph and compares Torch fp32 with direct ORT CPU
 over 1,000 seeded documents and 25 **PROPOSED** topic queries: maximum absolute
 embedding difference `5.401670932769775e-7`, minimum cosine
@@ -423,10 +423,14 @@ without an implementation emit a candidate-only deferred diagnostic, never the
 Python unknown-mode contract. The prepared version implementation derives the
 runtime root from its own executable under a six-digit `runtimes` entry's
 `Scripts` or `bin` directory, matching Python's `sys.prefix` identity. It checks
-its own executable and matches the runtime path as written or canonicalized.
+its own executable, also requires the canonical Python console path to be a file
+(`Scripts/pseudolife-mcp.exe` or `bin/pseudolife-mcp`), and matches the runtime
+path as written or canonicalized. The marker follows Python's dictionary shape.
 Manifest NaN, Infinity, lone surrogates and integers beyond u64 remain deferred.
-The three version nodes are routed; final-head runtime execution, both-platform
-receipts and the Windows installed-layout timing diagnosis remain pending.
+The three version nodes are routed. Frozen `5220b5ee` Windows/Linux CLI cells
+cover canonical-console admission, missing-console fallback and actual non-ASCII
+homes with UTF-8 streams; counts and warm measurements are in PORT-STATE.md.
+Required successor hosted checks and independent review remain pending.
 The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
 normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
 and initialize-return timing, using the same paired ordering and repeat floors.
@@ -459,7 +463,7 @@ establishes no production parity.
   locking nor atomic updates; the trial also excludes object subclasses, byte
   text, deep recursion and tier warning logs. None is retired by implication.
 
-## Current close-out evidence
+## Historical Phase 1 close-out evidence
 
 Frozen candidate `690bb8ac` has current Windows/Linux schema-2 Python self-replay
 and Rust receipts, each with eight actual stdio outcomes and 32 executable-bound
@@ -470,6 +474,19 @@ identity, not a build attestation. The paired measurements use three repeats
 of ten samples per arm, with separately sampled RSS and per-arm quantile floors.
 Current numeric tables and remaining acceptance gates are in PORT-STATE.md;
 full suites, final integrated-head CI and whole-change review remain pending.
+
+## Version warm measurement condition
+
+Frozen `5220b5ee` captures retain 28 exact cases and 112 mutation controls on
+each OS. UTF-8 output is selected; locale/default encoding remains deferred.
+Version measurement makes one untimed start per arm before each of three
+ten-pair blocks, then reuses exact executable file identities and restored
+state. Each layout retains two byte controls, six warm starts and sixty timed
+starts with per-arm floors. Help can explicitly opt in with `--warm-images`;
+other CLI benchmark reset semantics are unchanged. Cold-copy Windows results
+remain historical, with no security-provider cause established. Current
+numbers, identities and remaining hosted/review gates are in PORT-STATE.md;
+these CPU CLI cells establish no full-suite acceptance.
 
 ## Lease diagnostic boundaries
 
