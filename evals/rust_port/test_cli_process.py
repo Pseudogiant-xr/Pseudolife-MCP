@@ -84,8 +84,8 @@ def test_controls_are_not_satisfied_by_an_unrelated_existing_difference():
 def test_default_corpus_does_not_claim_unported_mode_coverage():
     assert {case["mode"] for case in cli_process.cases()} == {"help", "unknown-dispatch"}
     versions = cli_process.cases(("version",))
-    assert len(versions) == 11
-    assert len({case["id"] for case in versions}) == 11
+    assert len(versions) == 13
+    assert len({case["id"] for case in versions}) == 13
     assert all("response" not in case for case in versions)
 
 

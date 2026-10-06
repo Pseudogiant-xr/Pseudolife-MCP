@@ -16,6 +16,8 @@ def cases():
         ("default-commit-flag-tail", ["--version", "ignored"], "default", "commit"),
         ("default-requirement", ["version"], "default", "requirement"),
         ("default-checkout-no-git", ["version"], "default", "checkout-no-git"),
+        ("missing-console", ["version"], "missing-console", "commit"),
+        ("non-ascii-home", ["version"], "default", "commit"),
         ("override-commit", ["version"], "override", "commit"),
         ("override-requirement", ["--version"], "override", "requirement"),
         ("half-root", ["version"], "half-root", "commit"),
@@ -24,7 +26,9 @@ def cases():
     ]
     return [{"id": "version-" + name, "mode": "version", "argv": argv, "stdin_b64": "",
              "environment_deltas": {}, "pre_files_b64": {}, "normalizations": [],
-             "layout_kind": layout, "manifest_kind": marker}
+             "layout_kind": layout, "manifest_kind": marker,
+             **({"expected_stdout": "pseudolife-mcp {version}\n"} if layout == "missing-console" else {}),
+             **({"home_suffix": "home-café-☃"} if name == "non-ascii-home" else {})}
             for name, argv, layout, marker in rows]
 
 
@@ -105,11 +109,12 @@ def make_prepare(source_root, source_pin):
                 "source_commit": commit if kind == "commit" else None,
                 "base_interpreter": seed["base_interpreter"]}
 
-    def seed_files(runtime, marker, commands, *, native):
+    def seed_files(runtime, marker, commands, *, native, console=True):
         scripts = runtime / scripts_name
         scripts.mkdir(parents=True, exist_ok=True)
         shutil.copy2(commands["oracle"][0], scripts / python_name)
-        shutil.copy2(seed["console"], scripts / console_name)
+        if console:
+            shutil.copy2(seed["console"], scripts / console_name)
         shutil.copy2(seed["config"], runtime / "pyvenv.cfg")
         if native:
             shutil.copy2(commands["candidate"][0], scripts / native_name)
@@ -145,7 +150,7 @@ def make_prepare(source_root, source_pin):
         else:
             selected = override if kind == "override" else default
             runtime = selected / "000001"
-            seed_files(runtime, marker, commands, native=True)
+            seed_files(runtime, marker, commands, native=True, console=kind != "missing-console")
             # Own identity must survive the presence of a newer complete runtime.
             seed_files(selected / "000002", manifest("commit", commit="0" * 39 + "1"), commands, native=False)
             native = runtime / scripts_name / native_name

@@ -310,8 +310,8 @@ and other output encodings and non-UTF-8 or surrogate argv remain deferred. Requ
 arguments are `--oracle-root`, `--candidate-root`, `--candidate`, `--out` and
 the existing resource-check option; optional `--candidate-sha256` binds a frozen
 binary. `--smoke` permits smaller positive counts and marks the output as plumbing
-evidence. Version, lease check and doctor measurements remain deferred until their
-mode contracts are implemented. Final help pairs at committed `6e936887` are
+evidence. Lease check and doctor measurements remain deferred until their
+mode contracts are implemented. Historical help pairs at committed `6e936887` are
 [`rust-phase2-help-measurement-windows-6e936887.json`](../results/rust-phase2-help-measurement-windows-6e936887.json)
 and [`rust-phase2-help-measurement-linux-6e936887.json`](../results/rust-phase2-help-measurement-linux-6e936887.json).
 Each has 30 rows per arm; PORT-STATE.md links the matching accepted CLI receipts
@@ -320,3 +320,17 @@ Phase 1 docs/data merge leaves source/instruments unchanged; executed artifact
 identities remain `6e936887`. Both-OS executing CI passed in workflow
 37242071017 for that head's exact tree; current documentation-head gates
 remain pending.
+
+Version timing now defaults to one untimed invocation per arm before each of
+the three ten-sample blocks. Installed layouts are prepared for the two byte
+controls, then retained: timed starts reuse the same path, file identity and
+executable bytes that were warmed. Input files and environment are restored to
+the exact byte-control state without rewriting unchanged images; every warm
+and timed invocation must reproduce its arm's control output and poststate.
+Receipts retain the historical `cold_start_to_exit_ms` metric name, record six
+warmups separately, and identify this as fresh-process timing after explicit
+image warmup. Other modes retain their existing fixture-reset protocol unless
+`--warm-images` is explicitly selected. `--mode version --layout installed`
+selects the minimal installer-schema fixture; `--layout bare` is also available.
+New final measurements require the combined committed candidate and both-OS
+captures. Earlier copied-image timing remains historical evidence.

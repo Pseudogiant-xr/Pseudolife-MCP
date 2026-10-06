@@ -135,6 +135,14 @@ fn runtime_line() -> Option<String> {
         let marker: Value =
             serde_json::from_slice(&fs::read(path.join("runtime.json")).ok()?).ok()?;
         let marker = marker.as_object()?;
+        let console = path.join(if cfg!(windows) {
+            "Scripts/pseudolife-mcp.exe"
+        } else {
+            "bin/pseudolife-mcp"
+        });
+        if !console.is_file() {
+            continue;
+        }
         let origin = if let Some(commit) = marker.get("source_commit").filter(|value| truthy(value))
         {
             format!("source commit {}", python_text(commit, false))

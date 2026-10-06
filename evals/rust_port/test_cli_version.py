@@ -10,10 +10,10 @@ from evals.rust_port import cli_process, cli_version
 def test_public_version_corpus_contains_installed_default_override_and_bare_cases():
     rows = cli_process.cases(("help", "version"))
     versions = [row for row in rows if row["mode"] == "version"]
-    assert len(rows) == 26
-    assert len(versions) == 11
+    assert len(rows) == 28
+    assert len(versions) == 13
     assert {row["layout_kind"] for row in versions} == {
-        "bare", "default", "override", "half-root", "half-launcher", "wrong-suffix"}
+        "bare", "default", "override", "half-root", "half-launcher", "wrong-suffix", "missing-console"}
     assert {row["manifest_kind"] for row in versions} == {"commit", "requirement", "checkout-no-git"}
     assert all(not row["normalizations"] for row in versions)
 
@@ -41,8 +41,17 @@ def test_minimal_runtime_seeds_identical_bytes_and_preserves_public_prefix(tmp_p
     # Simulate each naming/layout branch without replacing pathlib's host OS.
     monkeypatch.setattr(cli_version, "os", SimpleNamespace(name=platform))
     prepare = cli_version.make_prepare(tmp_path, "f" * 40)
+    if "expected_stdout" in spec:
+        import base64
+        (tmp_path / "pyproject.toml").write_text('[project]\nversion="0.16.1"\n')
+        expected = spec["expected_stdout"].format(version="0.16.1")
+        if cli_process.os.name == "nt":
+            expected = expected.replace("\n", "\r\n")
+        stdout = base64.b64encode(expected.encode()).decode()
+    else:
+        stdout = ""
     monkeypatch.setattr(cli_process, "run_cli", lambda *a, **k: {
-        "exit_code": 0, "stdout_b64": "", "stderr_b64": ""})
+        "exit_code": 0, "stdout_b64": stdout, "stderr_b64": ""})
     home = tmp_path / "home"
     arms = {arm: cli_process.observe(spec, prefix, commands, root=tmp_path, home=home,
                                     url="http://127.0.0.1:49152", prepare=prepare)
@@ -55,6 +64,7 @@ def test_minimal_runtime_seeds_identical_bytes_and_preserves_public_prefix(tmp_p
         assert execution["command_identity"]["executable_sha256"] == \
             cli_process.command_identity(commands[arm], tmp_path)["executable_sha256"]
     native = Path(arms["candidate"]["execution"]["selected_prefix"][0])
+    home = home / spec["home_suffix"] if "home_suffix" in spec else home
     if spec["layout_kind"] == "bare":
         assert native.parent == home / "bare-native"
     else:

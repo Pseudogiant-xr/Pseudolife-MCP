@@ -1,9 +1,10 @@
-"""Paired CLI cold-start-to-exit measurement using the existing repeat floors."""
+"""Paired fresh-process CLI timing after equal warmups, using existing repeat floors."""
 import argparse
 import base64
 import copy
 import json
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import time
@@ -12,15 +13,46 @@ import tomllib
 from .common import lease_gate, provenance
 from .shim_measurement import artifact_identity, metric_cells
 from evals.rust_port.cli_corpus import STREAM_CONTRACT
-from evals.rust_port.cli_process import cli_binding, prepared_command, remove_root_link, reset_home, snapshot
+from evals.rust_port.cli_process import (
+    checked_metadata, cli_binding, file_path, prepared_command, remove_root_link, reset_home, snapshot,
+)
 from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
 from evals.rust_port.provenance import require_import_root, runtime_metadata
 from evals.rust_port.stdio_capture import require_phase1_source
 
 
+def file_identity(command):
+    path = Path(command[0]).resolve(strict=True)
+    metadata = path.stat()
+    return {"path": str(path), "device": metadata.st_dev, "inode": metadata.st_ino,
+            "bytes": metadata.st_size, "modified_ns": metadata.st_mtime_ns}
+
+
+def restore_state(home, files, directories):
+    """Restore owned input state without replacing or rewriting unchanged images."""
+    current = snapshot(home)  # Reject links/junctions before changing owned state.
+    entries = list(home.rglob("*"))
+    for path in entries:
+        checked_metadata(path)
+    for name in current.keys() - files.keys():
+        file_path(home, name).unlink()
+    for path in sorted(entries, key=lambda path: len(path.parts), reverse=True):
+        if path.exists() and stat.S_ISDIR(checked_metadata(path).st_mode) \
+                and path.relative_to(home).as_posix() not in directories:
+            path.rmdir()
+    for name in directories:
+        file_path(home, name).mkdir(parents=True, exist_ok=True)
+    for name, encoded in files.items():
+        if current.get(name) != encoded:
+            path = file_path(home, name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(base64.b64decode(encoded, validate=True))
+
+
 def measure(args, resource, *, prepare=None, case=None):
     mode = getattr(args, "mode", "help")
+    warm_images = mode == "version" or getattr(args, "warm_images", False)
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
     if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv) \
             or argv[0] not in {mode, "--" + mode}:
@@ -42,7 +74,8 @@ def measure(args, resource, *, prepare=None, case=None):
     helpers = {"evals/rust_baseline/cli_measurement.py": [Path(__file__)],
                "evals/rust_baseline/common.py": [lease_gate, provenance],
                "evals/rust_baseline/shim_measurement.py": [artifact_identity, metric_cells],
-               "evals/rust_port/cli_process.py": [cli_binding, prepared_command, reset_home, snapshot, remove_root_link],
+               "evals/rust_port/cli_process.py": [checked_metadata, cli_binding, file_path, prepared_command,
+                                                   reset_home, snapshot, remove_root_link],
                "evals/rust_port/harness.py": [capture_platform, isolated_env, run_cli, write_new],
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
                "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
@@ -64,47 +97,85 @@ def measure(args, resource, *, prepare=None, case=None):
     prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
+    warmups = []
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
+        home = directory / "cli-home"
+        installed = {}
+        state_controls = {}
+        identities = {}
+        baseline_files = {}
+        baseline_directories = set()
 
         def invoke(arm, label, *, timed=False):
-            if prepare is None:
-                home = directory / label
-                env = isolated_env(home)
+            nonlocal baseline_files, baseline_directories
+            control = label == "control-" + arm
+            reuse = warm_images and not control
+            # Keep the historical per-invocation reset for modes without opt-in.
+            active_home = home if prepare is not None or warm_images else directory / label
+            if reuse:
+                for installed_arm, entry in installed.items():
+                    if file_identity(entry["selected"]) != identities[installed_arm]:
+                        raise RuntimeError("CLI warmed executable file identity changed")
+                restore_state(active_home, baseline_files, baseline_directories)
+                env = copy.deepcopy(installed[arm]["env"])
+                selected = installed[arm]["selected"]
+                selected_identity = installed[arm]["selected_identity"]
+                original_identity = installed[arm]["original_identity"]
+                binding = copy.deepcopy(installed[arm]["binding"])
+            elif prepare is None:
+                reset_home(active_home)
+                env = isolated_env(active_home)
                 selected = commands[arm]
+                selected_identity = original_identity = command_identity(selected, root)
                 binding = None
             else:
-                home = directory / "cli-home"
-                reset_home(home)
-                env = isolated_env(home)
-                env.update({"XDG_DATA_HOME": str(home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                reset_home(active_home)
+                env = isolated_env(active_home)
+                env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
                             "PYTHONDONTWRITEBYTECODE": "1"})
                 prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
                 try:
                     selected, selected_identity, original_identity = prepared_command(
-                        case, commands[arm], prefixes, root=root, home=home, env=env, prepare=prepare)
-                    binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(home),
+                        case, commands[arm], prefixes, root=root, home=active_home, env=env, prepare=prepare)
+                    binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
                                "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                              "effective_argv": [*selected, *argv], "cwd": str(root),
                                              "command_identity": selected_identity}}
                 except BaseException:
-                    remove_root_link(home)
+                    remove_root_link(active_home)
                     raise
+            before = snapshot(active_home)
+            if control:
+                baseline_files = before
+                baseline_directories = {path.relative_to(active_home).as_posix() for path in active_home.rglob("*")
+                                        if stat.S_ISDIR(checked_metadata(path).st_mode)}
+                installed[arm] = {"selected": selected, "env": copy.deepcopy(env), "binding": binding,
+                                  "selected_identity": selected_identity, "original_identity": original_identity}
+            elif reuse and before != baseline_files:
+                raise RuntimeError("CLI input state changed during measurement")
             input_options = {"stdin": base64.b64decode(case.get("stdin_b64", ""), validate=True)} \
                 if case is not None else {}
             try:
                 started = time.perf_counter() if timed else None
                 response = run_cli(selected, argv, cwd=root, env=env, timeout=10, **input_options)
                 elapsed = (time.perf_counter() - started) * 1000 if timed else None
+                after = snapshot(active_home)
+                if reuse and file_identity(selected) != identities[arm]:
+                    raise RuntimeError("CLI warmed executable file identity changed")
+                if command_identity(selected, root) != selected_identity \
+                        or command_identity(commands[arm], root) != original_identity:
+                    raise RuntimeError("CLI executable changed during measurement capture")
+                state = {"environment": copy.deepcopy(env), "pre_files_b64": before, "post_files_b64": after}
+                if reuse and state != state_controls[arm]:
+                    raise RuntimeError("CLI files or environment changed during measurement")
+                if control:
+                    state_controls[arm] = state
                 if binding is not None:
-                    binding["post_files_b64"] = snapshot(home)
-                    if command_identity(selected, root) != selected_identity \
-                            or command_identity(commands[arm], root) != original_identity:
-                        raise RuntimeError("CLI executable changed during measurement capture")
+                    binding["post_files_b64"] = after
                 return response, elapsed, binding
             finally:
-                if prepare is not None:
-                    remove_root_link(home)
+                remove_root_link(active_home)
 
         # The untimed exact-byte control must pass before any timing is recorded.
         controls = {}
@@ -121,9 +192,19 @@ def measure(args, resource, *, prepare=None, case=None):
         if prepared_controls and files_and_environment(prepared_controls["python"]) != \
                 files_and_environment(prepared_controls["rust"]):
             raise RuntimeError("CLI byte control failed for prepared files or environment")
+        if warm_images and state_controls["python"] != state_controls["rust"]:
+            raise RuntimeError("CLI byte control failed for files or environment")
+        if warm_images:
+            identities = {arm: file_identity(entry["selected"]) for arm, entry in installed.items()}
         for repeat in range(args.repeats):
             resource_checks.append(resource if repeat == 0 or args.smoke else lease_gate(
                 args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at))
+            for arm in commands if warm_images else ():
+                response, _, _ = invoke(arm, f"warm-{repeat}-{arm}")
+                if response != controls[arm]:
+                    raise RuntimeError("CLI bytes changed during measurement warmup")
+                warmups.append({"repeat": repeat, "arm": arm, "file_identity": identities[arm],
+                                "response": response, "files_and_environment_match_control": True})
             for sample in range(args.samples):
                 order = ("python", "rust") if (repeat * args.samples + sample) % 2 == 0 else ("rust", "python")
                 for arm in order:
@@ -135,6 +216,8 @@ def measure(args, resource, *, prepare=None, case=None):
                         raise RuntimeError("CLI files or environment changed during measurement")
                     runs[arm].append({"repeat": repeat, "sample": sample,
                                       "arm_order": list(order), "cold_start_to_exit_ms": elapsed,
+                                      **({"warmed_file_identity": identities[arm], "warmed_file_identity_matches": True}
+                                         if warm_images else {}),
                                       "executable_bytes": (python_identity if arm == "python" else identity)["executable_bytes"],
                                       **({"execution": binding["execution"], "files_and_environment_match_control": True}
                                          if binding is not None else {})})
@@ -155,13 +238,18 @@ def measure(args, resource, *, prepare=None, case=None):
             "resource_check": resource,
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
+            "warmups": warmups, "state_controls": state_controls,
+            "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state."
+                              if warm_images else "Historical per-invocation fixture reset; no explicit image warmup.",
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
-            "limitations": ["Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
+            "limitations": ["Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
+                             if warm_images else "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
                             "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+                            "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
                             "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
                             "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
                             "Smoke is plumbing evidence only." if args.smoke else "Final samples require the caller's quiet CPU window."]}
@@ -174,6 +262,8 @@ def main():
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256")
     parser.add_argument("--mode", choices=("help", "version"), default="help")
+    parser.add_argument("--warm-images", action="store_true",
+                        help="Reuse and warm images before each repeat; default for version, opt-in for other modes")
     parser.add_argument("--argv-json", help="Optional argv for the selected mode")
     parser.add_argument("--layout", choices=("bare", "installed"), default="bare",
                         help="Installed layout uses the installer-schema version case and stable shared home")

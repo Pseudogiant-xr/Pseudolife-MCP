@@ -52,7 +52,7 @@ fn command(executable: &Path, home: &Path) -> Command {
     command
 }
 
-fn installed_executable(runtime: &Path) -> std::path::PathBuf {
+fn native_executable(runtime: &Path) -> std::path::PathBuf {
     let scripts = runtime.join(if cfg!(windows) { "Scripts" } else { "bin" });
     fs::create_dir_all(&scripts).unwrap();
     let executable = scripts.join(if cfg!(windows) {
@@ -61,6 +61,22 @@ fn installed_executable(runtime: &Path) -> std::path::PathBuf {
         "pseudolife-stdio"
     });
     fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    executable
+}
+
+fn console_path(runtime: &Path) -> std::path::PathBuf {
+    runtime
+        .join(if cfg!(windows) { "Scripts" } else { "bin" })
+        .join(if cfg!(windows) {
+            "pseudolife-mcp.exe"
+        } else {
+            "pseudolife-mcp"
+        })
+}
+
+fn installed_executable(runtime: &Path) -> std::path::PathBuf {
+    let executable = native_executable(runtime);
+    fs::write(console_path(runtime), b"fixture console").unwrap();
     executable
 }
 
@@ -253,6 +269,34 @@ fn a_valid_manifest_above_the_installed_executable_is_the_running_identity() {
             runtime.display()
         ),
     );
+}
+
+#[test]
+fn a_manifest_and_native_executable_without_a_console_file_do_not_claim_runtime_identity() {
+    for console_is_directory in [false, true] {
+        let home = DisposableHome::new();
+        let runtime = home.path(if cfg!(windows) {
+            "local/pseudolife-mcp/runtimes/000001"
+        } else {
+            "data/pseudolife-mcp/runtimes/000001"
+        });
+        let executable = native_executable(&runtime);
+        fs::write(
+            runtime.join("runtime.json"),
+            r#"{"source_commit":"incomplete-runtime-commit"}"#,
+        )
+        .unwrap();
+        if console_is_directory {
+            fs::create_dir(console_path(&runtime)).unwrap();
+        }
+        assert_output(
+            command(&executable, &home.0)
+                .arg("version")
+                .output()
+                .unwrap(),
+            &first_line(),
+        );
+    }
 }
 
 #[test]
