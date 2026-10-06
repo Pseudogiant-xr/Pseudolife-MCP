@@ -100,6 +100,52 @@ Instances: `register-sender /body/name`; `register-recipient /body/name`, across
 
 ## Errors and recovery
 
+### Wait-mail inputs and named policy instances
+
+The wait-mail candidate is integrated with accepted master
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75`; its next full corpus must use
+that oracle pin. This preparation does not promote historical receipts.
+The adapter writes UTF-8 digest text with an ASCII decimal watermark, an
+ASCII ring decision/reason and decimal `.seen` content. The command's public
+argv, environment and explicitly selected digest path are user inputs;
+their existing parser, opaque-path and output-failure contracts stay exact.
+This local-file mode makes no HTTP requests, so it has no
+`http-forbidden-input-refused` or header/chunk inactivity instances.
+
+`nondeterministic-bytes-semantic` governs only delivery stderr's `HH:MM:SS`
+and `ledger.log` column 1. First case: `wait-mail-large-watermark`.
+The local clock must have the exact format and represent a second in that
+arm's own invocation wall-time window; the ledger epoch must be canonical
+ASCII decimal in the same window. Every surrounding stderr byte, elapsed
+wording, ledger column, stdout byte, `.seen` byte and other state stays exact.
+`cli_process.observe` now records the window immediately around the child
+invocation; `wait_mail_policy.delivery_projection` validates and records
+these two fields for one fresh delivery without rewriting raw observations.
+
+| Case id | Named fields / disposition |
+|---|---|
+| `wait-mail-large-watermark` | Windows delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-non-ascii-space-body` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-delayed-ring` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-delayed-digest` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-cr-spaces-ring` | Both hosts' earlier clock-only failures retained. |
+| `unicode-session` | Earlier Windows clock instance; no same-id second-Python claim. |
+| `wait-mail-unicode-delivery` | Both hosts' positive delivery; additive bounded-clock node prepared, final-head execution pending. |
+| `seen-directory` | Both hosts' one quoted source basename `.tmp-[a-z0-9_]{8}.seen`; exact directory, destination and error bytes; any clocks governed separately. Comparator wiring pending. |
+| `invalid-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `inline-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `environment-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `invalid-multiple-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `inline-unicode-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+
+For the five session cases, exit 1, stdout, the terminal
+`UnicodeEncodeError: message` line including its LF and complete post-state
+remain exact; their final-head comparator wiring is still pending.
+The native CI lane runs the unchanged deterministic additive wait-mail tests,
+a new actual positive-delivery node and the Python/native help drift guard
+at `COLUMNS=80`. It cannot substitute for the complete both-OS corpus,
+positive paired measurements, current-head CI or independent review.
+
 Map each failure at its public boundary: MCP error code/data/message, HTTP status
 and body, or CLI exit/stdout/stderr. An internal Rust error enum is not a wire
 specification. Preserve distinctions between invalid input, authentication

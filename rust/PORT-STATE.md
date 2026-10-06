@@ -1,6 +1,26 @@
 # Rust port state
 
-## Wait-mail leaf candidate
+## Wait-mail preparation on accepted master (2026-10-07)
+
+The wait-mail branch now includes accepted master `0b46bb8e` and its corrected
+Linux descendant cleanup. The Windows help-template checkout fix preserves
+the existing LF fixture and assertions. This is preparation; wait-mail remains
+`deferred`, and every prior failure and measurement keeps its original binding.
+
+Merge-forward conflict: `main.rs` now uses the accepted `args_os` dispatch and
+invalid-mode diagnostic, then passes native wait-mail its unchanged `OsString`
+arguments. This manually resolved source conflict requires one later WSL full
+suite on the committed final candidate; it has not run.
+
+The new additive CI nodes check actual native Unicode delivery/stdout/`.seen`
+and bounded per-arm clocks, plus `COLUMNS=80` help against Python. The existing
+deterministic wait-mail assertions run with an explicit binary in that lane.
+Only the synthetic policy control has run during preparation; native execution,
+both-OS recapture, suffix/terminal-traceback comparator wiring, positive paired
+measurements and current-head hosted checks remain pending. Historical private
+receipts cited below cannot certify this candidate.
+
+## Historical wait-mail leaf candidate and captures
 
 Native `wait-mail` is implemented before shim attachment on dependency
 `db0d59cb`, against immutable Python `eb0c13e9` (0.17.0/schema 55). The first

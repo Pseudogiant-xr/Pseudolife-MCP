@@ -303,9 +303,11 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
                 or original_executable.resolve(strict=True) != original_resolved_executable:
             raise ValueError("CLI command changed before process launch")
         launch_env = copy.deepcopy(env)
+        wall_started = time.time()
         response = run_cli(selected, arguments, cwd=root, env=env,
                            timeout=case.get("timeout_seconds", 10),
                            stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
+        wall_finished = time.time()
         if "expected_stdout" in case:
             version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
             expected = case["expected_stdout"].format(version=version)
@@ -326,6 +328,7 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
         return {"request": copy.deepcopy(case), "environment": launch_env,
                 "pre_files_b64": before, "response": response,
                 "execution": {"original_prefix": original, "selected_prefix": selected,
+                              "wall_window": [wall_started, wall_finished],
                               "invoked_executable": selected[0], "resolved_executable": str(resolved_executable),
                               "effective_argv": [*selected, *arguments], "cwd": str(root),
                               "command_identity": identity}}
