@@ -680,7 +680,7 @@ The scoped output contract is UTF-8 stdout/stderr with platform newlines. This i
 
 Captured `5220b5ee` source is 184/125 = 1.472: 171 physical Rust version lines before `#[cfg(test)]` plus 13 net dispatcher lines versus `c9705e88`, divided by 223 Python CLI module lines minus the 98-line AST `_USAGE` asset. Comments/blanks count; tests, assets and shared support do not. Historical 176/125 retains its own binding.
 
-Current publication state: #600 remains draft, with published `95d5402d` checks and local `5220b5ee` captures retaining their own identities. #589 and #606 closed after verified survival. Historical receipt links point to merged #610 CLI and #609 ONNX evidence. Master `4d6b6dc99cdfd1d3df189be4ed39c8b950575110` is integrated: all 26 historical CLI receipt blobs and the ONNX receipt remain byte-identical ancestor content and are absent from this PR diff. The only merge conflict was `rust/PHASE3-READ-PATH.md`; master retained the complete old Git byte prefix plus its 13,823-byte, 45-line historical ranking appendix, and its whole file was retained. All 341 capture-bound source/instrument/production paths remain exactly unchanged from `5220b5ee`, with checkout-byte and canonical Git hashes kept separate. Successor hosted checks and fresh independent review remain pending.
+Current publication state: #600 remains draft, with published `95d5402d` checks and local `5220b5ee` captures retaining their own identities. #589 and #606 closed after verified survival. Historical receipt links point to merged #610 CLI and #609 ONNX evidence. Master `4d6b6dc99cdfd1d3df189be4ed39c8b950575110` is integrated: all 26 historical CLI receipt blobs and the ONNX receipt remain byte-identical ancestor content and are absent from this PR diff. The only merge conflict was `rust/PHASE3-READ-PATH.md`; master retained the complete old Git byte prefix plus its 13,823-byte, 45-line historical ranking appendix, and its whole file was retained. At master-forward `13ec5ec7`, all 341 capture-bound source/instrument/production paths remained exactly unchanged from `5220b5ee`, with checkout-byte and canonical Git hashes kept separate. The subsequent integration of master `7b0abf921fe4bd4ef1c84864eef118309b400705` inherits the reviewed #607 users runtime/dependency changes without a conflict: 5 of the 341 capture-bound paths now differ from executed `5220b5ee` (`rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`), while the other 336 and all 146 original production/test guard paths remain exact. The `5220b5ee` measurements remain historical source-bound executions and do not validate the inherited users implementation or this combined tree; current hosted CI and fresh review are required. Successor hosted checks and fresh independent review remain pending.
 
 ## Frozen combined version evidence at 5220b5ee
 
@@ -730,6 +730,8 @@ process after the recorded image warmup.
 | Linux | bare | Rust | 2.529 | 3.027 | 0.147 | 1.844 |
 | Linux | installed | Python | 578.670 | 595.723 | 3.844 | 5.837 |
 | Linux | installed | Rust | 2.741 | 3.222 | 0.078 | 0.860 |
+
+Python's version path calls runtime discovery and marker/console checks, but their cost was not isolated and the cause of the Linux installed Python median of 578.670 ms versus 119.715 ms bare remains unknown.
 
 Under this recorded warm-image condition, Rust's median and p95 are lower in
 all four cells; each difference exceeds the larger observed floor of both
