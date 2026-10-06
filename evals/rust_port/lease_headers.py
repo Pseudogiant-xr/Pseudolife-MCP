@@ -49,6 +49,27 @@ def cases():
                 "action": "run", "token_file": True, "file_terminator": True},
                {"id": "ordinary-bearer-file-private-check", "field": "bearer", "value": "bad\x7fvalue",
                 "action": "run", "token_file": True, "missing_file": True}]
+    for action in ("run", "check", "list"):
+        for source, token_file in (("env", False), ("file", True)):
+            for tag, value in (("forbidden", "bad\x7fvalue"), ("valid", "fixture-bearer")):
+                result.append({"id": f"combined-url-{action}-{source}-{tag}", "field": "bearer",
+                               "value": value, "action": action, "token_file": token_file,
+                               "invalid_url": True, "shared_home": True})
+        for tag, value, token_file, missing in (("credential-error", "bad value", False, False),
+                                               ("private-check", "bad\x7fvalue", True, True)):
+            result.append({"id": f"combined-url-{action}-{tag}", "field": "bearer",
+                           "value": value, "action": action, "token_file": token_file,
+                           "missing_file": missing, "invalid_url": True, "shared_home": True})
+    for field, other in (("agent_id", "credential"), ("credential", "agent_id")):
+        for tag, value in (("forbidden", "bad\x7fvalue"), ("empty", ""),
+                           ("nonascii", "nonascii-é"), ("surrogate", "surrogate-\ud800")):
+            result.append({"id": f"combined-partial-{field}-{tag}", "field": field,
+                           "value": value, "action": "run", "token_file": False,
+                           "registration_overrides": {other: ""}, "shared_home": True})
+        for tag, value in (("forbidden", "bad\x7fvalue"), ("valid", "fixture-value")):
+            result.append({"id": f"combined-missing-{field}-{tag}", "field": field,
+                           "value": value, "action": "run", "token_file": False,
+                           "registration_missing": [other], "shared_home": True})
     return result
 
 
@@ -88,8 +109,11 @@ def files(home):
             for path in sorted(home.rglob("*")) if path.is_file()}
 
 
-def observe(command, case, directory, oracle_package):
-    home = Path(tempfile.mkdtemp(prefix="lease-header-arm-", dir=directory))
+def observe(command, case, directory, oracle_package, home=None):
+    if home is None:
+        home = Path(tempfile.mkdtemp(prefix="lease-header-arm-", dir=directory))
+    else:
+        home.mkdir()
     if not case.get("empty_home"):
         (home / "instance.id").write_bytes(b"0123456789ab\n")
     environment = {key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR") if key in os.environ}
@@ -124,6 +148,9 @@ def observe(command, case, directory, oracle_package):
                 reply = {"agent_id": "fixture-agent", "credential": "fixture-key"}
                 if case["field"] != "bearer":
                     reply[case["field"]] = case["value"]
+                    reply.update(case.get("registration_overrides", {}))
+                    for field in case.get("registration_missing", []):
+                        reply.pop(field, None)
             elif self.path.endswith("/leases"):
                 reply = {"leases": []}
             else:
@@ -138,6 +165,8 @@ def observe(command, case, directory, oracle_package):
     thread = threading.Thread(target=peer.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
     environment["PSEUDOLIFE_MCP_DAEMON_URL"] = f"http://127.0.0.1:{peer.server_port}"
+    if case.get("invalid_url"):
+        environment["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:1/invalid-path"
     argv = ["lease", case["action"]]
     if case["action"] == "run":
         child = "from pathlib import Path; Path('child-ran').write_bytes(b'ran'); raise SystemExit(3)"
@@ -178,8 +207,15 @@ def run(root, candidate, out, selected=None):
     for case in cases():
         if selected and case["id"] not in selected:
             continue
-        oracle, pre, oracle_requests = observe(oracle_command, case, directory, package.parent)
-        candidate_response, candidate_pre, requests = observe([str(candidate)], case, directory, package.parent)
+        # New ordinary controls retain path bytes by resetting the same home.
+        # Move each completed home aside so its actual state also stays raw.
+        home = directory / (case["id"] + "-home") if case.get("shared_home") else None
+        oracle, pre, oracle_requests = observe(oracle_command, case, directory, package.parent, home)
+        if home is not None:
+            home.rename(directory / (case["id"] + "-oracle-home"))
+        candidate_response, candidate_pre, requests = observe([str(candidate)], case, directory, package.parent, home)
+        if home is not None:
+            home.rename(directory / (case["id"] + "-candidate-home"))
         assert pre == candidate_pre
         passed = comparison(case, oracle, candidate_response, candidate_pre, newline, requests)
         substituted = expected(case, oracle, pre, newline) is not oracle

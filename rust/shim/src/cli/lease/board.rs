@@ -118,6 +118,13 @@ impl Board {
             return Ok(());
         }
         let reply=self.post("register",json!({"label":"lease-run","project":project,"task":task,"status":"","capabilities":json!({"resumable":false}),"wake_enabled":false}),false,10).await?;
+        for field in ["agent_id", "credential"] {
+            if let Value::String(value) = &reply[field]
+                && forbidden(value)
+            {
+                return Err(Failure::forbidden(field));
+            }
+        }
         let (agent, key) = match (&reply["agent_id"], &reply["credential"]) {
             (Value::String(agent), Value::String(key)) if !agent.is_empty() && !key.is_empty() => {
                 (agent, key)
@@ -128,11 +135,6 @@ impl Board {
                 ));
             }
         };
-        for (field, value) in [("agent_id", agent), ("credential", key)] {
-            if forbidden(value) {
-                return Err(Failure::forbidden(field));
-            }
-        }
         let mut session = self.session.lock().await;
         session.agent = Some(agent.to_owned());
         session.credential = Some(key.to_owned());
@@ -241,7 +243,7 @@ pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
     if no_board {
         return Err(Failure::refused("--no-board was given"));
     }
-    let url=crate::daemon_url::from_environment().map_err(|_|Failure::refused("PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) origin (scheme, host and optional port only)"))?;
+    let url=crate::daemon_url::from_environment().map_err(|_|Failure::refused("PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) origin (scheme, host and optional port only)"));
     // Environment tokens are header values, while private files may carry a
     // trailing line terminator that the credential decoder strips.
     if std::env::var_os("PSEUDOLIFE_MCP_TOKEN_FILE").is_none()
@@ -259,21 +261,30 @@ pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
         }
     };
     let snapshot = crate::credentials::CredentialProvider::from_environment()
-        .map_err(unusable)?
-        .snapshot_checked(|raw| {
-            let Ok(text) = std::str::from_utf8(raw) else {
-                return Ok(());
-            };
-            // Strip only the decoder's CR/LF file terminator, preserving TAB
-            // and every other C0 byte for forbidden-header admission.
-            let token = text.trim_end_matches(['\r', '\n']);
-            if token.bytes().any(|c| c < 32 || c == 127) {
-                Err(crate::credentials::CredentialError(FORBIDDEN_BEARER))
-            } else {
-                Ok(())
-            }
+        .and_then(|provider| {
+            provider.snapshot_checked(|raw| {
+                let Ok(text) = std::str::from_utf8(raw) else {
+                    return Ok(());
+                };
+                // Strip only the decoder's CR/LF file terminator, preserving TAB
+                // and every other C0 byte for forbidden-header admission.
+                let token = text.trim_end_matches(['\r', '\n']);
+                if token.bytes().any(|c| c < 32 || c == 127) {
+                    Err(crate::credentials::CredentialError(FORBIDDEN_BEARER))
+                } else {
+                    Ok(())
+                }
+            })
         })
-        .map_err(unusable)?;
+        .map_err(unusable);
+    let snapshot = match snapshot {
+        Err(failure) if failure.fatal_header => return Err(failure),
+        snapshot => snapshot,
+    };
+    // Only forbidden admitted headers preempt URL errors. Ordinary credential
+    // failures retain URL-first diagnostics, including failed file security.
+    let url = url?;
+    let snapshot = snapshot?;
     let Some(token) = snapshot.token() else {
         return Err(Failure::refused(
             "no bearer token (set PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE)",

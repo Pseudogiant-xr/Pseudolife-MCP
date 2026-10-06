@@ -1100,6 +1100,12 @@ review and successor hosted checks are separate. CLI-LEASE stays deferred.
 Successful-child own invocation windows and second oracle capture, explicit
 Windows unlock/Ctrl-C, measurements and final acceptance remain pending.
 
+The header corpus also covers combined malformed daemon URLs with selected
+environment/private-file bearers and incomplete registration replies. Forbidden
+admitted headers preempt ordinary fallback; otherwise URL-first credential
+diagnostics, private-file security and missing/empty address behavior remain.
+Raw ordinary controls retain non-ASCII and surrogate reply behavior.
+
 `hold`, `break`, `delegate` and `designate` remain Phase 4. This native
 candidate loses those four actions until Phase 4; each must explicitly refuse
 with exit 1 and a diagnostic containing `deferred in this candidate`, without

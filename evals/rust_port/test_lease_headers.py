@@ -57,3 +57,22 @@ def test_private_file_admission_and_decoder_newline_are_outside_substitution():
     for case in cases():
         if case.get("missing_file") or case.get("file_terminator"):
             assert expected(case, raw, {}, b"\n") is raw
+
+
+def test_combined_url_and_partial_reply_cases_preserve_fatal_and_ordinary_boundaries():
+    inputs = {case["id"]: case for case in cases()}
+    raw = {"exit_code": 3, "stdout_b64": "", "stderr_b64": "cmF3", "post_files_b64": {}}
+    for action in ("run", "check", "list"):
+        for source in ("env", "file"):
+            fatal = inputs[f"combined-url-{action}-{source}-forbidden"]
+            assert expected(fatal, raw, {}, b"\n") == refusal_response("bearer", {}, b"\n")
+            assert expected(inputs[f"combined-url-{action}-{source}-valid"], raw, {}, b"\n") is raw
+        for tag in ("credential-error", "private-check"):
+            assert expected(inputs[f"combined-url-{action}-{tag}"], raw, {}, b"\n") is raw
+    for field in ("agent_id", "credential"):
+        fatal = inputs[f"combined-partial-{field}-forbidden"]
+        assert expected(fatal, raw, {}, b"\n") == refusal_response(field, {}, b"\n")
+        for tag in ("empty", "nonascii", "surrogate"):
+            assert expected(inputs[f"combined-partial-{field}-{tag}"], raw, {}, b"\n") is raw
+        assert expected(inputs[f"combined-missing-{field}-forbidden"], raw, {}, b"\n") == refusal_response(field, {}, b"\n")
+        assert expected(inputs[f"combined-missing-{field}-valid"], raw, {}, b"\n") is raw
