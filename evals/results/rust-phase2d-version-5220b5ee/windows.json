@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "kind": "windows-version-cli-cpu-proof",
+  "candidate_head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "candidate_tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+  "candidate_executable_sha256": "2ec6ce230d7aa06f016fbc63342ec2f5f70ebd9b7d2c28a5d43493048cb02916",
+  "candidate_executable_bytes": 13267968,
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "python_version": "3.11.9",
+  "package_version": "0.17.0",
+  "instrument_source_head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "frozen_wrapper_sha256": "0b3978cfdd6d669d8e73c2e7f07e688ae363fd6cd7d7e2f5fbc7298e518c47e2",
+  "private_audit_sha256": "2325f5afe393ac8dd1be5c67d772bfb209175ea687753ca1355822db73dd07bd",
+  "corpus": {
+    "cases": 28,
+    "negative_controls": 112,
+    "passed": true,
+    "case_ids": [
+      "help-long",
+      "help-short",
+      "help-mode",
+      "help-trailing",
+      "help-invalid-trailing",
+      "unknown-basic",
+      "unknown-trailing",
+      "unknown-empty",
+      "unknown-apostrophe",
+      "unknown-quotes",
+      "unknown-backslash",
+      "unknown-controls",
+      "unknown-unicode",
+      "unknown-separators",
+      "unknown-category-c",
+      "version-bare-version",
+      "version-bare-flag",
+      "version-default-commit",
+      "version-default-commit-flag-tail",
+      "version-default-requirement",
+      "version-default-checkout-no-git",
+      "version-missing-console",
+      "version-non-ascii-home",
+      "version-override-commit",
+      "version-override-requirement",
+      "version-half-root",
+      "version-half-launcher",
+      "version-wrong-platform-suffix"
+    ],
+    "exact_bytes_and_state": true
+  },
+  "original_cli_nodes": {
+    "python": 8,
+    "rust": 8,
+    "passed": true,
+    "nodes_unchanged": true
+  },
+  "native_argv": {
+    "cases": 1,
+    "passed": true
+  },
+  "installed_smoke": {
+    "passed": true,
+    "relocated_python_runtime_verified": true,
+    "exact_crlf": true
+  },
+  "metrics": {
+    "bare": {
+      "arms": {
+        "python": {
+          "median_ms": 124.08904999028891,
+          "p95_ms": 134.3936999910511,
+          "median_floor_ms": 2.348200010601431,
+          "p95_floor_ms": 2.507299999706447,
+          "samples": 30
+        },
+        "rust": {
+          "median_ms": 17.540250002639368,
+          "p95_ms": 19.8872999753803,
+          "median_floor_ms": 0.524050003150478,
+          "p95_floor_ms": 0.5019000382162631,
+          "samples": 30
+        }
+      },
+      "rust_minus_python_median_ms": -106.54879998764955,
+      "larger_median_floor_ms": 2.348200010601431,
+      "rust_minus_python_p95_ms": -114.5064000156708,
+      "larger_p95_floor_ms": 2.507299999706447
+    },
+    "installed": {
+      "arms": {
+        "python": {
+          "median_ms": 148.55610000086017,
+          "p95_ms": 159.22329999739304,
+          "median_floor_ms": 4.559699998935685,
+          "p95_floor_ms": 14.247700048144907,
+          "samples": 30
+        },
+        "rust": {
+          "median_ms": 20.590599975548685,
+          "p95_ms": 23.020699969492853,
+          "median_floor_ms": 1.1378499621059746,
+          "p95_floor_ms": 0.5850000306963921,
+          "samples": 30
+        }
+      },
+      "rust_minus_python_median_ms": -127.96550002531148,
+      "larger_median_floor_ms": 4.559699998935685,
+      "rust_minus_python_p95_ms": -136.2026000279002,
+      "larger_p95_floor_ms": 14.247700048144907
+    }
+  },
+  "measurement_protocol": {
+    "per_layout": {
+      "untimed_byte_controls": 2,
+      "untimed_warm_starts": 6,
+      "timed_starts": 60,
+      "repeats": 3,
+      "samples_per_arm_per_repeat": 10
+    },
+    "alternating_arms": true,
+    "same_file_identity_and_state_verified": true,
+    "version_default_warmup": true,
+    "other_modes_unchanged_unless_explicit_opt_in": true
+  },
+  "cleanup": {
+    "all_owned_disposable_roots_removed": true,
+    "original_test_process_subtrees_stopped": true
+  },
+  "no_daemon_or_database_started": true,
+  "limitations": [
+    "No daemon/database started: CPU CLI process/state corpus, not a guarded PostgreSQL daemon capture.",
+    "UTF-8 stream scope; no locale emulation.",
+    "Original copied-image timings remain historical; no attribution to Defender.",
+    "Executable/source hashes plus retained build command/output are provenance, not reproducible-build attestation.",
+    "No candidate-wide full suite, GPU or publication performed."
+  ]
+}
