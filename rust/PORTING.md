@@ -594,3 +594,33 @@ formatting, fractional seconds floor, and unsupported calendar values display
 to the platform local-zone contract; Windows CRT-only overrides do not. This
 supersedes the two historical C-int-year list exception expectations without
 discarding their raw failure evidence or changing the other named policies.
+
+## Final lease core comparison boundary
+
+The final7e [bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+retains raw responses before policy, actual image/source/runtime bindings and
+cleanup. Successful-child comparison admits only `ran.json /t`: each finite
+decimal lies within its own recorded invocation window, two Python captures
+have distinct clocks, and every other response/file byte stays exact. Nonzero
+children have no clock exception. Explicit Windows unlock releases exactly
+the acquired first-byte range before closing, best effort; POSIX behavior is
+unchanged. Its new test separately reacquires byte zero while the original
+handle remains open. Windows CTRL_C_EVENT evidence separately checks child
+absence before helper cleanup and actual board/local-lock release.
+
+The named `python-traceback-not-contract` rule additionally admits **only**
+`list-expected-extreme` and `list-waiter-extreme` text outcomes: validated
+Python OverflowError exit 1 may become native exit 0 with complete independently
+specified `?` fixture output, empty stderr and exact unchanged state. Ordinary
+Python exit-0 outcomes stay raw-exact; both timestamp JSON companions and all
+other list exits stay exact. This does not waive exit status for the other
+traceback cells. `extreme_list_response` and the new additive rejecting test
+enforce this narrow boundary; terminal/header/frame validation remains the
+existing `traceback_response` contract. PARITY records both complete receipt
+hashes and the raw Linux 1/0 pair rather than concealing that mismatch.
+
+Only check/list/run are implemented in this candidate. `hold`, `break`,
+`delegate` and `designate` refuse exit 1 with `deferred in this candidate`;
+the candidate loses those actions until Phase 4. Final hosted acceptance and
+independent review remain pending, so neither CLI-LEASE-core nor full mode
+is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.

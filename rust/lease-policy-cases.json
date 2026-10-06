@@ -378,5 +378,42 @@
       "retained_result": "incomplete-missing-invocation-windows",
       "final_head_status": "pending-recapture"
     }
-  ]
+  ],
+  "final7e_bounded_evidence": {
+    "status": "bounded-functional-policy-proof-hosted-acceptance-pending",
+    "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+    "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+    "public_evidence": "evals/results/rust-phase2d-lease-7e6927b7/README.md",
+    "remaining_policy_ids_observed_and_accepted": 14,
+    "json_companions_raw_exact": 2,
+    "platforms": [
+      "windows",
+      "linux"
+    ],
+    "historical_cases_unchanged": true,
+    "core_ported": false,
+    "header_final_hosted_execution": "pending",
+    "successful_child_final_proof": "matched-own-windows-repeat-and-six-controls-per-OS",
+    "extreme_text_exit_rule": {
+      "policy": "python-traceback-not-contract",
+      "ids": [
+        "list-expected-extreme",
+        "list-waiter-extreme"
+      ],
+      "linux_raw_exits": {
+        "oracle": 1,
+        "candidate": 0
+      },
+      "windows_raw_exits": {
+        "oracle": 0,
+        "candidate": 0
+      },
+      "json_companions": "raw-exact",
+      "other_list_exit_differences": "rejected",
+      "raw_receipt_sha256": {
+        "windows": "97bfcefebe9a397eb1323df10c93687dd276ac4ab128c9c0b79c98bb0171d45f",
+        "linux": "0a819e13c9a1fcf8fc238f64a74447970ab413ef47b46d038faa093d55d67e44"
+      }
+    }
+  }
 }

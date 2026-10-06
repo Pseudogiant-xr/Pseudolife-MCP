@@ -13,6 +13,35 @@ RUN_CLOCK = re.compile(
     rb'\{"held": "suite,gpu", "t": (?P<clock>[0-9]+\.[0-9]+), "credential": false\}'
 )
 HEADER_FIELDS = frozenset({"agent_id", "credential", "bearer"})
+EXTREME_LIST_CASES = frozenset({"list-expected-extreme", "list-waiter-extreme"})
+
+
+def extreme_list_response(case_id, oracle, candidate, expected_stdout):
+    """Admit exactly two unsupported-date list outcomes; other exits stay exact.
+
+    The caller supplies the complete independently specified '?' fixture output.
+    On platforms where Python returns normally, the whole response stays exact.
+    A validated Python OverflowError may become native exit 0 only for these two
+    IDs; native stderr is empty and all post-state bytes remain unchanged.
+    """
+    if case_id not in EXTREME_LIST_CASES or oracle["exit_code"] == 0:
+        return oracle == candidate
+    if oracle["exit_code"] != 1 or oracle["stdout_b64"] != "" or not isinstance(expected_stdout, bytes):
+        return False
+    lines = base64.b64decode(oracle["stderr_b64"], validate=True).splitlines(keepends=True)
+    if not lines or not lines[-1].startswith(b"OverflowError: "):
+        return False
+    terminal = lines[-1]
+    terminal_only = dict(oracle)
+    terminal_only["stderr_b64"] = base64.b64encode(terminal).decode()
+    try:
+        if not traceback_response(oracle, terminal_only, terminal):
+            return False
+    except ValueError:
+        return False
+    expected = dict(oracle)
+    expected.update(exit_code=0, stdout_b64=base64.b64encode(expected_stdout).decode(), stderr_b64="")
+    return expected == candidate
 
 
 def traceback_response(oracle, candidate, terminal):

@@ -1159,3 +1159,50 @@ with exit 1 and a diagnostic containing `deferred in this candidate`, without
 Python or silent fallback. A future CLI-LEASE-core check/list/run row may be
 accepted only through its own gates, and full CLI-LEASE requires every action
 to be native. This candidate makes neither promotion.
+
+### Lease final7e functional and policy evidence; hosted acceptance pending
+
+Accepted master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75` is integrated by
+ordinary merge, preserving CLI-VERSION acceptance. Actual Windows/Linux
+execution remains bound to `7e6927b7b72db62569281d3477dc8e8924c82292`, tree
+`34b24d60d854e28448079bfc0c8e8eea83551d47`; later evidence/docs/comparison
+additions leave the Rust production/Cargo/assets component unchanged.
+
+[Committed bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+records both-OS successful-child own-window/repeat proof and six controls,
+exact exit-3 child, four deferred refusals, independent board release and
+lock reacquisition, final Windows Ctrl-C with zero helper kills, and the
+actual four warmed bare check/list3x10 measurements. Every producing whole
+driver exited 0 and checked fixture cleanup. All 16 remaining policy cells
+per OS are accepted in their named scope, with 80 captured controls per OS;
+the two Linux extreme-text raw 1/0 outcomes pass only the explicit PARITY
+rule. Earlier unresolved interpretation and raw failures remain historical,
+without rewriting observations. The additional offline checker accepts 32
+retained cells and rejects 32 wrong-exit controls. Successful-run timing is
+unmeasured. Numerical claims are limited to the committed samples/recipes;
+the removed historical untracked timing table is not restored.
+
+Current physical lease production lines at 7e total **2,932** across the same
+seven files, before their test-only modules: args352, board369, json693,
+lock240, mod76, run395 and view807. Comments/blanks count; assets, dispatch,
+fixtures and test modules do not. The historical Python lease_cli denominator
+is still 1,889, including deferred operator actions: 2,932/1,889=1.55214. Shared
+Python os_lock adds 147 lines; including it gives 2,932/2,036=1.44008. The earlier
+2,884/1,889 figure retains its own historical source binding.
+
+The final hosted lane still supplies both feature configurations, general/header
+corpora and current-head routed help/version checks. Original direct lease tests
+remain unchanged Python baselines, not Rust-routed lease acceptance.
+Normal hosted Linux full/lite lanes through `ops/ci_tests.sh` supply those Python
+baselines on PRs; their outgoing-head result remains pending. Fresh final
+review and exact-master-ref CI remain pending. CLI-LEASE-core(check/list/run)
+and full CLI-LEASE stay deferred; hold/break/delegate/designate explicitly
+refuse exit 1 with `deferred in this candidate`, without Python/silent fallback,
+until Phase 4. Locale/default-encoding, Windows CRT-only TZ, installation and
+full mode acceptance remain outside this bounded evidence.
+
+Historical forbidden-header RED/effect failures, malformed-URL/partial reply
+counterexamples, old-base hosted help/parser failures, mounted POSIX private-home
+failure and cached CRLF assets remain retained. Frozen68's clock cell matched,
+but its whole Windows driver failed an assertion; its continuation separately
+failed, so neither whole run passed. Final7e proof has separate actual identities.
