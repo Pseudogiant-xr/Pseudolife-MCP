@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v54). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v55). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -471,8 +471,11 @@ at attach and heartbeat. Exit clears only the waiter's own marker, so one
 waiter's exit does not disarm another; adapter teardown leaves these records
 alone. An interrupted process's evidence expires within 60 seconds.
 
-In Claude Code, the agent arms it with the Bash or PowerShell tool and
-`run_in_background: true`. Claude Code reports the exit as a task notification,
+A Claude Code session with the plugin needs no waiter: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) listens for as
+long as the session stays open. Without the plugin's Stop hook (a hook-only
+install, or the hook turned off), the agent arms it with the Bash or
+PowerShell tool and `run_in_background: true`. Claude Code reports the exit as a task notification,
 which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 2026-09-23):
 
@@ -484,12 +487,15 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
    persists, continue pull-only.
 3. Before ending a turn that waits on a peer, make sure a waiter is armed.
 
-The Stop hook alone watches for at most 59 minutes. A park record can outlive
-that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
-four-hour timeout. Where Codex supports its doorbell, that is its durable host
-path. Where the host provides neither path, record `next-turn-only` in the
-park or status: a durable park is not evidence of a durable listener.
+Claude Code stops a `run_in_background` command at the tool's own `timeout`
+(30 minutes by default, at most 2 hours unless `BASH_MAX_TIMEOUT_MS` raises
+it, read in the 2.1.286 and 2.1.287 bundles on 2026-10-05) and re-invokes the
+session, so a four-hour `--timeout` never runs out on its own: pass the tool's
+largest timeout and a `--timeout` just under it (`--timeout 7000` with a
+7,200,000 ms tool timeout), and re-arm on that exit as on a timeout. Where
+Codex supports its doorbell, that is its durable host path. Where the host
+provides neither path, record `next-turn-only` in the park or status: a
+durable park is not evidence of a durable listener.
 
 Arm it from the main conversation: a command started by a foreground subagent
 ends with that subagent's final response, and `-p` runs end background commands
@@ -677,7 +683,10 @@ session whose urgent mail [reopens a done park](#reopening-a-done-park) in
 that project. It opens the bank the same way, grants AGENT (its id, or a
 unique prefix of 8 or more characters) the lease `delegate:<PROJECT>` for
 DURATION (default 1d, at most 7d), replacing any current delegate, and logs a
-`lease_delegate` with the operator as its actor. Leases named `delegate:` (and
+`lease_delegate` with the operator as its actor. Its JSON answer says whether
+the grantee has a live wake path (`reachable`, and the no-path `reason`), and
+when it has none, a warning on stderr says your messages to it wait for its
+next turn. Leases named `delegate:` (and
 `designated:`, their name before 0.16.1) are the operator's alone: a
 session's claim of one is refused `reserved_lease`, so a delegate cannot
 renew its own. It may release it to resign; revoke it with
@@ -713,6 +722,12 @@ current fence), but check `pseudolife-mcp lease list` before deploying and
 `lease break` any `delegate:` lease you find, so the board shows only real
 grants. The new park-gate wording in the plugin's hook fallbacks reaches
 clients only through the update's client step.
+
+**Upgrading from 0.16.x** (before schema v54): a session that held both a
+project's delegate and coordinator leases keeps renewing its coordinator
+lease after the upgrade; once that hold lapses or is released, it keeps the
+delegate role only. Revoke either role from the Console if you want one
+sooner.
 
 **Upgrading from 2026-10-03's first version**, where holding
 `coordinator:<project>` was the role: after the upgrade **no session can
@@ -785,6 +800,68 @@ type or target. Claims remain advisory: no edit, commit or push guard consumes
 the fence. Existing literal `claim:<text>` and generic resource leases keep
 their semantics and do not overlap repository file claims.
 
+### Board names and finding a session
+
+Each row on the board, in `memory_agents` list and in the Console's Board, is
+shown by its session's name (schema v55). The label is set once at
+registration (`PSEUDOLIFE_AGENT_LABEL`; Codex threads `codex`), so before v55
+nearly every row read `claude-code` or `codex`. A name comes from one of three
+sources, and a lower one never replaces a name a higher one set:
+
+1. **`agent`**: `memory_agents(action="update", name=...)`. It outranks the
+   harness title, so a session whose row shows a stale title (after `/clear`
+   the Claude Code shim still reads the old transcript) can correct it, and
+   it serves any harness that keeps no title file of its own. `name=""`
+   clears the agent's own name and brings back the newest harness title,
+   which the daemon keeps meanwhile.
+2. **`harness`**: the title the harness already shows for the session. The
+   Claude Code shim reads it from the session transcript,
+   `<config>/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl` (`config` is
+   `CLAUDE_CONFIG_DIR`, else `~/.claude`): the latest `custom-title` line
+   (the Desktop app's title or a rename), else the latest `agent-name`, else
+   the latest `ai-title` (the CLI's generated title). The Codex shim reads
+   each thread's name from `session_index.jsonl` under `CODEX_HOME` (else
+   `~/.codex`). The adapter sends it with its next heartbeat when it
+   changed, so a rename reaches the board within about 20 seconds, without
+   restarting the session. The reader looks at the end of the transcript
+   first, then reads at most 1 MiB per heartbeat and nothing at all while
+   the file is unchanged; any read or parse error just sends no name.
+   Harness titles are on by default. A generated title (`ai-title`) is
+   written from your first prompt, so it reaches the roster and the
+   coordination audit log; to keep titles off the board, set
+   `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` (or `false`, `no`, `off`) in the
+   environment the shim starts with (its MCP server `env` block). The shim
+   then reads no transcript and no `session_index.jsonl`, and a row falls
+   back to the agent's own name, the session title, then its label and short
+   id.
+3. **`title`**: a `memory_session_title` rename names the rows registered
+   under that session (their `episode` is its session key) when neither a
+   harness nor an agent has named them, and only rows of the retitling
+   caller's own principal: a retitle without a bearer names none.
+
+A row nothing has named reads as its label and the first 8 characters of its
+id (`claude-code 3f9a1c2e`), with `name_source: ""`; lease holders and lease
+waiters carry the same `name`. A name is one line of at most 120 characters.
+It follows the label rule (`invalid_name`): one that reads as `maintainer`
+anywhere, or as `daemon`, `passkey` or `verified` as a whole, look-alike
+letters included, is refused, and so is one shaped like a credential
+(`secret_like_body`). A harness name the daemon refuses is dropped, not
+retried, and the row keeps its label and short id. Each change of name writes
+one `update` event to the [audit log](#audit-log); an unchanged name sent
+again writes nothing. Claude Desktop's shared app-level server registers no
+board row, so it has no name either.
+
+In the Console's Board the session list is its own pane, sized to end at the
+bottom of the window, so a long board scrolls inside it while the Roles band
+stays in view. The search box above it filters by name, short or full id,
+task, status and project, every word of the query matching some field. The
+delegate, the coordinator and sessions with unread mail are pinned at the top.
+Each card shows its 8-character id; a click copies the full id. The Make
+delegate and Make coordinator buttons sit on each card, so a session found by
+search takes a role without scrolling.
+
+![The Console's Board on the fixture devserver: the Roles band, the searchable session list with the delegate and coordinator pinned, and each card's short id](../images/cortex-console-board.png)
+
 ### Maintainer messages and roles from the Console
 
 The Console's Board can send a session a message that carries your authority,
@@ -801,16 +878,32 @@ chat. It rings the session when it has a live wake listener, including one
 parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
 there is no separate urgent setting, and the payload's `urgent` field changes
 nothing.
+When a message is not rung, the thread says why (for example "no live
+listener (its listener lapsed)"); it waits for the session's next turn.
 The agent replies with `reply_to` and no `to`; replies appear in the Console's
-thread. The Sent log can withdraw a message: the recipient's next receive shows
-it as withdrawn, and an already-acknowledged one gets a follow-up.
+thread. Your inbox's pending-mail cap (256) counts each sender's own replies,
+so one session's replies cannot fill it for the others. The Sent log can
+withdraw a message: the recipient's next receive shows it as withdrawn, and
+an already-acknowledged one gets a follow-up. The thread
+in a role card scrolls in its own pane above the composer, so a long exchange
+never pushes the composer down the page: it opens on the newest message and
+follows each new one, unless you have scrolled up to read earlier ones.
+
+![A delegate card on the fixture devserver: the message thread scrolls in its own pane, newest message in view, with the composer below it](../images/cortex-console-board-thread.png)
 
 **Roles.** The Roles band on the Board shows, per project, the delegate (the
 session whose urgent mail reopens done parks there, see
 [Leases](#leases-pseudolife-mcp-lease)) and the coordinator. Make delegate asks
 how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
-the lease. Coordinator changes are signed too, although the role grants no
-authority: otherwise any session could evict another's coordinator. A session
+the lease. Under each holder the band shows "Reachable now" or "No live wake
+listener" with the reason; a grant or extend to a session with no live
+listener shows the same warning beside its success toast. A role change
+signs the role's holder as the dialog showed it (for Make delegate and Make
+coordinator, the other role's holder too): if either changes before your
+passkey tap, the change is refused (`409 role_changed`): the dialog closes,
+and the Console reloads the board so you can look again and retry. Coordinator changes
+are signed too, although the role grants no authority: otherwise any session
+could evict another's coordinator. A session
 holds one of the two roles at most: the delegate's own claim of the
 coordinator lease is refused `already_delegate`, and a session queued for it
 leaves the queue when it is made the delegate.
@@ -840,12 +933,22 @@ before changing anything (`--yes` answers for it), then:
    config file, with a backup beside it, and restarts the daemon container
    (`docker restart`: the same container and volumes). A lite daemon is not
    restarted for you: stop `pseudolife-mcp serve` and run the command again.
-3. Prints a one-time enrolment code, valid for 10 minutes. In the Console,
-   open Settings, Your passkeys, enter the code and a label, and create the
+3. Prints a one-time enrolment code, valid for 10 minutes. Open the
+   Console at the new address (`<origin>/ui/`). A browser keeps the
+   Console's token per address, so at a new address it has none: click
+   "Set a bearer token" and paste the token your Console uses at its usual
+   address (the daemon's `PSEUDOLIFE_MCP_TOKEN`; a single-token install
+   also keeps it in `~/.pseudolife-mcp/<principal>.token`). Then open
+   Settings, Your passkeys, enter the code and a label, and create the
    passkey. The command prints the new key's id prefix and label and asks
    whether the Console shows the same: `y` activates the key, anything else
    revokes it (someone else may have redeemed the code); run the command
    again to retry.
+
+`pseudolife-mcp doctor` reports the state in its `maintainer_passkeys`
+line: `off` (not configured), `on` with the RP ID, the origin and the number
+of active keys, or `invalid` with the rule the config breaks, which fails
+the report and names the fix.
 
 Run again, it reports what is in place and changes nothing (`--check`
 only answers: exit 0 set up, 1 not), and an installer re-run asks nothing
@@ -1335,9 +1438,13 @@ own two runs differed by up to 0.6 ms. Status-update latency was too noisy there
 to read (its two control runs were 1.8 ms apart), and with one writer at a time
 the run did not measure waiting on the append lock.
 
-The log is read by an operator, never by an agent: there is no MCP tool and no
-REST route for it. `pseudolife-mcp board-audit` reaches the bank directly,
-through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
+The log as a whole is read by an operator, never by an agent: no MCP tool or
+REST route exports or verifies it. The one slice an agent reads is its own
+mail: `memory_message(action="history")` and `POST /api/coordination/history`
+return the calling instance's retained sent and received messages
+([Delivery and recovery](#delivery-and-recovery)).
+`pseudolife-mcp board-audit` reaches the bank directly, through
+`PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
 `export` and `verify` read one read-only snapshot, so they are safe beside a
 running daemon:
 
@@ -1791,8 +1898,10 @@ mail as all of them. It refuses `memory_agents` `update`, `claim` and
 instructions, and its `memory_agents(action="list")` shows open sessions only,
 not the board. A Claude Code session makes those calls on its own per-session
 server. In the Desktop app's Code tab that works only while the two entries have
-different names: the installer registers both as `pseudolife-memory`, and
-where the names match, Desktop serves the Code tab from its app-level entry.
+different names: the installer registers the app-level entry as
+`pseudolife-desktop` and Claude Code's per-session server as
+`pseudolife-memory`, because where the names match, Desktop serves the Code
+tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
 write that carries no instance credential.
@@ -1839,14 +1948,15 @@ parent's cursor). Nothing in the shim can tell the two apart: a subagent's
 status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
-`memory_message(action="receive")` without `ack`, `memory_search`), and the
+`memory_message(action="receive")` without `ack`, the read-only
+`memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
 (`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
 puts in a subagent's hook input, and never in the parent's, and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list and receive pass, and so
-does every call the parent makes. The subagent reads the refusal as
+send and ack, whatever the server's name. Its list, receive and history
+pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
 update never reached the server, its list and the parent's update did). A
@@ -1927,15 +2037,16 @@ still rings it. Waiting on a merge click or a review that may still bring fixes?
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
 `maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
 a live listener. Check the sender's wake receipt; `no_path` means mail is
-queued for receive on a later turn. For waits over 59 minutes, especially
-`needs_approval` waiting on maintainer, arm `wait-mail` in the background or
-keep the Codex doorbell active; otherwise record that you are reachable
-on your next turn. [Reopening a done park](#reopening-a-done-park) says who
+queued for receive on a later turn. Claude Code's Stop hook keeps listening
+while the session stays open, and a Codex thread needs its doorbell active;
+without either, record that you are reachable on your next turn. [Reopening a done park](#reopening-a-done-park) says who
 counts as the maintainer and the coordinator.
 
-Before parking on a dependency that may take longer than 59 minutes, keep a
-host path armed as described under [wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-or [Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
+Before parking on a long dependency, make sure a host path is armed: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) in Claude Code
+(armed at every turn end while the session stays open),
+[wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail) without it, or the
+[Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
 limitation explicit. A sender checks the receipt instead of assuming that
 an installed hook wakes an idle recipient. On `no_path`, use the recipient
 host's messaging tool when available: Claude Desktop's session `send_message`
@@ -2099,7 +2210,7 @@ and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI or Desktop Code tab) | the Stop hook's 59-minute wait, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
+| Claude Code (CLI or Desktop Code tab) | the Stop hook's watcher, armed at every turn end while the session stays open, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional
@@ -2288,10 +2399,9 @@ also capped (below, and by the daemon's `wake` caps under
   bring fixes? Park needs_approval with park_clear_by set to the reviewer's
   agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires
   a live listener. Check the sender's wake receipt; no_path means mail is
-  queued for receive on a later turn. For waits over 59 minutes, especially
-  needs_approval waiting on maintainer, arm wait-mail in the background or
-  keep the Codex doorbell active; otherwise record that you are reachable
-  on your next turn." as the wake text and a `gate` ledger line (its
+  queued for receive on a later turn. Claude Code's Stop hook keeps listening
+  while this session stays open, and a Codex thread needs its doorbell active;
+  without either, record that you are reachable on your next turn." as the wake text and a `gate` ledger line (its
   fifth column is the message's length in UTF-8 bytes plus one, on every
   client). Once: the continuation's Stop carries `stop_hook_active: true` and
   is not asked (Claude Code also caps stop-hook continuations at eight in a
@@ -2335,16 +2445,32 @@ also capped (below, and by the daemon's `wake` caps under
   marker and leaves the shared `.wake` ownership stamp alone; the stamp
   without a matching live marker proves no liveness. Stale evidence expires
   within 60 seconds even after an interrupted process.
-- A watcher waits at most 3540 s after the turn that armed it; the hook's
-  `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
-  `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after a ring or its four-hour timeout; without that, its mail appears
-  on its next prompt and the ring listener expires. The watcher
-  also stops when Claude Code exits: at once on Linux and macOS, and within
-  a minute on Windows, where it lists the process through `ps -W` at arm
-  time and then once a minute (a Windows PID is invisible to `kill -0`). In
-  `claude -p` runs, Claude Code ends a waiting hook at teardown.
+- A watcher listens for as long as the session stays open: at most
+  1,209,540 s (14 days) after the turn that armed it, under the hook's
+  `timeout` of 1,209,600 s, which Claude Code enforces on `asyncRewake` hooks.
+  Fourteen days is twice the longest delegate lease, so a lease granted any
+  time in the week after a session's last turn is covered to its end
+  (maintainer requirement 2026-10-05: a session, the delegate above all, stays
+  reachable while it is open). Claude Code takes the timeout as is into a Node
+  timer (`timeout * 1000` ms, no ceiling, read in the 2.1.286 and 2.1.287
+  bundles), which fires at once above 2^31 - 1 ms, so it stays under 24.8
+  days. After its first 3540 s the watcher polls every 30 s instead of every
+  5 s, so a session idle for days does not keep starting processes every few
+  seconds; a ring then fires up to 30 s later. Before 2026-10-05 the watcher
+  stopped after 59 minutes, and a plugin from before then still does until
+  `pseudolife-mcp update` moves the clients. `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT`
+  (seconds) shortens it. The watcher
+  also stops when Claude Code exits. A clean exit removes the shim's digest,
+  which ends the watch within one poll (5 s, or 30 s after the first hour).
+  On Linux and macOS a crash is caught by `kill -0` at the next poll. On
+  Windows it lists the process through `ps -W` at arm time, then once a
+  minute for the first hour and every five minutes after (a Windows PID is
+  invisible to `kill -0`, and `ps -W` took 1.6-3.5 s on a loaded host); a
+  crashed session whose PID is reused, or that `ps -W` never lists, keeps its
+  watcher until the digest is swept as stale, about a day later. An idle
+  watcher spawns a `sleep` and an `mv` every 30 s, plus on Windows a `ps -W`
+  and an `awk` every five minutes: about 0.07 processes a second per session.
+  In `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json` and gets only the park gate, on every
   platform: on Windows through the entry's native command
   (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
@@ -2421,7 +2547,7 @@ memory_policy:
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
 | `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
-| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), about 8 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler
 (`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
@@ -2930,9 +3056,10 @@ every variant.
 
 ## Toolset tiers
 
-Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
-set-slot pair, the gate), `core` (24: + graph/recall, world facts, lessons,
-documents, episodes, stats, `memory_get`, `memory_fact_resolve`, coordination),
+Three visibility tiers — `minimal` (10 tools: the recall/capture loop with
+lesson search, the set-slot pair, the gate), `core` (24: + graph/recall, world
+facts, documents, episodes, stats, `memory_get`, `memory_fact_resolve`,
+coordination),
 `full` (38) — filtered per principal at `tools/list` (the named principal
 from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
 a credential share a tier view). The filter is
@@ -2945,8 +3072,8 @@ session expands its tier before calling a hidden tool. Defaults:
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
-Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
-`minimal`; clients that defer schemas client-side (Claude Code) barely
+Eager-loading clients (Claude Desktop) start at about 18 KB of manifest (10
+tools) on `minimal`; clients that defer schemas client-side (Claude Code) barely
 notice tiers at all.
 
 **Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes
@@ -3043,6 +3170,14 @@ is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
 from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
+
+**Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
+checkout. Run inside one, a 0.16.x updater can record the wrong version in the
+`runtime.json` of the runtime it installs (it reads a stale build's metadata
+from the checkout). The launcher picks a runtime by its number, not its
+label, so the right code still runs, but each rerun installs yet another
+runtime. A later update by 0.17.0 or newer installs a correctly labelled
+runtime and removes the mislabelled one once nothing runs from it.
 
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
@@ -3167,18 +3302,23 @@ its own and an update never replaces a folder a session is using:
   cache matching it proves nothing: the step reports `failed`, never
   `current`, quoting the CLI's line, and the run exits with the client-step
   code. Claude Code clones a GitHub-source marketplace over SSH, which fails
-  on a host with no github.com key in `known_hosts`. Add the key after
-  checking its fingerprint against GitHub's published ones, or point the
-  marketplace at HTTPS with
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
-  (it replaces the existing entry's source, and the installed plugin
-  follows it), then run the update again; the README's Updating section
-  has the same steps. Claude Code refuses that add while
-  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
-  with another source: change that entry's source to
-  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-  first (the step names the file when it finds one). Do not use
-  `claude plugin marketplace remove`, which uninstalls the plugin.
+  on a host with no github.com key in `known_hosts`.
+- Before the refresh, a marketplace still recorded with the `github` source
+  the installers used up to 0.16.1 is moved to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` (the installers do
+  the same on a rerun, through `ops/plugin_marketplace.py`). The step copies
+  `settings.json`, `known_marketplaces.json` and `installed_plugins.json`
+  to `plugins/backup-<time>-marketplace-https/`. It changes only the
+  `pseudolife-mcp` entry's source under `extraKnownMarketplaces` (Claude
+  Code refuses the add while that entry names another source), runs
+  `claude plugin marketplace add` with the HTTPS URL, and checks that
+  `known_marketplaces.json` followed. A refused add puts the entry back as
+  it was and fails the step; the refresh still runs. An HTTPS source, a fork, a local
+  directory or a pinned ref is left as it is. Both files are read under
+  `CLAUDE_CONFIG_DIR` when it is set. For any other github-source
+  marketplace, add github.com's key after checking its fingerprint against
+  GitHub's published ones, or follow the README's Updating section. Do not
+  use `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
@@ -3852,7 +3992,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v54**; migrations are additive
+The current Postgres meta version is **v55**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3912,6 +4052,7 @@ The milestones:
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
+| v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

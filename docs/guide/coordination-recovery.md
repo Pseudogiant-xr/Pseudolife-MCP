@@ -97,6 +97,23 @@ A backup taken before v42 restores without the log. Recovery never migrates a
 schema, so both commands still revoke and rebind, print that the operation is
 not recorded, and the next daemon start creates an empty log.
 
+## Maintainer passkeys across a restore
+
+A full backup holds the maintainer's passkeys (`maintainer_passkeys`, schema
+v54), unredeemed enrolment codes (`maintainer_bootstrap`), spent challenge
+nonces (`maintainer_nonces`) and the challenge secret (`maintainer_secret_v1`
+in `meta`), all as of the backup. `recover` does not touch them. A passkey
+revoked after the backup is active again, and one enrolled after it is gone.
+Before step 6, with `PSEUDOLIFE_MCP_DATABASE_URL` still pointing at the
+restored database, run `pseudolife-mcp maintainer list` and
+`pseudolife-mcp maintainer revoke <prefix>` any key you revoked since the
+backup. If you cannot tell, `pseudolife-mcp maintainer reset` revokes every
+key, rotates the secret and reopens enrolment; after step 6, enrol again with
+`pseudolife-mcp maintainer setup`.
+
+Portable exports never carry these tables or the secret (full backups only),
+so an imported bank starts with no passkeys.
+
 ## Failure and retention
 
 A failed private-state write rolls back credential issuance. A crash or uncertain

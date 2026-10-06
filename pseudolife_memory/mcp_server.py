@@ -44,9 +44,12 @@ Configuration
 
 from __future__ import annotations
 
+import difflib
 import functools
+import json
 import logging
 import os
+import re
 import sys
 import atexit
 import signal
@@ -66,7 +69,7 @@ from anyio import to_thread  # noqa: E402
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
-from mcp.types import ToolAnnotations  # noqa: E402
+from mcp.types import CallToolResult, TextContent, ToolAnnotations  # noqa: E402
 # ``Annotated[T, Field(description=...)]`` on a tool signature is how a
 # per-argument contract reaches the client: FastMCP builds each tool's
 # inputSchema from a pydantic model derived from the signature
@@ -74,10 +77,18 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # lands in ``inputSchema.properties[arg].description``. Defaults stay plain
 # signature defaults — Field carries description ONLY, so coercion and
 # optionality are untouched.
-from pydantic import Field, StrictInt  # noqa: E402
+from pydantic import ConfigDict, Field, StrictInt, ValidationError  # noqa: E402
+from pydantic_core import PydanticCustomError  # noqa: E402
 
 from pseudolife_memory.service import (  # noqa: E402
     _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
+from pseudolife_memory.memory.cortex import MAX_CURRENT_MEMBERS  # noqa: E402
+from pseudolife_memory.memory.meta_filter import is_meta_statement  # noqa: E402
+
+# Checks beyond Field's own bounds (ge/le/min_length) also run while the
+# arguments are bound, so a bad value is refused with a readable message
+# before the tool body runs.
+from pydantic import AfterValidator  # noqa: E402
 
 # Log to stderr so MCP's JSON-RPC chatter on stdout stays clean.
 logging.basicConfig(
@@ -213,9 +224,8 @@ def _async_offload(fn):
     parameter list, and AnyIO copies the calling context into the worker
     thread so the per-request writer/session contextvars still resolve.
 
-    Also the surface's uniform failure contract: a service-level raise is
-    mapped to the same ``{"error", "message"}`` shape the dispatch tools
-    return, instead of leaking a raw exception string to the agent.
+    Also the surface's failure contract: a raise becomes an MCP tool error
+    (``_tool_error``), never a raw exception string or a class name.
     """
     @functools.wraps(fn)
     async def _run(*args: Any, **kwargs: Any) -> Any:
@@ -223,8 +233,73 @@ def _async_offload(fn):
             return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
         except Exception as exc:  # noqa: BLE001
             logger.exception("tool %s failed", fn.__name__)
-            return {"error": type(exc).__name__, "message": str(exc)}
+            return _tool_error(fn.__name__, exc)
     return _run
+
+
+_ERROR_CODE = re.compile(r"([a-z][a-z0-9_]*)(?::\s*(.+))?", re.DOTALL)
+
+
+def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
+    """The JSON a refused call returns: ``{error, message}`` plus ``param``,
+    ``accepted`` and ``action`` where the refusal names them, and
+    ``mutation`` where a failure leaves a write in doubt.
+
+    A refusal keeps the code its raiser chose (other callers key on it),
+    from a ``code`` attribute or a ``code`` / ``code: detail`` message; a
+    ValueError or TypeError in prose is ``invalid_argument`` with that
+    prose; a missing file is ``file_not_found`` (the caller named the path).
+    Anything else is ``internal_error``, whose class and text stay in the
+    daemon log: the model learned nothing from them and retried blindly
+    (review 2026-10-04, M1)."""
+    if isinstance(exc, FileNotFoundError):
+        # document_ingest's own message already says whose filesystem, with
+        # the Docker hint the Console's REST route shows too: say it once.
+        text = str(exc)
+        if "server's filesystem" not in text:
+            text += ": paths are resolved on the server's filesystem"
+        return {"error": "file_not_found", "message": text}
+    if not isinstance(exc, (ValueError, TypeError)):
+        payload = {"error": "internal_error",
+                   "message": "The server failed while running this call (the cause is in "
+                              "its log); retry once at most, then tell the user."}
+        if tool not in _READ_ONLY_TOOLS:
+            payload["mutation"] = "unknown"
+        return payload
+    code, detail = getattr(exc, "code", None), getattr(exc, "detail", None)
+    if not (isinstance(code, str) and _ERROR_CODE.fullmatch(code) and ":" not in code):
+        text = str(exc).strip()
+        match = _ERROR_CODE.fullmatch(text)
+        if match is None:
+            return {"error": "invalid_argument",
+                    "message": text or "The arguments were refused."}
+        code, detail = match.groups()
+    payload = {"error": code,
+               "message": f"{code}: {detail}" if detail else f"{code}: the call was refused."}
+    for key in ("param", "accepted", "action"):
+        value = getattr(exc, key, None)
+        if value is not None:
+            payload[key] = value
+    # The board's boundary turns an unexpected failure into this code, a
+    # ValueError like any refusal, though the write may have happened.
+    if code == "coordination_unavailable" and tool not in _READ_ONLY_TOOLS:
+        payload["mutation"] = "unknown"
+    return payload
+
+
+def _tool_error(tool: str, exc: Exception) -> CallToolResult:
+    """A refused call as an MCP tool error (``isError: true``) whose text
+    and structured content are the same JSON object, so Claude Code (text)
+    and Codex (structured) read one shape. No-ops are not refusals and stay
+    successes with their own fields."""
+    return _error_result(_error_payload(tool, exc))
+
+
+def _error_result(payload: dict[str, Any]) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text",
+                             text=json.dumps(payload, indent=2, ensure_ascii=False))],
+        structured_content=payload, is_error=True)
 
 
 # Hints describe user-visible bank operations. Retrieval may update access
@@ -258,7 +333,104 @@ def _annotations(name: str) -> ToolAnnotations:
     )
 
 
+# Wrong names models actually sent, measured in the 2026-10-04 transcript
+# review (Claude 11,049 calls, Codex 9,626): limit on memory_search (68 +
+# 72) and memory_lesson_search (56), content on memory_store (13 + 1),
+# note/notes/text on memory_outcome (7). Consulted only when the name is not
+# a parameter of the tool and the target is; difflib covers the rest.
+_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "limit": ("top_k", "n"),
+    "content": ("text",),
+    "note": ("detail",), "notes": ("detail",), "text": ("detail",),
+}
+
+
+class _BindingRefusal(dict):
+    """What ``validate_arguments`` returns for arguments it refused: no
+    arguments, and the tool error ``call_fn`` answers with in place of the
+    tool body."""
+
+    def __init__(self, result: CallToolResult):
+        super().__init__()
+        self.result = result
+
+
 class _StringSafeMetadata(FuncMetadata):
+    tool_name: str = ""
+
+    def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        """Bind the arguments, or refuse them in the body's error shape.
+
+        The SDK turns a ``ValidationError`` into pydantic's own text, which
+        echoes each value passed (``input_value``) and a docs URL, so a
+        binding refusal read nothing like a body refusal (review of
+        #587/#588, 2026-10-05). It becomes the same JSON tool error instead,
+        naming each refused argument and never its value.
+        """
+        try:
+            return self._bind(arguments_to_validate)
+        except ValidationError as exc:
+            return _BindingRefusal(_error_result(self._binding_payload(exc)))
+
+    async def call_fn(self, fn, fn_is_async, arguments, arguments_to_pass_directly=None):
+        if isinstance(arguments, _BindingRefusal):
+            return arguments.result
+        return await super().call_fn(fn, fn_is_async, arguments, arguments_to_pass_directly)
+
+    def _accepted(self) -> list[str]:
+        return [field.alias or name for name, field in self.arg_model.model_fields.items()]
+
+    def _binding_payload(self, exc: ValidationError) -> dict[str, Any]:
+        """``{error, message, param, accepted?}`` from the refused arguments'
+        names and pydantic's per-error sentences, which carry no value."""
+        errors = exc.errors(include_url=False, include_input=False, include_context=False)
+        names = [".".join(str(part) for part in err["loc"]) or "arguments" for err in errors]
+        unknown = all(err["type"] == "unknown_parameter" for err in errors)
+        if unknown:
+            message = " ".join(err["msg"] for err in errors)
+        else:
+            message = "; ".join(f"{name}: {err['msg']}" for name, err in zip(names, errors))
+        payload: dict[str, Any] = {
+            "error": "unknown_parameter" if unknown else "invalid_argument",
+            "message": message}
+        if errors and errors[0]["loc"]:
+            payload["param"] = str(errors[0]["loc"][0])
+        if unknown:
+            payload["accepted"] = self._accepted()
+        return payload
+
+    def _bind(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        """Refuse an argument name the tool does not have.
+
+        Pydantic's default (``extra="ignore"``) dropped it without a word, so
+        ``memory_search(limit=3)`` answered with the default 8 hits and the
+        model never learned.
+        """
+        accepted = self._accepted()
+        unknown = [key for key in arguments_to_validate if key not in accepted]
+        if unknown:
+            # hide_input: a misnamed argument can carry a secret, so the
+            # refusal names the parameter and never prints its value. The
+            # accepted list closes the last entry only, once per error.
+            raise ValidationError.from_exception_data(self.tool_name or "arguments", [
+                {"type": PydanticCustomError(
+                    "unknown_parameter", "{detail}",
+                    {"detail": self._unknown_message(
+                        key, accepted, last=key == unknown[-1])}),
+                 "loc": (key,), "input": None}
+                for key in unknown], hide_input=True)
+        return super().validate_arguments(arguments_to_validate)
+
+    def _unknown_message(self, key: str, accepted: list[str], *, last: bool) -> str:
+        guess = next((a for a in _PARAM_ALIASES.get(key, ()) if a in accepted),
+                     None)
+        if guess is None:
+            close = difflib.get_close_matches(key, accepted, n=1)
+            guess = close[0] if close else None
+        hint = f"; did you mean '{guess}'?" if guess else "."
+        listed = f" Accepted: {', '.join(accepted)}" if last else ""
+        return f"unknown parameter '{key}' for {self.tool_name}{hint}{listed}"
+
     def pre_parse_json(self, data: dict[str, Any]) -> dict[str, Any]:
         """Keep text literal while retaining the SDK's list/dict compatibility.
 
@@ -279,14 +451,24 @@ class _StringSafeMetadata(FuncMetadata):
         return {**parsed, **literal}
 
 
+def _bind_arguments(name: str) -> None:
+    """Give a registered tool the string-safe, strict argument binding; its
+    schema then says ``additionalProperties: false``, matching the refusal."""
+    tool = mcp._tool_manager.get_tool(name)
+    meta = tool.fn_metadata.model_dump()
+    meta["arg_model"] = type(meta["arg_model"].__name__, (meta["arg_model"],),
+                             {"model_config": ConfigDict(extra="forbid")})
+    tool.fn_metadata = _StringSafeMetadata(**meta, tool_name=name)
+    tool.parameters = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
+
+
 def _tool(*, tier: str = "full"):
     """Record the tool's tier and register it (always — tiers gate
     visibility in tools/list, not existence)."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = tier
         mcp.tool(annotations=_annotations(fn.__name__))(_async_offload(fn))
-        tool = mcp._tool_manager.get_tool(fn.__name__)
-        tool.fn_metadata = _StringSafeMetadata(**tool.fn_metadata.model_dump())
+        _bind_arguments(fn.__name__)
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
@@ -364,6 +546,11 @@ def memory_agents(
         description="update: positive finite Unix epoch seconds, at most "
                     "now + 7 days; new parks default to now + 12 hours, "
                     "refinements keep expiry.")] = None,
+    name: Annotated[str | None, Field(
+        max_length=120,
+        description="update: the name the board shows for you, up to 120 "
+                    "chars; it overrides your harness's title. \"\" clears "
+                    "yours.")] = None,
 ) -> dict[str, Any]:
     """Coordinate agent sessions on the shared board: list peers and
     leases, update your own status or park, claim/release shared
@@ -387,7 +574,7 @@ def memory_agents(
                   lease=lease, worktree=worktree, repository_id=repository_id, path=path,
                   expect=expect, children=children, park_reason=park_reason,
                   park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
-                  park_expires=park_expires)
+                  park_expires=park_expires, name=name)
 
 
 @_tool(tier="core")
@@ -467,12 +654,127 @@ def memory_message(
         "urgent": urgent or None, "limit": limit, "peer": peer}.items() if v is not None})
 
 
+# ── Refusal notes and argument checks ─────────────────────────────────────
+# A refusal or no-op that still returns success (nothing changed) carries a
+# one-sentence ``note`` beside its code, saying what happened and what to do,
+# so a model neither misses it nor retries blind (2026-10-04 tool-description
+# review, M2). The codes are unchanged; a note is added only where none is.
+
+
+def _noted(out: Any, notes: dict[str, str], key: str = "reason") -> Any:
+    code = out.get(key) if isinstance(out, dict) else None
+    if isinstance(code, str) and code in notes:
+        out.setdefault("note", notes[code])
+    return out
+
+
+_STORE_NOTES = {
+    "empty": "Not stored: the text was empty.",
+    "filtered_meta": "Not stored: reads as a statement about the memory "
+                     "system itself. Rephrase as the fact.",
+    "below_surprise_threshold": "Not stored: a near-duplicate of a memory "
+                                "already held; no need to retry.",
+    "rejected": "Not stored: the admission gate refused it; nothing was "
+                "written.",
+}
+_EXACT_DUPLICATE_NOTE = ("Not stored: it repeats a memory already held word "
+                         "for word; no need to retry.")
+
+
+def _store_noted(out: Any, text: str, source: str) -> Any:
+    """``service.store`` reports every drop at surprise 0.0 as
+    ``filtered_meta``. With ``surprise_threshold`` above 0 (default 0, which
+    stores duplicates) that includes an exact duplicate, whose novelty is
+    0.0 at the gate; the meta filter's own check tells the two apart."""
+    if isinstance(out, dict) and out.get("reason") == "filtered_meta":
+        memory = service.config.memory
+        meta = memory.meta_filter.enabled and is_meta_statement(
+            (text or "").strip(), role=source)
+        if memory.surprise_threshold > 0 and not meta:
+            out.setdefault("note", _EXACT_DUPLICATE_NOTE)
+    return _noted(out, _STORE_NOTES)
+# Keyed on the service's reason text, which is a sentence for these two.
+_OUTCOME_NOTES = {
+    "signals require Postgres storage": "Outcome not kept: this bank runs "
+        "without Postgres, so signals are dropped. Do not retry.",
+    "lessons disabled": "Outcome not kept: lessons are disabled in this "
+        "bank's config. Do not retry.",
+}
+_FADED_NOTE = ("No entry with this id: a wrong id, a forgotten or evicted "
+               "entry, or a bank without Postgres (file mode cannot read "
+               "ids). Search again for a current id.")
+_SET_NOTES = {
+    "member_invalid": "Not added: the member is blank; pass a non-empty "
+                      "value.",
+    "member_capped": f"Not added: the slot already holds "
+                     f"{MAX_CURRENT_MEMBERS} current members, the cap; "
+                     f"retract one with memory_set_remove first.",
+    "member_not_found": "Nothing removed: no current member matches "
+                        "(case-insensitive); read the slot with "
+                        "memory_fact_get.",
+    "member_remove_refused": "Not removed: an assistant-origin retraction "
+                             "cannot remove a member another source added; "
+                             "ask the human.",
+}
+_REVIEW_NOTES = {
+    "bad_pair": "Nothing dismissed: src and dst are blank or name the same "
+                "entity or slot; pass two distinct ones.",
+    "bad_store": 'Nothing dismissed: store must be "lesson" or "world".',
+    "not_pending": "Nothing settled: no pending proposal has this id "
+                   "(already decided or unknown); list again for current "
+                   "ids.",
+    "stale_review": "Not applied: the finding changed after it was listed; "
+                    "list again and decide afresh.",
+    "nothing_retired": "Nothing restored: no retired slot matches this key "
+                       "or entity.",
+    "slot_live": "Nothing restored: the slot already holds a live value.",
+}
+_WORLD_NOTES = {
+    "unsafe_source_url": "Not stored: source_url must be an http(s) URL or "
+                         "empty; other schemes are refused.",
+}
+
+
+def _correction_noted(out: Any) -> Any:
+    """The correction services return their refusal code in ``reason`` and
+    its sentence in ``error`` (the Console's REST routes read ``error``).
+    On the MCP surface the sentence moves to ``note``, the shape every other
+    success-shaped refusal has."""
+    if isinstance(out, dict) and "reason" in out and "error" in out:
+        out["note"] = out.pop("error")
+    return out
+
+
+def _non_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
+
+
+def _check_as_of(value: str | float | None) -> str | float | None:
+    """Refuse an ``as_of`` the history read cannot parse, at binding
+    (``"yesterday"`` used to reach the service as "Invalid isoformat
+    string")."""
+    if value is None:
+        return value
+    try:
+        MemoryService._parse_as_of(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(
+            "as_of takes an ISO-8601 date or date-time (2026-10-01, "
+            "2026-10-01T12:00:00+00:00) or epoch seconds, not relative "
+            "words like 'yesterday'") from None
+    return value
+
+
 @_tool(tier="minimal")
 def memory_store(
     text: Annotated[str, Field(
         description="The claim to remember.")],
     source: Annotated[str, Field(
-        description="Stable per-project/topic tag for later filtering.")] = "agent",
+        description="Stable per-project/topic tag for later filtering; "
+                    '"status" for in-flight progress notes (peers see '
+                    "those; the dream skips them).")] = "agent",
     tags: Annotated[list[str] | None, Field(
         description='Optional labels, e.g. ["decision", "blocker"].')] = None,
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
@@ -504,9 +806,10 @@ def memory_store(
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
-    return service.store(
+    return _store_noted(service.store(
         text=text, source=source, tags=tags, origin=origin, episode=episode,
-        authority=authority, distortion_tolerance=distortion_tolerance)
+        authority=authority, distortion_tolerance=distortion_tolerance),
+        text, source)
 
 
 def _restates_fact(entry_text: str, value: str) -> bool:
@@ -670,15 +973,18 @@ def _iso_seconds(ts: float | None) -> str | None:
 # (TTL/3 — the stale flag at 2×TTL fires too late for the incident shape).
 
 CORRECTION_NOTE = (
-    "Facts flagged correct_with above are aged or contested. If one "
-    "contradicts what you observe, run its correction call NOW with the "
+    "Facts flagged correct_with above are aged or contested. If an aged "
+    "fact contradicts what you observe, run its call NOW with the "
     "verified value (re-assert the same value if it checks out) — noticing "
-    "without writing leaves the error for the next session.")
+    "without writing leaves the error for the next session. For a "
+    "contested fact, read the contenders; resolve only once the human "
+    "decides.")
 
 
 def _cortex_correct_with(f: dict[str, Any]) -> str | None:
-    """The copy-paste correction call for a cortex fact, or None when the
-    fact is fresh enough (or durable enough) not to warrant one."""
+    """The copy-paste correction call for a cortex fact (the read-then-
+    resolve path for a contested one), or None when the fact is fresh
+    enough (or durable enough) not to warrant one."""
     from pseudolife_memory.memory.freshness import needs_correction_nudge
     aged = needs_correction_nudge(
         f.get("freshness_class") or "evergreen",
@@ -697,7 +1003,17 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     # The active affordance at correction time is `memory_supersede`'s
     # `derived_flagged`, which names exactly the facts affected by that
     # explicit correction.
-    if not (f.get("contested") or f.get("stale") or aged):
+    if f.get("contested"):
+        # A contested slot is settled by a human decision, not a write:
+        # ``memory_fact_set`` there parks one more contender, and a
+        # prefilled ``accept`` would let a model settle it blindly
+        # (2026-10-04: a live recall served a contested slot with a
+        # ``memory_fact_set`` call). Takes precedence over aged/stale.
+        slot = f"entity={f['entity']!r}, attribute={f['attribute']!r}"
+        return (f"memory_fact_get({slot}) to read the contenders; once the "
+                f"human decides, memory_fact_resolve({slot}, "
+                f"accept=<the human's decision>) (core tier)")
+    if not (f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
             f"attribute={f['attribute']!r}, "
@@ -731,10 +1047,11 @@ def memory_search(
     # 2026-09-23 review's ~90.5% for 6 read a width-6 list as a prefix of
     # the width-8 one, which the dense pool's cosine cut makes untrue.
     top_k: Annotated[int, Field(
-        description="Direct entry hits to retrieve, default 8; documents "
-                    "and neighbors may add a few. Compact payloads cap "
-                    "cortex facts at min(5, top_k). Use top_k, not "
-                    "limit.")] = 8,
+        ge=1,
+        description="Direct entry hits to retrieve, a positive integer "
+                    "(default 8); documents and neighbors may add a few. "
+                    "Compact payloads cap cortex facts at min(5, top_k). "
+                    "Use top_k, not limit.")] = 8,
     sources: Annotated[list[str] | None, Field(
         description="Source tags of direct entry hits; null or [] means "
                     "no source filter.")] = None,
@@ -769,10 +1086,10 @@ def memory_search(
     """Search shared memory in natural language: past work, decisions,
     preferences, canonical facts and ingested documents. Call at task
     start and whenever prior context may matter. Exact value of a known
-    (entity, attribute): memory_fact_get. Core tier (expand if absent,
-    then rediscover): memory_recall for multi-hop questions,
-    memory_lesson_search for lessons, memory_world_search for cited
-    external facts, document_search for documents only.
+    (entity, attribute): memory_fact_get; lessons: memory_lesson_search.
+    Core tier (expand if absent, then rediscover): memory_recall for
+    multi-hop questions, memory_world_search for cited external facts,
+    document_search for documents only.
 
     Hits are leads about the PAST: check each against today's task and
     re-derive when its context differs. cortex facts come first and may
@@ -944,8 +1261,9 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
                     {"pinned": True}
                     if f.get("pinned") else {}
                 ),
-                # Supersede-at-discovery: aged/stale/contested facts
-                # carry their exact correction call (see CORRECTION_NOTE).
+                # Supersede-at-discovery: aged/stale facts carry their
+                # exact correction call, contested ones the resolve path
+                # (see CORRECTION_NOTE).
                 **(
                     {"correct_with": cw}
                     if (cw := _cortex_correct_with(f)) else {}
@@ -986,7 +1304,8 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
 @_tool()
 def memory_recent(
     n: Annotated[int, Field(
-        description="How many entries to return.")] = 10,
+        ge=1,
+        description="How many entries to return; positive integer.")] = 10,
     sources: Annotated[list[str] | None, Field(
         description="Keep only entries with one of these source tags.")] = None,
     episodes: Annotated[list[str] | None, Field(
@@ -1021,7 +1340,8 @@ def memory_supersede(
 ) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
-    higher and shows both together.
+    higher and shows both together. Test junk or a never-true entry:
+    ``memory_forget``; a canonical slot: ``memory_fact_set``.
 
     Use exactly one selector. Missing, retired, or ambiguous targets cause
     no mutation; search again and resubmit an ID. No similarity fallback.
@@ -1036,7 +1356,8 @@ def memory_supersede(
     ``derived_flagged_total`` say when a correction reached further than
     the cap.
     """
-    return service.supersede(old_text=old_text, new_text=new_text, entry_id=entry_id)
+    return _correction_noted(service.supersede(
+        old_text=old_text, new_text=new_text, entry_id=entry_id))
 
 
 @_tool()
@@ -1097,8 +1418,7 @@ def memory_stats() -> dict[str, Any]:
 # board tools and two full-tier tools missing from it).
 _TIER_ADDS = {
     "core": "board (memory_agents/memory_message), graph + recall, world "
-            "facts, lessons, documents, stats, episodes, "
-            "memory_get/fact_resolve",
+            "facts, documents, stats, episodes, memory_get/fact_resolve",
     "full": "supersede/reinstate/forget/history/reinforce, recent, "
             "episode_summary, dream + graph-review, graph_unrelate, aliases, "
             "consolidation, relation-define",
@@ -1133,8 +1453,8 @@ async def memory_toolset(
     """Change your server-visible tool tier: minimal -> core -> full, one
     step per expand; collapse steps down; status shows the current tier
     and what each tier adds. Core adds the board (memory_agents,
-    memory_message), graph/recall, world facts, lessons, documents; full
-    adds supersede/forget/history, dream and graph-review admin. After
+    memory_message), graph/recall, world facts, documents; full adds
+    supersede/forget/history, dream and graph-review admin. After
     expand, rediscover tools in the client: list_changed_sent means the
     notification was sent, not client refresh. If a named tool is still
     absent at its required tier, report the visibility mismatch; do not
@@ -1174,6 +1494,7 @@ async def memory_toolset(
 # body is dict ops only and cannot block the event loop.
 _TOOL_TIERS["memory_toolset"] = "minimal"
 mcp.tool(annotations=_annotations("memory_toolset"))(memory_toolset)
+_bind_arguments("memory_toolset")
 
 
 # core memory_fact_get returns source_entries ids —
@@ -1190,6 +1511,8 @@ def memory_get(
     ``{found: false, faded: true}`` once forgotten.
     """
     out = service.get_entry(entry_id)
+    if out.get("faded"):
+        out.setdefault("note", _FADED_NOTE)
     if out.get("superseded"):
         # Same projection as a compact search hit: the pointer, never the
         # uncapped replacement text (2026-09-23), so dereferencing
@@ -1210,7 +1533,10 @@ def memory_reinforce(
     it genuinely useful — a deliberate "this mattered" signal that helps it
     resist forgetting. Read first, then reinforce.
     """
-    return service.reinforce(entry_id)
+    out = service.reinforce(entry_id)
+    if out.get("faded"):
+        out.setdefault("note", _FADED_NOTE)
+    return out
 
 
 # ── Cortex — canonical facts ──────────────────────────────────────────────
@@ -1227,23 +1553,22 @@ def memory_fact_get(
         description="Full record; the default drops bookkeeping keys.")]
     = False,
 ) -> dict[str, Any]:
-    """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
-    One value per slot. A null record means EMPTY, not unknown —
-    ``memory_search`` still finds context. A set-valued slot returns
-    ``{kind: "set", members, removed}`` instead — ``members: []`` means
-    EMPTY too.
+    """Look up the one CURRENT value at an ``(entity, attribute)`` slot;
+    open questions go to ``memory_search``. A null record means EMPTY, not
+    unknown. A set-valued slot returns ``{kind: "set", members, removed}``
+    instead — ``members: []`` means EMPTY too.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). Non-empty ``contenders`` = unsettled
-    conflict (see ``memory_fact_resolve``); on an empty slot,
+    conflict (see ``memory_fact_resolve`` (core)); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
     ``re_verify`` = a memory this fact was derived from has since been
     corrected; the value still stands but check it before acting. Set slots
     carry it too, at the slot. PostgreSQL keeps this warning after the
     corrected source memory is evicted or deleted; file mode has no durable
     retraction warning. ``verbose=True`` adds the record's provenance,
-    support and temporal stamp; ``memory_history`` shows the slot's version
-    chain.
+    support and temporal stamp; ``memory_history`` (full) shows the slot's
+    version chain.
     """
     rec = service.cortex_lookup(entity, attribute)
     out = {
@@ -1259,7 +1584,8 @@ def memory_fact_get(
     if (rec is None or is_empty_set) and not out["contenders"]:
         out["candidates"] = service.cortex_candidates(entity, attribute)
     # Supersede-at-discovery: an aged/stale record carries its exact
-    # correction call, and the response states the norm once.
+    # correction call (a contested one the resolve path), and the response
+    # states the norm once.
     if rec is not None and not is_empty_set:
         cw = _cortex_correct_with(
             {**rec, "contested": bool(out["contenders"])})
@@ -1351,18 +1677,22 @@ def _lean_fact_record(rec: Any) -> Any:
 @_tool(tier="minimal")
 def memory_fact_set(
     entity: Annotated[str, Field(
+        min_length=1,
         description="The slot's subject; the (entity, attribute) match "
-                    "is case- and separator-insensitive.")],
+                    "is case- and separator-insensitive."),
+        AfterValidator(_non_blank)],
     attribute: Annotated[str, Field(
-        description="The slot's attribute.")],
+        min_length=1, description="The slot's attribute."),
+        AfterValidator(_non_blank)],
     value: Annotated[str, Field(
-        description="The value that is canonical NOW.")],
+        min_length=1, description="The value that is canonical NOW."),
+        AfterValidator(_non_blank)],
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
         description='Who asserted it: "user" = the human told you; '
                     'otherwise "action"/"agent". Omitted records '
                     '"agent".')] = None,
     confidence: Annotated[float, Field(
-        description="How sure you are, 0..1.")] = 0.8,
+        ge=0, le=1, description="How sure you are, 0..1.")] = 0.8,
     episode: Annotated[str | None, Field(
         description="Episode handle for attribution.")] = None,
     freshness_class: Annotated[
@@ -1380,12 +1710,14 @@ def memory_fact_set(
             description='"constraint" = verbatim, pinned in recall; "auto" '
                         'infers only that.')] = "auto",
 ) -> dict[str, Any]:
-    """Assert a canonical fact — insert, confirm, or correct a slot.
+    """Assert a canonical fact — insert, confirm, or correct a slot's one
+    NOW value. Narrative, decisions, observations: memory_store; many
+    concurrent values: memory_set_add (a set-valued slot errors here).
 
     A new value at an existing slot supersedes the old (history kept).
     A conflicting write parks as a contender (``action="contested"``,
     winner under ``current``) — check with the human, settle via
-    ``memory_fact_resolve``.
+    ``memory_fact_resolve`` (core).
 
     ``authority`` / ``distortion_tolerance`` inherit the slot's labels
     unless restated.
@@ -1411,11 +1743,12 @@ def memory_set_add(
     not one NOW value). A scalar there converts to a set on first call —
     one-way — except number-led scalars ("32", "$1,500"), which are
     protected: the add parks as a contender (action="contested", settle
-    via memory_fact_resolve). Read with memory_fact_get.
+    via memory_fact_resolve (core)). Read with memory_fact_get.
 
     Returns: {action, entity, attribute, member, members_count}.
     """
-    return service.set_add(entity, attribute, member)
+    return _noted(service.set_add(entity, attribute, member), _SET_NOTES,
+                  key="action")
 
 
 @_tool(tier="minimal")
@@ -1430,7 +1763,8 @@ def memory_set_remove(
 
     Returns: {action, entity, attribute, member, members_count}.
     """
-    return service.set_remove(entity, attribute, member)
+    return _noted(service.set_remove(entity, attribute, member), _SET_NOTES,
+                  key="action")
 
 
 @_tool(tier="core")
@@ -1459,8 +1793,10 @@ def memory_history(
     attribute: Annotated[str | None, Field(
         description="The fact slot to read; omit for chain mode.")] = None,
     as_of: Annotated[str | float | None, Field(
-        description="Slot mode only: ISO-8601 or epoch seconds; returns "
-                    "only versions written by then.")] = None,
+        description="Slot mode only: ISO-8601 date or epoch seconds, not "
+                    "relative words like 'yesterday'; returns only "
+                    "versions written by then."),
+        AfterValidator(_check_as_of)] = None,
 ) -> dict[str, Any]:
     """Read an entity's past. SLOT mode (``attribute`` given): every
     version of that canonical fact slot, oldest→newest, each with
@@ -1497,7 +1833,7 @@ def memory_world_set(
                         "never decays, ``slow`` is months, ``volatile`` is "
                         "weeks.")] = "volatile",
     confidence: Annotated[float, Field(
-        description="Source confidence, 0..1.")] = 0.85,
+        ge=0, le=1, description="Source confidence, 0..1.")] = 0.85,
     retrieved_at: Annotated[float | None, Field(
         description="Epoch seconds the source was fetched.")] = None,
     content_hash: Annotated[str | None, Field(
@@ -1510,11 +1846,11 @@ def memory_world_set(
 
     Returns: ``{action: inserted|confirmed|superseded|rejected, ...record}``.
     """
-    return service.world_write(
+    return _noted(service.world_write(
         entity, attribute, value, confidence=confidence, source_url=source_url,
         source_quote=source_quote, freshness_class=freshness_class,
         retrieved_at=retrieved_at, content_hash=content_hash,
-    )
+    ), _WORLD_NOTES)
 
 
 @_tool(tier="core")
@@ -1522,7 +1858,8 @@ def memory_world_search(
     query: Annotated[str, Field(
         description="Natural-language description of the external fact "
                     "needed.")],
-    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max entries returned; positive integer.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full provenance metadata; default entries are "
                     "compact.")] = False,
@@ -1662,7 +1999,7 @@ def memory_outcome(
         description="The tool or approach concerned; aids traversal.")] = None,
     detail: Annotated[str | None, Field(
         description="What worked, or what the dead-end was.")] = None,
-    polarity: Annotated[str | None, Field(
+    polarity: Annotated[Literal["+", "-"] | None, Field(
         description='"+" do-this or "-" avoid; usually omit — it is '
                     "inferred from the outcome.")] = None,
     episode: Annotated[str | None, Field(
@@ -1670,11 +2007,12 @@ def memory_outcome(
     used_ids: Annotated[list[int] | str | None, Field(
         description="Ids of the search hits you actually used, e.g. "
                     "[1421, 903] — the relevance label only you can "
-                    "write. At most 50. Credits this session's searches "
-                    "from the last hour; log before that lapses.")] = None,
+                    "write. At most 50.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. The dream distils signals into next session's lessons.
+    ``used_ids`` credits this session's searches from the last hour;
+    log before that lapses.
 
     Returns ``{recorded, signal_id, task, outcome}``; needs Postgres.
     ``used_ids`` adds ``used_ids_recorded`` (credited),
@@ -1685,9 +2023,9 @@ def memory_outcome(
     landed).
     """
     ids, ignored, truncated = _parse_used_ids(used_ids)
-    out = service.record_outcome(
+    out = _noted(service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity,
-        episode=episode, used_ids=ids or None)
+        episode=episode, used_ids=ids or None), _OUTCOME_NOTES)
     if ignored:
         out["used_ids_ignored"] = ignored
     if truncated:
@@ -1706,12 +2044,13 @@ def memory_outcome(
     return out
 
 
-@_tool(tier="core")
+@_tool(tier="minimal")
 def memory_lesson_search(
     query: Annotated[str, Field(
         description="The task at hand, described the way it would have "
                     "been logged.")],
-    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max entries returned; positive integer.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full provenance metadata; default entries are "
                     "compact.")] = False,
@@ -1785,18 +2124,27 @@ def memory_forget(
         if not any((text, substring, source, episode, tag)):
             return {"error": "filter_required",
                     "filters": ["text", "substring", "source", "episode", "tag"]}
-        return service.delete(
+        out = service.delete(
             text=text, substring=substring, source=source,
             episode=episode, tag=tag, confirm_bulk=bool(confirm_bulk),
         )
+        if out.get("deleted_count") == 0 and "error" not in out:
+            out.setdefault("note", "Nothing deleted: no entry matched every "
+                                   "filter (filters AND-combine).")
+        return out
     if scope in ("fact", "world", "lesson"):
         if not entity:
             return {"error": "entity_required", "scope": scope}
         if scope == "fact":
-            return service.cortex_forget(entity, attribute)
-        if scope == "world":
-            return service.world_forget(entity, attribute, decided_by="agent")
-        return service.lesson_forget(entity, attribute, decided_by="agent")
+            out = service.cortex_forget(entity, attribute)
+        elif scope == "world":
+            out = service.world_forget(entity, attribute, decided_by="agent")
+        else:
+            out = service.lesson_forget(entity, attribute, decided_by="agent")
+        if out.get("removed") == 0 and "error" not in out:
+            out.setdefault("note", "Nothing removed: no slot matches this "
+                                   "entity/attribute.")
+        return out
     return {"error": "unknown_scope",
             "scopes": ["memory", "fact", "world", "lesson"]}
 
@@ -1806,9 +2154,10 @@ def memory_dream(
     action: Literal["status", "pull", "commit", "run", "deep", "runs",
                     "rollback"],
     limit: Annotated[int | None, Field(
+        ge=1,
         description="pull/run: how many memories to process (pull defaults "
                     "to 40). runs: how many passes to list (defaults to "
-                    "10).")] = None,
+                    "10). Positive integer.")] = None,
     commit_token: Annotated[str | None, Field(
         description="commit: token returned by pull.")] = None,
     cursor: Annotated[float | None, Field(
@@ -2003,7 +2352,8 @@ def memory_graph_review(
     if action == "dismiss_pair":
         if not src or not dst:
             return {"error": "src_dst_required"}
-        return service.graph_dismiss_duplicate(src, dst)
+        return _noted(service.graph_dismiss_duplicate(src, dst),
+                      _REVIEW_NOTES)
     if action == "dismiss_slot_pair":
         # Listed keys spell a literal "|" in a name as "%7C" (service._slot_key),
         # so a key has exactly one bare "|"; decode it rather than re-split it.
@@ -2014,7 +2364,8 @@ def memory_graph_review(
                     "detail": "store='lesson'|'world'; src/dst are "
                               "'entity|attribute' keys from the deep response "
                               "(a literal '|' in a name is spelled %7C)"}
-        return service.curation_dismiss_duplicate(store, *a, *b)
+        return _noted(service.curation_dismiss_duplicate(store, *a, *b),
+                      _REVIEW_NOTES)
     if action == "restore_slot":
         key = _parse_slot_key(src) if src and "|" in src else None
         if store not in ("lesson", "world") or not src or (
@@ -2027,7 +2378,8 @@ def memory_graph_review(
         ent, attr = key or (src.replace(_SLOT_KEY_PIPE, "|"), None)
         fn = (service.lesson_restore if store == "lesson"
               else service.world_restore)
-        return fn(ent, attr or None, decided_by="agent")
+        return _noted(fn(ent, attr or None, decided_by="agent"),
+                      _REVIEW_NOTES)
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
@@ -2046,7 +2398,7 @@ def memory_graph_review(
                             "accept_merge", "accept_junk", "reject_entity"]}
     batch = _coerce_id_list(proposal_ids)
     if batch:
-        results = [handler(pid) for pid in batch]
+        results = [_noted(handler(pid), _REVIEW_NOTES) for pid in batch]
         # Every id handler reports success under "accepted" or "rejected";
         # a stale id yields {"...": False} (or reason=not_pending) and must
         # not count as settled.
@@ -2055,7 +2407,7 @@ def memory_graph_review(
         return {"action": action, "settled": ok, "results": results}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
-    return handler(proposal_id)
+    return _noted(handler(proposal_id), _REVIEW_NOTES)
 
 
 # ── Episodes + consolidation ──────────────────────────────────────────────
@@ -2141,14 +2493,16 @@ def memory_consolidation_candidates(
         description="Consider only entries carrying one of these "
                     "tags.")] = None,
     top_k: Annotated[int, Field(
-        description="How many candidate entries to cluster over.")] = 20,
+        ge=1, description="How many candidate entries to cluster over; "
+                          "positive integer.")] = 20,
     min_cohesion: Annotated[float, Field(
         description="Minimum intra-cluster cosine — raise it to flag only "
                     "near-duplicates.")] = 0.6,
     min_cluster_size: Annotated[int, Field(
-        description="Drop clusters with fewer members than this.")] = 2,
+        ge=1, description="Drop clusters with fewer members than this; "
+                          "positive integer.")] = 2,
     max_clusters: Annotated[int, Field(
-        description="Max clusters returned.")] = 10,
+        ge=1, description="Max clusters returned; positive integer.")] = 10,
 ) -> dict[str, Any]:
     """Find clusters of near-duplicate memories ripe for consolidation —
     the same thing phrased five ways across five sessions. Anchor with a
@@ -2195,10 +2549,10 @@ def memory_consolidate(
 
     Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored}``.
     """
-    return service.consolidate(
+    return _correction_noted(service.consolidate(
         replaces=replaces, new_text=new_text, source=source, tags=tags,
         entry_ids=entry_ids,
-    )
+    ))
 
 
 # ── Knowledge graph ───────────────────────────────────────────────────────
@@ -2217,7 +2571,7 @@ def memory_graph_relate(
     origin: Annotated[str | None, Field(
         description="Who asserted the edge.")] = None,
     confidence: Annotated[float, Field(
-        description="How sure you are, 0..1.")] = 0.8,
+        ge=0, le=1, description="How sure you are, 0..1.")] = 0.8,
     src_type: Annotated[str | None, Field(
         description="Entity kind for ``src``: set when the node is "
                     "created, or filled in on an existing node that has "
@@ -2231,7 +2585,7 @@ def memory_graph_relate(
     "runs-on", "host-1")``. Entities auto-create and resolve through
     aliases; re-asserting an edge bumps its confidence. On a rejected
     relation, pick a suggestion, fall back to ``related-to``, or grow the
-    vocabulary deliberately via ``memory_relation_define``.
+    vocabulary deliberately via ``memory_relation_define`` (full).
 
     Returns: ``{src, relation, dst, confidence, warnings}`` or
     ``{error: "unknown_relation", suggestions}``.
@@ -2502,7 +2856,9 @@ def memory_recall(
     hops: Annotated[int, Field(
         description="Max graph hops. Clamped to 1..5.")] = 3,
     top_k: Annotated[int, Field(
-        description="Bounds only the SEED search (the initial hits that "
+        ge=1,
+        description="Positive integer. Bounds only the SEED search (the "
+                    "initial hits that "
                     "name the walk's start entities), not the result, which "
                     "is capped separately; up to 3 ``texts`` slots go to "
                     "seed hits.")] = 5,
@@ -2519,13 +2875,12 @@ def memory_recall(
     means no seed entity matched — fall back to ``memory_search``.
 
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
-    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
-    per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
-    the deeper hops the walk exists to reach; ``edges`` prefers links
-    between surviving entities; each entity's ``facts`` is capped
-    (currently 5). A fact carrying ``re_verify`` stands on a memory that
-    has since been corrected — the value still stands, but check it before
-    acting. A seed entity's ``constraint`` facts come first, marked
+    ``entities``/``edges``/``texts`` are capped with a per-hop
+    reservation, so a hub seed's own 1-hop ring can't crowd out the
+    deeper hops the walk exists to reach; ``edges`` prefers links between
+    surviving entities; each entity's ``facts`` is capped too. A fact
+    carrying ``re_verify`` stands on a memory that has since been
+    corrected — the value still stands, but check it before acting. A seed entity's ``constraint`` facts come first, marked
     ``pinned``. ``truncated: true`` (with ``searches_issued``) means a
     search ceiling or time budget stopped the walk early: some re-queries,
     and possibly deeper hops, were skipped, so supporting texts and deeper
@@ -2633,7 +2988,8 @@ def document_search(
     query: Annotated[str, Field(
         description="Natural-language description of the passage "
                     "wanted.")],
-    top_k: Annotated[int, Field(description="Max chunks returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max chunks returned; positive integer.")] = 5,
 ) -> dict[str, Any]:
     """Search the reference bank only — ingested documents, no
     conversational memories mixed in. For docs AND memories together, use

@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pseudolife_memory.storage.coordination import CoordinationStore
 from pseudolife_memory.utils.config import AppConfig
 
 _NOW = time.time()
@@ -841,8 +842,11 @@ class FixtureService:
                                     now - 6 * _D)],
                 "roles": {self._MX_PROJECT: {
                     "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
-                                 "granted_by": "maintainer"},
-                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H},
+                                 "granted_by": "maintainer", "reachable": True,
+                                 "reason": None},
+                    # Shows the band's no-listener line.
+                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H,
+                                    "reachable": False, "reason": "listener_expired"},
                 }},
                 "sent": [{
                     "message_id": "f1c0ffee00000000000000000000000a",
@@ -852,7 +856,23 @@ class FixtureService:
                     "wake": {"decision": "rung", "reason": "maintainer_message",
                              "ring_at": now - 2 * _H + 1},
                     "first_read_at": now - 2 * _H + 60,
-                    "acknowledged_at": now - 2 * _H + 420, "repudiated_at": None}],
+                    "acknowledged_at": now - 2 * _H + 420, "repudiated_at": None},
+                    # A longer exchange, so the delegate card's thread pane
+                    # scrolls in the demo.
+                    *[{"message_id": f"f1c0ffee0000000000000000000001{i:02x}",
+                       "recipient_agent_id": relay, "recipient_label": "Release relay",
+                       "created_at": now - 90 * 60 + i * 15 * 60,
+                       "label": "Demo laptop (fixture)", "text": text,
+                       "wake": {"decision": "rung", "reason": "maintainer_message",
+                                "ring_at": now - 90 * 60 + i * 15 * 60 + 1},
+                       "first_read_at": now - 90 * 60 + i * 15 * 60 + 40,
+                       "acknowledged_at": now - 90 * 60 + i * 15 * 60 + 90,
+                       "repudiated_at": None}
+                      for i, text in enumerate((
+                          "After the deploy, check the Board on a phone width too.",
+                          "Then re-run the docs guards and regenerate llms-full.txt; "
+                          "the schema table moved to v55.",
+                          "Hold the release until the box suite reports green."))]],
                 "inbox": [{
                     "message_id": "f1c0ffee00000000000000000000000b",
                     "sender_agent_id": relay, "sender_label": "Release relay",
@@ -861,7 +881,19 @@ class FixtureService:
                     "text": "CI green; merged as d7cfd36b. Deploy started, ETA 10 min. "
                             "I will verify /ui/ live after.",
                     "created_at": now - 2 * _H + 420, "acknowledged_at": None,
-                    "origin": "agent"}],
+                    "origin": "agent"},
+                    *[{"message_id": f"f1c0ffee0000000000000000000002{i:02x}",
+                       "sender_agent_id": relay, "sender_label": "Release relay",
+                       "sender_principal": "laptop",
+                       "reply_to": f"f1c0ffee0000000000000000000001{i:02x}",
+                       "text": text, "created_at": now - 90 * 60 + i * 15 * 60 + 300,
+                       "acknowledged_at": None, "origin": "agent"}
+                      for i, text in enumerate((
+                          "Checked at 375 px: the session list scrolls in its own pane and "
+                          "the search box stays on top. No horizontal scroll.",
+                          "Guards green, llms-full.txt regenerated and committed.",
+                          "Holding. The box suite is about 60% through; I will report the "
+                          "summary line when it finishes."))]],
                 "spent": set(),
                 "fence": 7,
             }
@@ -963,6 +995,84 @@ class FixtureService:
             if entry["delegate"] or entry["coordinator"]:
                 out[project] = entry
         return out
+
+    # ── coordination board: DEMO ONLY ────────────────────────────────────────
+    # A Console board snapshot (GET /api/agents?view=coordination) whose
+    # roster carries v55 board names from every source, an unnamed row (read
+    # as label and short id), the maintainer demo's delegate and coordinator,
+    # unread mail, and enough rows that the roster scrolls in its own pane.
+    # Served only where ``demo_board`` is on: the devserver sets it, while
+    # tests drive the real console_snapshot path through a FixtureService.
+    demo_board = False
+    # (agent_id, label, name, name_source, task, status, pending, minutes ago)
+    _BOARD_ROWS = (
+        ("a7e2c4d1f0b94e5a8c3d2b1a09f8e7d6", "claude-code", "Release relay", "harness",
+         "release v0.21", "CI green; deploying with update -All, ETA 10 min", 0, 2),
+        ("8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b", "claude-code", "Console board roles", "harness",
+         "board roles", "Wiring the Roles band to the passkey flow", 1, 5),
+        ("3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f", "codex", "Forget cascade fix", "harness",
+         "forget cascade", "Reviewing the cascade test matrix", 0, 9),
+        ("c41d0e7a9b2f4c3d8e5f6a7b8c9d0e1f", "claude-code", "Nightly eval triage", "agent",
+         "eval triage", "Waiting on the judge server", 2, 14),
+        ("5e6f7a8b9c0d4e1f2a3b4c5d6e7f8a9b", "codex", "Dream extractor ladder", "title",
+         "extractor ladder", "Ladder run 3 of 5", 0, 21),
+        ("9a8b7c6d5e4f4a3b2c1d0e9f8a7b6c5d", "claude-code", "", "",
+         "", "", 0, 26),
+        ("0f1e2d3c4b5a4968a7b6c5d4e3f2a1b0", "claude-code", "Schema v55 docs pass", "harness",
+         "docs currency", "Regenerating llms-full.txt", 0, 33),
+        ("1a2b3c4d5e6f4a7b8c9d0e1f2a3b4c5d", "codex", "Shim restart loop", "harness",
+         "shim restart", "Reproducing on the box", 0, 38),
+        ("2b3c4d5e6f7a4b8c9d0e1f2a3b4c5d6e", "claude-code", "Graph merge review", "harness",
+         "graph review", "12 proposals left in the queue", 0, 44),
+        ("3c4d5e6f7a8b4c9d0e1f2a3b4c5d6e7f", "claude-code", "Installer passkey prompt", "agent",
+         "installer", "Testing the unattended path", 0, 51),
+        ("4d5e6f7a8b9c4d0e1f2a3b4c5d6e7f8a", "codex", "", "",
+         "lease cli", "Paging the lease listing", 0, 57),
+        ("6f7a8b9c0d1e4f2a3b4c5d6e7f8a9b0c", "claude-code", "Bench Postgres upgrade", "title",
+         "pg upgrade", "Dumping the bench database", 0, 63),
+    )
+
+    def board_snapshot(self, limit=50) -> dict:
+        from pseudolife_memory.storage.coordination import _board_name
+
+        now = time.time()
+        roles = self._mx_live_roles().get(self._MX_PROJECT, {})
+        agents = []
+        for agent_id, label, name, source, task, status, pending, ago in self._BOARD_ROWS:
+            active = now - ago * 60
+            agents.append({
+                "agent_id": agent_id, "principal": "laptop", "label": label,
+                "name": _board_name(agent_id, label, name), "name_source": source,
+                "project": self._MX_PROJECT, "task": task, "status": status,
+                "episode": "", "capabilities": {}, "wake_enabled": True,
+                "created_at": active - 3 * _H, "last_activity": active,
+                "lifecycle": "attached" if ago < 45 else "detached", "children": [],
+                "park_reason": None, "park_needs": "", "park_clear_by": "",
+                "park_resume": "", "park_expires": None, "park_set_at": None,
+                "parent_agent_id": None, "subagent": False, "adapter_available": ago < 45,
+                "status_expires_at": None, "status_overdue": False,
+                "status_set_at": active, "status_age": f"{ago} minutes ago",
+                "status_stale": False, "pending_count": pending,
+            })
+        names = {a["agent_id"]: a for a in agents}
+        leases = []
+        for role in ("coordinator", "delegate"):
+            held = roles.get(role)
+            if not held or held["agent_id"] not in names:
+                continue
+            row = names[held["agent_id"]]
+            leases.append({
+                "name": f"{role}:{self._MX_PROJECT}", "fence": None,
+                "holder": {"agent_id": row["agent_id"], "label": row["label"],
+                           "name": row["name"], "principal": row["principal"],
+                           "purpose": role, "acquired_at": now - 2 * _H,
+                           "expires_at": held["expires_at"], "expected_end": None},
+                "expires_at": held["expires_at"], "expected_end": None,
+                "stale": False, "expired": False, "queued": 0, "queue": []})
+        return {"enabled": True, "available": True, "snapshot_at": now,
+                "agents": agents[:limit], "truncated": len(agents) > limit,
+                "idle_omitted": 4, "leases": leases, "leases_truncated": False,
+                "events": [], "events_truncated": False}
 
     def maintainer_status(self) -> dict:
         out = {"available": bool(self._mx_signing())}
@@ -1118,14 +1228,23 @@ class FixtureService:
             # One role per session: the other role's lease breaks too.
             slots[other] = None
             also_broken = f"{other}:{project}"
-        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"]}
+        # The demo's second session is the one whose listener lapsed.
+        reach = ({"reachable": True, "reason": None}
+                 if agent_id != list(self._MX_SESSIONS)[1]
+                 else CoordinationStore.reachability(
+                     {"attachment_id": None, "lease_until": 0, "wake_enabled": False,
+                      "capabilities": {"ring": True, "ring_armed_until": 0}},
+                     now, role=role))
+        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"],
+                 "reachable": reach["reachable"], "reason": reach["reason"]}
         if role == "delegate":
             entry["granted_by"] = "maintainer"
         slots[role] = entry
         self._mx()["fence"] += 1
         out = {"name": name, "agent_id": agent_id, "fence": self._mx()["fence"],
                "expires_at": entry["expires_at"],
-               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None}
+               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None,
+               **reach}
         if also_broken:
             out["also_broken"] = also_broken
         return out

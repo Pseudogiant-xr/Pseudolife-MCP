@@ -60,15 +60,30 @@ context: the per-turn digest previews up to five pending messages (sender
 label and a 100-character excerpt each), `memory_message(action="receive")`
 returns them in full, and a wake can start a turn in a parked session. A
 session that a hostile page has steered can therefore try to steer its
-peers. The mitigations are provenance-shaped too: every delivery is framed
+peers. The mitigations are provenance-shaped too: agent mail is framed
 as agent-origin under a daemon-verified sender, never as a user
-instruction, and peer text cannot grant user approval; mailbox access
+instruction, and peer text cannot grant user approval; only mail with
+`origin: "maintainer"`, signed by the maintainer's Console passkey, carries
+the maintainer's authority, and only the `receive` result's
+`maintainer_note` proves it; mailbox access
 needs a bearer whose principal is on `coordination.allowed_principals`
 (or a paired machine granted board access) and a registered adapter's own
 credential; wakes are policy-gated and capped; and an open install
 with no token keeps the board dormant. None of that stops a model from
 acting on a persuasive message, so treat peer mail like any other read
 content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).
+
+**The Console signs maintainer actions.** Maintainer mail and board role
+changes are proven by a passkey tap in the Console, so script running in
+the Console's origin could ask for a challenge at the moment the maintainer
+expects a prompt. Every `/ui/` response therefore carries a strict
+Content-Security-Policy (`default-src 'self'; script-src 'self'; style-src
+'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors
+'none'; form-action 'self'`), `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` (JSON
+API answers carry `nosniff` too). The Console has no inline script: its
+theme bootstrap is served as `/ui/theme.js`.
 
 ## Mechanism → threat map
 
@@ -120,9 +135,11 @@ problem than the limitation it hides.
   novel malicious content passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
-  (the token determines the writer id) but there is no signing, no
-  attestation, and no way to prove after the fact that a given writer
-  really made a given write. This is roadmap, not a promise.
+  (the token determines the writer id) but agent writers have no signing,
+  no attestation, and no way to prove after the fact that a given writer
+  really made a given write. This is roadmap, not a promise. The one
+  signed channel is the maintainer's: maintainer mail and board role
+  changes carry a WebAuthn passkey assertion made in the Console.
 - **Ranking as a defense.** Retrieval scoring is optimizable by an
   attacker who can influence stored text. Treat rank as convenience, not
   as a trust signal.

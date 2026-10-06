@@ -2,6 +2,9 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
+import subprocess
+import tomllib
 
 import pytest
 
@@ -16,11 +19,11 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+    assert inventory.PHASE1_ORACLE == "3c01bb31abd60178e15dea99adda369b4bbf92fc"
     result = inventory.validate_phase1()
-    assert result["test_files"] == 419
+    assert result["test_files"] == 423
     assert result["candidate_nodes"] == 13
-    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 349}
+    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 353}
 
 
 def test_legacy_inventory_retains_its_real_pin(inventory):
@@ -31,7 +34,19 @@ def test_legacy_inventory_retains_its_real_pin(inventory):
     assert result["buckets"] == {"oracle": 68, "candidate": 1, "internal": 337}
 
 
-@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 419)])
+def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
+    root = inventory.ROOT
+    pinned = subprocess.check_output(["git", "show", inventory.PHASE1_ORACLE + ":pyproject.toml"], cwd=root)
+    version = tomllib.loads(pinned.decode())["project"]["version"]
+    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text())
+    lock = tomllib.loads((root / "rust/Cargo.lock").read_text())
+    member = next(item for item in lock["package"] if item["name"] == "pseudolife-stdio")
+    runtime = re.search(r'pub const PACKAGE_VERSION: &str = "([^"]+)";',
+                        (root / "rust/shim/src/lifecycle.rs").read_text()).group(1)
+    assert crate["package"]["version"] == member["version"] == runtime == version
+
+
+@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 423)])
 def test_newer_checkout_test_cannot_shift_either_pin(inventory, monkeypatch, tmp_path, phase1, count):
     newer = tmp_path / "test_newer_master_surface.py"
     newer.write_text("def test_newer():\n    pass\n", encoding="utf-8")
@@ -85,8 +100,8 @@ def test_both_audits_reject_incomplete_candidates(inventory, monkeypatch, phase1
 def test_phase1_scoped_equivalents_preserve_complete_ownership(inventory):
     manifest = json.loads(inventory.source("rust/phase1-test-buckets.json"))
     functions = manifest["phase1_functions"]
-    assert len(functions) == 189
-    assert manifest["phase1_function_counts"] == {"candidate": 8, "oracle": 1, "internal": 180}
+    assert len(functions) == 191
+    assert manifest["phase1_function_counts"] == {"candidate": 8, "oracle": 3, "internal": 180}
     scoped = [item for item in functions if item["bucket"] == "internal" and item["scope"] == "phase1"]
     assert len(scoped) == 125
     assert all(item["required_equivalent"] or item.get("equivalence_evidence") for item in scoped)

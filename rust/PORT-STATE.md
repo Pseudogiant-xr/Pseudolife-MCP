@@ -1,9 +1,9 @@
 # Rust port state
 
-The historical phase 1 close-out oracle is
-`f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
-Phase 2b master integration and a new oracle pin remain pending after #546 lands;
-the current source constants retain this historical pin until then.
+The current phase 1 oracle is
+`3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55).
+Historical phase 1 close-out evidence retains
+`f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54); existing receipts keep their executed identities.
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
 existing receipts retain their original source identities.
 The historical phase 0b oracle remains
@@ -30,6 +30,23 @@ Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate clos
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
+
+## Phase 2c publication snapshot
+
+Snapshot: 2026-10-06 18:33 AEDT. PRs, current remote branch refs and Rust shim workflow runs were queried with `gh`; a run is current only when its recorded head matches the branch head below. `—` means no Rust workflow run for that published head was found.
+
+| Branch | PR | Head | Base (current remote ref) | Rust workflow run / status | Next action |
+|---|---|---|---|---|---|
+| `codex/rust-phase1` | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), open draft | `ccc2f890` | `master` @ `3c01bb31` | No run @ `ccc2f890`; #37281778651 succeeded @ `d3f0022b` (stale) | Resume the pending merge-forward, resolve the `CHANGELOG.md` conflict, then obtain Rust CI on the resulting head. |
+| `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), open draft | `db0d59cb` | `codex/rust-phase1` @ `ccc2f890` | No run @ `db0d59cb`; #37315503446 failed @ `ac0c64a1` (historical, not this head) | Wait for #560's merge-forward to settle, align the base, then obtain Rust CI for this head. |
+| `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), open draft | `9861ced9` | `codex/rust-phase2b-version` @ `db0d59cb` | #37428816392 failed @ `9861ced9` | Inspect the failing jobs, repair, and rerun CI on the updated head. |
+| `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), open draft | `a6cdf024` | `codex/rust-phase2b-version` @ `db0d59cb` | #37428908416 in progress @ `a6cdf024` | Let the run finish; address any failure on this head. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), open draft | `267ee9a2` | `codex/rust-phase2b-version` @ `db0d59cb` | #37429259333 queued @ `267ee9a2` | Await the queued run and address any failure on this head. |
+| `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), open draft | `7171d6cc` | `codex/rust-phase2b-version` @ `db0d59cb` | #37429570773 queued @ `7171d6cc` | Await the queued run and address any failure on this head. |
+| `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), open draft | `2c026331` | `codex/rust-phase2b-version` @ `db0d59cb` | #37429996211 queued @ `2c026331` | Await the queued run and address any failure on this head. |
+| `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), open draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881 queued @ `1ff47a1a` | Await the queued run; preserve #589 until the dependent split is complete. |
+| `codex/rust-phase2b-fixes` | — (commits folded into #560; redundant worktree archived with a recoverable snapshot and private patch) | `7f890590` | `master` @ `3c01bb31` (local ref; absent on origin) | #37242617729 failed @ `7f890590` before folding | Validate through #560's resulting head; no redundant PR. |
+| `codex/rust-phase2` | [#589](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/589), open draft | `c9705e88` | `codex/rust-phase1` @ `ccc2f890` | #37253327797 succeeded @ `c9705e88` | Preserve #589 until the dependent fixture/evidence split is complete. |
 
 ## Decisions and constraints
 
@@ -480,3 +497,23 @@ platform. The [Linux receipt](../evals/results/rust-phase2b-codex-delivery-4173e
 binds these results to `4173ef98` and retains the initial zero-test library
 filters as unaccepted setup history. Current-master integration and the final
 integrated-head review remain pending; no parity status changes.
+
+## Current-master integration (2026-10-06)
+
+Merged master `3c01bb31` forward while preserving all nine close-out commits
+through `ccc2f890`. The only textual conflict was CHANGELOG.md; both the
+experimental Unreleased candidate entry and upstream release entries remain.
+Python production, existing tests, ops, plugin and docs match upstream.
+The genuine selected oracle is Python 0.17.0/schema 55; the crate, lockfile
+member and lifecycle version now match it. Both inventory generations remain
+separate: Phase 0b retains 406 files at its historical pin; Phase 1 names
+423 files, 191 function rows and the existing 13 routed nodes. The two new
+upstream shim refusal cases remain oracle-only pending candidate evidence.
+Historical startup contracts and captures keep their original identities;
+their selected startup source blobs match current master. Current-head
+Rust/Parity CI, candidate-routed suites and independent review remain pending.
+
+The closed phase 0b worktree is clean at master `3c01bb31`; its remote
+branch is deleted after #546 merged. SHIM-WAKE-REASON is `ported` under
+the maintainer's phase 2c decision and retained full-range Unicode proof;
+this does not complete current integrated-head runtime acceptance.

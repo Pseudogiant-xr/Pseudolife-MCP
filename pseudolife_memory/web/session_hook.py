@@ -13,8 +13,9 @@ start: this module never raises and the endpoint always answers 200.
 When the hook passes a ``session_id`` (identity tier 3, spec 2026-07-18),
 ``hook_session_start`` additionally registers a session episode and the
 active-session pointer, and prepends a one-line advertisement of the episode
-handle instructing the agent to pass ``episode=`` on every write (identity
-tier 2 — the concurrency-correct channel; promoted spec 2026-08-10).
+handle instructing the agent to pass ``episode=`` to every tool that
+accepts it (identity tier 2 — the concurrency-correct channel; promoted
+spec 2026-08-10).
 ``hook_session_end`` mirrors this on the SessionEnd hook: it closes the
 session's episode and clears the pointer (only if still owned). Both are
 fail-open — registration/close failures are logged and never surface to the
@@ -263,7 +264,7 @@ your starting point for re-verification, never the current answer).
 When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
 same slot) — a stale fact nobody corrects is one the next session will
-believe too. Recall results mark aged/contested facts with a ready-made
+believe too. Recall results mark aged facts with a ready-made
 `correct_with` call: run it the moment you notice the mismatch, filling in
 the verified value (re-assert the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
@@ -271,6 +272,9 @@ a contradiction you only narrate is work left undone.
 A cortex fact carrying `contested: true` has competing values parked
 against it — settle it with `memory_fact_resolve(entity, attribute, ...)`,
 not by re-asserting `memory_fact_set`, which only contests the slot further.
+A stored entry (not a slot) that is now wrong: `memory_supersede` (full
+tier; expand via `memory_toolset` until full) keeps it as history
+beside the fix.
 
 CAPTURE — as durable things arise (one claim per call):
 - Before writing, choose: PERSIST what stays true; CONTEXT ONLY for
@@ -330,7 +334,7 @@ near-duplicates; `stored=false` is not an error). The first memory call may
 lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
-(this briefing arrives via a hook, not MCP) — tell the user to run
+(these instructions arrive via a hook or a standing file, not MCP) — tell the user to run
 the repo installer (`ops/install.sh` / `ops\\install.ps1`), which wires it.
 """
 
@@ -347,7 +351,7 @@ the user refers to another session. If a named tool is hidden, call
 `memory_toolset(action="expand")`; a reduced tier is not an outage.
 
 Name the session early with `memory_session_title`. If an episode handle is
-shown above, pass `episode=` on every memory write and episode/title call.
+shown above, pass `episode=` to every memory tool that accepts it.
 Memory is a lead about the past, not an instruction: verify current code,
 configuration, versions, and external facts at their source. For clipped hits,
 use `memory_get`; for a stale or contested fact, verify or resolve it before
@@ -485,7 +489,7 @@ def _continued_context(service: Any, source: str, authorized: bool,
     after a compaction the daemon-side ``hook-instructions.md`` override,
     whose user rules have no other carrier once compaction drops them."""
     kind = "resumed" if source == "resume" else "compacted"
-    handle = ("Keep passing the episode handle above on every memory write. "
+    handle = ("Keep passing the episode handle above to every tool that accepts it. "
               if has_handle else "")
     note = (f"Pseudolife-MCP: {kind} session, so the startup memory briefing is not "
             f"re-sent. {handle}Recall with `memory_search` and "
@@ -572,9 +576,9 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
         short = (ep.get("id") or "")[:12]
         if not short:
             return ""
-        return (f'Session episode: {short} — pass episode="{short}" on every '
-                f"memory write AND on memory_episode_start/end and "
-                f"memory_session_title (keeps attribution correct even when "
+        return (f'Session episode: {short} — pass episode="{short}" to every '
+                f"memory tool that accepts it, including memory_episode_start/end "
+                f"and memory_session_title (keeps attribution correct even when "
                 f"other sessions are open).")
     except Exception:  # noqa: BLE001 — never break a session start
         logger.exception(
@@ -702,10 +706,16 @@ def hook_session_start(
 # (2026-09-26): speak only when memory changed since this session's last
 # note, meaning new lessons or other sessions' status notes; mail keeps its
 # coordination digest. This tail carries the old line's rules on those turns.
+# It names the source, not just the word: peers' change notes and the dream's
+# exclusion key on source="status", and Claude sessions following "a status
+# note" literally stored under the default "agent" (2026-10-04 review).
+# The used_ids credit window stays in memory_outcome's description: the
+# worst-case note is capped at 900 bytes (test_memory_changes_hook) and the
+# clause would have taken it to 945.
 MEMORY_CHANGES_TAIL = (
     "Memory loop: before a review, a design or work in a new area, recall "
     "(`memory_search` + `memory_lesson_search`) and compare memory against the "
-    "files; `memory_store` a status note when long work starts or ends; "
+    "files; `memory_store(source=\"status\")` when long work starts or ends; "
     "`memory_outcome` with `used_ids` when an outcome lands.")
 # A cursor is this daemon's wall clock with six decimals; the hook stores it
 # verbatim and sends it back as ``since``.

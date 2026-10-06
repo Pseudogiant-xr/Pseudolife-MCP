@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -30,9 +31,11 @@ logger = logging.getLogger(__name__)
 _PARAMETERS = {
     "context": {"agent_id", "nonce", "read_only"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled",
-                 "parent_thread"},
+                 "parent_thread", "name", "name_source"},
+    # v55: ``name`` on update is the agent's own; the heartbeat's is the
+    # harness's (the shim's adapter, from the title the harness shows).
     "update": {"project", "task", "status", "expect", "children", "park_reason", "park_needs",
-               "park_clear_by", "park_resume", "park_expires"},
+               "park_clear_by", "park_resume", "park_expires", "name"},
     "agents": {"project", "task", "limit"},
     # v45 resource leases. ``leases`` lists with the bearer alone, like the
     # awareness roster; acquiring and releasing act as the caller's instance.
@@ -40,7 +43,7 @@ _PARAMETERS = {
     "release": {"name"},
     "leases": {"name", "limit"},
     "attach": {"attachment_id", "wake_enabled", "ring", "ring_armed_until"},
-    "heartbeat": {"attachment_id", "generation", "active", "ring_armed_until"},
+    "heartbeat": {"attachment_id", "generation", "active", "ring_armed_until", "name"},
     "detach": {"attachment_id", "generation"},
     "send": {"to", "text", "request_id", "reply_to", "clears", "urgent"},
     "receive": {"after", "limit", "attachment_id", "generation"},
@@ -105,19 +108,28 @@ PUBLIC_ERROR_CODES = frozenset({
     "invalid_parent", "child_send_refused",
     # v54: ``daemon``, ``maintainer`` or a reserved row named as a recipient.
     "recipient_reserved",
+    # v55: a board name too long, malformed, from a source the caller may
+    # not claim, or naming a reserved sender.
+    "invalid_name",
 })
 
 
 class CoordinationRefused(ValueError):
     """What ``dispatch`` raises: a stable public code and, for some
     refusals, a short public ``detail`` the caller can act on (the
-    candidates an ambiguous prefix matched, the size of a refused burst).
-    Its text is ``code`` or ``code: detail``, which is what the MCP tool
-    surfaces; the REST route sends the two as separate fields."""
+    candidates an ambiguous prefix matched, the size of a refused burst, the
+    parameter a call lacked). Its text is ``code`` or ``code: detail``; the
+    REST route sends the two as separate fields. ``param``, ``accepted``
+    and ``action`` name the refused parameter, its allowed values and the
+    action, where known: the MCP tool error carries them as fields."""
 
-    def __init__(self, code: str, detail: str | None = None):
+    def __init__(self, code: str, detail: str | None = None, *, param: str | None = None,
+                 accepted: list[str] | None = None, action: str | None = None):
         self.code = code
         self.detail = detail
+        self.param = param
+        self.accepted = accepted
+        self.action = action
         super().__init__(code if detail is None else f"{code}: {detail}")
 
 
@@ -253,10 +265,9 @@ PARK_GATE_MESSAGE = (
     "still bring fixes? Park needs_approval with park_clear_by set to the "
     "reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires "
     "a live listener. Check the sender's wake receipt; no_path means mail is "
-    "queued for receive on a later turn. For waits over 59 minutes, especially "
-    "needs_approval waiting on maintainer, arm wait-mail in the background or "
-    "keep the Codex doorbell active; otherwise record that you are reachable "
-    "on your next turn.")
+    "queued for receive on a later turn. Claude Code's Stop hook keeps listening "
+    "while this session stays open, and a Codex thread needs its doorbell active; "
+    "without either, record that you are reachable on your next turn.")
 
 
 def park_gate(service, headers: Mapping[str, str], *, agent, since,
@@ -380,6 +391,17 @@ def public_detail(exc: Exception) -> str | None:
         return None
     detail = exc.detail
     return detail if isinstance(detail, str) and exc.code in PUBLIC_ERROR_CODES else None
+
+
+def public_refusal(exc: Exception) -> CoordinationRefused:
+    """The refusal ``exc`` becomes at the boundary: its public code and,
+    beside that code only, its detail, parameter, accepted values and
+    action. Never the text of an unexpected exception."""
+    fields = {}
+    if isinstance(exc, (CoordinationError, CoordinationRefused)) and exc.code in PUBLIC_ERROR_CODES:
+        fields = {key: getattr(exc, key, None) for key in ("param", "accepted", "action")}
+    return CoordinationRefused(public_error(exc), public_detail(exc),
+                               **{k: v for k, v in fields.items() if v is not None})
 
 
 def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token=None) -> str:
@@ -511,6 +533,26 @@ def _store(service):
                                  service.config.coordination, "maintainer_principals", ()))
 
 
+_PARAMETER_NAME = re.compile(r"[a-z][a-z0-9_]{0,39}")
+
+
+def _unexpected(action: str, names, accepted: list[str], *,
+                homes: dict[str, list[str]] | None = None) -> CoordinationRefused:
+    """``unexpected_parameter`` naming what ``action`` does not take, what
+    it does and, given ``homes`` (action -> parameters), which actions take
+    the first refused one. Only identifier-shaped names are echoed: a REST
+    caller's keys are its own text."""
+    shown = sorted(n for n in names if isinstance(n, str) and _PARAMETER_NAME.fullmatch(n))
+    takes = f"; it takes {', '.join(accepted)}" if accepted else "; it takes no parameters"
+    detail = f"{action} does not take {', '.join(shown) if shown else 'these parameters'}{takes}"
+    where = [other for other, params in (homes or {}).items() if shown and shown[0] in params]
+    if where:
+        detail += f"; {shown[0]} is for {' or '.join(where)}"
+    return CoordinationRefused("unexpected_parameter", detail,
+                               param=shown[0] if shown else None, accepted=accepted,
+                               action=action)
+
+
 def _dispatch(service, action: str, parameters: dict, *, headers=None,
              principal: str | None = None) -> dict:
     """Run one immediate operation; ``principal`` is transport-validated only."""
@@ -528,18 +570,27 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
     if not principal_admitted(cfg, principal):
         raise ValueError("principal_not_allowed")
     if action not in _PARAMETERS:
-        raise ValueError("unknown_coordination_action")
+        # The supplied action is not echoed: it is caller text.
+        raise CoordinationRefused(
+            "unknown_coordination_action", f"use one of {', '.join(sorted(_PARAMETERS))}",
+            accepted=sorted(_PARAMETERS))
     binding = None if action == "context" else bound_identity(headers)
-    if set(parameters) - _PARAMETERS[action]:
-        raise ValueError("unexpected_parameter")
-    if _REQUIRED.get(action, set()) - set(parameters):
-        raise ValueError("missing_parameter")
+    extra = set(parameters) - _PARAMETERS[action]
+    if extra:
+        raise _unexpected(action, extra, sorted(_PARAMETERS[action]))
+    missing = sorted(_REQUIRED.get(action, set()) - set(parameters))
+    if missing:
+        raise CoordinationRefused("missing_parameter", f"{action} needs {', '.join(missing)}",
+                                  param=missing[0], action=action)
     if action == "context":
         if "read_only" in parameters and type(parameters["read_only"]) is not bool:
-            raise ValueError("unexpected_parameter")
+            raise CoordinationRefused("unexpected_parameter", "read_only must be true or false",
+                                      param="read_only", action=action)
         supplied = set(parameters) - {"read_only"}
         if supplied and supplied != {"agent_id", "nonce"}:
-            raise ValueError("missing_parameter")
+            raise CoordinationRefused(
+                "missing_parameter", "context needs agent_id and nonce together, or neither",
+                param=sorted({"agent_id", "nonce"} - supplied)[0], action=action)
         for key in supplied:
             value = parameters[key]
             if (not isinstance(value, str) or len(value) != 32
@@ -698,7 +749,20 @@ def console_snapshot(service, *, limit=50) -> dict:
         with service._coordination_lock:
             return _store(service).console_snapshot(principal, limit=limit)
     except Exception as exc:
-        raise CoordinationRefused(public_error(exc), public_detail(exc)) from None
+        raise public_refusal(exc) from None
+
+
+def title_board_names(service, episodes, title, *, principal=None) -> int:
+    """Name the board rows of a retitled session (v55, source ``title``):
+    ``episodes`` are the session keys the rename resolved. The caller
+    (``set_session_title``) has released the service lock and ignores any
+    failure: the board side never fails a retitle."""
+    cfg = service.config.coordination
+    if not cfg.enabled or not getattr(service, "_db_url", None) or service._storage is None:
+        return 0
+    _ensure_tier(service, full=False)
+    with service._coordination_lock:
+        return _store(service).title_names(episodes, title, principal=principal)
 
 
 def send_recipients(result) -> list[str]:
@@ -726,7 +790,7 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
                 service._ensure_init()
             return _dispatch(service, action, parameters, headers=headers, principal=principal)
     except Exception as exc:
-        raise CoordinationRefused(public_error(exc), public_detail(exc)) from None
+        raise public_refusal(exc) from None
 
 
 # How long a model's claim holds between renewals. A model renews by claiming
@@ -744,10 +808,26 @@ def _present(**fields):
     return {k: v for k, v in fields.items() if v is not None}
 
 
+# What each memory_agents action takes, by the tool's own parameter names
+# (the board's REST names differ: a claim's lease is ``name``, its status
+# ``purpose``). A refusal lists them and says where a misplaced one goes.
+_AGENT_PARAMETERS = {
+    "list": ["project", "task"],
+    "update": ["project", "task", "status", "expect", "children", "name", "park_reason",
+               "park_needs", "park_clear_by", "park_resume", "park_expires"],
+    "claim": ["lease", "worktree", "repository_id", "path", "status", "expect"],
+    "release": ["lease", "worktree", "repository_id", "path"],
+}
+
+
+def _agents_unexpected(action: str, names) -> CoordinationRefused:
+    return _unexpected(action, names, _AGENT_PARAMETERS[action], homes=_AGENT_PARAMETERS)
+
+
 def agents(service, *, action="list", project=None, task=None, status=None, lease=None,
            worktree=None, repository_id=None, path=None,
            expect=None, children=None, park_reason=None, park_needs=None, park_clear_by=None,
-           park_resume=None, park_expires=None):
+           park_resume=None, park_expires=None, name=None):
     """Model surface: scope is relevance, never an identity or permission key.
 
     ``claim`` and ``release`` are session-held resource leases (v45): a
@@ -759,9 +839,17 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
         # Only the local shim can inspect the user's checkout. HTTP tool
         # callers must prepare the identity/path on their own host instead.
         raise ValueError("file_claim_requires_local_client")
+    if action not in _AGENT_PARAMETERS:
+        raise CoordinationRefused(
+            "unknown_coordination_action", f"use one of {', '.join(_AGENT_PARAMETERS)}",
+            accepted=list(_AGENT_PARAMETERS))
     if repository_id is not None or path is not None:
-        if action not in {"claim", "release"} or lease is not None:
-            raise ValueError("unexpected_parameter")
+        if action not in {"claim", "release"}:
+            raise _agents_unexpected(action, _present(repository_id=repository_id, path=path))
+        if lease is not None:
+            raise CoordinationRefused(
+                "unexpected_parameter", f"{action} takes one selector: lease, or "
+                "repository_id with path, not both", param="lease", action=action)
         from pseudolife_memory.repository_claims import file_claim_name
         lease = file_claim_name(repository_id, path)
         file_claim = {"repository_id": repository_id, "path": path}
@@ -769,11 +857,11 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
                     park_expires=park_expires)
     if park_reason is not None:
         park["park_reason"] = park_reason or None
-    if (children is not None or park) and action != "update":
-        raise ValueError("unexpected_parameter")
+    if (children is not None or park or name is not None) and action != "update":
+        raise _agents_unexpected(action, {**_present(children=children, name=name), **park})
     if action == "list":
         if status is not None or lease is not None or expect is not None:
-            raise ValueError("unexpected_parameter")
+            raise _agents_unexpected(action, _present(status=status, lease=lease, expect=expect))
         from pseudolife_memory.writer_context import _http_request_headers
         headers = _http_request_headers() or {}
         if not headers.get("x-pl-agent"):
@@ -781,18 +869,20 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
         return dispatch(service, "agents", _present(project=project, task=task))
     if action == "update":
         if lease is not None:
-            raise ValueError("unexpected_parameter")
+            raise _agents_unexpected(action, ["lease"])
         return dispatch(service, "update", {**_present(project=project, task=task, status=status,
-                                                       expect=expect, children=children), **park})
-    if action not in {"claim", "release"}:
-        raise ValueError("unknown_coordination_action")
+                                                       expect=expect, children=children,
+                                                       name=name), **park})
     if lease is None:
-        raise ValueError("missing_parameter")
+        raise CoordinationRefused("missing_parameter",
+                                  f"{action} needs lease, or repository_id with path "
+                                  "(worktree with path through a local shim)",
+                                  param="lease", action=action)
     if project is not None or task is not None:
-        raise ValueError("unexpected_parameter")
+        raise _agents_unexpected(action, _present(project=project, task=task))
     if action == "release":
         if status is not None or expect is not None:
-            raise ValueError("unexpected_parameter")
+            raise _agents_unexpected(action, _present(status=status, expect=expect))
         result = dispatch(service, "release", {"name": lease})
         return {**result, "file_claim": file_claim} if file_claim else result
     ttl = CLAIM_LEASE_TTL if lease.startswith("claim:") else SESSION_LEASE_TTL

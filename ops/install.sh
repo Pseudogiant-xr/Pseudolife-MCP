@@ -1356,7 +1356,8 @@ fi
 # here gives a fresh machine the session briefing and per-turn hooks from
 # the plugin (section 9 then skips the settings.json hooks). Idempotent: an
 # installed plugin is left alone — its cache moves through /plugin update,
-# and the daemon's session briefing says when it is behind.
+# and the daemon's session briefing says when it is behind — except that a
+# marketplace recorded with the old github source is moved to HTTPS.
 CLAUDE_PLUGIN_ID="pseudolife-memory@pseudolife-mcp"
 CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
 # The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
@@ -1377,8 +1378,31 @@ claude_plugin_installed_version() {
     { grep -A 12 "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null \
         | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; } || true
 }
+claude_marketplace_https() {
+    # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
+    # which Claude Code records as a github source and refreshes over SSH:
+    # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
+    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
+    # Code's own CLI (settings.json backed up and edited first), prints one
+    # line, and prints nothing when no marketplace is recorded.
+    mk_py="$(installer_python)"
+    if [ -z "$mk_py" ]; then
+        if grep -A 3 "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json" 2>/dev/null | grep -q '"github"'; then
+            echo "WARNING: the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps" >&2
+        fi
+        return 0
+    fi
+    if mk_out=$("$mk_py" "$repo/ops/plugin_marketplace.py"); then
+        [ -z "$mk_out" ] || step "$mk_out"
+    else
+        echo "WARNING: ${mk_out:-ops/plugin_marketplace.py failed}" >&2
+    fi
+}
 install_claude_plugin() {
     case " $CLIENTS " in *" claude "*) ;; *) return 0 ;; esac
+    if [ "$CLAUDE_PLUGIN" != skip ] && command -v claude >/dev/null 2>&1; then
+        claude_marketplace_https
+    fi
     # An installed plugin is reported as such even under skip: the ladder
     # line must agree with the hook-ownership lines section 9 derives from
     # the same record.

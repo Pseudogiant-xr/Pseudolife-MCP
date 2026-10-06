@@ -2,11 +2,13 @@
 
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
 detach, send, receive (first read), acknowledge, attempt, prune, restore
-recovery, operator rebind and operator redaction, and the v45 resource
+recovery, operator rebind and operator redaction, the v45 resource
 leases: acquire (grant, queue, renew), release, operator break, and the
-settling any lease call, listing, prune or recovery does (expire, grant).
+settling any lease call, listing, prune or recovery does (expire, grant),
+and the v55 naming of rows by a session retitle (``title_names``).
 Every one of them except a heartbeat and a plain lease renewal appends to
-the audit log (``coordination_events``) in its own transaction; see
+the audit log (``coordination_events``) in its own transaction; a heartbeat
+that changes the row's name (v55) logs that one change. See
 ``_append``. A renewal that changes a lease's purpose or estimate is
 logged. Only redaction (a send event's ``body``, which is outside the hash)
 and prune's retention cut change existing log rows, both under the chain
@@ -121,6 +123,16 @@ class CoordinationConnection:
 MAX_TEXT_BYTES = 8192
 MAX_LABEL = 120
 MAX_SCOPE = 120
+# v55: the name a row shows on the board, bounded like the label. Sources in
+# ascending precedence: a lower one never replaces a name a higher one set,
+# an equal or higher one always does. 'agent' is highest so a session can
+# correct a stale harness title (after /clear the shim still reads the old
+# transcript; delegate review of #582, 2026-10-05). Clients may claim only
+# 'agent' and 'harness'; 'title' is the daemon's, from a session retitle.
+MAX_NAME = MAX_LABEL
+NAME_SOURCES = ("", "title", "harness", "agent")
+_NAME_RANK = {source: rank for rank, source in enumerate(NAME_SOURCES)}
+CLIENT_NAME_SOURCES = frozenset({"agent", "harness"})
 # v47: the subagents a session names under its own address. Room for a
 # short work-item label each, and a list small enough to read at a glance
 # in a peer listing, like the 240-character status.
@@ -220,9 +232,10 @@ WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
 # Codex: the doorbell (``codex queue``) serves CLI and desktop threads alike
 # but watches a thread only from the thread's first Pseudolife call after the
 # MCP server starts, and turns itself off after a failed queue. Claude Code:
-# the Stop hook's 59-minute wait or a background wait-mail; a Claude Desktop
-# Code-tab session also takes its host's session send_message, which needs
-# neither the board nor a listener.
+# the Stop hook's watcher, armed at every turn end for as long as the session
+# stays open (14 days; 59 minutes before 2026-10-05), or a background
+# wait-mail; a Claude Desktop Code-tab session also takes its host's session
+# send_message, which needs neither the board nor a listener.
 FALLBACK_CODEX = (
     "Mail is queued for receive on the thread's next turn and rings once its Codex "
     "doorbell re-arms (the shim watches a thread from its first Pseudolife call after "
@@ -230,9 +243,22 @@ FALLBACK_CODEX = (
     "session's window.")
 FALLBACK_CLAUDE = (
     "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
-    "wait or wait-mail re-arms. Only if it is a Claude Desktop Code-tab session (the "
+    "listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the "
     "board cannot tell) does its host's session send_message reach it now; a Claude Code "
     "CLI session is reached by the maintainer typing into its window.")
+# What a role grant tells the maintainer or operator when the holder has no
+# live wake path now (maintainer requirement 2026-10-05: the delegate above
+# all must be reachable). Keyed by ``_listener_path``'s reasons.
+UNREACHABLE_REASONS = {
+    "listener_expired": "its listener lapsed",
+    "listener_unknown": "its listener has not reported yet",
+    "wake_disabled": "it has no wake listener",
+}
+UNREACHABLE_WARNING = (
+    "The new {role} has no live wake path now ({reason}): maintainer mail to it "
+    "waits for its next turn. A Claude Code session listens again when its turn "
+    "ends, a Codex thread once its doorbell re-arms; a client older than the "
+    "always-listening plugin stops 59 minutes after a turn until it is updated.")
 # ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
 # the board cannot tell one from a CLI session, so the text says so.
 FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
@@ -567,12 +593,18 @@ class CoordinationError(ValueError):
     """Stable public code; never includes supplied credentials or bodies.
 
     ``detail`` is a short public elaboration a caller can act on (the
-    candidates an ambiguous prefix matched, the size of a refused burst):
-    id prefixes and counts only, never a body, a status or a credential."""
+    candidates an ambiguous prefix matched, the size of a refused burst, the
+    field and rule a value broke): id prefixes, counts, field names and
+    limits only, never a body, a status or a credential. ``param`` names the
+    refused field and ``accepted`` lists its allowed values, where the
+    refusal has one."""
 
-    def __init__(self, code: str, detail: str | None = None):
+    def __init__(self, code: str, detail: str | None = None, *,
+                 param: str | None = None, accepted: list[str] | None = None):
         self.code = code
         self.detail = detail
+        self.param = param
+        self.accepted = accepted
         super().__init__(code)
 
 
@@ -586,6 +618,14 @@ def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
         raise CoordinationError(f"invalid_{field}")
     return value
+
+
+def _board_name(agent_id: str, label: str | None, name: str | None) -> str:
+    """What the board shows for a row (v55): its name, else its label and
+    the first 8 characters of its id, so rows that all registered as
+    "claude-code" still tell apart."""
+    short = agent_id[:8]
+    return name or (f"{label} {short}" if label else short)
 
 
 def _excerpt(text: Any) -> str:
@@ -898,9 +938,12 @@ def looks_like_secret(text: str) -> bool:
     return secret_kind(text) is not None
 
 
-def _refuse_secret(text: str) -> None:
+def _refuse_secret(text: str, field: str) -> None:
+    """Refuse credential-shaped ``text``, naming the field, never the text."""
     if looks_like_secret(text):
-        raise CoordinationError("secret_like_body")
+        raise CoordinationError(
+            "secret_like_body", f"{field} looks like a credential, which the board never "
+            "keeps; remove it and retry", param=field)
 
 
 def _hash(credential: str) -> str:
@@ -1325,6 +1368,11 @@ class CoordinationStore:
         result["subagent"] = row.get("parent_thread") is not None
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
+        # v55: what the board shows for the row, and who set it. An unnamed
+        # row (name_source "") reads as its label and short id, so rows that
+        # all registered as "claude-code" still tell apart.
+        result["name"] = _board_name(row["agent_id"], row["label"], row.get("name"))
+        result["name_source"] = row.get("name_source") or ""
         return result
 
     @staticmethod
@@ -1343,6 +1391,59 @@ class CoordinationStore:
             raise CoordinationError("invalid_label")
 
     @staticmethod
+    def _check_name(name):
+        """A v55 board name from a client: one line of at most MAX_NAME
+        characters that names no reserved sender and holds nothing shaped
+        like a credential (hashed into the audit chain for good). Returned
+        stripped; empty clears. No control or format character either
+        (Unicode category C: bidi overrides, zero-width marks, C1): the
+        reserved-word check reads past them, so one could make a name
+        render as a reserved word (review of 2026-10-05)."""
+        _string(name, MAX_NAME, "name")
+        if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
+            raise CoordinationError("invalid_name")
+        _refuse_secret(name, "name")
+        return name.strip()
+
+    @staticmethod
+    def _title_name(title):
+        """The name a session title gives (v55), or ``None`` when it gives
+        none: the title is cleaned to one bounded line, and one that names a
+        reserved sender or looks like a credential names nothing (a retitle
+        must not fail over its board side)."""
+        from pseudolife_memory.harness_names import clean_name
+        name = clean_name(title)
+        if name is None or reserved_name(name) or looks_like_secret(name):
+            return None
+        return name
+
+    @staticmethod
+    def _name_change(row, name, source, now):
+        """The columns that apply ``name`` from ``source`` to ``row`` under
+        the v55 precedence, or ``{}`` when nothing changes: a lower source
+        never replaces a higher one's name, an equal or higher one does. An
+        empty name clears only the caller's own source's name; an agent's
+        cleared name gives way to the newest harness title (``harness_name``)."""
+        current = row.get("name_source") or ""
+        if _NAME_RANK[source] < _NAME_RANK.get(current, 0):
+            return {}
+        if not name:
+            if current != source:
+                return {}
+            kept = (row.get("harness_name") or "") if source == "agent" else ""
+            return {"name": kept, "name_source": "harness" if kept else "", "name_set_at": now}
+        if (row.get("name") or "") == name and current == source:
+            return {}
+        return {"name": name, "name_source": source, "name_set_at": now}
+
+    def _name_event(self, row, naming, principal, *, actor="agent"):
+        return self._event(
+            "update", {"fields": {k: naming[k] for k in ("name", "name_source")},
+                       "before": {k: row.get(k) or "" for k in ("name", "name_source")}},
+            actor=actor, principal=principal, agent_id=row["agent_id"],
+            project=row["project"], task=row["task"])
+
+    @staticmethod
     def _codex_thread(fields) -> str | None:
         """The Codex thread a row speaks for: its episode, on a row whose
         capabilities name the ``codex`` transport (the shim's Codex adapter
@@ -1353,7 +1454,8 @@ class CoordinationStore:
         return fields["episode"]
 
     def register(self, principal, *, label="", project="", task="", episode="", status="",
-                 capabilities=None, wake_enabled=False, parent_thread=None):
+                 capabilities=None, wake_enabled=False, parent_thread=None, name="",
+                 name_source=None):
         """``parent_thread`` (v50) is the parent Codex thread a native child
         read from Codex's turn metadata: a canonical UUID, on a Codex row
         (``_codex_thread``) for another thread. It marks the row a subagent
@@ -1365,6 +1467,14 @@ class CoordinationStore:
                               capabilities={} if capabilities is None else capabilities,
                               wake_enabled=wake_enabled)
         thread = self._codex_thread(fields)
+        # v55: a name at register is the agent's own unless it says it is
+        # the harness's.
+        if name_source is not None and (name_source not in CLIENT_NAME_SOURCES or not name):
+            raise CoordinationError("invalid_name")
+        if name:
+            name = self._check_name(name)
+        if name:
+            fields.update(name=name, name_source=name_source or "agent")
         if parent_thread is not None:
             try:
                 canonical = str(uuid.UUID(parent_thread)) if isinstance(parent_thread, str) else None
@@ -1382,11 +1492,14 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
                 "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity,"
-                "parent_thread,parent_agent_id) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "parent_thread,parent_agent_id,name,name_source,name_set_at,harness_name) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (agent_id, principal, _hash(credential), fields["label"], fields["project"],
                  fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
-                 fields["wake_enabled"], now, now, parent_thread, parent))
+                 fields["wake_enabled"], now, now, parent_thread, parent,
+                 fields.get("name", ""), fields.get("name_source", ""),
+                 now if fields.get("name") else None,
+                 fields["name"] if fields.get("name_source") == "harness" else ""))
             events = [self._event("register", fields, principal=principal, agent_id=agent_id,
                                   project=fields["project"], task=fields["task"])]
             if thread is not None:
@@ -1434,7 +1547,7 @@ class CoordinationStore:
                 # Hashed into the audit chain for good: every field in the
                 # register event, and project and task into the columns of
                 # every later event by this agent.
-                _refuse_secret(value)
+                _refuse_secret(value, key)
             elif key == "wake_enabled":
                 if not isinstance(value, bool):
                     raise CoordinationError("invalid_wake_enabled")
@@ -1445,7 +1558,7 @@ class CoordinationStore:
                     _string(item, 40, "capabilities", empty=False)
                     # Capability names are hashed into the event too, and a
                     # GitHub token fits in 40 characters.
-                    _refuse_secret(item)
+                    _refuse_secret(item, "capabilities")
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
             elif key == "children":
@@ -1465,7 +1578,7 @@ class CoordinationStore:
                     except CoordinationError:
                         raise refused from None
                     # Hashed into the update event, like the status.
-                    _refuse_secret(label)
+                    _refuse_secret(label, "children")
                 if len(set(value)) != len(value):
                     raise refused
             elif key == "park_reason":
@@ -1474,29 +1587,45 @@ class CoordinationStore:
                 if value is None or value == "":
                     fields[key] = None
                 elif value not in PARK_REASONS:
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", f"park_reason must be one of {', '.join(PARK_REASONS)}, "
+                        "or empty to clear the park; nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
             elif key in _PARK_TEXT_LIMITS:
-                _string(value, _PARK_TEXT_LIMITS[key], "park")
+                try:
+                    _string(value, _PARK_TEXT_LIMITS[key], "park")
+                except CoordinationError:
+                    raise CoordinationError(
+                        "invalid_park", f"{key} must be text of at most "
+                        f"{_PARK_TEXT_LIMITS[key]} characters with no control characters; "
+                        "nothing was updated", param=key) from None
                 # Hashed into the update event, like the status.
-                _refuse_secret(value)
+                _refuse_secret(value, key)
             elif key == "park_expires":
                 # A null (REST passes JSON null through) would store a park
                 # that never lapses, past the default and the cap: refused.
                 if (value is None or isinstance(value, bool)
                         or not isinstance(value, (int, float))
                         or not math.isfinite(value) or value <= 0):
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", "park_expires must be a positive finite Unix epoch "
+                        "in seconds; nothing was updated", param="park_expires")
                 fields[key] = float(value)
             else:
                 raise CoordinationError("invalid_update")
         return fields
 
-    def update(self, principal, agent_id, credential, *, expect=None, **fields):
+    def update(self, principal, agent_id, credential, *, expect=None, name=None, **fields):
         """Change the caller's own row. ``expect`` (seconds) says when the
         status stops being true: past it the peer list marks the row
         ``status_overdue``. A new status without one clears the old
-        expectation; ``expect`` alone re-times the current status."""
+        expectation; ``expect`` alone re-times the current status.
+        ``name`` (v55) is the agent naming its row (source ``agent``): it
+        outranks the harness title, and ``""`` clears its own, bringing the
+        newest harness title back."""
         fields = self._fields(**fields)
+        if name is not None:
+            name = self._check_name(name)
         self._check_label(principal, fields)
         if expect is not None and (type(expect) is not int
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
@@ -1520,7 +1649,10 @@ class CoordinationStore:
                 if "park_reason" in fields and fields["park_reason"] is None:
                     fields.update(_PARK_CLEARED)
                 elif "park_reason" not in fields and not parked:
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", "park_reason is required: no park stands to refine "
+                        "(a lapsed park counts as none); nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
                 else:
                     if recorded and not parked:
                         # A new park over a lapsed one starts empty: its
@@ -1535,7 +1667,11 @@ class CoordinationStore:
                         fields["park_expires"] = now + PARK_DEFAULT_TTL
                     expires = fields.get("park_expires")
                     if expires is not None and expires > now + PARK_MAX_TTL:
-                        raise CoordinationError("invalid_park")
+                        raise CoordinationError(
+                            "invalid_park", f"park_expires must be at most "
+                            f"{PARK_MAX_TTL // 86400} days ({PARK_MAX_TTL} seconds) from now; "
+                            "nothing was updated",
+                            param="park_expires")
             elif "status" in fields and recorded:
                 fields.update(_PARK_CLEARED)
             # Only a real change reaches the row and the log, so a status
@@ -1546,9 +1682,13 @@ class CoordinationStore:
                 fields["status_expires_at"] = now + expect
             elif "status" in fields and row["status_expires_at"] is not None:
                 fields["status_expires_at"] = None
-            assignments = [f"{key}=%s" for key in fields]
+            naming = {} if name is None else self._name_change(row, name, "agent", now)
+            columns = {**fields, **naming}
+            # The event says what the name became; the time is the event's.
+            fields.update({k: v for k, v in naming.items() if k != "name_set_at"})
+            assignments = [f"{key}=%s" for key in columns]
             values = [Jsonb(v) if k in {"capabilities", "children"} else v
-                      for k, v in fields.items()]
+                      for k, v in columns.items()]
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET " + ",".join(assignments + ["last_activity=%s"])
                 + " WHERE agent_id=%s", (*values, now, agent_id))
@@ -1614,7 +1754,7 @@ class CoordinationStore:
             raise CoordinationError("invalid_children")
         label = f"{kind[:HOOK_CHILD_KIND_CUT] or 'subagent'}#{child[:8]}"
         # Hashed into the update event, like a parent's labels.
-        _refuse_secret(label)
+        _refuse_secret(label, "children")
         with self.storage._txn():
             row = self._hook_children_row(agent_id, principal)
             if row is None:
@@ -1813,7 +1953,7 @@ class CoordinationStore:
                 or any(unicodedata.category(c)[0] == "C" for c in name)):
             raise CoordinationError("invalid_lease")
         # The name is in every lease event's hashed payload, for good.
-        _refuse_secret(name)
+        _refuse_secret(name, "lease")
         if ttl is not None and (type(ttl) is not int
                                 or not LEASE_TTL_MIN <= ttl <= LEASE_TTL_MAX):
             raise CoordinationError("invalid_ttl")
@@ -1823,7 +1963,7 @@ class CoordinationStore:
         if purpose is not None:
             _string(purpose, 240, "purpose")
             # Hashed into the audit chain for good (lease_acquire/queue/grant).
-            _refuse_secret(purpose)
+            _refuse_secret(purpose, "purpose")
 
     def _grant(self, name, agent_id, principal, *, now, hold, expect, purpose):
         # The fence comes from one sequence for every lease, never from the
@@ -1925,16 +2065,20 @@ class CoordinationStore:
         if row["holder_agent_id"] is None:
             return None
         holder = {"agent_id": row["holder_agent_id"], "label": row.get("label") or "",
-                "principal": row["holder_principal"], "purpose": row["purpose"],
-                "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
-                "expected_end": row["expected_end"]}
+                  # v55: the holder's board name, as the roster shows it.
+                  "name": _board_name(row["holder_agent_id"], row.get("label"),
+                                      row.get("holder_name")),
+                  "principal": row["holder_principal"], "purpose": row["purpose"],
+                  "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
+                  "expected_end": row["expected_end"]}
         if row["name"].startswith("claim:file:"):
             holder["fence"] = row["fence"]
         return holder
 
     def _lease_row(self, name):
         return self._one(
-            "SELECT l.*,a.label FROM coordination_leases l LEFT JOIN coordination_agents a "
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
             "ON a.agent_id=l.holder_agent_id WHERE l.name=%s", (name,))
 
     def _lease_view(self, name, agent_id):
@@ -2083,7 +2227,8 @@ class CoordinationStore:
         busy = ("(l.holder_agent_id IS NOT NULL OR EXISTS (SELECT 1 FROM "
                 "coordination_lease_waiters w WHERE w.name=l.name))")
         rows = self._all(
-            "SELECT l.*,a.label FROM coordination_leases l LEFT JOIN coordination_agents a "
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
             "ON a.agent_id=l.holder_agent_id WHERE " + busy
             + (" AND l.name=%s" if name is not None else "")
             # Resource leases (suite, GPU, coordinator) before the day-long
@@ -2098,14 +2243,18 @@ class CoordinationStore:
             # Bound each queue before joining its labels; the truncated lease
             # page's extra row does not need a queue read.
             waiters = self._all(
-                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
+                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,a.name AS agent_name,"
+                "w.enqueued_at,w.purpose "
                 "FROM unnest(%s::text[]) AS wanted(name) CROSS JOIN LATERAL "
                 "(SELECT agent_id,enqueued_at,purpose,ticket FROM coordination_lease_waiters "
                 "WHERE name=wanted.name ORDER BY ticket LIMIT %s) w "
                 "LEFT JOIN coordination_agents a ON a.agent_id=w.agent_id "
                 "ORDER BY wanted.name,w.ticket", (names, LEASE_LIST_QUEUE))
             for waiter in waiters:
-                queues[waiter.pop("name")].append(dict(waiter))
+                lease = waiter.pop("name")
+                waiter["name"] = _board_name(waiter["agent_id"], waiter["label"],
+                                             waiter.pop("agent_name"))
+                queues[lease].append(dict(waiter))
             counts = {row["name"]: row["n"] for row in self._all(
                 "SELECT name,count(*) AS n FROM coordination_lease_waiters "
                 "WHERE name=ANY(%s::text[]) GROUP BY name", (names,))}
@@ -2242,6 +2391,19 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
+        return {**out, **self.reachability(agent, now, role="delegate")}
+
+    @classmethod
+    def reachability(cls, agent, now, *, role=None):
+        """Whether maintainer mail rings ``agent`` (an agent row, or None for
+        a holder with no board row) now: ``reachable`` and the no-path
+        ``reason`` a send would carry, plus, given ``role``, the ``warning``
+        a grant shows when it is not."""
+        reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
+        out = {"reachable": reason is None, "reason": reason}
+        if role is not None and reason is not None:
+            out["warning"] = UNREACHABLE_WARNING.format(
+                role=role, reason=UNREACHABLE_REASONS.get(reason, reason))
         return out
 
     def assign_coordinator(self, project, agent_id, *, hold, actor="operator"):
@@ -2289,7 +2451,7 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
-        return out
+        return {**out, **self.reachability(agent, now, role="coordinator")}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -2428,13 +2590,17 @@ class CoordinationStore:
                 "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
 
     def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
-                  active=False, ring_armed_until=None):
+                  active=False, ring_armed_until=None, name=None):
         """Renew the lease. ``active`` says the shim forwarded a tool call
         since its previous heartbeat; only then does the renewal count as
         activity, so a parked shim is not ranked or retained as a working
-        one."""
+        one. ``name`` (v55) is the title the harness shows for the session
+        (source ``harness``); the shim sends it only when it changed, and
+        only a real change is written and logged."""
         if not isinstance(active, bool):
             raise CoordinationError("invalid_active")
+        if name is not None:
+            name = self._check_name(name)
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             self._attachment(row, attachment_id, generation)
@@ -2445,11 +2611,53 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
+            if name is not None and name != (row.get("harness_name") or ""):
+                # Kept even while an agent name outranks it, so clearing that
+                # name restores the harness title. Heartbeat state, unlogged;
+                # only a change of the shown name is an audit event.
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET harness_name=%s WHERE agent_id=%s",
+                    (name, agent_id))
+            naming = {} if name is None else self._name_change(row, name, "harness", now)
+            if naming:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET name=%s,name_source=%s,name_set_at=%s "
+                    "WHERE agent_id=%s", (naming["name"], naming["name_source"],
+                                         naming["name_set_at"], agent_id))
+                self._append([self._name_event(row, naming, principal)], now)
             self._record_listener(row, armed_until)
             mailbox = self._mailbox_state(agent_id)
             ring = self._serve_wake(agent_id, now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
                 "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
+
+    def title_names(self, episodes, title, *, principal=None):
+        """Name the rows registered under any of ``episodes`` (the session
+        keys a ``memory_session_title`` rename resolved) after ``title``,
+        with source ``title`` (v55): only rows no agent or harness named,
+        only those of ``principal``, one ``update`` event per row that
+        changed, by the daemon. Returns how many changed. Without a
+        principal it names nothing: fail closed, never every principal's
+        rows (delegate review of #582, 2026-10-05)."""
+        name = self._title_name(title)
+        episodes = sorted({e for e in episodes if isinstance(e, str) and e})
+        if name is None or not episodes or principal is None:
+            return 0
+        now = self.clock()
+        params = [name, now, episodes, name, principal]
+        scope = " AND a.principal=%s"
+        with self.storage._txn():
+            rows = self._all(
+                "UPDATE coordination_agents a SET name=%s,name_source='title',name_set_at=%s "
+                "FROM coordination_agents b WHERE a.agent_id=b.agent_id "
+                "AND a.episode=ANY(%s) AND a.episode<>'' AND a.credential_hash IS NOT NULL "
+                "AND a.name_source IN ('','title') AND a.name<>%s" + scope +
+                " RETURNING a.agent_id,a.principal,a.project,a.task,b.name,b.name_source",
+                params)
+            self._append([self._name_event(row, {"name": name, "name_source": "title"},
+                                           row["principal"], actor="daemon")
+                          for row in sorted(rows, key=lambda r: r["agent_id"])], now)
+        return len(rows)
 
     def _serve_wake(self, agent_id, now):
         """Offer the newest pending ring; the adapter deduplicates its identity.
@@ -3036,7 +3244,7 @@ class CoordinationStore:
         _string(hlc, 120, "hlc")
         if clears is not None:
             _string(clears, MAX_CLEARS, "clears", empty=False)
-            _refuse_secret(clears)
+            _refuse_secret(clears, "clears")
         if not isinstance(urgent, bool):
             raise CoordinationError("invalid_urgent")
         stamp = None
@@ -3047,18 +3255,29 @@ class CoordinationStore:
                     raise ValueError
             except ValueError:
                 raise CoordinationError("invalid_hlc") from None
-        try:
-            valid_text = (isinstance(text, str) and bool(text.strip()) and "\x00" not in text
-                          and len(text.encode("utf-8")) <= MAX_TEXT_BYTES)
-        except UnicodeEncodeError:
-            valid_text = False
-        if not valid_text:
-            raise CoordinationError("invalid_text")
+        # The detail says which rule the body broke, with a byte count and
+        # never the text (review 2026-10-04: one bare code covered four).
+        problem = None
+        if not isinstance(text, str) or not text.strip():
+            problem = "text must be nonblank"
+        elif "\x00" in text:
+            problem = "text must not contain NUL characters"
+        else:
+            try:
+                size = len(text.encode("utf-8"))
+            except UnicodeEncodeError:
+                problem = "text is not encodable as UTF-8 (it holds a lone surrogate)"
+            else:
+                if size > MAX_TEXT_BYTES:
+                    problem = (f"text is {size} UTF-8 bytes; the limit is {MAX_TEXT_BYTES} "
+                               "bytes, not characters")
+        if problem is not None:
+            raise CoordinationError("invalid_text", problem, param="text")
         # Refused before this call reads or writes a row: the audit log would
         # keep the body for its whole retention window, and the request id
         # in the send event's hashed payload for good.
-        _refuse_secret(text)
-        _refuse_secret(request_id)
+        _refuse_secret(text, "text")
+        _refuse_secret(request_id, "request_id")
         if reply_to is not None:
             _string(reply_to, 120, "reply", empty=False)
         if expires_at is not None and (isinstance(expires_at, bool) or
@@ -3810,7 +4029,9 @@ class CoordinationStore:
                 or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp")
                        for c in reason)):
             raise CoordinationError("invalid_reason")
-        _refuse_secret(reason)
+        if looks_like_secret(reason):
+            # Operator-only: board-audit explains this refusal in its own words.
+            raise CoordinationError("secret_like_body", param="reason")
         if is_id_prefix(message_id):
             like = message_id + "%"
             message_id = _resolved([r["message_id"] for r in self._all(

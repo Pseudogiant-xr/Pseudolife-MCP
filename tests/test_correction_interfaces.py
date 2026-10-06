@@ -48,8 +48,8 @@ def test_mcp_does_not_coerce_correction_ids(monkeypatch, method, key, bad):
     monkeypatch.setattr(mcp_server, "service", SimpleNamespace(**{
         method: lambda **kwargs: calls.append(kwargs) or {"called": True},
     }))
-    with pytest.raises(Exception):
-        invoke_tool(f"memory_{method}", {key: bad, "new_text": "The revised note"})
+    refused = invoke_tool(f"memory_{method}", {key: bad, "new_text": "The revised note"})
+    assert refused["error"] == "invalid_argument" and refused["param"] == key
     assert not calls
 
 

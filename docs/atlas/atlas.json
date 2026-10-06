@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.16.1",
-  "schema": 54,
-  "verified": "2026-10-04"
+  "version": "0.17.0",
+  "schema": 55,
+  "verified": "2026-10-05"
  },
  "groups": {
   "clients": {
@@ -198,6 +198,7 @@
     "async + asyncRewake: waits after each turn on the session's coordination digest; exit 2 wakes an idle session",
     "v49: fires only on a rung ring the daemon decided (<key>.ring past .seen, written by the shim for rung mail) with the digest past .seen and mail listed; chatter, withheld mail and plain mail to a session that never parked never wake (urgent mail to it is rung; since 2026-10-02 a leftover nudged marker is no ring); the wait ledger line carries the ring's reason; one lease per session, at most 20 wakes an hour",
     "While waiting it renews a 60 s local listener lease every poll (the daemon rings only an address with a live wake path); after a wake fires, one background POST /api/hook/woke (2 s) records it for wake-precision stats",
+    "Listens 14 days after each turn end (since 2026-10-05; 59 minutes before): hooks.json timeout 1209600 s, twice the longest delegate lease, which Claude Code passes uncapped into a Node timer; the wait ends at MAX_WAIT 1209540, before the kill; polls every 5 s for the first 3540 s, then every 30 s; with no Claude Code parent to watch it keeps 3540 s; PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT only shortens it; each turn end writes a fresh token to <key>.wake and an older watcher exits at its next poll",
     "v49 park gate, before the wait: unless stop_hook_active, with <key>.agent present, one 2 s request to GET /api/hook/park-gate?agent=<id>&since=<the .turn stamp coordination-prompt.sh leaves>; block ends the turn at once (exit 2) with the daemon's message, once; allow, no address or no answer arms the wait",
     "Codex loads the same hooks.json and gets only the park gate on every platform (off on an explicit PSEUDOLIFE_AGENT_WAKE_HOOK or PSEUDOLIFE_AGENT_COORDINATION of 0/false/no/off): on Windows lifecycle.ps1 -Event Stop, on macOS and Linux this script in Codex context (PSEUDOLIFE_CODEX_HOOK=1 or PLUGIN_ROOT equal to CLAUDE_PLUGIN_ROOT), resolving the daemon from the managed connection file as coordination-start.sh does; a block is {\"decision\":\"block\",\"reason\":...} on stdout with exit 0 as Codex documents, plus the gate ledger line, and the wait is never armed (the doorbell is Codex's wake)",
     "SubagentStop (argument subagent-stop; lifecycle.ps1 -Event SubagentStop on Windows) runs the same gate for a Codex child thread, keyed by the payload's agent_id (the child's MCP threadId, a canonical lower-case UUID; never the root session_id), with no turn stamp; in Claude Code it does nothing"
@@ -260,7 +261,7 @@
    "p": "pseudolife_memory/cli.py",
    "d": [
     "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
-    "briefing / prompt-hook / doctor / backup / export / import / board-audit / coordination-recovery / wait-mail / lease / doorbell-prompt-seen / episode-start / episode-end subcommands; host lifecycle: update · connect / invite / pair / expose / tunnel / move",
+    "briefing / prompt-hook / doctor / backup / export / import / board-audit / coordination-recovery / wait-mail / lease / maintainer / test-login / doorbell-prompt-seen / episode-start / episode-end subcommands; version (runtime path and source) and help; host lifecycle: update · connect / invite / pair / expose / tunnel / move",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
   },
@@ -324,7 +325,8 @@
     "Renders a per-turn digest from the pending_preview that attach/heartbeat return; the watermark moves only when the text changes; with a digest_path (host session id) the file and its .seen marker are what the prompt hooks read, and deliver_hint() hands each change to a tool result once plus a one-line reminder every HINT_REPEAT_CALLS while mail stays pending",
     "An outage pauses the stream and the heartbeat task re-attaches with backoff (1 s to 60 s), replaying unacknowledged mail under the new generation; a restored notice follows the once-per-outage warning",
     "inbox() long-polls receive (wait_seconds 30), marks one attempt per message per attachment and frames every event with a fixed agent-origin header; acknowledgment stays an explicit model action",
-    "v49: the daemon decides, the shim rings. The adapter declares its ring path (a digest for the Stop hook, or a Codex doorbell) in its register capabilities and as attach's ring, dropping the parameter once for a pre-v48 daemon; a wake on an attach or heartbeat answer (taken once, repeats ignored) becomes <key>.ring (digest watermark, then decision and reason) at ring_at for the Stop hook, and ring_due() offers the same ring to the Codex doorbell once due, dropped when its mail was already seen or nothing is pending; <key>.agent names the address for the park gate and is touched with the digest; .ring, .agent and the hooks' .turn leave with the digest and are swept with it"
+    "v49: the daemon decides, the shim rings. The adapter declares its ring path (a digest for the Stop hook, or a Codex doorbell) in its register capabilities and as attach's ring, dropping the parameter once for a pre-v48 daemon; a wake on an attach or heartbeat answer (taken once, repeats ignored) becomes <key>.ring (digest watermark, then decision and reason) at ring_at for the Stop hook, and ring_due() offers the same ring to the Codex doorbell once due, dropped when its mail was already seen or nothing is pending; <key>.agent names the address for the park gate and is touched with the digest; .ring, .agent and the hooks' .turn leave with the digest and are swept with it",
+    "v55: the heartbeat sends the harness's title for the session as name (harness_names.py, read in a worker thread: the Claude transcript's custom-title > agent-name > ai-title, or Codex session_index thread_name) only when it changed; a pre-v55 daemon's unexpected_parameter retires it for the process, and an invalid_name or secret_like_body refusal is not resent until the title changes; PSEUDOLIFE_BOARD_HARNESS_NAMES=0 (false/no/off) in the shim's environment reads no transcript or index"
    ]
   },
   {
@@ -372,7 +374,8 @@
     "POST must be exactly application/json (forces CORS preflight)",
     "Sync service calls always via run_in_executor — never blocks the loop",
     "POST /api/pair is the one unauthenticated write (pairing-code redemption): any Origin 403, one uniform 400 pairing_refused for every refused code, a failure budget then 429; stored (invited) principals are refused the operator POST paths",
-    "v54: every /ui/ response (and the / redirect) carries Content-Security-Policy default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ... frame-ancestors 'none'; form-action 'self', X-Frame-Options DENY and Referrer-Policy no-referrer; /api/maintainer* require a configured bearer (tokenless: 401) and answer MaintainerError codes with their status (409/410/403/404/429/503), never exception text"
+    "v54: every /ui/ response (and the / redirect) carries Content-Security-Policy default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ... frame-ancestors 'none'; form-action 'self', X-Frame-Options DENY and Referrer-Policy no-referrer; /api/maintainer* require a configured bearer (tokenless: 401) and answer MaintainerError codes with their status (409/410/403/404/429/503), never exception text",
+    "X-Content-Type-Options nosniff on every JSON answer (_send_json), every /ui/ response and the / redirect (CONSOLE_SECURITY_HEADERS)"
    ]
   },
   {
@@ -387,7 +390,9 @@
     "Every tool is a thin tier-tagged wrapper over MemoryService",
     "_async_offload: tool bodies run on worker threads",
     "tools/list filtered per principal tier; hidden tools stay callable server-side",
-    "Core memory_agents and memory_message delegate to coordination.py; mailbox authority requires bearer plus private adapter instance binding; dispatch raises CoordinationRefused (a ValueError: public code, optional detail such as an ambiguous prefix's candidates, text code: detail) and notifies each recipient a send's receipts name, so a burst or a prefix send wakes the right adapters"
+    "Core memory_agents and memory_message delegate to coordination.py; mailbox authority requires bearer plus private adapter instance binding; dispatch raises CoordinationRefused (a ValueError: public code, optional detail such as an ambiguous prefix's candidates, text code: detail) and notifies each recipient a send's receipts name, so a burst or a prefix send wakes the right adapters",
+    "A refused or failed call is an isError result whose text and structuredContent are one JSON object: {error, message} plus param / accepted / action where the refusal names them; a raiser's code (code attribute, or code / code: detail text) is kept, prose ValueError/TypeError is invalid_argument, FileNotFoundError file_not_found, anything else internal_error with the cause only in the daemon log; mutation: unknown when a write tool's outcome is in doubt (internal_error, coordination_unavailable)",
+    "Strict binding (extra=forbid, schema additionalProperties false): an argument name the tool lacks is refused as unknown_parameter, naming it and never its value, with a did-you-mean guess (_PARAM_ALIASES from the 2026-10-04 transcript review, e.g. limit -> top_k, else difflib) and the accepted list; any other binding failure is invalid_argument with pydantic's per-field sentences, no input echoed"
    ]
   },
   {
@@ -401,7 +406,7 @@
    "d": [
     "Resolution: principal override → tier map → stored principal's tier → env default (unset = full; compose sets core)",
     "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
-    "core = 24 of 38 tools; minimal = 9; mailbox operations additionally require an adapter-held instance credential"
+    "core = 24 of 38 tools; minimal = 10; mailbox operations additionally require an adapter-held instance credential"
    ]
   },
   {
@@ -814,7 +819,8 @@
     "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
     "No DSN → legacy file mode (.pt + ChromaDB under data_dir)",
     "coordination.enabled defaults on (bearer authentication still required); awareness_limit bounds peer summaries; without the key allowed_principals admits the singular-token principal default plus bank-stored principals with board on; other token-map principals must be listed; audit_retention_days (default 90, 0 = forever) bounds the board audit log",
-    "updates.*: check_releases (every 6 h) on; unattended_clients and unattended_daemon off by default"
+    "updates.*: check_releases (every 6 h) on; unattended_clients and unattended_daemon off by default",
+    "coordination.maintainer (rp_id, origin, maintainer_per_recipient_per_hour 30) is file-only: POST /api/config refuses every coordination.maintainer path with config_protected"
    ]
   },
   {
@@ -1012,12 +1018,12 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 54",
+   "s": "DDL · SCHEMA_META_VERSION 55",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
     "entries(vector 1024) · facts · world_facts · lessons · entities/edges/edge_evidence · episodes · memory_traces/memory_trace_invalidations · entry_reinstatement_decisions · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · lesson_search_events · slot_reads · curation_judgments · store_decisions · coordination_agents · coordination_messages · coordination_events · coordination_leases/coordination_lease_waiters · coordination_wakes · client_sessions · principals · maintainer_passkeys · maintainer_bootstrap · maintainer_nonces",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings) · v41 entry_reinstatement_decisions (FK-free operation-keyed audit; exact preimage, decision and retirement clear commit together; trace-invalidated targets refused) · v42 coordination_events (append-only, FK-free, sha256-chained board audit log written in each mutation's own transaction and pruned only by its own window, which logs its cuts; coordination_messages.first_read_at) · v43 client_sessions (one FK-free row per registered session key, never pruned: registered_via, principal, first start, last close + end_reason, the memory-policy variant served, every root episode id — outlives the prune of a root that stored nothing) · v44 memory-loop observability (lesson_search_events: one FK-free row per memory_lesson_search, slot-keyed, kept out of the replayed retrieval_events; nullable outcome_signals.used_ids JSONB keeps the credited/unmatched/served_elsewhere partition of an outcome's used_ids) · v45 resource leases (coordination_leases: one FK-free row per name, its fence from the coordination_lease_fence sequence so it never repeats; coordination_lease_waiters: its FIFO queue; coordination_agents.status_expires_at for a status's expected end) · v46 coordination_events.body (a send's body outside the row hash, its payload committing to text_commitment (sha256 of a per-message salt in body_salt plus the body; no length), so an operator redact event can blank it and the chain still verifies; pre-v46 sends keep text in the hashed payload) · v47 coordination_agents.children (the subagents a session names under its own address, as [{label, since}]) · v48 fan-out mail (one send to project:<name> or all writes one coordination_messages row and one send event per recipient under one request id; the sender request key becomes the unique index coordination_messages_request_idx over (sender_agent_id, request_id, recipient_agent_id), created before the pre-v48 two-column constraint is dropped where it exists; ids resolve from a unique 8+ hex prefix, no DDL) · v49 park records and wake decisions (coordination_agents.park_reason/park_needs/park_clear_by/park_resume/park_expires/park_set_at: a session's standing statement of why it stopped and what clears it; coordination_messages.wake: the send's decision, repeated on a retry; coordination_wakes: every rung or nudged ring with its reason, ring_at and served_at, for the caps, the fan-out stagger and the hand-off to the shim) · v50 subagents as their parent's children (coordination_agents.parent_thread: the parent Codex thread a native subagent registered with, set once; parent_agent_id: the parent's row under the same principal, filled at register or when the parent registers later, cleared when prune removes the parent; both added only when missing) · v51 edge_evidence (source-entry links for new dream edges; forgetting the last current supporting entry retires the edge) · v52 retained coordination history indexes (partial send indexes on sender/principal/seq, recipient/seq, sender/recipient/seq and principal/seq; principal/seq timeline and partial expiry/seq indexes; message/event/time for lifecycle reconstruction) · v53 principals (stored bearer identities for pseudolife-mcp invite / pair: token and pairing-code SHA-256 only, tier, board, the redeemed code's hash for a ten-minute retry window; excluded from logical exports) · v54 maintainer messages and Board roles (maintainer_passkeys: each WebAuthn credential with its COSE key, alg, sign count, label, enrolled_by, pending/active/revoked state, quarantine end and flagged_at; maintainer_bootstrap: host-code SHA-256, expiry, failed attempts (burned at 5) and redeeming credential; maintainer_nonces: spent challenge nonces to expiry; coordination_messages.origin/maintainer_proof/repudiated_at, added only when missing; excluded from logical exports)",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL) · v35 write-time label pair (nullable entries/facts.authority + distortion_tolerance — the source's speech act and fidelity class, inherit-unless-restated through supersession; constraint facts pinned ahead of cosine in recall and carried verbatim through the dream; NULL = pre-v35 reading, no backfill) · v36 review-queue judges (link-judge verdict + decided_by on edge_proposals, merge second opinion judge2_* on entity_proposals, curation_judgments memo) · v37 store_decisions (FK-free retire/restore audit for lessons + world: forgets retire rows with the verbatim record instead of deleting them; restore falls back to the snapshot after compaction) · v38 entries.dream_state (per-entry acknowledgement; NULL marks old rows for one-time source-aware legacy classification; new rows default pending) · v39 memory_trace_invalidations (FK-free source correction events survive entry deletion and fact snapshots; atomic with explicit source retirement) · v40 agent coordination (coordination_agents instance credentials/attachment generations; coordination_messages addressed mail, recipient sequence, request-key deduplication, expiry and explicit acknowledgment; no episode cascade and no embeddings) · v41 entry_reinstatement_decisions (FK-free operation-keyed audit; exact preimage, decision and retirement clear commit together; trace-invalidated targets refused) · v42 coordination_events (append-only, FK-free, sha256-chained board audit log written in each mutation's own transaction and pruned only by its own window, which logs its cuts; coordination_messages.first_read_at) · v43 client_sessions (one FK-free row per registered session key, never pruned: registered_via, principal, first start, last close + end_reason, the memory-policy variant served, every root episode id — outlives the prune of a root that stored nothing) · v44 memory-loop observability (lesson_search_events: one FK-free row per memory_lesson_search, slot-keyed, kept out of the replayed retrieval_events; nullable outcome_signals.used_ids JSONB keeps the credited/unmatched/served_elsewhere partition of an outcome's used_ids) · v45 resource leases (coordination_leases: one FK-free row per name, its fence from the coordination_lease_fence sequence so it never repeats; coordination_lease_waiters: its FIFO queue; coordination_agents.status_expires_at for a status's expected end) · v46 coordination_events.body (a send's body outside the row hash, its payload committing to text_commitment (sha256 of a per-message salt in body_salt plus the body; no length), so an operator redact event can blank it and the chain still verifies; pre-v46 sends keep text in the hashed payload) · v47 coordination_agents.children (the subagents a session names under its own address, as [{label, since}]) · v48 fan-out mail (one send to project:<name> or all writes one coordination_messages row and one send event per recipient under one request id; the sender request key becomes the unique index coordination_messages_request_idx over (sender_agent_id, request_id, recipient_agent_id), created before the pre-v48 two-column constraint is dropped where it exists; ids resolve from a unique 8+ hex prefix, no DDL) · v49 park records and wake decisions (coordination_agents.park_reason/park_needs/park_clear_by/park_resume/park_expires/park_set_at: a session's standing statement of why it stopped and what clears it; coordination_messages.wake: the send's decision, repeated on a retry; coordination_wakes: every rung or nudged ring with its reason, ring_at and served_at, for the caps, the fan-out stagger and the hand-off to the shim) · v50 subagents as their parent's children (coordination_agents.parent_thread: the parent Codex thread a native subagent registered with, set once; parent_agent_id: the parent's row under the same principal, filled at register or when the parent registers later, cleared when prune removes the parent; both added only when missing) · v51 edge_evidence (source-entry links for new dream edges; forgetting the last current supporting entry retires the edge) · v52 retained coordination history indexes (partial send indexes on sender/principal/seq, recipient/seq, sender/recipient/seq and principal/seq; principal/seq timeline and partial expiry/seq indexes; message/event/time for lifecycle reconstruction) · v53 principals (stored bearer identities for pseudolife-mcp invite / pair: token and pairing-code SHA-256 only, tier, board, the redeemed code's hash for a ten-minute retry window; excluded from logical exports) · v54 maintainer messages and Board roles (maintainer_passkeys: each WebAuthn credential with its COSE key, alg, sign count, label, enrolled_by, pending/active/revoked state, quarantine end and flagged_at; maintainer_bootstrap: host-code SHA-256, expiry, failed attempts (burned at 5) and redeeming credential; maintainer_nonces: spent challenge nonces to expiry; coordination_messages.origin/maintainer_proof/repudiated_at, added only when missing; excluded from logical exports) · v55 board session names (coordination_agents.name/name_source/name_set_at/harness_name, added only when missing, plus a partial index on episode)",
     "One-current-row-per-slot partial unique indexes",
     "Owns driver-free COORDINATION_SCHEMA_SQL; all six operational tables enter the shared bench reset roster; PRINCIPALS_SCHEMA_SQL (v53) is appended the same way; MAINTAINER_SCHEMA_SQL (v54) likewise"
    ]
@@ -1118,6 +1124,7 @@
     "receive is cursor-based and non-destructive — ordered by per-recipient sequence, nothing is consumed until ack or expiry",
     "ack takes one message_id or several comma-separated (MAX_PAGE): a batch returns receipts in order plus the ids that were not this mailbox's, under the agent row lock so overlapping batches serialize",
     "Receive continuity explains expired unacknowledged mail and seven-day metadata gaps without expired bodies; authenticated history pages retained sends for this instance, with exact peer filtering, separate cursors, audit retention and operator redaction, and no delivery effects. v52 seeks sender and recipient pages separately, gets cursor high-water from two indexed heads and reconstructs only page message lifecycles through the message index; history and Console pin transactions and use transaction-local statement timeouts to bound lock occupancy for large caller-owned histories",
+    "v55 board names: name/name_source on each row, precedence agent (update name; \"\" restores harness_name) > harness (heartbeat name from harness_names.py: the Claude transcript's custom-title > agent-name > ai-title, or Codex session_index thread_name; harness_name always kept, only a shown-name change is written to the audit log) > title (title_names: one indexed UPDATE by episode when a memory_session_title rename resolves a session key, the caller's principal only, none without one); an unnamed row, a lease holder and a waiter read as label + 8-char id (_board_name); names follow the label rule (reserved_name)",
     "console_snapshot uses a repeatable-read, read-only transaction over roster, unsettled leases, principal-visible pending counts and a bounded metadata-only event timeline; it never receives mail or settles a lease",
     "v48: to, reply_to and ack's message ids resolve from a unique prefix of 8-31 lowercase hex characters (is_id_prefix; ambiguous_recipient / ambiguous_message_id / ambiguous_reply carry the candidates' distinguishing prefixes in CoordinationError.detail; to resolves among unrevoked addresses, reply_to and ack among the caller's own mail); to project:<name> or all reaches every attached non-idle peer but the sender (the adapter_available rows of list_agents, _fanout_rows), at most FANOUT_MAX (50), atomically under one request id whose fingerprint covers the resolved address, one row and one send event (payload fanout: {to, recipients}) with its own salt per recipient, counted once against SEND_RATE (distinct request ids); the sender and every recipient are locked in id order after an unlocked read of the set, which is re-read under the locks; send receipts carry recipient_agent_id, the stored wake decision and a path (live for an attached wake-enabled peer, else pull); resolve_agent_id serves the operator CLIs (export --agent against addresses and the log, rebind --agent among registered addresses, revoked included)",
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
@@ -1136,9 +1143,10 @@
     "v49 wake decision at send (_wake_decision, on the locked recipient row): hinted while an unparked recipient acted within active_seconds (a parked one is decided on its park); a done park rings only for urgent mail from the maintainer, the maintainer's delegate for the project or its named clearer (reopened), else not_needed with reopen_by, and maintainer / delegate urgency spends authority_per_sender_per_hour; no_path without a live channel or a ring path (capabilities.ring, set by attach's ring); parked with a need: rung for the clearer, anyone, a clears naming the need in whole words or urgent (each within its cap), else withheld with the need; idle unparked (or a lapsed park): rung (reason urgent) for urgent within the same urgent sender cap, else not_needed (no_park), no ring and no row (regular mail never wakes, 2026-10-02; the hourly nudged ring is retired, and a nudged row from before is never served nor delivered live); per-recipient hourly and nightly caps, urgent per sender per hour, ring_at staggered across one sender's burst; each ring is a coordination_wakes row that the recipient's attach and heartbeat answers carry as wake: queued mail and Codex offers until ack or expiry, other rings for WAKE_SERVE_REPEAT (25 s) after first served; unparked urgent Codex mail is capped attention with no steer path",
     "v50 subagents: register(parent_thread=) on a Codex row (capabilities name codex, episode is the thread) links the row to the most recently active live Codex row for that thread under the same principal (_codex_parent), and a Codex row registering links every row naming its thread (_link_children, one daemon update event per child, before = the row it replaced); prune clears parent_agent_id of the children of a removed parent; send from a row with parent_thread raises child_send_refused before any lookup; _public carries parent_agent_id and subagent. children entries with an agent_id belong to the hooks: subagent_started/subagent_stopped (actor hook) add or remove one by agent_id, labelled <agent_type>#<id8>, idempotent, with their own MAX_HOOK_CHILDREN (8, the oldest replaced past it) outside the parent's MAX_CHILDREN; a parent update keeps them (_parent_children) and is never refused because of them; _live_children hides a hook entry past HOOK_CHILD_TTL (the attached-idle window) and every write drops it; detach clears them all (a daemon update event); a refused children update applies nothing and says so",
     "Operator grant: grant_delegate grants the lease delegate:<project> (reason delegate); a session asking for a delegate: or designated: (the 0.16.0 name) lease gets reserved_lease, a freed grant never passes to a queued session, a delegate: hold counts only with the operator's lease_delegate audit record for its current fence (so one a session took under 0.16.0 grants nothing), and a 0.16.0 designated:coordinator: hold grants nothing",
-    "v54 maintainer mail: send(maintainer_proof=) only as the reserved MAINTAINER_PRINCIPAL (never reachable from dispatch), one full-id recipient that is a session's own address, stored with origin maintainer and its proof; receive shows origin maintainer with verified {by, label, signed_at} only for such a row (message_origin), or repudiated_at and the withdrawal sentence, and a withdrawn one is never a live turn; the pending preview omits maintainer mail and _mailbox_state counts it (maintainer_pending); _wake_decision decides it first: rung whenever a listener is live (done parks and active sessions included), capped above maintainer_per_recipient_per_hour, else no_path, recorded under reason maintainer_message, which _serve_wake serves without a park",
+    "v54 maintainer mail: send(maintainer_proof=) only as the reserved MAINTAINER_PRINCIPAL (never reachable from dispatch), one full-id recipient that is a session's own address, stored with origin maintainer and its proof; receive shows origin maintainer with verified {by, label, signed_at} only for such a row (message_origin), or repudiated_at and the withdrawal sentence, and a withdrawn one is never a live turn; history shows it withdrawn the same way (repudiated_at, the sentence in place of an unredacted body), from the live row or, once that is pruned, the maintainer_repudiate audit event the withdrawal appends as its transaction's last write; the pending preview omits maintainer mail and _mailbox_state counts it (maintainer_pending); _wake_decision decides it first: rung whenever a listener is live (done parks and active sessions included), capped above maintainer_per_recipient_per_hour, else no_path, recorded under reason maintainer_message, which _serve_wake serves without a park",
     "v54 reserved names: daemon and maintainer are refused as a to (recipient_reserved), either reserved row is reached only by a routed reply (send without to, reply_to one of the caller's maintainer messages); labels spelling daemon, maintainer, passkey or verified after NFKC, casefold and dropping non-alphanumerics are invalid_label except a reserved sender's own",
-    "v54 role changes take actor operator (host CLI) or maintainer (passkey route), nothing else: grant_delegate, break_lease and assign_coordinator (coordinator:<project> vacated with lease_assign naming the replaced holder, then an ordinary lease; the queue stays); one role per session per project, the other role's live hold broken in the same transaction (lease_break reason one_role, also_broken); both role leases locked in name order before any waiter or agent row; _authority accepts a lease_delegate record by either actor for the current fence. CoordinationConnection._txn is re-entrant (inner blocks are savepoints) so a signed action and its nonce commit together"
+    "v54 role changes take actor operator (host CLI) or maintainer (passkey route), nothing else: grant_delegate, break_lease and assign_coordinator (coordinator:<project> vacated with lease_assign naming the replaced holder, then an ordinary lease; the queue stays); one role per session per project, the other role's live hold broken in the same transaction (lease_break reason one_role, also_broken); acquire_lease refuses coordinator:<project> to that project's live delegate (already_delegate) unless it already holds it, so a pre-v54 session holding both keeps renewing; both role leases locked in name order before any waiter or agent row; _authority accepts a lease_delegate record by either actor for the current fence. CoordinationConnection._txn is re-entrant (inner blocks are savepoints) so a signed action and its nonce commit together",
+    "Reachability: grant_delegate and assign_coordinator return reachable and reason (_listener_path: listener_expired / listener_unknown / wake_disabled) plus, when not reachable, a warning; the grant still succeeds and lease delegate prints the warning; MaintainerStore.roles() carries reachable/reason per role holder"
    ]
   },
   {
@@ -1155,7 +1163,9 @@
     "Providers: claude / claude-desktop / codex / gemini / generic; per-provider writer ids",
     "Modes: sidecar / claude-* / openai-* / endpoint[-fallback] (-only and endpoint = ~11.8 GB lighter)",
     "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll",
-    "Client-only mode: -DaemonUrl with -TokenFile / -ReadToken / -PairingCode wires clients to a remote daemon, no Docker, volumes or token minting"
+    "Client-only mode: -DaemonUrl with -TokenFile / -ReadToken / -PairingCode wires clients to a remote daemon, no Docker, volumes or token minting",
+    "-TestLogin / --test-login: also runs test-login create in the Postgres container (a failure warns, the install stands); a client-only install ignores it with a note",
+    "A daemon install with a token ends by offering maintainer setup: --check first (in place: says so), no terminal prints the command, else one y/N (default no), then maintainer setup --yes; a failure leaves the install complete"
    ]
   },
   {
@@ -1208,7 +1218,7 @@
    "s": "checkout-mode wrapper over pseudolife-mcp update",
    "p": "ops/update.ps1",
    "d": [
-    "Maps its switches onto pseudolife_memory/update_cli.py through ops/update.py --checkout <repo> (the code pseudolife-mcp update runs); -ClientsOnly is refused (ops/update_clients.py)",
+    "Maps its switches onto pseudolife_memory/update_cli.py through ops/update.py --checkout <repo> (the code pseudolife-mcp update runs); -ClientsOnly is refused (ops/update_clients.py); -NoTestLogin / --no-test-login pass --no-test-login through (skips the checkout-mode test-suite login step)",
     "Refuses a dirty tree, or one git cannot describe, unless -AllowDirty",
     "Stamps git sha / dirty / build time into image labels + /health build",
     "backup → rollback tag <tag>-pre-update-<ts> → prune (keep 2)",
@@ -1242,7 +1252,8 @@
    "p": "ops/restore.ps1",
    "d": [
     "Default: scratch-DB rehearsal + row-count diff — zero writes",
-    "-Apply: safety dump → stop daemon → drop / create → restore → health"
+    "-Apply: safety dump → stop daemon → drop / create → restore → health",
+    "REVOKE CONNECT ... FROM PUBLIC before each replay (a plain dump carries no database ACL): on the rehearsal's scratch DB (a failure drops it and stops) and on the recreated bank (a failure only warns: re-run test-login create), so the test login cannot open either"
    ]
   },
   {
@@ -1381,7 +1392,7 @@
    "s": "GitHub Actions test suite",
    "p": ".github/workflows/ci.yml",
    "d": [
-    "~7.7k test functions vs a real pgvector pg18 service (job test); offline, CPU torch",
+    "~8.3k test functions vs a real pgvector pg18 service (job test); offline, CPU torch; job test also sets PSEUDOLIFE_TEST_LOGIN_ADMIN_URL (the service's superuser), so tests/test_test_login_cli.py makes a test-login role there and runs a PG-backed slice under it",
     "Separate from evals/ — those never run in CI",
     "Also test-lite-linux / test-lite-windows / test-lite-macos (embedded PG lanes) and frontend (type check, vitest, committed-build diff)"
    ]
@@ -1423,7 +1434,7 @@
    "p": "pseudolife_memory/connect_cli.py",
    "d": [
     "Plan → confirm → verify → apply, all or nothing, across claude-code / codex / claude-desktop / gemini registrations and the hooks' URL + token-file copies; every file backed up and read back; never creates a registration",
-    "Verify = the shim's token-file check, an authenticated no-redirect request and an MCP handshake with the board check-in off, before anything is written; a remote target gets PSEUDOLIFE_MCP_NO_SPAWN=1; Codex is written through its app-server (codex_connection)",
+    "Verify = the shim's token-file check, an authenticated no-redirect request and an MCP handshake with the board check-in off (a child run from the temp dir, so a source checkout's package cannot shadow the installed one, given only the target's URL and credential), before anything is written; a remote target gets PSEUDOLIFE_MCP_NO_SPAWN=1; Codex is written through its app-server (codex_connection)",
     "--code / --read-code joins a bank: runs pair only after confirmation (--dry-run never spends a code), then connects with the new token file"
    ]
   },
@@ -1521,7 +1532,7 @@
    "p": "pseudolife_memory/lease_cli.py",
    "d": [
     "run | hold | check | list | break | delegate (designate: deprecated alias); the truth is an OS file lock (os_lock, ~/.pseudolife-mcp/locks) held while the command runs; the board mirrors it through POST /api/coordination/lease | release | leases and keeps the FIFO queue; without a daemon it is flock with a name",
-    "run takes the board lease first, then the OS lock, renewing every ttl/3; hold --while-pid covers a process it did not start; break and delegate are operator-only and open the bank directly",
+    "run takes the board lease first, then the OS lock, renewing every ttl/3; hold --while-pid covers a process it did not start; break and delegate are operator-only and open the bank directly; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
     "check exits 0 free, 1 held, 70 when the check itself failed, so a gate never reads a crash as held"
    ]
   },
@@ -1534,7 +1545,7 @@
    "s": "operator-only board audit log",
    "p": "pseudolife_memory/board_audit_cli.py",
    "d": [
-    "export (JSON lines in chain order) · verify (walks the hash chain) · redact (one body, with a reason) · stats; reaches the bank directly with the database owner's credentials: no MCP tool, no REST route, never a bearer",
+    "export (JSON lines in chain order) · verify (walks the hash chain) · redact (one body, with a reason) · stats; reaches the bank directly with the database owner's credentials: no MCP tool, no REST route, never a bearer; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py); export --out and the stats report are written on this side, and stats sends this host's suite-lock durations in on stdin",
     "stats (board_audit_stats.compute_stats, pure) reports mail latency, wake precision against coordination_wakes, park outcomes, sends per session-hour and suite-lock waits as counts, seconds and names only",
     "Exit 0 ok, 1 chain broken or redaction refused, 2 nothing checked or changed"
    ]
@@ -1550,7 +1561,8 @@
    "d": [
     "One JSON report: installed versions, credential source, /health (2 s cap), an MCP stdio handshake (instructions, tool count, annotations), wake state, Codex hooks, coordination snapshot, saved tunnels; exit 0 only when ok",
     "Never starts a daemon; a daemon/shim version mismatch sets ok false and recommends update --clients-only --tag <daemon version>",
-    "--agent-state adds a read_only POST /api/coordination/context; --disposable-proof is the one writing mode and needs an explicit PSEUDOLIFE_TEST_DATABASE_URL"
+    "--agent-state adds a read_only POST /api/coordination/context; --disposable-proof is the one writing mode and needs an explicit PSEUDOLIFE_TEST_DATABASE_URL",
+    "maintainer_passkeys, only when the board is on for this token: GET /api/maintainer with the bearer → on (rp_id, origin, active keys, and a note that the database password or a host shell can also reset them) / off (unset) / invalid (the config_problem rule: fails the report, MaintainerPasskeysInvalid, recovery names maintainer setup) / unsupported / not_checked"
    ]
   },
   {
@@ -1592,7 +1604,7 @@
    "p": "pseudolife_memory/client_updates.py",
    "d": [
     "Shim: installs a numbered side-by-side runtime (venv, pip --no-deps, version probe, runtime.json written last) behind one stable launcher, migrates registrations to the launcher (each file backed up) and removes runtimes nothing names or runs (never the one the update itself runs from); a release the current runtime was installed from reports current instead of installing again (--reinstall forces it)",
-    "Plugin: claude plugin marketplace update, a byte compare of marketplace clone and cache, claude plugin update only on a difference, then the compare again as proof; never uninstalls",
+    "Plugin: claude plugin marketplace update, a byte compare of marketplace clone and cache, claude plugin update only on a difference, then the compare again as proof; never uninstalls; a failed marketplace update (the CLI's \"Failed to update/refresh marketplace\" line, or a nonzero exit) makes the step failed, never current or refreshed, its detail quoting that line, the remedy and the retry (update_clients.py --only plugin, else update --clients-only); a github-source marketplace is first moved to the HTTPS git source (settings.json and the record backed up; never removed)",
     "Codex: refreshes manual hook copies, upgrades a plugin copy via codex plugin marketplace upgrade, prints re-approval steps only when an approved hook definition changed; saved tunnels are updated too"
    ]
   },
@@ -1606,7 +1618,7 @@
    "p": "pseudolife_memory/maintainer.py",
    "d": [
     "MaintainerOps: the ten service methods behind /api/maintainer* (status, challenge, enrol, send, role, cancel, revoke, repudiate, sent, inbox), one per route; MemoryService inherits it",
-    "Gate: a configured bearer (tokenless refuses), a request principal the board admits (never maintainer), Postgres, and coordination.maintainer rp_id/origin that pass MaintainerConfig.problem() (https://<rp_id>[:port], or http://localhost[:port] with rp_id localhost), else 409 maintainer_https_required; the origin is never read from a request header",
+    "Gate: a configured bearer (tokenless refuses), a request principal the board admits (never maintainer), Postgres, and coordination.maintainer rp_id/origin that pass MaintainerConfig.problem() (https://<rp_id>[:port], or http://localhost[:port] with rp_id localhost; never the scheme's default :443 / :80, which a browser leaves out of the origin), else 409 maintainer_https_required; the origin is never read from a request header",
     "Stateless challenges (storage/maintainer.py): canonical JSON payload with purpose, nonce, expiry (120 s) and every deciding input, HMAC-SHA256 under the meta row maintainer_secret_v1; the WebAuthn challenge is sha256(payload); completion checks MAC, purpose, expiry, assertion, then spends the nonce in the action's transaction",
     "maintainer_webauthn.py: strict CBOR/COSE and clientDataJSON parsing with cryptography signatures (ES256 DER, EdDSA, RS256 PKCS#1 v1.5 n>=2048 e=65537; no PSS); UP+UV required; exact origin and rpIdHash; crossOrigin/topOrigin refused; sign-count compare-and-set, a regression flags the key; every failure is assertion_invalid with the check in the log only",
     "Enrolment: first key by host code (pseudolife-mcp maintainer enrol-code) stays pending until maintainer confirm; later keys need an enrol-approve signature and sit 24 h in quarantine, cancellable by any older key; a key revokes only itself; host revoke and reset (rotates the secret) via maintainer_cli.py",
@@ -1623,8 +1635,24 @@
    "p": "pseudolife_memory/maintainer_cli.py",
    "d": [
     "enrol-code prints a one-time 10-character base32 code (10 min, stored hashed, refused while any key is pending or active) and waits to print the redeeming key's prefix and label; confirm <prefix> activates it; revoke <prefix>; reset --yes; list",
-    "Opens the bank directly (PSEUDOLIFE_MCP_DATABASE_URL or the lite tier's instance), never through a bearer: what keeps an agent holding only a bearer from enrolling, confirming or revoking a key",
-    "setup (maintainer_setup.py) is the guided first setup: health with auth → tier (the daemon container, else this install) → the daemon's own config and keys read in its environment (docker exec / this interpreter, python -m pseudolife_memory.maintainer_setup state; MaintainerConfig.problem()) → a valid name is kept, else the tailnet HTTPS name (tailscale serve --bg --https=8443, verified, undone if it does not take; Tailscale stopped or without HTTPS certificates is refused) or http://localhost:<port> → one confirmation (--yes) → config write with a backup → docker restart → enrol-code, then one y/N after the prefix check (N revokes)"
+    "Opens the bank directly (PSEUDOLIFE_MCP_DATABASE_URL or the lite tier's instance), never through a bearer: what keeps an agent holding only a bearer from enrolling, confirming or revoking a key; with no bank in this shell (no PSEUDOLIFE_MCP_DATABASE_URL, no lite instance) and the pseudolife-mcp-daemon container running here, it re-runs itself there (docker exec, -it at a terminal; PSEUDOLIFE_DAEMON_EXEC stops a second hop) with the same arguments and exit code (daemon_exec.py)",
+    "setup (maintainer_setup.py) is the guided first setup: health with auth → tier (the daemon container, else this install) → the daemon's own config and keys read in its environment (docker exec / this interpreter, python -m pseudolife_memory.maintainer_setup state; MaintainerConfig.problem()) → a valid name is kept, else the tailnet HTTPS name (tailscale serve --bg --https=8443, verified, undone if it does not take; Tailscale stopped or without HTTPS certificates is refused) or http://localhost:<port> → one confirmation (--yes) → config write with a backup → docker restart (Docker tier only; a lite or pip daemon is told how to restart it, and a re-run enrols) → enrol-code, then one y/N after the prefix check (N revokes)",
+    "setup --check only answers (0 set up, 1 not, 2 unreadable): what the installers ask before offering the setup"
+   ]
+  },
+  {
+   "id": "testlogincli",
+   "g": "ops",
+   "x": 1860,
+   "y": 1895,
+   "t": "test_login_cli.py",
+   "s": "pseudolife-mcp test-login · a test-suite login that cannot open the bank",
+   "p": "pseudolife_memory/test_login_cli.py",
+   "d": [
+    "create (idempotent): role pseudolife_test with LOGIN and CREATEDB only (memberships revoked); REVOKE CONNECT from PUBLIC and the role on each production database (pseudolife_memory, POSTGRES_DB, --bank), and from PUBLIC on template1; leftover run databases handed to it; vector installed in template1, since CREATE EXTENSION vector needs a superuser",
+    "Refuses before any change when a role would lose CONNECT with PUBLIC (the PSEUDOLIFE_MCP_DATABASE_URL user, or one connected to a bank now), or when --role names that user",
+    "Writes PSEUDOLIFE_TEST_PG_USER / _PASSWORD to an owner-only ~/.pseudolife-mcp/test-pg.env (PSEUDOLIFE_TEST_PG_LOGIN_FILE), which tests/pg_defaults.py reads before ops/.env; a re-run re-applies the file's password; --rotate draws a new one, required when the role exists and no file here holds its password",
+    "Runs psql in the pseudolife-mcp-postgres container as its own superuser (stdlib only, SQL on stdin), or psycopg with --admin-url; the server gets only a SCRAM-SHA-256 verifier; exit 0 done, 1 database failed, 2 usage, 4 refused"
    ]
   }
  ],
@@ -2510,6 +2538,24 @@
    "t": "pgstorage",
    "l": "enrol-code · confirm · revoke · reset (direct)",
    "k": "data"
+  },
+  {
+   "f": "cli",
+   "t": "testlogincli",
+   "l": "test-login",
+   "k": "control"
+  },
+  {
+   "f": "testlogincli",
+   "t": "pgN",
+   "l": "role · REVOKE CONNECT (psql in-container | --admin-url)",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "testlogincli",
+   "l": "checkout mode: test-suite login when missing",
+   "k": "deploy"
   }
  ],
  "flows": {

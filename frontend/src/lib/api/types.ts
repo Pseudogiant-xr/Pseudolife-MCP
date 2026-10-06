@@ -182,6 +182,11 @@ export interface BoardAgent {
   agent_id: string;
   principal: string;
   label: string;
+  /** v55: the name the board shows: the session's title or the agent's own,
+   *  else "label shortid" (name_source ""). Absent from older daemons. */
+  name?: string;
+  /** Who set the name: "harness" | "agent" | "title" | "". */
+  name_source?: string;
   project: string;
   task: string;
   status: string;
@@ -211,6 +216,8 @@ export interface BoardAgent {
 export interface LeaseHolder {
   agent_id: string;
   label: string;
+  /** v55: the holder's board name ("label shortid" when unnamed); absent from older daemons. */
+  name?: string;
   principal: string;
   purpose: string;
   acquired_at: Epoch | null;
@@ -222,6 +229,8 @@ export interface LeaseHolder {
 export interface LeaseWaiter {
   agent_id: string;
   label: string;
+  /** v55: the waiter's board name; absent from older daemons. */
+  name?: string;
   enqueued_at: Epoch;
   purpose: string;
 }

@@ -158,6 +158,11 @@ if ($target -eq 'local') {
     $lines.Add('server="$(printf %s "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}" | tr -d "[:space:]")"; port="${server##*:}"')
     $lines.Add('if [[ "$server" != *:* || ! "$port" =~ ^[0-9]+$ ]] || (( 10#$port == 5433 )); then echo "remote-suite: PSEUDOLIFE_TEST_PG_HOST_PORT is not set to a test server other than port 5433 on this machine after env=; refusing" >&2; exit 2; fi')
     $lines.Add('export PSEUDOLIFE_SUITE_DISPATCHED=1')
+    # The pruning settings set here win over env= there.
+    foreach ($k in 'PSEUDOLIFE_SUITE_PRUNE', 'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP') {
+        $v = [Environment]::GetEnvironmentVariable($k)
+        if ($v) { $lines.Add("export $k=" + (Quote $v)) }
+    }
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
     $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read

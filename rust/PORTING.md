@@ -1,8 +1,9 @@
 # Porting contract
 
-The historical phase 1 close-out behavioural oracle is Python 0.16.1 at
-`f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
-Phase 2b master integration and a new oracle pin remain pending after #546 lands.
+The current phase 1 behavioural oracle is Python 0.17.0 at
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55.
+Historical phase 1 close-out evidence retains Python 0.16.1 at
+`f709abb54f7912ae9cd767998d0926ca33df4bcd` and schema 54.
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
 Historical phase 0b evidence remains bound to Python 0.15.0 at
@@ -202,8 +203,8 @@ credential defaults from the caller's installed client configuration.
 
 ## SQL and durable state
 
-Read and write the recorded phase-start schema (54 at the historical Phase 1
-close-out pin; earlier evidence keeps its recorded schema) without
+Read and write the recorded phase-start schema (55 at the current Phase 1
+pin; historical close-out evidence keeps schema 54) without
 DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
 each phase start; any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and

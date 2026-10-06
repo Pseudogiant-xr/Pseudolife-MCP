@@ -1803,8 +1803,12 @@ def test_codex_attention_offer_reports_pending_without_a_ring_marker(tmp_path):
     {"decision": "rung", "reason": [], "ring_at": 1.0}])
 @pytest.mark.parametrize("marker", ["written", "delayed", "refused"])
 def test_codex_authoritative_withdrawal_clears_offer_and_marker_paths(tmp_path, withdrawn, marker):
+    # The delayed ring is an hour ahead: the adapter arms a timer of at most
+    # 300 s for it, so it cannot fire before the withdrawal cancels it. A
+    # 0.2 s margin, computed here before connect and attach, lapsed on a
+    # slow Windows CI runner (2026-10-05) and the timer had already fired.
     ring = {"decision": "rung", "reason": "urgent",
-            "ring_at": time.time() + 0.2 if marker == "delayed" else 0.0}
+            "ring_at": time.time() + 3600 if marker == "delayed" else 0.0}
     daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
                               (2, _preview("m1", "m2"), withdrawn)])
 
@@ -1822,11 +1826,17 @@ def test_codex_authoritative_withdrawal_clears_offer_and_marker_paths(tmp_path, 
                 elif marker == "written":
                     assert (tmp_path / "digest.ring").exists()
                 else:
-                    assert coordination._ring_timer is not None
+                    timer = coordination._ring_timer
+                    assert timer is not None
                 original_ring = coordination._last_ring
                 await coordination._heartbeat()
                 assert coordination.ring_due() is None
+                assert coordination._ring_offer is None
                 assert coordination._ring_timer is None
+                if marker == "delayed":
+                    # The far-off ring never fires inside the test, so the
+                    # withdrawal's cancel is checked on the handle itself.
+                    assert timer.cancelled()
                 assert coordination._ring_unwritten is None
                 assert coordination._last_ring == original_ring
                 await asyncio.sleep(0.25)

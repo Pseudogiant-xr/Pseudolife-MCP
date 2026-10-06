@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
-PHASE1_ORACLE = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+PHASE1_ORACLE = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
 
 
 def source(path: str) -> str:
@@ -186,7 +186,7 @@ def validate(*, phase1: bool = False) -> dict:
     assert manifest["candidate_node_count"] == len(selected)
     if phase1:
         functions = manifest.get("phase1_functions", [])
-        assert len(functions) == 189, "missing per-function Phase 1 ownership"
+        assert len(functions) == 191, "missing per-function Phase 1 ownership"
         assert len({item["nodeid"] for item in functions}) == len(functions)
         scoped_internal = [item for item in functions
                            if item["bucket"] == "internal" and item["scope"] == "phase1"]

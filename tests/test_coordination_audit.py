@@ -1183,9 +1183,12 @@ def test_redaction_is_never_an_agent_action():
     assert "redact" not in _PARAMETERS
     service = SimpleNamespace(config=SimpleNamespace(coordination=SimpleNamespace(
         enabled=True, allowed_principals=["alice"])))
-    with pytest.raises(ValueError, match="^unknown_coordination_action$"):
+    # The refusal lists the agent actions (review 2026-10-04, M1); redact
+    # is not one of them.
+    with pytest.raises(ValueError, match="^unknown_coordination_action: ") as caught:
         dispatch(service, "redact", {"message_id": "0" * 32, "reason": "why"},
                  headers={}, principal="alice")
+    assert "redact" not in str(caught.value) and "redact" not in caught.value.accepted
 
 
 def test_a_log_that_predates_the_body_column_still_reads_and_verifies(store):

@@ -110,7 +110,7 @@ fn test_shim_accept_health_says_one_line_when_it_is_not_the_daemon_version() {
     let stderr = startup_stderr("{\"version\":\"0.1.0\"}");
     assert_eq!(stderr.lines().count(), 1);
     assert!(stderr.starts_with(
-        "[shim] this shim is pseudolife-mcp 0.16.1 but the daemon at http://127.0.0.1:"
+        "[shim] this shim is pseudolife-mcp 0.17.0 but the daemon at http://127.0.0.1:"
     ));
     assert!(stderr.contains("is 0.1.0 — run pseudolife-mcp update --clients-only --tag 0.1.0"));
     assert!(stderr.ends_with(if cfg!(windows) {
@@ -123,7 +123,7 @@ fn test_shim_accept_health_says_one_line_when_it_is_not_the_daemon_version() {
 fn test_shim_accept_health_is_quiet_when_versions_match_or_are_unknown() {
     for body in [
         "{}",
-        "{\"version\":\"0.16.1\"}",
+        "{\"version\":\"0.17.0\"}",
         "{\"version\":\"malformed value\"}",
         "{\"version\":7}",
     ] {

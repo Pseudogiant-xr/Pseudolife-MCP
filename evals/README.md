@@ -81,7 +81,7 @@ changes, so read the code if they disagree.
 | `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `$PSEUDOLIFE_BENCH_DG_URL` (default `http://127.0.0.1:8082/v1`, via `evals/dg_shim.py` — no llama-server support for diffusion archs) ⚠️ |
 | `gemma4-26b-qat` | Gemma 4 26B-A4B QAT-Q4_0 (candidate)          | `http://127.0.0.1:8081/v1`   |
 | `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
-| `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
+| `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default until `e4b-v3` replaced it (2026-08-08)** | `http://127.0.0.1:8081/v1` |
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
@@ -1200,7 +1200,10 @@ instruction is a separate change needing its own gate.
   and reaches the sidecar **only when the shim is unreachable**. The shim
   replaces the shipped prompt prefix with `sonnet_extractor_v2.md`, so
   until that override file carries the same instruction the new prompt
-  serves approximately nothing on this install.
+  serves approximately nothing on this install. (That follow-up has since
+  landed: `sonnet_extractor_v4.md` carried the same blocks from 2026-09-05
+  — the gate in the next section — and `sonnet_extractor_v5.md`, the shim
+  default since 2026-09-07, still does.)
 - **Restart the shim after `ops/update.ps1`.** A shim process holds the
   `_SYSTEM_PROMPT` of the tree it was launched from and swaps exactly that
   prefix (`evals/claude_shim.py`, `system.startswith(_SYSTEM_PROMPT)`).
@@ -3621,7 +3624,8 @@ docker exec pseudolife-mcp-daemon python /tmp/lb.py --target all
 
 The prime optimisation target is the **shipped sidecar** — whatever
 `ops/Dockerfile.extractor` bakes, which since 2026-07-06 is an **E4B-class**
-model and currently the Gemma 4 E4B QLoRA fine-tune (`e4b-ft`), not the 2B the
+model and currently the Gemma 4 E4B v3 fine-tune (`e4b-v3`, since 2026-08-08;
+`e4b-ft` before it), not the 2B the
 findings below were measured on. **Qwen3.6-27B** (4090) is the quality CEILING,
 not the target. The `_LESSON_SYSTEM_PROMPT` here is tuned, then ported to
 `memory/dream.py`.
@@ -4048,8 +4052,9 @@ so do hook-registered sessions that never touched memory (idle shim-only
 sessions are still dropped as transport artifacts), one per session key,
 with their memory-policy variant. Activity from before v43, or from a client that
 never registered, whose root is gone is still reported separately. Lesson
-searches and unmatched `used_ids` are reported as not recorded: the bank
-persists neither.
+searches and unmatched `used_ids` are reported as null: since schema v44 the
+bank persists both (`lesson_search_events`, `outcome_signals.used_ids`), but
+the script does not read them yet.
 
     python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
 
@@ -4852,7 +4857,10 @@ event in their session, so most-recent-wins left about one named id in
 three with an unlabelled earlier serving event.
 Whether agents actually pass it is the open question — the served session-start block
 (`MEMORY_LOOP_BLOCK`) now asks for it in the REFLECT beat, and the next
-telemetry review measures the answer against the 1 label above.
+telemetry review measures the answer against the 1 label above. (Since
+2026-09-24 the block served by default is `STARTUP_MEMORY_CORE`
+— `memory_policy.variant: compact` — which asks for `used_ids` at task end
+too; `MEMORY_LOOP_BLOCK` is served only under `full_separate_hook`.)
 
 ## `retrieval_replay.py` — the shipped knobs on the queries agents really asked
 
@@ -5308,6 +5316,13 @@ a bounded briefing; `MEMORY_LOOP_BLOCK` remains the detailed standing copy in
 alone; the briefing after it depends on the bank and can fill the rest of the
 hook's 9,500-byte budget. The ledger has not been rerun, which needs the live
 daemon; until it is, the row above is the pre-#364 measurement.
+
+The tier counts have moved as well: on 2026-10-05 `minimal` holds 10 tools,
+`core` 24 and `full` 38 (counted from the tier tags in
+`pseudolife_memory/mcp_server.py`), so the manifest rows above price smaller
+tiers than ship now. `MEMORY_LOOP_BLOCK` is served only when
+`memory_policy.variant` is `full_separate_hook`, by the plugin's separate
+memory-policy hook, and has grown to about 8,200 characters.
 
 ## What a call costs — before and after the cuts
 

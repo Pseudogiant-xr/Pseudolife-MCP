@@ -211,7 +211,56 @@ def test_hooks_json_binds_stop_as_an_async_rewake_command():
     assert hook["commandWindows"].endswith('lifecycle.ps1" -Event Stop')
     # Claude Code enforces the timeout on an asyncRewake hook; the script's own
     # budget stays under it so it always exits before the kill.
-    assert hook["timeout"] == 3600 and _constant("MAX_WAIT") < hook["timeout"]
+    assert _constant("MAX_WAIT") < hook["timeout"]
+
+
+def test_the_watcher_outlasts_any_delegate_lease_granted_after_the_last_turn():
+    """A session stays reachable while it is open (maintainer requirement
+    2026-10-05), the delegate above all. The watcher armed at a turn end
+    lasts twice the longest delegate lease, so a lease granted any time in
+    the week after the session's last turn is covered to its end. Claude
+    Code takes the timeout as is (``timeout * 1000`` ms, no ceiling, read in
+    the 2.1.286 and 2.1.287 bundles) into a Node timer, which fires at once
+    above 2**31 - 1 ms: past that the watcher would be killed on arrival."""
+    from pseudolife_memory.storage.coordination import DELEGATION_MAX
+    hook = _stop_hook()
+    assert _constant("MAX_WAIT") >= 2 * DELEGATION_MAX - 60
+    assert hook["timeout"] * 1000 <= 2**31 - 1
+
+
+def test_a_long_idle_watcher_polls_slower_but_keeps_its_listener_lease():
+    """After the first hour the watcher polls every IDLE_POLL seconds: a
+    session idle for days would otherwise spawn three Git Bash processes
+    every 5 s for as long as it stays open. Each poll renews the
+    listener record for LISTENER_LEASE seconds, so the slower poll must
+    still renew well inside it or the daemon would see no live path."""
+    assert _constant("POLL") < _constant("IDLE_POLL") <= _constant("LISTENER_LEASE") // 2
+    assert _constant("FAST_WAIT") == 3540
+
+
+def test_an_idle_watcher_spawns_little_per_poll():
+    """Delegate review of #585 (2026-10-05): with ~30 sessions open on the
+    maintainer's Windows host, an idle watcher's spawns add up. After the
+    first hour the Windows parent check (`ps -W` plus awk, 1.6-3.5 s on a
+    loaded host) runs every IDLE_PARENT_CHECK seconds, and the listener
+    renewal reads the clock with bash's printf where bash has it (4.2 and
+    later) instead of spawning date: a poll spawns only its sleep and mv."""
+    assert _constant("PARENT_CHECK") < _constant("IDLE_PARENT_CHECK") == 300
+    script = HOOK.read_text(encoding="utf-8")
+    renew = script.split("renew_listener() {", 1)[1].split("\n}\n", 1)[0]
+    assert "date" not in renew and "epoch_now" in renew
+    assert re.search(r"printf -v \w+ '%\(%s\)T' -1", script)
+
+
+def test_a_watcher_with_no_parent_to_check_keeps_the_one_hour_bound():
+    """Review of the 14-day watcher (2026-10-05): with no Claude Code process
+    to watch (no CLAUDE_PID), nothing but the digest's removal would end it,
+    so it keeps the bound it had before; and on Windows a ps -W that gives no
+    listing at arm time is retried each minute rather than dropped."""
+    script = HOOK.read_text(encoding="utf-8")
+    assert re.search(r'^\[ -n "\$PARENT" \] \|\| \[ "\$WAIT" -le "\$FAST_WAIT" \] \|\| WAIT=\$FAST_WAIT$',
+                     script, re.M)
+    assert re.search(r'^\s+\[ \$\? -ne 1 \] && PARENT=\$CLAUDE_PID && WINDOWS_PARENT=1$', script, re.M)
 
 
 @pytest.mark.parametrize("flag", ["", "1", "0"])
@@ -757,14 +806,23 @@ GATE_MESSAGE = ("Before ending: update your board status with why you stopped an
                 "needs_approval with park_clear_by set to the reviewer's agent id or maintainer, "
                 "or waiting_peer. A park records intent; automatic wake requires a live listener. "
                 "Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. "
-                "For waits over 59 minutes, especially needs_approval waiting on maintainer, arm wait-mail "
-                "in the background or keep the Codex doorbell active; otherwise record that you are "
-                "reachable on your next turn.")
+                "Claude Code's Stop hook keeps listening while this session stays open, and a Codex "
+                "thread needs its doorbell active; without either, record that you are reachable on "
+                "your next turn.")
 
 
 def test_the_served_park_gate_prompt_names_the_followup_distinction():
     from pseudolife_memory.coordination import PARK_GATE_MESSAGE
     assert PARK_GATE_MESSAGE == GATE_MESSAGE
+
+
+def test_the_hooks_own_park_prompt_matches_the_served_one():
+    """stop-wake.sh shows its own copy when the daemon's block carries no
+    text; since the watcher listens while the session is open, neither copy
+    sends a session to arm wait-mail (2026-10-05)."""
+    script = HOOK.read_text(encoding="utf-8")
+    default = re.search(r'^\s*DEFAULT_MESSAGE="([^"]*)"$', script, re.M)
+    assert default is not None and default.group(1) == GATE_MESSAGE
 
 
 @pytest.mark.parametrize("surface", ["checkin_sentence", "configuration", "stop_hook_quote"])

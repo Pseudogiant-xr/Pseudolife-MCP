@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-pub const PACKAGE_VERSION: &str = "0.16.1";
+pub const PACKAGE_VERSION: &str = "0.17.0";
 pub const SPAWN_WAIT: Duration = Duration::from_secs(25);
 pub const SPAWN_WAIT_ALIVE: Duration = Duration::from_secs(180);
 pub const EXTERNAL_WAIT: Duration = Duration::from_secs(5);

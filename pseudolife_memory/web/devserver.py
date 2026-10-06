@@ -30,6 +30,7 @@ def build_dev_app(token: str | None = None):
     from pseudolife_memory.web.fixtures import FixtureService
 
     service = FixtureService()
+    service.demo_board = True   # the Board shows the demo roster (fixtures.py)
 
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
