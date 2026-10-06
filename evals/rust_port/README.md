@@ -348,8 +348,8 @@ Acceptance closes only help and the scoped CLI-DISPATCH cases; other modes
 remain deferred.
 
 Current local CLI receipts at `779c588c` are
-[`rust-port-phase2-cli-windows-779c588c.json`](../results/rust-port-phase2-cli-windows-779c588c.json)
-and [`rust-port-phase2-cli-linux-native-779c588c.json`](../results/rust-port-phase2-cli-linux-native-779c588c.json).
+[`rust-port-phase2-cli-windows-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-779c588c.json)
+and [`rust-port-phase2-cli-linux-native-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-779c588c.json).
 Each has 15 passing self/candidate cases, 45 rejected mutations and five passing
 original outcomes for Python and Rust. Native Linux temporary/evidence storage
 is used. Both help measurement pairs, numerical repeat floors and exact
@@ -366,9 +366,24 @@ Only the UTF-8/scalar help/unknown-dispatch slice is accepted; current
 documentation-head review/checks remain separate.
 
 Historical local CLI receipts at `6e936887` remain unchanged:
-[`Windows`](../results/rust-port-phase2-cli-windows-6e936887.json) and
-[`native Linux`](../results/rust-port-phase2-cli-linux-native-6e936887.json).
+[`Windows`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-6e936887.json) and
+[`native Linux`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-6e936887.json).
 Their help pairs and executing
 [CI run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017)
 retain their original identities in `rust/PORT-STATE.md`. The earlier mounted-home
 Linux collection failure remains private and is excluded from acceptance.
+
+## Combined version capture scope
+
+Frozen `5220b5ee` Windows/Linux CLI cells cover 28 exact byte/state cases and
+112 rejected mutations per OS. Thirteen version cases include a Python-
+shaped marker and native image with canonical console missing, plus a valid
+installed fixture using an actual non-ASCII home. UTF-8 streams and platform
+newlines are explicit; locale/default encoding remains deferred. Eight
+immutable original CLI nodes pass once/non-skipped per arm, and each OS
+retains one native invalid-argv control. These storage-free cells start no
+daemon or database and do not establish a real-bank transcript. Exact source,
+runtime, helper and image bindings remain attached to `5220b5ee`; a docs/results
+carrier does not change the executed head. PORT-STATE.md records counts,
+source ratio, numeric tables and remaining hosted/review gates. Version
+remains deferred.

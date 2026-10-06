@@ -312,8 +312,8 @@ the existing resource-check option; optional `--candidate-sha256` binds a frozen
 binary. `--smoke` permits smaller positive counts and marks the output as plumbing
 evidence. Lease check and doctor measurements remain deferred until their
 mode contracts are implemented. Historical help pairs at committed `6e936887` are
-[`rust-phase2-help-measurement-windows-6e936887.json`](../results/rust-phase2-help-measurement-windows-6e936887.json)
-and [`rust-phase2-help-measurement-linux-6e936887.json`](../results/rust-phase2-help-measurement-linux-6e936887.json).
+[`rust-phase2-help-measurement-windows-6e936887.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2-help-measurement-windows-6e936887.json)
+and [`rust-phase2-help-measurement-linux-6e936887.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2-help-measurement-linux-6e936887.json).
 Each has 30 rows per arm; PORT-STATE.md links the matching accepted CLI receipts
 and reports pooled nearest-rank p50/p95 and repeat-block floors. The later
 Phase 1 docs/data merge leaves source/instruments unchanged; executed artifact
@@ -332,5 +332,22 @@ warmups separately, and identify this as fresh-process timing after explicit
 image warmup. Other modes retain their existing fixture-reset protocol unless
 `--warm-images` is explicitly selected. `--mode version --layout installed`
 selects the minimal installer-schema fixture; `--layout bare` is also available.
-New final measurements require the combined committed candidate and both-OS
-captures. Earlier copied-image timing remains historical evidence.
+Final combined-head measurements at `5220b5ee` cover both OSes. Earlier
+copied-image timing remains historical evidence.
+
+## Version image warmup protocol
+
+Version uses two untimed exact-byte controls, then one untimed start per arm
+before each of three blocks of ten alternating pairs. Warm and timed starts
+reuse exact executable file identities and identical restored input state:
+six warm starts and sixty timed starts per OS/layout. Bytes, environment,
+state and image/source identity remain checked. Preparation/restoration/file
+checks are untimed; owned-process setup, output collection and exit remain
+timed. The existing `cold_start_to_exit_ms` key means a fresh process after
+this warmup. Version enables it by default; `--warm-images` opts help in,
+without changing other CLI benchmark reset semantics. The `5220b5ee` bare
+and installed captures retain per-arm floors and recorded desktop load,
+without claiming controlled-idle conditions. PORT-STATE.md retains current
+numbers and historical cold-copy Windows results, with no established
+security-provider cause. CPU CLI timings claim no full-suite or shim-timing
+acceptance; executable sizes exclude interpreter dependencies.
