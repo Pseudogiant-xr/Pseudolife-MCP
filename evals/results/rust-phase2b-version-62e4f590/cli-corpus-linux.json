@@ -1,0 +1,999 @@
+{
+  "schema": 1,
+  "kind": "cli-state-compared-public",
+  "status": "passed",
+  "captured_at_utc": "2026-10-05T12:11:50Z",
+  "policy": "cli-state-compared",
+  "normalizations": [],
+  "capture_platform": {
+    "os": "Linux",
+    "architecture": "x86_64"
+  },
+  "python_oracle": {
+    "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "actual_source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "oracle_schema": 55,
+    "production_source_matches_pin": true,
+    "behavior_test_sources_match_pin": true
+  },
+  "instrument_binding": {
+    "source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "source_tree": "ab2d84ec76db706b8dbc4e6252d822f4ada05600",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "evals/rust_port/cli_process.py": "13b3660a9482d8faacd1af6f132f9154ffa0c17923c2e85392ddf4b5738e3eb2",
+      "evals/rust_port/cli_corpus.py": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+      "evals/rust_port/cli_public.py": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+      "evals/rust_port/cli_version.py": "296ede717ed1b2057c42026ffac19ba93a556bdaeada5a3c608d0da64028bb6b",
+      "evals/rust_port/harness.py": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+      "evals/rust_port/phase1_receipts.py": "1dffb09ad556432156edde839bce75135c06d361be611f86c9fe15add524858e",
+      "evals/rust_port/processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+      "evals/rust_port/provenance.py": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+      "evals/rust_port/stdio_capture.py": "e3a449cb528c8db9af6a8021063c294e8436e25b13a0b09dccb72c17e714b028",
+      "evals/rust_port/full_bank.py": "a51f0e2d426cd3bba76e87314431f5e4b473e37c8927688a0656d78f6c1d948d",
+      "evals/rust_baseline/common.py": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+      "evals/rust_baseline/daemon.py": "6968c2315da3bcd9fbcd4780c82faf11aef9b993ec5b0961a596727c53071e4d",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826",
+      "evals/rust_port/stdio_daemon.py": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+      "evals/memory_policy_bench.py": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+      "evals/memory_policy_daemon.py": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229"
+    },
+    "source_files_git_blob": {
+      "evals/rust_port/cli_process.py": "63bce99c03758ef504dbd753943dcc820369cbb3",
+      "evals/rust_port/cli_corpus.py": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+      "evals/rust_port/cli_public.py": "afa29f49ceeea317a628d876afda402a82f7939f",
+      "evals/rust_port/cli_version.py": "b5612fa6d430186570e7a574dc9b454848bc2ef3",
+      "evals/rust_port/harness.py": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+      "evals/rust_port/phase1_receipts.py": "4f8f996f00485ee9cc629354cbf972fcf386a1d9",
+      "evals/rust_port/processes.py": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+      "evals/rust_port/provenance.py": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+      "evals/rust_port/stdio_capture.py": "32ccdabf1b14e54a14c79b64329dfb32c6f863a1",
+      "evals/rust_port/full_bank.py": "c556409ad2fff65d48cb8d142c739fb1850ee394",
+      "evals/rust_baseline/common.py": "f255588f5088cd7d8b98b850db4b775f60b35569",
+      "evals/rust_baseline/daemon.py": "c64bc55070aaa6f642877c8a5e5ea312703288cb",
+      "evals/rust_baseline/daemon_child.py": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+      "evals/rust_baseline/transport.py": "346ee47cd712dc450763846d4267707e6657b1de",
+      "evals/rust_port/stdio_daemon.py": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+      "evals/memory_policy_bench.py": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+      "evals/memory_policy_daemon.py": "6569e7ddee359385bb8110ecfd50a91cf5c836fb"
+    }
+  },
+  "production_ownership": {
+    "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "source_tree": "82f6a9687bf755fb8da23f0838bbb40dc1e5561a",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "pseudolife_memory/storage/schema.py": "45290101c176157f64af8eba5b2ca406300478068d41f17e08a3b55f9c05dc78",
+      "tests/pg_defaults.py": "59cbc86125af57b1491a0fdb1a3a28f4230c30c43b2aacf425ac6578a0eae677",
+      "tests/fake_embedder.py": "0143f87137082c380b560b7e75920ac62028220d222abefdc8915e2939cdff86"
+    },
+    "source_files_git_blob": {
+      "pseudolife_memory/storage/schema.py": "67485994544895878e5c88e3a2702ed4eb6a6db8",
+      "tests/pg_defaults.py": "0d099e0b021a1a2b70b3aed578511ab4a108231a",
+      "tests/fake_embedder.py": "852fcb8cffdc9d1d923918f78462010c776e082d"
+    }
+  },
+  "command_identities": {
+    "oracle": {
+      "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+      "executable_bytes": 21662864,
+      "public_cli_module": true
+    },
+    "candidate": {
+      "executable_sha256": "8222c4a1105b636afd5415324ba0d119cebb886e92bef423c0e0d95ca6ec1f2c",
+      "executable_bytes": 16758936,
+      "public_cli_module": false,
+      "source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+      "source_tree": "ab2d84ec76db706b8dbc4e6252d822f4ada05600"
+    }
+  },
+  "capture_runtime": {
+    "python": "3.11.15",
+    "package_version": "0.17.0",
+    "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+    "environment_kind": "virtualenv",
+    "source_origin_matches_selected_root": true
+  },
+  "daemon_runtime": {
+    "python": "3.11.15",
+    "package_version": "0.17.0",
+    "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+    "environment_kind": "virtualenv",
+    "source_origin_matches_selected_root": true
+  },
+  "daemon_cleanup": {
+    "readiness_identity_verified": true,
+    "daemon_stopped": true,
+    "children_stopped": true,
+    "database_dropped": true
+  },
+  "cases": [
+    {
+      "id": "help-long",
+      "mode": "help",
+      "argv": [
+        "--help"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "help-short",
+      "mode": "help",
+      "argv": [
+        "-h"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "help-mode",
+      "mode": "help",
+      "argv": [
+        "help"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "help-trailing",
+      "mode": "help",
+      "argv": [
+        "help",
+        "anything"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "help-invalid-trailing",
+      "mode": "help",
+      "argv": [
+        "--help",
+        "--invalid"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-basic",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "bogus"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-trailing",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "bogus",
+        "--help"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-empty",
+      "mode": "unknown-dispatch",
+      "argv": [
+        ""
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-apostrophe",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "isn't-a-mode"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-quotes",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "'\"mode"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-backslash",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "mode\\name"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-controls",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "mode\t\n\r\u0001"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-unicode",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "mémoire—🧠"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-separators",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "mode  　"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "unknown-category-c",
+      "mode": "unknown-dispatch",
+      "argv": [
+        "mode​󰀀"
+      ],
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-bare-version",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "bare",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-bare-flag",
+      "mode": "version",
+      "argv": [
+        "--version"
+      ],
+      "layout_kind": "bare",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-default-commit",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "default",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-default-commit-flag-tail",
+      "mode": "version",
+      "argv": [
+        "--version",
+        "ignored"
+      ],
+      "layout_kind": "default",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-default-requirement",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "default",
+      "manifest_kind": "requirement",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-default-checkout-no-git",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "default",
+      "manifest_kind": "checkout-no-git",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-override-commit",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "override",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-override-requirement",
+      "mode": "version",
+      "argv": [
+        "--version"
+      ],
+      "layout_kind": "override",
+      "manifest_kind": "requirement",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-half-root",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "half-root",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-half-launcher",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "half-launcher",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    },
+    {
+      "id": "version-wrong-platform-suffix",
+      "mode": "version",
+      "argv": [
+        "version"
+      ],
+      "layout_kind": "wrong-suffix",
+      "manifest_kind": "commit",
+      "passed": true,
+      "difference_count": 0
+    }
+  ],
+  "candidate_controls": [
+    {
+      "case": "help-long",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-long",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-long",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-long",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-short",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-short",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-short",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-short",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-mode",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-mode",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-mode",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-mode",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-trailing",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-trailing",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-trailing",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-trailing",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-invalid-trailing",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-invalid-trailing",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-invalid-trailing",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "help-invalid-trailing",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-basic",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-basic",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-basic",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-basic",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-trailing",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-trailing",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-trailing",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-trailing",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-empty",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-empty",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-empty",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-empty",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-apostrophe",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-apostrophe",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-apostrophe",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-apostrophe",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-quotes",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-quotes",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-quotes",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-quotes",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-backslash",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-backslash",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-backslash",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-backslash",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-controls",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-controls",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-controls",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-controls",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-unicode",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-unicode",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-unicode",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-unicode",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-separators",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-separators",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-separators",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-separators",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-category-c",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-category-c",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-category-c",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "unknown-category-c",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-version",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-version",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-version",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-version",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-flag",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-flag",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-flag",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-bare-flag",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit-flag-tail",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit-flag-tail",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit-flag-tail",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-commit-flag-tail",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-requirement",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-requirement",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-requirement",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-requirement",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-checkout-no-git",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-checkout-no-git",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-checkout-no-git",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-default-checkout-no-git",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-commit",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-commit",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-commit",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-commit",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-requirement",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-requirement",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-requirement",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-override-requirement",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-root",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-root",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-root",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-root",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-launcher",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-launcher",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-launcher",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-half-launcher",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-wrong-platform-suffix",
+      "field": "exit_code",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-wrong-platform-suffix",
+      "field": "stdout_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-wrong-platform-suffix",
+      "field": "stderr_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    },
+    {
+      "case": "version-wrong-platform-suffix",
+      "field": "post_files_b64",
+      "mutation_arm": "candidate",
+      "rejected": true
+    }
+  ]
+}

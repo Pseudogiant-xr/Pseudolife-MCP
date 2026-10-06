@@ -1,6 +1,6 @@
 # Repaired Unix account comparison
 
-The [published instrument](../../rust_port/users_comparison/README.md) executed against committed source `245baf71e697a5b236dbf89928bdd942dafde983` and tree `57a97ffc0d89b2d20ea2a44ddf0738917612bcd9`. [comparison.json](comparison.json) records its exact Git blobs and executed file bytes, commands, exits and path-free observed output. Cargo manifest and lock files have checkout CRLF line endings; their normalized content equals the canonical Git blobs. A subsequent receipt-only commit does not become this execution's source identity.
+The [published instrument](../../rust_port/users_comparison/README.md) executed against committed source `245baf71e697a5b236dbf89928bdd942dafde983` and tree `57a97ffc0d89b2d20ea2a44ddf0738917612bcd9`. [comparison.json](comparison.json) records its exact Git blobs and executed file bytes, commands, exits and path-free observed output. The Cargo manifest has checkout CRLF line endings and normalizes to its canonical Git blob; Cargo.lock has LF line endings and identical canonical and executed bytes. A subsequent receipt-only commit does not become this execution's source identity.
 
 Actual `users` 0.11.0 and the production replacement matched four name cases, with two positive accounts, across four threads; real UID comparison also passed. All six imported resolver tests passed, including the two defensive admission cases. Four original test bodies remain byte-identical to `43e05ac1`.
 
