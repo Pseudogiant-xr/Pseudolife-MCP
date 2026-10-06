@@ -52,7 +52,7 @@ def command_summary(identity, *, source=False):
 
 
 def public_summary(receipt):
-    """Require the complete help/version gate and project only checked fields."""
+    """Require complete help/version and any selected lease gate; project checked fields."""
     from .cli_process import STATE_POLICY, cases
     try:
         require(receipt["policy"] == STATE_POLICY and receipt["normalizations"] == [])
@@ -87,8 +87,11 @@ def public_summary(receipt):
         require(all(value is True for value in cleanup.values()))
         child_runtime = runtime_summary(receipt["daemon_cleanup"]["actual_child_runtime"])
         require(child_runtime["package_version"] == runtime["package_version"])
-        expected = {row["id"]: row for row in cases(("help", "version"))}
         records = receipt["records"]
+        lease_selected = any(row["mode"].startswith("lease-") for row in records) or any(
+            mode.startswith("lease-") for mode in receipt.get("coverage", {}).get("modes", []))
+        expected = {row["id"]: row for row in cases(("help", "version", "lease") if lease_selected
+                                                   else ("help", "version"))}
         require(len(records) == len(expected) and {row["id"] for row in records} == set(expected))
         inventory = []
         for record in records:
@@ -100,7 +103,9 @@ def public_summary(receipt):
                 require(observed["request"] == case)
                 selected = command_summary(observed["execution"]["command_identity"])
                 require(all(selected[key] == identity[key] for key in selected))
-            inventory.append({"id": case["id"], "mode": case["mode"], "argv": case["argv"],
+            # Lease argv can contain the private child interpreter path.
+            inventory.append({"id": case["id"], "mode": case["mode"],
+                              **({"argv": case["argv"]} if not case["mode"].startswith("lease-") else {}),
                               **{key: case[key] for key in ("layout_kind", "manifest_kind") if key in case},
                               "passed": record["passed"], "difference_count": len(record["differences"])})
         fields = ("exit_code", "stdout_b64", "stderr_b64", "post_files_b64")
