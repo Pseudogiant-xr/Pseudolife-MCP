@@ -3,7 +3,7 @@ import re
 
 
 CLI_HELPERS = (
-    "evals/rust_port/cli_process.py", "evals/rust_port/cli_corpus.py", "evals/rust_port/cli_public.py", "evals/rust_port/cli_version.py",
+    "evals/rust_port/cli_process.py", "evals/rust_port/cli_corpus.py", "evals/rust_port/lease_corpus.py", "evals/rust_port/cli_public.py", "evals/rust_port/cli_version.py",
     "evals/rust_port/harness.py", "evals/rust_port/phase1_receipts.py", "evals/rust_port/processes.py",
     "evals/rust_port/provenance.py", "evals/rust_port/stdio_capture.py", "evals/rust_port/full_bank.py",
     "evals/rust_baseline/common.py", "evals/rust_baseline/daemon.py",
@@ -64,6 +64,8 @@ def public_summary(receipt):
         require(isinstance(receipt["captured_at_utc"], str)
                 and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", receipt["captured_at_utc"]) is not None)
         binding = receipt["cli_instrument_binding"]
+        require(set(binding["instrument"]["source_files_sha256"]) == set(CLI_HELPERS)
+                and set(binding["instrument"]["source_files_git_blob"]) == set(CLI_HELPERS))
         instrument = binding_summary(binding["instrument"], CLI_HELPERS)
         candidate = command_summary(receipt["command_identities"]["candidate"], source=True)
         oracle = command_summary(receipt["command_identities"]["oracle"])
