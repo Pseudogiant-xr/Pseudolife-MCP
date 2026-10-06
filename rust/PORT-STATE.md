@@ -21,8 +21,9 @@ and six relevant parser-limit cells on each current binary, with no requests
 and 56 rejected output/file controls per host. Five focused helper checks, one
 public formatter process check, formatting and warning-denied clippy pass on
 both hosts. Earlier native checks retain their original binary attribution. These are scripted-peer diagnostics;
-real-daemon acceptance, persistent multi-turn sequencing, hosted CI and
-performance evidence remain outstanding. Existing Python tests and the generic
+broader real-daemon acceptance, persistent multi-turn sequencing and hosted CI
+remain outstanding; the bounded positive proof and debug timing below do not
+close those gates. Existing Python tests and the generic
 CLI fixture remain unchanged; daemon-backed routing is not claimed.
 
 The external subprocess adapter now admits 18 collected existing prompt-hook
@@ -52,6 +53,51 @@ The first credential-file proof refused an unprotected Windows token file and
 is rejected as positive-path evidence. Later env-token proofs establish actual
 GETs and cursor effects after implementation began, without repairing the
 required proof-before-implementation sequence. Follow-up review is pending.
+
+The bounded owned-daemon nonempty `briefing` pair now passes on Windows and
+Linux against Python 0.17.0/schema 55 at the oracle above. One synthetic world
+fact is seeded through pinned production storage APIs without embedding
+computation. Independently expected stdout is 67 Windows bytes and 65 Linux
+bytes, with exit 0, empty stderr, unchanged home files, four rejected output/file
+controls, identical endpoint responses before/after and verified owned cleanup.
+Local untracked proof evidence is
+`briefing-committed-daemon-nonempty-windows-proof.json` and
+`briefing-committed-daemon-nonempty-linux-proof.json`; this bounded result does
+not retroactively repair the earlier proof-before-implementation sequence.
+
+The existing CLI instrument at
+`840cccf85ec99bd5e8e97cb820d3a1d899005de3`, tree
+`941df01bc9eed839946ac5b6eadad5d81501b4db`, completes the same owned-daemon bare
+fixture with three repeats of ten cold-start-to-exit samples per arm on each OS,
+alternating arms and retaining the existing repeat floors. The 1x1 plumbing
+smokes remain separate. Exact arm-level controls are retained; the instrument
+compares every invocation's output and prepared environment/home to its control
+before appending the timing row. Timed rows do not retain individual raw streams
+or full post-file payloads. All bounded fixture resources were cleaned up.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `briefing-measurement-windows-3x10.json` | `3287483ee5ad27ad28281fb9d87bbd8728de7ce766cb2c4e590ea80a4baad395` |
+| Linux | `briefing-measurement-linux-3x10.json` | `9de318f28132f03bc563e711629d3591104dd379dde3e9c115d9086dc07994ca` |
+
+Native executable SHA256 is
+`4c8757f9268464c8c04d01e70287ea474649e51fe2888ac1e6a7f7e80d509ac6` on Windows
+and `d3e73627e849aeff812eb6cb013722fc9811c59ab1b12b4eb2c06c1e0f061315` on Linux.
+The retained evidence supports debug/unoptimized builds; producing Cargo
+invocation/profile/options attestation remains incomplete for both final
+executables. Local `briefing-retained-build-attestation.md` records that limit;
+`briefing-{windows,linux}-measurement-result.md` and the corresponding audit JSON
+files retain the descriptive results and source/runtime/helper bindings. No
+release-profile or general speed claim is made.
+
+The current local core corpus passes 50/53 declared comparisons per OS, with
+three configured bearer failures. Raw request headers also differ outside that
+comparator; full wire equality is unproven. Pending groups 5 (configured bearer headers), 10 (unmatched
+traceback prefixes) and 12 (response-head/chunk-framing inactivity) remain
+unapproved; briefing header failures are measured, while its chunk-framing gap
+is inferred from the shared client. Broader daemon/cursor sequencing and hosted
+acceptance remain open. Next action is those pending compatibility decisions
+and remaining full-mode gates; `briefing` and `prompt-hook` remain deferred.
 
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
