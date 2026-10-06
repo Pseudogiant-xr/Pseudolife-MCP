@@ -14,7 +14,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The current version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 15 routed nodes (10 public stdio and 5 CLI). The two new public refusal nodes passed as part of the ten selected stdio nodes per platform in run 37315503446 at ac0c64a1; the later Phase 1 judge failed and acceptance remains pending. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
+The prepared version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The current ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors from missing offline model files; it does not isolate a Rust failure. Current final-head hosted Parity remains required; historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
 
 The native version candidate and shared CLI fixture have fresh independent code approval at `62e4f590` and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](../evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
@@ -77,8 +77,8 @@ Snapshot: 2026-10-06 08:57 UTC. These are the published heads and observed workf
 
 | Branch | PR | Published head | Base | Rust workflow run / status | Next action |
 |---|---|---|---|---|---|
-| `codex/rust-phase1` | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), draft | `5ff045b0` | `master` @ `3c01bb31` | #37434566225: Rust and Parity green on both OSes; general CI #37434566230 green | Review and publish the Linux cleanup deadline repair; require its own CI, one routed full suite per machine, and final readiness review. |
-| `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` | `codex/rust-phase1` | No run on this head; #37315503446 belongs to historical `ac0c64a1` | Complete the installed-layout identity correction and source-bound checks, then align with the final phase 1 base and rebind evidence. |
+| `codex/rust-phase1` | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), merged | `465d75d9` merge; validated `a3e95642` | `master` @ `3c01bb31` | #37443932505: Rust and Parity green on both OSes at `a3e95642` | Merged Phase 1 retains its own eight-route full-suite/source/ELF bindings; it does not verify the version branch's 18 current admissions. |
+| `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` published; `74b5998c` measured | `master` after #560 | No hosted run on `74b5998c`; historical #37315503446 failed at `ac0c64a1` | Freeze the documentation/evidence successor, repeat required final-head cells on both OSes, then require hosted validation and independent review. The current ten-stdio attempt fails five shared fixture nodes in both arms. |
 | `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
 | `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
 | `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
@@ -613,9 +613,34 @@ NaN, Infinity, lone surrogates and integers beyond u64. The fixture admission
 preserves canonical containment, existence and symlink checks, including
 Windows short/long spellings of the same owned file.
 
-These source changes do not rebind historical receipts. Version remains
-deferred pending compiled identity contracts and final-head paired receipts
-on both platforms, hosted routed/additive validation, and the Windows
-installed-layout timing diagnosis with committed measurement floors. The
-recorded 278 ms candidate versus 156 ms Python and 5 ms floor is unresolved;
-no final-head performance or ported claim follows from this integration.
+Historical/provisional Windows release proof captured at `74b5998c` passes
+the original compiled contracts with both feature settings, 26 exact CLI cases,
+104 rejected controls and all eight routed CLI nodes. The admitted Python
+runtime is genuine 3.11.9 at the current pin. The Linux release corpus passes
+26 cases and 104 controls; its eight CLI nodes pass once/non-skipped in both
+arms. Final paired measurements were not launched and remain required after
+the documentation freeze. The current ten-stdio attempt passes five and fails
+five in both arms with shared HTTP 500 fixture errors. An unchanged Python
+idle-gap diagnostic found missing offline model files. These provisional
+captures do not support a ported row. The implementation, instrument and documentation freeze with this
+packet; subsequent captured-result additions cite that frozen validation head.
+Version remains deferred until actual final-head invocations on both OSes,
+paired measurements, hosted validation and independent review are complete.
+
+The provisional Windows paired installed median at `74b5998c` is 288.004 ms against Python
+178.390 ms, a 109.614 ms regression beyond the 14.118 ms observed median floor;
+p95 is 324.564 versus 200.897 ms, beyond the 12.753 ms p95 floor. With the same
+current image, installed home and manifest, fresh help and version both cost
+284–288 ms, while immediate reuse costs 22–24 ms. Most of the fresh-copy
+penalty occurs in launch and process ownership setup before output collection.
+This records a fresh-image startup/cache condition affecting both commands;
+it does not attribute a security provider or dismiss the regression as noise.
+The historical 278/156 ms finding and measurements remain intact.
+
+Current native/Python mode source ratio is 176/125 = 1.408: 163 physical Rust
+lines before `#[cfg(test)]` plus 13 net dispatcher lines versus `c9705e88`,
+against 223 Python CLI module lines minus the 98-line AST `_USAGE` asset.
+Counts include comments/blanks and exclude tests, assets and shared runtime
+support, preserving the historical denominator definition. The provisional
+[Windows/Linux packet](../evals/results/rust-phase2c-version-74b5998c/README.md)
+retains the actual capture identities and final-head limitations.
