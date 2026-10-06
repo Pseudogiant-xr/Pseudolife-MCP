@@ -157,8 +157,18 @@ buffer remain live through `GetBinaryTypeW`; no native handle is created.
 Windows retains symlink metadata and extension-bearing file acceptance, while
 extensionless paths require that binary-type check. Unix uses `rustix::fs::access`
 with real IDs and ACLs after following metadata to a regular file. Ordered PATH
-search, captured cwd, Windows PATHEXT changes between calls and filename casing
-are retained.
+search, captured cwd and Windows filename casing are compared against the actual
+registry crate by `evals/rust_port/which_comparison.py`.
+
+Windows deliberately reads PATHEXT on each lookup. This matches the removed
+public `which::which` calls in 8.0.6: their borrowed `RealSys` uses the trait's
+default extension parser. It differs from an owned `WhichConfig<RealSys>`,
+whose `RealSys` implementation caches the first extension list in `OnceLock`.
+The comparison exercises both actual crate APIs after changing `.CMD` to
+`.EXE` in a disposable child; the owned configuration still accepts a `.CMD`
+file while the public API and replacement reject it. The replacement does not
+adopt that owned-configuration cache. This is an explicit lookup policy, not
+an assertion that every `which` API has identical behavior.
 The maintainer authorized exactly the two fixture resolver-call substitutions;
 their assertions and error handling remain unchanged. Platform validation and
 independent review remain required before acceptance.
