@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tomllib
 
 
@@ -38,13 +39,19 @@ def main() -> None:
     oracle = next(package for package in metadata["packages"] if package["name"] == "which")
     assert oracle["version"] == "8.0.6" and oracle["source"].startswith("registry+")
     oracle_root = Path(oracle["manifest_path"]).parent
-    checksum = json.loads((oracle_root / ".cargo-checksum.json").read_text())
-    assert checksum["package"] == package["checksum"]
+    archive = oracle_root.parent.parent.parent / "cache" / oracle_root.parent.name / "which-8.0.6.crate"
+    assert sha256(archive) == package["checksum"]
     oracle_hashes = {}
-    for name, expected in checksum["files"].items():
-        actual = sha256(oracle_root / name)
-        assert actual == expected, name
-        oracle_hashes[name] = actual
+    with tarfile.open(archive, "r:gz") as upstream:
+        for member in upstream.getmembers():
+            if member.isfile():
+                name = Path(member.name).relative_to("which-8.0.6").as_posix()
+                content = upstream.extractfile(member)
+                assert content is not None
+                expected = hashlib.sha256(content.read()).hexdigest()
+                actual = sha256(oracle_root / name)
+                assert actual == expected, name
+                oracle_hashes[name] = actual
     build = ["cargo", "+1.94.0", "build", "--manifest-path", str(manifest), "--offline", "--locked", "-j2"]
     with arguments.log.open("x", encoding="utf-8") as log:
         log.write("START registry which 8.0.6 versus production resolver\n" + json.dumps(build) + "\n")
