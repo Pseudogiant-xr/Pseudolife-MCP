@@ -11,6 +11,10 @@ def instrument(tmp_path, monkeypatch, *, mismatch=False):
                            candidate_root=tmp_path, candidate=tmp_path / "candidate",
                            candidate_sha256=None, repeats=3, samples=10, smoke=False,
                            board_checked_at=None, offline_resource_checked_at="fixture")
+    args.candidate.write_bytes(b"native fixture")
+    oracle = tmp_path / "python"
+    oracle.write_bytes(b"python fixture")
+    monkeypatch.setattr(cli_measurement.sys, "executable", str(oracle))
     monkeypatch.setattr(cli_measurement, "require_phase1_source", lambda root: {}, raising=False)
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.17.0"\n')
     monkeypatch.setattr(cli_measurement, "require_import_root", lambda root: None)
@@ -37,7 +41,7 @@ def instrument(tmp_path, monkeypatch, *, mismatch=False):
 def test_version_measurement_uses_selected_arguments_and_existing_repeat_floors(tmp_path, monkeypatch):
     args, calls = instrument(tmp_path, monkeypatch)
     receipt = cli_measurement.measure(args, {})
-    assert len(calls) == 62
+    assert len(calls) == 68
     assert all(argv == ["--version"] for argv in calls)
     assert receipt["mode"] == "version"
     assert receipt["argv"] == ["--version"]
@@ -93,9 +97,10 @@ def test_installed_measurement_resets_one_home_before_timer_and_retains_binding(
     from pathlib import Path
     monkeypatch.setattr(cli_measurement, "run_cli", observed)
     receipt = cli_measurement.measure(args, {}, prepare=prepare, case=case)
-    assert len(prepared) == len(calls) == 62
+    assert len(prepared) == 2
+    assert len(calls) == 68
     assert len({home for home, _, _ in prepared}) == 1
-    assert started[::2] == list(range(3, 63))
+    assert started[::2] == [2] * 60
     assert all(env["CUDA_VISIBLE_DEVICES"] == "-1" and env["PSEUDOLIFE_MCP_NO_SPAWN"] == "1"
                for _, env, _ in prepared)
     assert all(set(commands) == {"oracle", "candidate"} for _, _, commands in prepared)
@@ -153,7 +158,8 @@ def test_installed_layout_selects_public_installer_case_without_private_adapter(
     assert selected == [(tmp_path, "f" * 40)]
     assert receipt["prepared_case"]["layout_kind"] == "default"
     assert receipt["prepared_case"]["argv"] == ["--version"]
-    assert len(calls) == len(prepared) == 62
+    assert len(calls) == 68
+    assert len(prepared) == 2
 
 
 def test_installed_output_change_during_sampling_is_rejected(tmp_path, monkeypatch):
@@ -175,7 +181,7 @@ def test_measurement_binds_loaded_helpers_before_launch_and_after_capture(tmp_pa
     monkeypatch.setattr(cli_measurement, "cli_binding", lambda *a, **k: phases.append(len(calls)) or {"fixture": True},
                         raising=False)
     receipt = cli_measurement.measure(args, {})
-    assert phases == [0, 62]
+    assert phases == [0, 68]
     assert receipt["cli_instrument_binding"] == {"fixture": True}
 
 
@@ -204,7 +210,7 @@ def test_selected_phase1_guard_and_dynamic_version_bind_before_and_after_capture
     monkeypatch.setattr(cli_measurement, "require_phase1_source",
                         lambda root: phases.append(len(calls)) or {"oracle_head": "f" * 40}, raising=False)
     receipt = cli_measurement.measure(args, {})
-    assert phases == [0, 62]
+    assert phases == [0, 68]
     assert receipt["python_oracle"] == {"oracle_head": "f" * 40}
     assert receipt["capture_runtime"]["package_runtime_version"] == "0.17.0"
 

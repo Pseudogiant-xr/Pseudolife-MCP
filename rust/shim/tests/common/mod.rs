@@ -55,6 +55,7 @@ impl ResponseGate {
 }
 #[derive(Default)]
 pub struct Setup {
+    pub health: Vec<Reply>,
     pub calls: Vec<Reply>,
     pub lists: Vec<Reply>,
     pub initialize: Vec<Reply>,
@@ -95,6 +96,7 @@ impl Fixture {
         let mcp_enabled = Arc::new(AtomicBool::new(true));
         let writes = Arc::new(AtomicUsize::new(0));
         let replies = Arc::new(Mutex::new(HashMap::from([
+            ("health", VecDeque::from(setup.health)),
             ("initialize", VecDeque::from(setup.initialize)),
             ("tools/call", VecDeque::from(setup.calls)),
             ("tools/list", VecDeque::from(setup.lists)),
@@ -229,10 +231,10 @@ fn respond(
         if !health_enabled.load(Ordering::SeqCst) {
             return;
         }
-        Reply::Http(
+        replies.lock().unwrap().get_mut("health").and_then(VecDeque::pop_front).unwrap_or_else(|| Reply::Http(
             200,
             json!({"status":"ok","auth_required":false,"version":pseudolife_stdio::lifecycle::PACKAGE_VERSION}).to_string(),
-        )
+        ))
     } else if verb == "DELETE" {
         deleted.lock().unwrap().insert(session.clone());
         Reply::Http(200, "{}".to_owned())

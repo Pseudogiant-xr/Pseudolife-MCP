@@ -1,4 +1,5 @@
 """Installer-schema version cases with minimal, genuine runtime relocation."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,8 @@ def cases():
         ("default-commit-flag-tail", ["--version", "ignored"], "default", "commit"),
         ("default-requirement", ["version"], "default", "requirement"),
         ("default-checkout-no-git", ["version"], "default", "checkout-no-git"),
+        ("missing-console", ["version"], "missing-console", "commit"),
+        ("non-ascii-home", ["version"], "default", "commit"),
         ("override-commit", ["version"], "override", "commit"),
         ("override-requirement", ["--version"], "override", "requirement"),
         ("half-root", ["version"], "half-root", "commit"),
@@ -23,7 +26,9 @@ def cases():
     ]
     return [{"id": "version-" + name, "mode": "version", "argv": argv, "stdin_b64": "",
              "environment_deltas": {}, "pre_files_b64": {}, "normalizations": [],
-             "layout_kind": layout, "manifest_kind": marker}
+             "layout_kind": layout, "manifest_kind": marker,
+             **({"expected_stdout": "pseudolife-mcp {version}\n"} if layout == "missing-console" else {}),
+             **({"home_suffix": "home-café-☃"} if name == "non-ascii-home" else {})}
             for name, argv, layout, marker in rows]
 
 
@@ -47,6 +52,47 @@ def seed_context(source_root):
             "version": tomllib.loads((source_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]}
 
 
+def prepare_dispatch_runtime(command, runtime, env, source_root):
+    """Translate an immutable test's Runtime fixture into real process files."""
+    if runtime is None:
+        return command
+    seed = seed_context(source_root)
+    windows = os.name == "nt"
+    scripts = runtime.path / ("Scripts" if windows else "bin")
+    scripts.mkdir(parents=True, exist_ok=False)
+    python = scripts / ("python.exe" if windows else "python")
+    console_name = "pseudolife-mcp.exe" if windows else "pseudolife-mcp"
+    shutil.copy2(seed["python"], python)
+    shutil.copy2(seed["console"], scripts / console_name)
+    shutil.copy2(seed["config"], runtime.path / "pyvenv.cfg")
+    marker = {"version": seed["version"], "installed_at": runtime.installed_at,
+              "source": runtime.source, "source_commit": runtime.source_commit,
+              "base_interpreter": seed["base_interpreter"]}
+    (runtime.path / "runtime.json").write_text(json.dumps(marker) + "\n", encoding="utf-8")
+    env["PSEUDOLIFE_SHIM_RUNTIMES"] = str(runtime.path.parent)
+    env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(runtime.path.parent / console_name)
+    env["PYTHONPATH"] = seed["pythonpath"]
+    if command == [sys.executable, "-m", "pseudolife_memory.cli"]:
+        return [str(python), *command[1:]]
+    native = scripts / ("pseudolife-stdio.exe" if windows else "pseudolife-stdio")
+    shutil.copy2(command[0], native)
+    return [str(native), *command[1:]]
+
+
+def checked_dispatch_text(result, runtime, source_root):
+    """Bridge capsys only after proving the complete platform process bytes."""
+    version = tomllib.loads((source_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    text = f"pseudolife-mcp {version}\n"
+    if runtime is not None:
+        origin = f"source commit {runtime.source_commit}" if runtime.source_commit else f"source {runtime.source or 'unknown'}"
+        text += f"runtime {runtime.path} ({origin})\n"
+    expected = (text.replace("\n", "\r\n") if os.name == "nt" else text).encode("utf-8")
+    if result["exit_code"] != 0 or base64.b64decode(result["stderr_b64"], validate=True) \
+            or base64.b64decode(result["stdout_b64"], validate=True) != expected:
+        raise RuntimeError("version process bytes differ from the pinned text-interface contract")
+    return text
+
+
 def make_prepare(source_root, source_pin):
     """Use the reviewed prepare callback with identical files in both arms."""
     source_root = Path(source_root).resolve()
@@ -63,14 +109,15 @@ def make_prepare(source_root, source_pin):
                 "source_commit": commit if kind == "commit" else None,
                 "base_interpreter": seed["base_interpreter"]}
 
-    def seed_files(runtime, marker, commands, *, native):
+    def seed_files(runtime, marker, commands, *, native, console=True):
         scripts = runtime / scripts_name
         scripts.mkdir(parents=True, exist_ok=True)
         shutil.copy2(commands["oracle"][0], scripts / python_name)
-        shutil.copy2(seed["console"], scripts / console_name)
+        if console:
+            shutil.copy2(seed["console"], scripts / console_name)
         shutil.copy2(seed["config"], runtime / "pyvenv.cfg")
         if native:
-            shutil.copy2(commands["candidate"][0], runtime / native_name)
+            shutil.copy2(commands["candidate"][0], scripts / native_name)
         (runtime / "runtime.json").write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
 
     def prepare(case, home, env, command, commands):
@@ -103,10 +150,10 @@ def make_prepare(source_root, source_pin):
         else:
             selected = override if kind == "override" else default
             runtime = selected / "000001"
-            seed_files(runtime, marker, commands, native=True)
+            seed_files(runtime, marker, commands, native=True, console=kind != "missing-console")
             # Own identity must survive the presence of a newer complete runtime.
             seed_files(selected / "000002", manifest("commit", commit="0" * 39 + "1"), commands, native=False)
-            native = runtime / native_name
+            native = runtime / scripts_name / native_name
         copied = runtime / scripts_name / python_name if command == commands["oracle"] else native
         return [str(copied), *command[1:]]
 

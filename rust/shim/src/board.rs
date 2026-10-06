@@ -1,6 +1,7 @@
 //! Session-scoped coordination. Mailbox credentials never enter diagnostics.
 pub mod adapter;
 pub mod claims;
+#[cfg(feature = "codex-delivery")]
 pub mod delivery;
 pub mod doorbell;
 pub mod identity;
@@ -142,6 +143,7 @@ struct Status {
 }
 struct ThreadEntry {
     adapter: Option<Arc<Adapter>>,
+    #[cfg(feature = "codex-delivery")]
     delivery: Option<Arc<delivery::Delivery>>,
     retry: Option<(crate::credentials::Generation, tokio::time::Instant)>,
     late_note: bool,
@@ -157,7 +159,9 @@ pub struct Board {
     cancel: CancellationToken,
     tasks: TaskTracker,
     doorbell: Mutex<Option<Arc<doorbell::Doorbell>>>,
+    #[cfg(feature = "codex-delivery")]
     bridge_enabled: AtomicBool,
+    #[cfg(feature = "codex-delivery")]
     bridge_setup_reported: AtomicBool,
     registry_failure_reported: AtomicBool,
     capacity_reported: AtomicBool,
@@ -228,7 +232,9 @@ impl Board {
             cancel: CancellationToken::new(),
             tasks: TaskTracker::new(),
             doorbell: Mutex::new(None),
+            #[cfg(feature = "codex-delivery")]
             bridge_enabled: AtomicBool::new(false),
+            #[cfg(feature = "codex-delivery")]
             bridge_setup_reported: AtomicBool::new(false),
             registry_failure_reported: AtomicBool::new(false),
             capacity_reported: AtomicBool::new(false),
@@ -316,6 +322,7 @@ impl Board {
         );
     }
     async fn configure_registry(&self) {
+        #[cfg(feature = "codex-delivery")]
         if self.options.wake {
             let bank = self.runtime.provider.snapshot().ok();
             let enabled = self.options.delivery_url.is_some()
@@ -330,6 +337,12 @@ impl Board {
                     "pseudolife-mcp: Codex live delivery requires an authenticated bridge with a separate host credential; using pull coordination."
                 );
             }
+        }
+        #[cfg(not(feature = "codex-delivery"))]
+        if self.options.wake {
+            crate::stderrln!(
+                "pseudolife-mcp: Codex live delivery unavailable; using pull coordination."
+            );
         }
         let setting = self
             .options
@@ -610,6 +623,7 @@ impl Board {
                 .or_insert_with(|| {
                     Arc::new(Mutex::new(ThreadEntry {
                         adapter: None,
+                        #[cfg(feature = "codex-delivery")]
                         delivery: None,
                         retry: None,
                         late_note: false,
@@ -644,6 +658,7 @@ impl Board {
         }) {
             return Err(entry.failure_hint.clone());
         }
+        #[cfg(feature = "codex-delivery")]
         if let Some(delivery) = entry.delivery.take() {
             delivery.close().await;
         }
@@ -652,6 +667,7 @@ impl Board {
         config.legacy_state = snapshot.token().map(|token| {
             identity::legacy_state_path(&self.options.state_root, &self.runtime.url, token, thread)
         });
+        #[cfg(feature = "codex-delivery")]
         if self.bridge_enabled.load(Ordering::Acquire) {
             let connected = tokio::select! {_=self.cancel.cancelled()=>return Err("Coordination: session is closing.".into()),result=tokio::time::timeout(self.options.timing.startup,delivery::Delivery::connect(self.options.delivery_url.as_deref().unwrap_or(""),self.options.delivery_token.as_deref().unwrap_or(""),thread))=>result};
             match connected {
@@ -698,6 +714,7 @@ impl Board {
             self.registry_failure_reported
                 .store(false, Ordering::Release);
             entry.late_note = self.status.lock().await.note == Some(policy::REGISTERED);
+            #[cfg(feature = "codex-delivery")]
             if let Some(delivery) = &entry.delivery {
                 let (owned, delivery, cancel) =
                     (adapter.clone(), delivery.clone(), self.cancel.clone());
@@ -712,8 +729,13 @@ impl Board {
             } else if let Some(doorbell) = doorbell {
                 doorbell.watch(thread, adapter.clone(), false).await;
             }
+            #[cfg(not(feature = "codex-delivery"))]
+            if let Some(doorbell) = doorbell {
+                doorbell.watch(thread, adapter.clone(), false).await;
+            }
             Ok(adapter)
         } else {
+            #[cfg(feature = "codex-delivery")]
             if let Some(delivery) = entry.delivery.take() {
                 delivery.close().await;
             }
@@ -941,6 +963,7 @@ impl Board {
             .collect::<Vec<_>>();
         for entry in entries.into_iter().rev() {
             let mut entry = entry.lock().await;
+            #[cfg(feature = "codex-delivery")]
             if let Some(delivery) = entry.delivery.take() {
                 delivery.close().await;
             }

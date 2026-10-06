@@ -1,4 +1,7 @@
 //! Bounded, coherent bearer snapshots. Diagnostics never include credential bytes.
+#[cfg(unix)]
+mod unix_accounts;
+
 use sha2::{Digest, Sha256};
 #[cfg(not(windows))]
 use std::fs;
@@ -211,8 +214,7 @@ pub(crate) fn expand_user(path: &Path) -> io::Result<PathBuf> {
         |name| {
             #[cfg(unix)]
             {
-                use users::os::unix::UserExt;
-                users::get_user_by_name(name).map(|user| user.home_dir().to_path_buf())
+                unix_accounts::home_by_name(name)
             }
             #[cfg(windows)]
             {

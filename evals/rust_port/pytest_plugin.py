@@ -5,21 +5,20 @@ from pathlib import Path
 import sys
 from contextlib import asynccontextmanager
 import os
-import subprocess
 
 import pytest
 
 from evals.rust_port.harness import isolated_env, run_cli
 
 MANIFEST = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
-# Admit subprocess nodes only when their candidate modes are supported.
-# Doctor remains deferred; the global CLI selector must fail closed for it.
-CLI_SUBPROCESS_NODES = set()
+CLI_VERSION_NODES = {
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+    "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
+}
 
 
 def boundary(node):
-    if node in CLI_SUBPROCESS_NODES:
-        return "cli-main-process"
     return MANIFEST["mapped"].get(node)
 
 
@@ -115,32 +114,26 @@ def _port_selected_boundary(request):
     if boundary(request.node.nodeid) != "cli-main-process":
         raise pytest.UsageError("selected boundary is not implemented")
     monkeypatch = request.getfixturevalue("monkeypatch")
-    if request.node.nodeid in CLI_SUBPROCESS_NODES:
-        original = subprocess.run
-        routed = []
-
-        def candidate_run(command, *args, **kwargs):
-            modes = public_cli_arguments(command)
-            if modes is None:
-                return original(command, *args, **kwargs)
-            env = dict(kwargs.get("env") or os.environ)
-            env["CUDA_VISIBLE_DEVICES"] = "-1"
-            routed.append(modes)
-            return original([*prefix, *modes], *args, **{**kwargs, "env": env})
-
-        monkeypatch.setattr(subprocess, "run", candidate_run)
-        request.addfinalizer(lambda: routed or pytest.fail("CLI subprocess adapter observed no public CLI call"))
-        return
     tmp_path = request.getfixturevalue("tmp_path")
 
     def main():
         env = isolated_env(tmp_path)
         env["PSEUDOLIFE_MCP_PYTHON"] = os.environ.get("PSEUDOLIFE_MCP_PYTHON", sys.executable)
-        result = run_cli(prefix, sys.argv[1:], cwd=Path.cwd(),
+        command = prefix
+        if request.node.nodeid in CLI_VERSION_NODES:
+            from pseudolife_memory import runtimes
+            from evals.rust_port.cli_version import checked_dispatch_text, prepare_dispatch_runtime
+            # The immutable test supplies this Runtime or None through its stub.
+            # Only its fixture data crosses into the process, never Python main.
+            runtime = runtimes.running_runtime(None)
+            command = prepare_dispatch_runtime(prefix, runtime, env, Path.cwd())
+        result = run_cli(command, sys.argv[1:], cwd=Path.cwd(),
                          env=env, timeout=10)
         # capsys sees the candidate's streams; original test assertions and
         # expected SystemExit stay intact. No Python CLI implementation is run.
-        sys.stdout.write(base64.b64decode(result["stdout_b64"]).decode("utf-8"))
+        text = checked_dispatch_text(result, runtime, Path.cwd()) if request.node.nodeid in CLI_VERSION_NODES \
+            else base64.b64decode(result["stdout_b64"]).decode("utf-8")
+        sys.stdout.write(text)
         sys.stderr.write(base64.b64decode(result["stderr_b64"]).decode("utf-8"))
         raise SystemExit(result["exit_code"])
 

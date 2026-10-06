@@ -2,6 +2,9 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
+import subprocess
+import tomllib
 
 import pytest
 
@@ -16,10 +19,10 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
+    assert inventory.PHASE1_ORACLE == "3c01bb31abd60178e15dea99adda369b4bbf92fc"
     result = inventory.validate_phase1()
     assert result["test_files"] == 423
-    assert result["candidate_nodes"] == 15
+    assert result["candidate_nodes"] == 18
     assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 353}
 
 
@@ -29,6 +32,18 @@ def test_legacy_inventory_retains_its_real_pin(inventory):
     assert result["test_files"] == 406
     assert result["candidate_nodes"] == 5
     assert result["buckets"] == {"oracle": 68, "candidate": 1, "internal": 337}
+
+
+def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
+    root = inventory.ROOT
+    pinned = subprocess.check_output(["git", "show", inventory.PHASE1_ORACLE + ":pyproject.toml"], cwd=root)
+    version = tomllib.loads(pinned.decode())["project"]["version"]
+    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text())
+    lock = tomllib.loads((root / "rust/Cargo.lock").read_text())
+    member = next(item for item in lock["package"] if item["name"] == "pseudolife-stdio")
+    runtime = re.search(r'pub const PACKAGE_VERSION: &str = "([^"]+)";',
+                        (root / "rust/shim/src/lifecycle.rs").read_text()).group(1)
+    assert crate["package"]["version"] == member["version"] == runtime == version
 
 
 @pytest.mark.parametrize("phase1,count", [(False, 406), (True, 423)])

@@ -7,8 +7,11 @@ import threading
 
 def main():
     control = sys.argv[1]
-    if control not in {"identity", "wrong-protocol", "duplicate-key"}:
+    if control not in {"identity", "wrong-protocol", "duplicate-key", "stderr"}:
         raise ValueError("unknown broken stdio control")
+    if control == "stderr":
+        sys.stderr.buffer.write(b"synthetic candidate stderr control\x00\xff\r\n")
+        sys.stderr.buffer.flush()
     child = subprocess.Popen([sys.executable, "-m", "pseudolife_memory.cli"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def input_pump():
@@ -27,7 +30,7 @@ def main():
         reader.start()
     mutated = False
     for line in iter(child.stdout.readline, b""):
-        if not mutated and control != "identity":
+        if not mutated and control not in {"identity", "stderr"}:
             if control == "duplicate-key":
                 line = b'{"jsonrpc":"2.0",' + line[1:]
             else:

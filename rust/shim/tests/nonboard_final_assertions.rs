@@ -8,10 +8,11 @@ use pseudolife_stdio::{
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{self, Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::mpsc,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -20,7 +21,8 @@ fn python() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| "python".into());
     // Resolve before the disposable child clears PATH and changes directory.
-    which::which(selected).expect("selected Python runtime for the disposable fixture")
+    lifecycle::find_executable(selected)
+        .expect("selected Python runtime for the disposable fixture")
 }
 fn health() -> Value {
     json!({"status":"ok","auth":false,"version":"99.0.0","updates":{"unattended_clients":true}})
@@ -188,8 +190,234 @@ fn test_two_sessions_starting_together_spawn_one_run() {
     );
 }
 
+fn runtime_update_health(socket: TcpListener, cancelled: mpsc::Receiver<()>) -> io::Result<()> {
+    socket.set_nonblocking(true)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let (mut stream, _) = loop {
+        match socket.accept() {
+            Ok(connection) => break connection,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                match cancelled.recv_timeout(Duration::from_millis(5)) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "child exited before GET /health",
+                        ));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "child never issued GET /health",
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+    let mut bytes = vec![];
+    let mut chunk = [0; 4096];
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !bytes.windows(4).any(|p| p == b"\r\n\r\n") {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() || bytes.len() >= 8192 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "incomplete GET /health",
+            ));
+        }
+        stream.set_read_timeout(Some(left))?;
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "incomplete GET /health",
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    assert!(String::from_utf8_lossy(&bytes).starts_with("GET /health "));
+    let body = health().to_string();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+#[test]
+fn runtime_update_fixture_cancels_when_child_exits_before_health() {
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap();
+    let (cancel, cancelled) = mpsc::channel();
+    let (finished, completion) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        finished
+            .send(runtime_update_health(socket, cancelled))
+            .unwrap();
+    });
+    cancel.send(()).unwrap();
+    let result = completion.recv_timeout(Duration::from_secs(1));
+    if result.is_err() {
+        // Release the old blocking implementation before reporting the RED.
+        let mut connection = std::net::TcpStream::connect(address).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        connection
+            .write_all(b"GET /health HTTP/1.1\r\nHost: fixture\r\n\r\n")
+            .unwrap();
+        connection.read_to_end(&mut Vec::new()).unwrap();
+        completion
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+    }
+    worker.join().unwrap();
+    assert_eq!(
+        result
+            .expect("health listener ignored child cancellation")
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Interrupted
+    );
+}
+
 fn runtime_update_fixture() -> (DisposableHome, Output, Value) {
     runtime_update_fixture_at(None)
+}
+
+#[test]
+fn built_binary_launches_updater_only_after_first_flushed_frame() {
+    let home = DisposableHome::new();
+    let package = home.path("pseudolife_memory");
+    fs::create_dir(&package).unwrap();
+    fs::write(package.join("__init__.py"), "").unwrap();
+    let sentinel = home.path("updater.json");
+    fs::write(package.join("cli.py"), format!(
+        "import json,pathlib,sys\npathlib.Path(sys.argv[sys.argv.index('--result-file')+1]).write_text('0\\n')\npathlib.Path({}).write_text(json.dumps(sys.argv[1:]))\n",
+        serde_json::to_string(sentinel.to_str().unwrap()).unwrap()
+    )).unwrap();
+    let health_gate = std::sync::Arc::new(common::ResponseGate::default());
+    let fixture = common::Fixture::start_with(common::Setup {
+        health: vec![common::Reply::Gated(
+            health_gate.clone(),
+            Box::new(common::Reply::Http(200, health().to_string())),
+        )],
+        ..Default::default()
+    });
+    let interpreter = python();
+    let mut shim = common::Shim::start_with_env(
+        &fixture.url,
+        &[
+            ("PSEUDOLIFE_MCP_PYTHON", interpreter.to_str().unwrap()),
+            ("PYTHONPATH", home.0.to_str().unwrap()),
+        ],
+    );
+    let attempt = shim
+        .state_dir()
+        .join(".pseudolife-mcp/update-clients.99.0.0.attempt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|record| record.verb == "GET" && record.path == "/health")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "built binary did not request health"
+        );
+        assert!(!sentinel.exists(), "updater ran before health request");
+        assert!(!attempt.exists(), "updater attempted before health request");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The local startup probe times out at 250 ms; hold it for a bounded
+    // interval below that deadline, checking the persistent markers throughout.
+    assert_updater_absent(&sentinel, &attempt, Duration::from_millis(100));
+    health_gate.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|record| record.message["method"] == "initialize")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "built binary did not complete startup"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Startup is observable at the upstream boundary; no client frame exists.
+    assert_updater_absent(&sentinel, &attempt, Duration::from_millis(200));
+    shim.send(json!({"jsonrpc":"2.0","id":"open","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"updater-frame-proof","version":"1"}}}));
+    assert!(
+        shim.receive()["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("99.0.0")
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let argv: Vec<String> = loop {
+        if let Ok(bytes) = fs::read(&sentinel)
+            && let Ok(argv) = serde_json::from_slice(&bytes)
+        {
+            break argv;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "first flushed frame did not trigger updater callback"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(
+        &argv[..5],
+        [
+            "update",
+            "--clients-only",
+            "--tag",
+            "99.0.0",
+            "--result-file"
+        ]
+    );
+    assert_eq!(
+        Path::new(&argv[5]),
+        shim.state_dir()
+            .join(".pseudolife-mcp/update-clients.99.0.0.result")
+    );
+    assert_eq!(
+        fs::read_to_string(&argv[5]).unwrap(),
+        if cfg!(windows) { "0\r\n" } else { "0\n" }
+    );
+    shim.send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+    assert!(shim.finish().is_empty());
+    assert!(
+        shim.stderr()
+            .contains("started the unattended client update")
+    );
+    fixture.assert_deleted();
+}
+
+fn assert_updater_absent(sentinel: &Path, attempt: &Path, delay: Duration) {
+    let deadline = Instant::now() + delay;
+    loop {
+        assert!(!sentinel.exists(), "updater ran before first flushed frame");
+        assert!(
+            !attempt.exists(),
+            "updater attempted before first flushed frame"
+        );
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, Value) {
     let home = DisposableHome::new();
@@ -204,22 +432,8 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
     fs::write(package.join("cli.py"), code).unwrap();
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", socket.local_addr().unwrap());
-    let endpoint = std::thread::spawn(move || {
-        let (mut stream, _) = socket.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let mut bytes = vec![];
-        let mut chunk = [0; 4096];
-        while !bytes.windows(4).any(|p| p == b"\r\n\r\n") {
-            let n = stream.read(&mut chunk).unwrap();
-            assert_ne!(n, 0);
-            bytes.extend_from_slice(&chunk[..n]);
-        }
-        assert!(String::from_utf8_lossy(&bytes).starts_with("GET /health "));
-        let body = health().to_string();
-        write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
-    });
+    let (cancel, cancelled) = mpsc::channel();
+    let endpoint = std::thread::spawn(move || runtime_update_health(socket, cancelled));
     let mut command = child(&home, "runtime");
     command
         .current_dir(&home.0)
@@ -229,8 +443,17 @@ fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, 
     if let Some(profile) = profile {
         command.env("HOME", profile).env("USERPROFILE", profile);
     }
-    let out = command.output().unwrap();
-    endpoint.join().unwrap();
+    let out = command.output();
+    let _ = cancel.send(());
+    let served = endpoint.join().unwrap();
+    let out = out.unwrap();
+    served.unwrap_or_else(|error| {
+        panic!(
+            "health fixture: {error}; child status: {}; child stderr: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        )
+    });
     assert!(
         out.status.success(),
         "{}",
