@@ -1,10 +1,13 @@
 //! Daemon discovery, detached process ownership, authentication precheck and recovery.
+#[path = "lifecycle_executable.rs"]
+mod executable;
 use crate::stderrln as eprintln;
 use crate::{
     cache::HandshakeCache,
     credentials::{CredentialError, CredentialProvider, CredentialSnapshot},
     daemon_url,
 };
+pub use executable::find_executable;
 use fs2::FileExt;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
@@ -1118,7 +1121,7 @@ pub fn launcher_command() -> String {
     if !launcher.is_file() {
         return "pseudolife-mcp".into();
     }
-    launcher_command_for(&launcher, which::which("pseudolife-mcp").ok().as_deref())
+    launcher_command_for(&launcher, find_executable("pseudolife-mcp").ok().as_deref())
 }
 pub fn launcher_command_for(launcher: &Path, found: Option<&Path>) -> String {
     if !launcher.is_file() {
