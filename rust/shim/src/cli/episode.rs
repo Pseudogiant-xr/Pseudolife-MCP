@@ -355,6 +355,8 @@ pub(super) async fn run(mode: &str) -> ExitCode {
 
 async fn health(url: &str) -> Option<Value> {
     let client = reqwest::Client::builder()
+        // urllib follows health redirects without generating a Referer.
+        .referer(false)
         .connect_timeout(Duration::from_millis(250))
         .read_timeout(Duration::from_millis(250))
         .build()

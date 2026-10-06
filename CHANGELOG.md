@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   forbidden HTTP header controls with a named diagnostic and exit 1. Additive
   executable and title-clock policy controls are wired into the parity lane;
   final-head runtime acceptance remains pending and the modes remain deferred.
+- The native episode health probe suppresses generated Referer on redirects,
+  matching Python's header absence. The comparison instrument records named
+  field-name association and the delegated 57-case absent-Accept versus exact
+  `*/*` substitution, rejecting other header changes and duplicate/case collisions.
 
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 

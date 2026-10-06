@@ -25,6 +25,10 @@ boundaries. A compiling translation does not establish parity.
 
 ### Prepared episode policy instances
 
+The header-disposition statement from the original preparation at `758aa642`
+is historical; the narrow delegated disposition below supersedes that pending
+decision without changing raw receipts or promoting either episode mode.
+
 The episode branch integrates Python master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
 Its named policies and additive executable nodes are preparation; final-head
 runtime receipts, hosted execution, measurements and independent review are
@@ -69,10 +73,45 @@ controls remain exact; historical failed controls and private proxy failures
 remain failures. No new body-stall allowance is introduced.
 
 `episode_policy_cases.json` enumerates the 57 raw-header-difference case IDs
-per OS outside these policies. Implicit header presence, value and casing,
-including comparator exclusions, remain deferred. HTTPS, proxy/trust and
+per OS outside the three policies. At `758aa642`, implicit header presence,
+value and casing, including comparator exclusions, remained deferred pending
+the disposition below. HTTPS, proxy/trust and
 locale-default stdin behavior are also unproved; no broad transport parity
 claim follows from the additive loopback fixture nodes.
+
+### Narrow episode wire disposition
+
+The delegated 2026-10-07 decision permits two explicitly named comparisons
+in `episode_wire.py`; it requires Referer absence through implementation.
+Both modes remain deferred pending final-head executable proof.
+
+- **`http-field-name-case-insensitive`:** HTTP field-name association at
+  `/wire/*/headers`, first retained case `episode-key-6-episode-start`.
+  Names are ASCII HTTP tokens, associated by lowercase ASCII spelling;
+  every value and presence remains exact except the following named case.
+  Any duplicate name or case collision fails closed, even with equal values:
+  no overwrite, comma coalescing or whitespace normalization. Ordered-pair
+  captures retain order. Historical mapping receipts lost duplicate-line
+  information before comparison and cannot prove duplicate absence or raw
+  header ordering/framing equality.
+- **`episode-absent-accept-wildcard`:** only the exact 57 recorded IDs in
+  `episode_policy_cases.json`, first `episode-key-6-episode-start`; field
+  `/wire/*/headers/accept`. Oracle absence may compare with candidate exactly
+  `*/*`. Any other added Accept value, reversed presence difference, changed
+  existing value or other added header is rejected. Authentication, Host,
+  routing, bodies, framing and every other captured field remain exact.
+  This explicit server-visible substitution is not an additional general
+  parity policy and does not authorize other case IDs.
+
+Referer is never normalized. The episode health client uses `.referer(false)`
+to match urllib's absence on health redirects; the non-redirecting episode
+POST client is unchanged. Actual pinned reqwest 0.13.5 source was read:
+`async_impl/client.rs` defaults `referer` to true and passes the builder setting
+to `TowerRedirectPolicy`; `redirect.rs::on_request` conditionally inserts
+Referer. Python 3.11 `HTTPRedirectHandler.redirect_request` copies existing
+headers without generating that field. New additive redirect executable
+coverage awaits a compiled candidate; historical `health-redirect` still
+contains the extra field and remains a mismatch under this comparator.
 
 Tests decide where implementation and documentation disagree. Where tests are
 silent, record the Python behaviour and the coverage gap in `PARITY.md` before

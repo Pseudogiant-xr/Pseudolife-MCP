@@ -1,6 +1,29 @@
 # Rust port state
 
-## Episode preparation on current master
+## Episode wire preparation after delegated disposition
+
+The new wire comparator applies named field-name association and the exact
+57-case absent-Accept versus candidate `*/*` disposition. The episode health
+client disables generated redirect Referer; that source change is uncompiled
+and both modes remain deferred.
+The accepted VERSION row and the original `758aa642` preparation remain below.
+
+Static header controls cover every admitted ID, all other added-header/value
+rejections and duplicate/case-collision failure. Historical raw header replay
+matches 56/57 per OS, retaining the old Referer mismatch; Linux full wire
+additionally retains the title-minute mismatch. Raw receipt hashes/status are
+unchanged, with no new runtime result. The comparator preserves pair order
+where lossless pairs exist; historical dictionary captures cannot establish
+duplicate absence or full framing. Application audit at exact master finds no
+field-specific Accept/Referer read in the 128 Python files; external observers
+are not covered by that result.
+
+The additive Referer executable node is collected but not run. Final-head
+both-OS compiled/raw proofs, body/header/chunk controls, measurements/floors,
+line ratio, independent review, publication checks and hosted CI remain
+required, as does the manual source-conflict local-full gate recorded below.
+
+## Historical episode preparation at 758aa642
 
 The episode branch integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
 Configured forbidden bearer controls now have the agreed named exit-1 refusal;

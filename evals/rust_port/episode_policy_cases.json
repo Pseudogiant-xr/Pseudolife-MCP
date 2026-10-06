@@ -98,7 +98,8 @@
       "title-relative"
     ],
     "count_per_os": 57,
-    "status": "deferred; implicit header presence/value/casing and comparator exclusions have no approved waiver"
+    "status": "historical raw differences retained; narrow delegated disposition implemented in comparator; final-head runtime proof pending",
+    "historical_status_at_758aa642": "deferred; implicit header presence/value/casing and comparator exclusions have no approved waiver"
   },
   "unproved": [
     "HTTPS",
@@ -108,5 +109,29 @@
     "hosted additive executable-node outcomes",
     "committed paired measurements and floors",
     "fresh independent review"
-  ]
+  ],
+  "wire_disposition": {
+    "authority": "delegated maintainer decision 2026-10-07",
+    "http-field-name-case-insensitive": {
+      "field": "/wire/*/headers names",
+      "first_case_id": "episode-key-6-episode-start",
+      "shape": "ASCII HTTP field-name token; lowercase association only; values exact; duplicate/case-colliding names rejected; ordered pairs retain order"
+    },
+    "episode-absent-accept-wildcard": {
+      "field": "/wire/*/headers/accept",
+      "first_case_id": "episode-key-6-episode-start",
+      "case_id_source": "outside_policy_raw_header_differences/case_ids_per_os",
+      "case_count": 57,
+      "shape": "oracle absent; candidate exactly */*; no other added value/header allowed"
+    },
+    "referer": "no normalization; episode health builder disables generated Referer; new implementation uncompiled; historical health-redirect still mismatches",
+    "raw_receipts": "unchanged; parsed dictionaries cannot prove duplicate-line absence, raw ordering or full framing equality",
+    "application_audit": {
+      "master": "0b46bb8e2010cf0e428dd650b98cedb165ad3d75",
+      "python_files": 128,
+      "explicit_header_read_sites": 17,
+      "named_accept_referer_read_sites": 0,
+      "bound": "field-specific application-source audit only; generic header copies remain; libraries/middleware/proxies/servers may observe headers"
+    }
+  }
 }

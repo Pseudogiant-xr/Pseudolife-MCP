@@ -98,6 +98,28 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 
 ## Per-phase selection and acceptance gaps
 
+The delegated 2026-10-07 [episode wire disposition](PORTING.md#narrow-episode-wire-disposition)
+names `http-field-name-case-insensitive` and the 57-ID-only
+`episode-absent-accept-wildcard`. Referer must match absence through the health
+client implementation, with no normalization. Duplicate/case-colliding fields
+fail closed; raw receipts and their old status remain unchanged. Offline
+header-only replay of the historical 57 IDs matches 56 per OS; retained
+`health-redirect` still fails. Full captured wire replay also retains Linux's
+title-minute difference, so it matches 55/57 there and 56/57 on Windows.
+These projections establish comparator behavior, not current-head acceptance.
+
+Independent bounded application audit at exact master
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75` inspected all 128 Python files under
+`pseudolife_memory/`: AST inventory found 17 explicit header-read sites and no
+field-specific Accept or Referer reader. A case-insensitive `git grep` for
+header/Accept/Referer and `HTTP_ACCEPT`/`HTTP_REFERER` associations also found
+none. The generic header dictionary copies at `coordination.py:565` and
+`service.py:8409` remain; their application consumers read authentication and
+identity fields. This is a bounded application-source result. Libraries,
+middleware, proxies and servers can still observe or distinguish field spelling,
+Accept presence and Referer; the receipt instrument's parsed dictionaries do
+not establish complete raw HTTP/TLS/proxy equality.
+
 Episode preparation integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
 The [prepared episode policy entries](PORTING.md#prepared-episode-policy-instances)
 name the refusal, title-minute and separate direct group-12 instances;
