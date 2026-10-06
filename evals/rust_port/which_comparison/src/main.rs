@@ -224,6 +224,7 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
         #[cfg(windows)]
         "windows-links" => {
             use std::os::windows::fs::symlink_file;
+            use std::os::windows::process::CommandExt;
             let link = home.0.join("file-link.EXE");
             match symlink_file(&first, &link) {
                 Ok(()) => compare(&mut rows, "windows-file-symlink", &link, Some(link.clone())),
@@ -239,9 +240,12 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
                 let command =
                     PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
                 let output = Command::new(command)
-                    .args(["/D", "/C", "mklink", "/J"])
-                    .arg(&junction)
-                    .arg(&target)
+                    .args(["/D", "/S", "/C"])
+                    .raw_arg(format!(
+                        "mklink /J \"{}\" \"{}\"",
+                        junction.display(),
+                        target.display()
+                    ))
                     .output()
                     .unwrap();
                 assert!(
@@ -266,7 +270,7 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
     rows
 }
 
-fn run(smoke: bool) -> Value {
+fn run(smoke: bool, selected: Option<&str>) -> Value {
     let mut groups = vec!["ordinary"];
     if !smoke {
         groups.extend([
@@ -286,6 +290,10 @@ fn run(smoke: bool) -> Value {
             "windows-non-unicode-pathext",
             "windows-links",
         ]);
+    }
+    if let Some(selected) = selected {
+        assert!(groups.contains(&selected), "unknown comparison group");
+        groups.retain(|group| *group == selected);
     }
     let mut rows = Vec::new();
     for group in groups {
@@ -344,17 +352,24 @@ fn run(smoke: bool) -> Value {
 fn main() {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|value| value == "--child") {
-        let home = Home(PathBuf::from(&args[2]));
+        let home = std::mem::ManuallyDrop::new(Home(PathBuf::from(&args[2])));
         // The parent owns this fixture and verifies cleanup after the child exits.
         let rows = child(args[1].to_str().unwrap(), &home);
-        std::mem::forget(home);
         println!("{}", serde_json::to_string(&rows).unwrap());
     } else {
+        let selected = if args.first().is_some_and(|value| value == "--group") {
+            Some(args[1].to_str().unwrap())
+        } else {
+            None
+        };
         assert!(
-            args.is_empty() || args == ["--smoke"],
-            "use no arguments or --smoke"
+            args.is_empty() || args == ["--smoke"] || (selected.is_some() && args.len() == 2),
+            "use no arguments, --smoke or --group NAME"
         );
-        println!("{}", serde_json::to_string(&run(!args.is_empty())).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string(&run(args == ["--smoke"], selected)).unwrap()
+        );
     }
 }
 

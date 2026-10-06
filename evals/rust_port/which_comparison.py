@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--target-dir", type=Path, required=True, help="Existing reusable Cargo target")
     parser.add_argument("--resolver-reference-head", required=True, help="Git reference verified by the caller; not the instrument execution head")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--group", help="Run one comparison group for a bounded diagnostic")
     arguments = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     crate = Path(__file__).with_suffix("")
@@ -63,7 +64,8 @@ def main() -> None:
         if result.returncode:
             raise SystemExit(result.returncode)
         binary = arguments.target_dir.resolve() / "debug" / ("which-resolver-comparison.exe" if os.name == "nt" else "which-resolver-comparison")
-        run = subprocess.run([str(binary), *(["--smoke"] if arguments.smoke else [])], capture_output=True)
+        selection = ["--group", arguments.group] if arguments.group else (["--smoke"] if arguments.smoke else [])
+        run = subprocess.run([str(binary), *selection], capture_output=True)
         log.write(f"actual comparison exit: {run.returncode}\n")
         log.write(run.stdout.decode("utf-8", errors="replace") + run.stderr.decode("utf-8", errors="replace"))
         if run.returncode:

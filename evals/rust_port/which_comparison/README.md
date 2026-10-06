@@ -15,7 +15,8 @@ python evals/rust_port/which_comparison.py \
   --output <new-receipt.json> --log <private-command-log>
 ```
 
-`--smoke` runs only the ordinary-path group. The controller uses the locked
+`--smoke` runs only the ordinary-path group; `--group NAME` selects one group
+for a focused diagnostic. The controller uses the locked
 registry crate offline, verifies its package and file checksums, and binds
 the instrument, lockfile, production resolver and resulting binary hashes.
 The caller verifies the reference head; it is not a claim that an uncommitted
