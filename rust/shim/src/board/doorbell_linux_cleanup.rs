@@ -230,9 +230,26 @@ async fn cleanup_until(
     if fence.is_err() {
         let _ = child.inner_mut().start_kill();
     }
-    let reaped = child.inner_mut().wait().await.map(|_| ());
+    let reaped = wait_child_before_deadline(child.inner_mut(), deadline).await;
     check_deadline(deadline)?;
     fence.and(reaped)
+}
+
+async fn wait_child_before_deadline(
+    child: &mut dyn ChildWrapper,
+    deadline: Instant,
+) -> io::Result<()> {
+    check_deadline(deadline)?;
+    let mut wait = child.wait();
+    std::future::poll_fn(|cx| {
+        // Timeout polls its inner future first, so every resumed reap poll needs
+        // its own cutoff check before it can release the owned leader identity.
+        if let Err(error) = check_deadline(deadline) {
+            return std::task::Poll::Ready(Err(error));
+        }
+        wait.as_mut().poll(cx).map(|status| status.map(|_| ()))
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -247,3 +264,7 @@ mod tests;
 #[cfg(test)]
 #[path = "doorbell_linux_cleanup_deadline_tests.rs"]
 mod deadline_tests;
+
+#[cfg(test)]
+#[path = "doorbell_linux_cleanup_wait_deadline_tests.rs"]
+mod wait_deadline_tests;
