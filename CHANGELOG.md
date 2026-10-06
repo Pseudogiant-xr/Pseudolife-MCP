@@ -17,6 +17,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   drift guards. The candidate remains uninstalled and
   [CLI-LEASE stays deferred](rust/PORT-STATE.md#lease-shared-fixture-and-help-guard-follow-up).
 
+### Changed (2026-10-07 — native version admission and warmed CLI timing)
+
+- The experimental native `version` command reports an installed runtime only
+  when its own runtime has a dictionary marker and the canonical Python console
+  file; an incomplete layout falls back to the package version.
+- Version measurements preserve each arm's executable file identity, restore
+  input state and warm both images before timed fresh-process pairs. The CLI
+  harness records UTF-8 output and covers missing-console and non-ASCII-home
+  cases. No installation path installs the candidate; its
+  [CLI-VERSION evidence and status](rust/PORT-STATE.md#frozen-combined-version-evidence-at-5220b5ee)
+  remain separate from readiness.
+
 ## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
 
 ### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)

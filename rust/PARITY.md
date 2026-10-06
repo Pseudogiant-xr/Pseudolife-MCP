@@ -658,6 +658,16 @@ The scoped output contract is UTF-8 stdout/stderr with platform newlines. This i
 
 The [frozen console and warm-image packet](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/ceb1e3bb0fbe84afeec6dc22f7b10cdd4c4379da/evals/results/rust-phase2d-version-5220b5ee/README.md) records 28 exact CLI output/state cases and 112 rejected controls per OS, including missing named-console fallback and actual non-ASCII homes. Both arms retain their file identities across six untimed warm starts and three blocks of ten alternating timed pairs per layout; the detailed protocol and timing qualifications remain in PORT-STATE.md. These executions belong to `5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0`, tree `11e7267bd7a884ace22f57ebf5afd6c77ee25f91`; the documentation and master-forward carrier does not claim a new execution, and successor hosted checks and independent review remain pending.
 
+## Low-priority deferred version observations
+
+These source-level observations remain deferred and add no merge gates.
+
+- **Aliased runtime directories:** when multiple six-digit directory names resolve to the executable's own runtime, Rust `version.rs::runtime_line` selects the first complete matching entry from `read_dir`; Python `runtimes.py::list_runtimes` sorts by numeric sequence before `running_runtime` selects its first path match. The named runtime can therefore differ for multiple complete aliases (symlinks or junctions) to the same directory. This does not describe separate, unaliased installer runtimes.
+- **Matching marker failures:** after Rust has matched the executable's own directory, an unreadable, invalid-JSON or non-object marker ends the whole scan with the package-version fallback; Python skips that entry and continues. A difference requires a later usable matching entry, for example another alias with a usable path or transient filesystem state; a single incomplete runtime falls back in both arms. Malformed markers in unrelated runtime directories are skipped before Rust reads them.
+- **Platform selection:** Rust chooses runtime shape with `cfg!(windows)`; Python's `_windows(layout)` uses the launcher's `.exe` suffix. Python `default_layout` rejects a wrong-suffix override for the host and `_print_version` catches that rejection, while Rust `runtime_root` returns early, so ordinary CLI wrong-suffix overrides fall back in both arms. The remaining implementation distinction concerns manually constructed Python `Layout` values outside that ordinary admission path.
+
+The subsequent integration of master `7b0abf921fe4bd4ef1c84864eef118309b400705` inherits the reviewed #607 users runtime/dependency changes without a conflict: 5 of the 341 capture-bound paths now differ from executed `5220b5ee` (`rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`), while the other 336 and all 146 original production/test guard paths remain exact. The `5220b5ee` measurements remain historical source-bound executions and do not validate the inherited users implementation or this combined tree; current hosted CI and fresh review are required.
+
 ## Lease phase 2c policy preparation
 
 CLI-LEASE and the lease mode row remain deferred. The named decisions in
