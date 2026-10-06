@@ -15,7 +15,9 @@ const HTTP_FORBIDDEN_INPUT_REFUSED: &str =
     "[shim] invalid PSEUDOLIFE_MCP_TOKEN: forbidden HTTP header bytes.";
 
 fn forbidden_header_input(token: &str) -> bool {
-    token.chars().any(|c| matches!(u32::from(c), 0..=8 | 10..=31 | 127))
+    token
+        .chars()
+        .any(|c| matches!(u32::from(c), 0..=8 | 10..=31 | 127))
 }
 
 fn truthy(value: &Value) -> bool {
