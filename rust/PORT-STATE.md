@@ -40,9 +40,40 @@ minimum width of 11 at narrow COLUMNS values. The current repair applies that
 minimum only to the description, with additive public cases at widths 1, 2, 3, 7,
 12 and 13; usage and option layout retain their separate rules. Current focused
 results match 9/9 public pairs on each host, with two formatter tests and six
-additive cases passing per host (24 rejected candidate mutations each). The full
-corpus has not been rerun for this single clamp. Fresh review and the remaining
-byte-policy decisions are pending.
+additive cases passing per host (24 rejected candidate mutations each). Those
+focused results and the earlier 61-row captures remain unchanged.
+
+A later diagnostic corpus binds committed instrument `3abddc5d` to the unchanged
+final binaries and the pinned 0.17.0 oracle. Its 67 rows match 66/67 Windows pairs
+and 64/67 Linux pairs, with all 268 candidate-output mutations rejected on each
+platform. Both runs exit 1 and retain complete output and home-file observations.
+Windows fails `wait-mail-large-watermark`; Linux fails
+`wait-mail-non-ascii-space-body`, `wait-mail-delayed-ring` and
+`wait-mail-delayed-digest`. Each differs only in stderr's wall-clock second and
+the ledger epoch, by one ASCII byte per field. These four raw failures have not
+been waived, normalized or excluded.
+
+The local untracked receipts are
+`wait-mail-current-committed-windows-matrix.json` (SHA-256
+`6a1d4b8f8b47f1029bef9d9b78e12a46b092d29c90285a01d7907cd440d570bc`) and
+`wait-mail-current-committed-linux-matrix.json` (SHA-256
+`a10d1f1841a3f0e28ef4e390c6fd2be140c55e999df7f02eb73e851bf428cebd`).
+`wait-mail-current-committed-manifest.json` retains runtime, helper, corpus,
+source and binary bindings before and after capture, raw counts and cleanup;
+`wait-mail-current-committed-failure-classification.json` retains the differing
+byte ranges. They supplement the earlier evidence without replacing it.
+
+The positive `wait-mail-unicode-delivery` row delivers the exact peer body and
+advances `.seen` on both platforms. This proves local digest/ring-to-stdout/seen
+delivery at an unavailable daemon URL; new actual daemon mail delivery remains
+unverified. Successful delivery always prints runtime HH:MM:SS and appends a
+ledger epoch, while `cli_measurement` requires every sample's output and home
+bytes to equal its earlier control. Positive delivery timing therefore remains
+blocked by the pending group 7 clock-policy decision. No positive timing adapter,
+normalization or substitute timing run has been started. The existing question
+remains pending; group 8 random-suffix and group 9 traceback decisions, fresh
+review and full-mode acceptance remain deferred. The feasibility assessment is
+retained as `wait-mail-positive-measurement-feasibility.md`.
 
 The initial pre-code proof used a wrong-source console launcher and is rejected.
 Later public module invocations have child source/blob/bytecode bindings and a
