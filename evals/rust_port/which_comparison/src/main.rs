@@ -224,7 +224,6 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
         #[cfg(windows)]
         "windows-links" => {
             use std::os::windows::fs::symlink_file;
-            use std::os::windows::process::CommandExt;
             let link = home.0.join("file-link.EXE");
             match symlink_file(&first, &link) {
                 Ok(()) => compare(&mut rows, "windows-file-symlink", &link, Some(link.clone())),
@@ -232,20 +231,20 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
             }
             let target = home.0.join("directory-target");
             fs::create_dir(&target).unwrap();
+            let script = home.0.join("create-junction.ps1");
+            fs::write(&script, "New-Item -ItemType Junction -Path $args[0] -Value $args[1] -ErrorAction Stop | Out-Null\n").unwrap();
             for (name, id) in [
                 ("junction.CMD", "windows-directory-junction"),
                 ("broken.CMD", "windows-dangling-junction"),
             ] {
                 let junction = home.0.join(name);
-                let command =
-                    PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+                let command = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                    .join("System32/WindowsPowerShell/v1.0/powershell.exe");
                 let output = Command::new(command)
-                    .args(["/D", "/S", "/C"])
-                    .raw_arg(format!(
-                        "\"mklink /J \"{}\" \"{}\"\"",
-                        junction.display(),
-                        target.display()
-                    ))
+                    .args(["-NoProfile", "-NonInteractive", "-File"])
+                    .arg(&script)
+                    .arg(&junction)
+                    .arg(&target)
                     .output()
                     .unwrap();
                 assert!(
