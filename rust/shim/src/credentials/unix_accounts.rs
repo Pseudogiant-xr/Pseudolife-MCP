@@ -19,9 +19,9 @@ pub(super) fn home_by_name(name: &str) -> Option<PathBuf> {
 }
 
 /// When status is zero and result identifies `entry`, each non-null field must
-/// be NUL-terminated and alive until the buffer is dropped. Other results and
-/// null home fields are rejected without reading them. The caller cannot retain
-/// borrowed storage.
+/// be NUL-terminated and alive until the buffer is dropped. Other results are
+/// rejected without reading them; outside Android, null home fields are also
+/// rejected. The caller cannot retain borrowed storage.
 #[allow(unsafe_code)]
 unsafe fn home_with_lookup(
     name: &str,
