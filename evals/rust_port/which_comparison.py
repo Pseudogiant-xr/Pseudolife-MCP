@@ -35,7 +35,9 @@ def main() -> None:
     package = next(package for package in lock["package"] if package["name"] == "which")
     assert package["version"] == "8.0.6"
     assert package["checksum"] == "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
-    command = ["cargo", "+1.94.0", "metadata", "--manifest-path", str(manifest), "--offline", "--locked", "--format-version", "1"]
+    rustc_version = subprocess.check_output(["rustc", "+1.94.0", "-vV"], env=environment, text=True)
+    host = next(line.removeprefix("host: ") for line in rustc_version.splitlines() if line.startswith("host: "))
+    command = ["cargo", "+1.94.0", "metadata", "--manifest-path", str(manifest), "--offline", "--locked", "--format-version", "1", "--filter-platform", host]
     metadata = json.loads(subprocess.check_output(command, env=environment))
     oracle = next(package for package in metadata["packages"] if package["name"] == "which")
     assert oracle["version"] == "8.0.6" and oracle["source"].startswith("registry+")
@@ -77,6 +79,7 @@ def main() -> None:
         "resolver_reference_head": arguments.resolver_reference_head,
         "reference_note": "Caller-verified resolver Git reference; instrument source identified by exact hashes, not claimed committed at this reference.",
         "source_sha256": hashes,
+        "rustc_version": rustc_version,
         "oracle_registry_checksum": package["checksum"],
         "oracle_verified_file_sha256": oracle_hashes,
         "comparison_binary_sha256": sha256(binary),
