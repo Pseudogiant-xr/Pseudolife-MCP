@@ -1,49 +1,14 @@
 #![forbid(unsafe_code)]
+mod common;
+use common::LeaseHome as Home;
 use serde_json::{Value, json};
 use std::{
     fs,
     io::{Read, Write},
     net::TcpListener,
-    path::PathBuf,
-    process::Command,
     thread,
     time::{Duration, Instant},
 };
-
-struct Home(PathBuf);
-impl Home {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("lease-board-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&path).unwrap();
-        fs::write(path.join("instance.id"), b"0123456789ab\n").unwrap();
-        Self(path)
-    }
-    fn command(&self, url: &str) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
-        c.env_clear();
-        for key in ["SYSTEMROOT", "WINDIR"] {
-            if let Some(v) = std::env::var_os(key) {
-                c.env(key, v);
-            }
-        }
-        c.env("HOME", &self.0)
-            .env("USERPROFILE", &self.0)
-            .env("PSEUDOLIFE_LEASE_LOCK_DIR", &self.0)
-            .env("PSEUDOLIFE_SUITE_LOCK_DIR", &self.0)
-            .env("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer")
-            .env("PSEUDOLIFE_MCP_DAEMON_URL", url)
-            .env("PSEUDOLIFE_MCP_NO_SPAWN", "1")
-            .env("CUDA_VISIBLE_DEVICES", "-1")
-            .env("OMP_NUM_THREADS", "1")
-            .env("MKL_NUM_THREADS", "1");
-        c
-    }
-}
-impl Drop for Home {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).unwrap();
-    }
-}
 
 /// A bounded HTTP peer observes the actual public binary, including headers.
 fn server<F>(count: usize, mut answer: F) -> (String, thread::JoinHandle<Vec<(String, Value)>>)
@@ -137,7 +102,7 @@ fn has_header(header: &str, key: &str, value: &str) -> bool {
 fn unsupported_clock_dates_render_unknown_and_preserve_json() {
     for waiter in [false, true] {
         for json_output in [false, true] {
-            let home = Home::new();
+            let home = Home::board();
             let (url, peer) = server(1, move |_, header, body| {
                 assert!(header.starts_with("POST /api/coordination/leases "));
                 assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -150,7 +115,7 @@ fn unsupported_clock_dates_render_unknown_and_preserve_json() {
                     "queue":if waiter {json!([{"label":"waiter","enqueued_at":67767976233532800.0}])} else {json!([])}}]}),
                 )
             });
-            let mut command = home.command(&url);
+            let mut command = home.board_command(&url);
             command.args(["lease", "check", "resource"]);
             if json_output {
                 command.arg("--json");
@@ -204,7 +169,7 @@ fn timestamp_clocks_use_local_dates_and_floor_fractional_seconds() {
         };
         // Rounding this producer's fractional second would cross into 12:35.
         let stamp = json!(local.timestamp() as f64 + 0.999);
-        let home = Home::new();
+        let home = Home::board();
         let (url, peer) = server(1, move |_, header, _| {
             assert!(header.starts_with("POST /api/coordination/leases "));
             assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -215,7 +180,7 @@ fn timestamp_clocks_use_local_dates_and_floor_fractional_seconds() {
                     "queue":[{"label":"waiter","enqueued_at":stamp}]}]}),
             )
         });
-        let mut command = home.command(&url);
+        let mut command = home.board_command(&url);
         let output = command
             .args(["lease", "check", "resource"])
             .output()
@@ -241,7 +206,7 @@ fn nonascii_registration_headers_fall_back_before_lease_or_release() {
         ("agent_id", true),
         ("credential", true),
     ] {
-        let home = Home::new();
+        let home = Home::board();
         let (url, peer) = server_raw(1, move |_, header, _| {
             assert!(header.starts_with("POST /api/coordination/register "));
             assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -260,7 +225,7 @@ fn nonascii_registration_headers_fall_back_before_lease_or_release() {
             (200, raw)
         });
         let output = home
-            .command(&url)
+            .board_command(&url)
             .args([
                 "lease",
                 "run",
@@ -288,7 +253,7 @@ fn nonascii_registration_headers_fall_back_before_lease_or_release() {
 
 #[test]
 fn queued_timeout_leaves_its_ticket_without_starting_a_child() {
-    let home = Home::new();
+    let home = Home::board();
     let (url, peer) = server(3, |index, header, body| {
         assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
         match index {
@@ -311,7 +276,7 @@ fn queued_timeout_leaves_its_ticket_without_starting_a_child() {
         }
     });
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args([
             "lease",
             "run",
@@ -334,7 +299,7 @@ fn queued_timeout_leaves_its_ticket_without_starting_a_child() {
 
 #[test]
 fn queued_ticket_is_polled_then_granted_before_child_start() {
-    let home = Home::new();
+    let home = Home::board();
     let start = Instant::now();
     let (url, peer) = server(4, move |index, header, body| match index {
         0 => (200, registered()),
@@ -358,7 +323,7 @@ fn queued_ticket_is_polled_then_granted_before_child_start() {
         }
     });
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args([
             "lease",
             "run",
@@ -387,7 +352,7 @@ fn queued_ticket_is_polled_then_granted_before_child_start() {
 }
 #[test]
 fn board_grant_precedes_local_lock_and_release_follows_its_close() {
-    let home = Home::new();
+    let home = Home::board();
     let path = home.0.join("lease-resource.lock");
     let external = fs::OpenOptions::new()
         .read(true)
@@ -405,7 +370,7 @@ fn board_grant_precedes_local_lock_and_release_follows_its_close() {
         }
     });
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args([
             "lease",
             "run",
@@ -425,7 +390,7 @@ fn board_grant_precedes_local_lock_and_release_follows_its_close() {
 }
 #[test]
 fn renewal_keeps_original_expectation_and_purpose_and_loss_does_not_stop_child() {
-    let home = Home::new();
+    let home = Home::board();
     let path = home.0.join("lease-resource.lock");
     let released_path = path.clone();
     let start = Instant::now();
@@ -458,7 +423,7 @@ fn renewal_keeps_original_expectation_and_purpose_and_loss_does_not_stop_child()
     });
     let helper = std::env::current_exe().unwrap();
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args([
             "lease",
             "run",
@@ -511,10 +476,10 @@ fn signal_child() {
 fn sigterm_stops_owned_child_before_releasing_local_lock() {
     use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 
-    let home = Home::new();
+    let home = Home::board();
     let ready = home.0.join("child-ready");
     let helper = std::env::current_exe().unwrap();
-    let mut command = home.command("http://127.0.0.1:1");
+    let mut command = home.board_command("http://127.0.0.1:1");
     command
         .args(["lease", "run", "resource", "--no-board", "--"])
         .arg(helper)
@@ -561,7 +526,7 @@ fn sigterm_stops_owned_child_before_releasing_local_lock() {
 
 #[test]
 fn own_stale_hold_is_free_but_foreign_hold_is_held() {
-    let home = Home::new();
+    let home = Home::board();
     fs::write(home.0.join("lease-resource.lock"), b"").unwrap();
     for (label, expected_exit) in [
         ("lease-hold@0123456789ab", 0),
@@ -579,7 +544,7 @@ fn own_stale_hold_is_free_but_foreign_hold_is_held() {
             )
         });
         let output = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource", "--json"])
             .output()
             .unwrap();
@@ -592,7 +557,7 @@ fn own_stale_hold_is_free_but_foreign_hold_is_held() {
 #[test]
 fn python_json_holder_values_never_disappear_from_the_check() {
     for value in [r#""\ud800""#, "NaN", "Infinity", "-Infinity", "1e400"] {
-        let home = Home::new();
+        let home = Home::board();
         let raw = format!(r#"{{"leases":[{{"name":"resource","holder":{{"label":{value}}},"expected_end":NaN}}]}}"#).into_bytes();
         let (url, peer) = server_raw(1, move |_, header, body| {
             assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -600,7 +565,7 @@ fn python_json_holder_values_never_disappear_from_the_check() {
             (200, raw.clone())
         });
         let output = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource", "--json"])
             .output()
             .unwrap();
@@ -631,7 +596,7 @@ fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
         ),
     ] {
         for json in [false, true] {
-            let home = Home::new();
+            let home = Home::board();
             fs::write(home.0.join("lease-.lock"), b"").unwrap();
             let before = fs::read(home.0.join("instance.id")).unwrap();
             let mut raw = b"{\"leases\":[{\"name\":\"".to_vec();
@@ -642,7 +607,7 @@ fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
                 assert!(body["name"].is_null());
                 (200, raw.clone())
             });
-            let mut command = home.command(&url);
+            let mut command = home.board_command(&url);
             command.args(["lease", "list"]);
             if json {
                 command.arg("--json");
@@ -669,7 +634,7 @@ fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
 
 #[test]
 fn raw_surrogate_name_cannot_alias_a_scalar_and_discount_its_holder() {
-    let home = Home::new();
+    let home = Home::board();
     fs::write(home.0.join("lease-_-31237b17.lock"), b"").unwrap();
     let (url, peer) = server_raw(1, |_, header, body| {
         assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -677,7 +642,7 @@ fn raw_surrogate_name_cannot_alias_a_scalar_and_discount_its_holder() {
         (200, b"{\"leases\":[{\"name\":\"\xf0\x90\x80\x80\",\"holder\":{\"label\":\"claim\"}},{\"name\":\"\xed\xa0\x80\xed\xb0\x80\",\"holder\":{\"label\":\"lease-hold@0123456789ab\"}}]}".to_vec())
     });
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args(["lease", "check", "\u{10000}", "--json"])
         .output()
         .unwrap();
@@ -701,7 +666,7 @@ fn exact_stdout_buffer_boundary_is_buffered_through_8192_bytes() {
         },
     };
     for target in [8191, 8192, 8193] {
-        let home = Home::new();
+        let home = Home::board();
         let length = Arc::new(AtomicUsize::new(7000));
         let peer_length = length.clone();
         let (ready, proceed) = mpsc::channel();
@@ -716,7 +681,7 @@ fn exact_stdout_buffer_boundary_is_buffered_through_8192_bytes() {
             )
         });
         let ordinary = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource", "--json"])
             .output()
             .unwrap();
@@ -724,7 +689,7 @@ fn exact_stdout_buffer_boundary_is_buffered_through_8192_bytes() {
         let measured = ordinary.stdout.len() - 2;
         length.store(7000 + target - measured, Ordering::SeqCst);
         let mut child = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource", "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -754,7 +719,7 @@ fn exact_stdout_buffer_boundary_is_buffered_through_8192_bytes() {
 #[cfg(windows)]
 fn large_list_closed_stdout_returns_one_with_terminal_error() {
     use std::{process::Stdio, sync::mpsc};
-    let home = Home::new();
+    let home = Home::board();
     for index in 0..65 {
         fs::write(
             home.0
@@ -770,7 +735,7 @@ fn large_list_closed_stdout_returns_one_with_terminal_error() {
         (200, json!({"leases":[]}))
     });
     let mut child = home
-        .command(&url)
+        .board_command(&url)
         .args(["lease", "list", "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -786,7 +751,7 @@ fn large_list_closed_stdout_returns_one_with_terminal_error() {
 
 #[test]
 fn nonascii_stamp_does_not_discount_an_existing_board_holder() {
-    let home = Home::new();
+    let home = Home::board();
     let stamp = b"\xc2\xa00123456789ab\xc2\xa0";
     fs::write(home.0.join("instance.id"), stamp).unwrap();
     fs::write(home.0.join("lease-resource.lock"), b"").unwrap();
@@ -798,7 +763,7 @@ fn nonascii_stamp_does_not_discount_an_existing_board_holder() {
         )
     });
     let output = home
-        .command(&url)
+        .board_command(&url)
         .args(["lease", "check", "resource", "--json"])
         .output()
         .unwrap();
@@ -818,14 +783,14 @@ fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
         ("true", "bool"),
         ("NaN", "float"),
     ] {
-        let home = Home::new();
+        let home = Home::board();
         let raw = format!(r#"{{"leases":[{{"name":"resource","holder":{{"label":"h"}},"queued":1,"queue":{queue}}}]}}"#).into_bytes();
         let (url, peer) = server_raw(1, move |_, header, _| {
             assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
             (200, raw.clone())
         });
         let output = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource"])
             .output()
             .unwrap();
@@ -849,7 +814,7 @@ fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
 fn closed_stdout_matches_small_flush_and_large_check_failures() {
     use std::{process::Stdio, sync::mpsc};
     for length in [0, 20000] {
-        let home = Home::new();
+        let home = Home::board();
         let (ready, proceed) = mpsc::channel();
         let (url, peer) = server(1, move |_, header, _| {
             assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
@@ -860,7 +825,7 @@ fn closed_stdout_matches_small_flush_and_large_check_failures() {
             )
         });
         let mut child = home
-            .command(&url)
+            .board_command(&url)
             .args(["lease", "check", "resource", "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

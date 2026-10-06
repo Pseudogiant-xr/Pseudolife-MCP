@@ -1,48 +1,8 @@
 #![forbid(unsafe_code)]
+mod common;
+use common::LeaseHome as Home;
 use serde_json::Value;
-use std::{
-    fs,
-    path::PathBuf,
-    process::{Command, Output},
-};
-
-struct Home(PathBuf);
-impl Home {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("native-lease-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-    fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
-        command.env_clear();
-        for key in ["SYSTEMROOT", "WINDIR"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
-        command
-            .env("HOME", &self.0)
-            .env("USERPROFILE", &self.0)
-            .env("LOCALAPPDATA", self.0.join("local"))
-            .env("CUDA_VISIBLE_DEVICES", "-1")
-            .env("OMP_NUM_THREADS", "1")
-            .env("MKL_NUM_THREADS", "1")
-            .env("PSEUDOLIFE_LEASE_LOCK_DIR", &self.0)
-            .env("PSEUDOLIFE_SUITE_LOCK_DIR", &self.0)
-            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1")
-            .env("PSEUDOLIFE_MCP_NO_SPAWN", "1");
-        command
-    }
-    fn call(&self, args: &[&str]) -> Output {
-        self.command().args(args).output().unwrap()
-    }
-}
-impl Drop for Home {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).unwrap();
-    }
-}
+use std::fs;
 
 #[test]
 fn check_missing_lock_is_free_and_never_creates_the_lock_file() {
