@@ -31,7 +31,9 @@ owner); the **test login file** `~/.pseudolife-mcp/test-pg.env`
 once with `pseudolife-mcp test-login create` on the daemon host (or install
 with `ops/install.ps1 -TestLogin` / `ops/install.sh --test-login`; a
 checkout deploy, `ops/update.ps1` / `ops/update.sh`, creates it when it is
-missing): it is a
+missing and the suite targets the bundled container's published port; when
+only the suite's default address matches, it asks first, default no; and
+`-NoTestLogin` / `--no-test-login` skips it): it is a
 role that creates and drops
 its own databases and cannot connect to the bank, so no checkout needs
 `ops/.env`, which holds the bank owner's password. A run that still logs in
@@ -156,8 +158,13 @@ instead). Both run `ops/wsl-suite.sh`, which tags the run with
 `PSEUDOLIFE_SUITE_RUN_ID` and, once pytest exits (also on Ctrl+C or a
 hangup), stops every process still carrying that marker and names each on
 stderr; it exits 130, 129 or 143 for an interrupt, hangup or TERM, else
-with pytest's code. A run dispatched to the second machine refuses a test
-server that holds a production bank, and checks again once it holds the
+with pytest's code. Before it clones, a run removes the test copies and
+environments other runs left unused for 3 days
+(`PSEUDOLIFE_SUITE_PRUNE_DAYS`) or past the 8 most recent of each
+(`PSEUDOLIFE_SUITE_KEEP`), skipping any a run holds;
+`PSEUDOLIFE_SUITE_PRUNE=off` (or `0`, `false`, `no`) turns that off;
+`ops/remote-suite.ps1` forwards all three variables. A run dispatched to the
+second machine refuses a test server that holds a production bank, and checks again once it holds the
 suite lock, since a server that refused the first connection may be up by
 then.
 

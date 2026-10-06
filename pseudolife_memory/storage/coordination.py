@@ -232,9 +232,10 @@ WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
 # Codex: the doorbell (``codex queue``) serves CLI and desktop threads alike
 # but watches a thread only from the thread's first Pseudolife call after the
 # MCP server starts, and turns itself off after a failed queue. Claude Code:
-# the Stop hook's 59-minute wait or a background wait-mail; a Claude Desktop
-# Code-tab session also takes its host's session send_message, which needs
-# neither the board nor a listener.
+# the Stop hook's watcher, armed at every turn end for as long as the session
+# stays open (14 days; 59 minutes before 2026-10-05), or a background
+# wait-mail; a Claude Desktop Code-tab session also takes its host's session
+# send_message, which needs neither the board nor a listener.
 FALLBACK_CODEX = (
     "Mail is queued for receive on the thread's next turn and rings once its Codex "
     "doorbell re-arms (the shim watches a thread from its first Pseudolife call after "
@@ -242,9 +243,22 @@ FALLBACK_CODEX = (
     "session's window.")
 FALLBACK_CLAUDE = (
     "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
-    "wait or wait-mail re-arms. Only if it is a Claude Desktop Code-tab session (the "
+    "listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the "
     "board cannot tell) does its host's session send_message reach it now; a Claude Code "
     "CLI session is reached by the maintainer typing into its window.")
+# What a role grant tells the maintainer or operator when the holder has no
+# live wake path now (maintainer requirement 2026-10-05: the delegate above
+# all must be reachable). Keyed by ``_listener_path``'s reasons.
+UNREACHABLE_REASONS = {
+    "listener_expired": "its listener lapsed",
+    "listener_unknown": "its listener has not reported yet",
+    "wake_disabled": "it has no wake listener",
+}
+UNREACHABLE_WARNING = (
+    "The new {role} has no live wake path now ({reason}): maintainer mail to it "
+    "waits for its next turn. A Claude Code session listens again when its turn "
+    "ends, a Codex thread once its doorbell re-arms; a client older than the "
+    "always-listening plugin stops 59 minutes after a turn until it is updated.")
 # ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
 # the board cannot tell one from a CLI session, so the text says so.
 FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
@@ -579,12 +593,18 @@ class CoordinationError(ValueError):
     """Stable public code; never includes supplied credentials or bodies.
 
     ``detail`` is a short public elaboration a caller can act on (the
-    candidates an ambiguous prefix matched, the size of a refused burst):
-    id prefixes and counts only, never a body, a status or a credential."""
+    candidates an ambiguous prefix matched, the size of a refused burst, the
+    field and rule a value broke): id prefixes, counts, field names and
+    limits only, never a body, a status or a credential. ``param`` names the
+    refused field and ``accepted`` lists its allowed values, where the
+    refusal has one."""
 
-    def __init__(self, code: str, detail: str | None = None):
+    def __init__(self, code: str, detail: str | None = None, *,
+                 param: str | None = None, accepted: list[str] | None = None):
         self.code = code
         self.detail = detail
+        self.param = param
+        self.accepted = accepted
         super().__init__(code)
 
 
@@ -918,9 +938,12 @@ def looks_like_secret(text: str) -> bool:
     return secret_kind(text) is not None
 
 
-def _refuse_secret(text: str) -> None:
+def _refuse_secret(text: str, field: str) -> None:
+    """Refuse credential-shaped ``text``, naming the field, never the text."""
     if looks_like_secret(text):
-        raise CoordinationError("secret_like_body")
+        raise CoordinationError(
+            "secret_like_body", f"{field} looks like a credential, which the board never "
+            "keeps; remove it and retry", param=field)
 
 
 def _hash(credential: str) -> str:
@@ -1379,7 +1402,7 @@ class CoordinationStore:
         _string(name, MAX_NAME, "name")
         if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
             raise CoordinationError("invalid_name")
-        _refuse_secret(name)
+        _refuse_secret(name, "name")
         return name.strip()
 
     @staticmethod
@@ -1524,7 +1547,7 @@ class CoordinationStore:
                 # Hashed into the audit chain for good: every field in the
                 # register event, and project and task into the columns of
                 # every later event by this agent.
-                _refuse_secret(value)
+                _refuse_secret(value, key)
             elif key == "wake_enabled":
                 if not isinstance(value, bool):
                     raise CoordinationError("invalid_wake_enabled")
@@ -1535,7 +1558,7 @@ class CoordinationStore:
                     _string(item, 40, "capabilities", empty=False)
                     # Capability names are hashed into the event too, and a
                     # GitHub token fits in 40 characters.
-                    _refuse_secret(item)
+                    _refuse_secret(item, "capabilities")
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
             elif key == "children":
@@ -1555,7 +1578,7 @@ class CoordinationStore:
                     except CoordinationError:
                         raise refused from None
                     # Hashed into the update event, like the status.
-                    _refuse_secret(label)
+                    _refuse_secret(label, "children")
                 if len(set(value)) != len(value):
                     raise refused
             elif key == "park_reason":
@@ -1564,18 +1587,29 @@ class CoordinationStore:
                 if value is None or value == "":
                     fields[key] = None
                 elif value not in PARK_REASONS:
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", f"park_reason must be one of {', '.join(PARK_REASONS)}, "
+                        "or empty to clear the park; nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
             elif key in _PARK_TEXT_LIMITS:
-                _string(value, _PARK_TEXT_LIMITS[key], "park")
+                try:
+                    _string(value, _PARK_TEXT_LIMITS[key], "park")
+                except CoordinationError:
+                    raise CoordinationError(
+                        "invalid_park", f"{key} must be text of at most "
+                        f"{_PARK_TEXT_LIMITS[key]} characters with no control characters; "
+                        "nothing was updated", param=key) from None
                 # Hashed into the update event, like the status.
-                _refuse_secret(value)
+                _refuse_secret(value, key)
             elif key == "park_expires":
                 # A null (REST passes JSON null through) would store a park
                 # that never lapses, past the default and the cap: refused.
                 if (value is None or isinstance(value, bool)
                         or not isinstance(value, (int, float))
                         or not math.isfinite(value) or value <= 0):
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", "park_expires must be a positive finite Unix epoch "
+                        "in seconds; nothing was updated", param="park_expires")
                 fields[key] = float(value)
             else:
                 raise CoordinationError("invalid_update")
@@ -1615,7 +1649,10 @@ class CoordinationStore:
                 if "park_reason" in fields and fields["park_reason"] is None:
                     fields.update(_PARK_CLEARED)
                 elif "park_reason" not in fields and not parked:
-                    raise CoordinationError("invalid_park")
+                    raise CoordinationError(
+                        "invalid_park", "park_reason is required: no park stands to refine "
+                        "(a lapsed park counts as none); nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
                 else:
                     if recorded and not parked:
                         # A new park over a lapsed one starts empty: its
@@ -1630,7 +1667,11 @@ class CoordinationStore:
                         fields["park_expires"] = now + PARK_DEFAULT_TTL
                     expires = fields.get("park_expires")
                     if expires is not None and expires > now + PARK_MAX_TTL:
-                        raise CoordinationError("invalid_park")
+                        raise CoordinationError(
+                            "invalid_park", f"park_expires must be at most "
+                            f"{PARK_MAX_TTL // 86400} days ({PARK_MAX_TTL} seconds) from now; "
+                            "nothing was updated",
+                            param="park_expires")
             elif "status" in fields and recorded:
                 fields.update(_PARK_CLEARED)
             # Only a real change reaches the row and the log, so a status
@@ -1713,7 +1754,7 @@ class CoordinationStore:
             raise CoordinationError("invalid_children")
         label = f"{kind[:HOOK_CHILD_KIND_CUT] or 'subagent'}#{child[:8]}"
         # Hashed into the update event, like a parent's labels.
-        _refuse_secret(label)
+        _refuse_secret(label, "children")
         with self.storage._txn():
             row = self._hook_children_row(agent_id, principal)
             if row is None:
@@ -1912,7 +1953,7 @@ class CoordinationStore:
                 or any(unicodedata.category(c)[0] == "C" for c in name)):
             raise CoordinationError("invalid_lease")
         # The name is in every lease event's hashed payload, for good.
-        _refuse_secret(name)
+        _refuse_secret(name, "lease")
         if ttl is not None and (type(ttl) is not int
                                 or not LEASE_TTL_MIN <= ttl <= LEASE_TTL_MAX):
             raise CoordinationError("invalid_ttl")
@@ -1922,7 +1963,7 @@ class CoordinationStore:
         if purpose is not None:
             _string(purpose, 240, "purpose")
             # Hashed into the audit chain for good (lease_acquire/queue/grant).
-            _refuse_secret(purpose)
+            _refuse_secret(purpose, "purpose")
 
     def _grant(self, name, agent_id, principal, *, now, hold, expect, purpose):
         # The fence comes from one sequence for every lease, never from the
@@ -2350,6 +2391,19 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
+        return {**out, **self.reachability(agent, now, role="delegate")}
+
+    @classmethod
+    def reachability(cls, agent, now, *, role=None):
+        """Whether maintainer mail rings ``agent`` (an agent row, or None for
+        a holder with no board row) now: ``reachable`` and the no-path
+        ``reason`` a send would carry, plus, given ``role``, the ``warning``
+        a grant shows when it is not."""
+        reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
+        out = {"reachable": reason is None, "reason": reason}
+        if role is not None and reason is not None:
+            out["warning"] = UNREACHABLE_WARNING.format(
+                role=role, reason=UNREACHABLE_REASONS.get(reason, reason))
         return out
 
     def assign_coordinator(self, project, agent_id, *, hold, actor="operator"):
@@ -2397,7 +2451,7 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
-        return out
+        return {**out, **self.reachability(agent, now, role="coordinator")}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -3190,7 +3244,7 @@ class CoordinationStore:
         _string(hlc, 120, "hlc")
         if clears is not None:
             _string(clears, MAX_CLEARS, "clears", empty=False)
-            _refuse_secret(clears)
+            _refuse_secret(clears, "clears")
         if not isinstance(urgent, bool):
             raise CoordinationError("invalid_urgent")
         stamp = None
@@ -3201,18 +3255,29 @@ class CoordinationStore:
                     raise ValueError
             except ValueError:
                 raise CoordinationError("invalid_hlc") from None
-        try:
-            valid_text = (isinstance(text, str) and bool(text.strip()) and "\x00" not in text
-                          and len(text.encode("utf-8")) <= MAX_TEXT_BYTES)
-        except UnicodeEncodeError:
-            valid_text = False
-        if not valid_text:
-            raise CoordinationError("invalid_text")
+        # The detail says which rule the body broke, with a byte count and
+        # never the text (review 2026-10-04: one bare code covered four).
+        problem = None
+        if not isinstance(text, str) or not text.strip():
+            problem = "text must be nonblank"
+        elif "\x00" in text:
+            problem = "text must not contain NUL characters"
+        else:
+            try:
+                size = len(text.encode("utf-8"))
+            except UnicodeEncodeError:
+                problem = "text is not encodable as UTF-8 (it holds a lone surrogate)"
+            else:
+                if size > MAX_TEXT_BYTES:
+                    problem = (f"text is {size} UTF-8 bytes; the limit is {MAX_TEXT_BYTES} "
+                               "bytes, not characters")
+        if problem is not None:
+            raise CoordinationError("invalid_text", problem, param="text")
         # Refused before this call reads or writes a row: the audit log would
         # keep the body for its whole retention window, and the request id
         # in the send event's hashed payload for good.
-        _refuse_secret(text)
-        _refuse_secret(request_id)
+        _refuse_secret(text, "text")
+        _refuse_secret(request_id, "request_id")
         if reply_to is not None:
             _string(reply_to, 120, "reply", empty=False)
         if expires_at is not None and (isinstance(expires_at, bool) or
@@ -3964,7 +4029,9 @@ class CoordinationStore:
                 or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp")
                        for c in reason)):
             raise CoordinationError("invalid_reason")
-        _refuse_secret(reason)
+        if looks_like_secret(reason):
+            # Operator-only: board-audit explains this refusal in its own words.
+            raise CoordinationError("secret_like_body", param="reason")
         if is_id_prefix(message_id):
             like = message_id + "%"
             message_id = _resolved([r["message_id"] for r in self._all(

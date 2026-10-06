@@ -94,8 +94,10 @@ reads the process identity SessionStart recorded instead of measuring it,
 while that record says it still holds (`ps -W` prints a process's start
 time differently after its first 24 hours, and a DST change shifts it);
 and the Stop hook (on by default) checks that Claude Code is still running through
-`ps -W` at arm time and once a minute (a Windows PID is invisible to
-`kill -0`), so a watcher orphaned by a crash ends within the minute.
+`ps -W` at arm time, once a minute for the first hour and every five minutes
+after (a Windows PID is invisible to `kill -0`), so a watcher orphaned by a
+crash usually ends within that interval; if the PID is reused, or `ps -W`
+never lists it, it lasts until its digest is swept as stale, about a day.
 
 ## Startup check-in and per-turn coordination
 
@@ -230,7 +232,8 @@ listed for review and left alone. By hand:
 - **Stop hook** (on by default since 2026-09-28; `PSEUDOLIFE_AGENT_WAKE_HOOK=0`
   turns it off, `PSEUDOLIFE_AGENT_COORDINATION=0` turns off the board) — waits
   in the background after each turn and wakes the idle session when board
-  mail that clears its declared need arrives; policy-gated and capped. See
+  mail arrives that clears its declared need, is urgent, or is a maintainer
+  message; policy-gated and capped. See
   [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
 - **Subagent board guard** (PreToolUse, since 2026-09-30; off with the board,
   `PSEUDOLIFE_AGENT_COORDINATION=0`) — a subagent runs in its parent's shim,
@@ -238,10 +241,11 @@ listed for review and left alone. By hand:
   (Claude Code marks it with `agent_id` in the hook input) the hook denies
   `memory_agents` update, claim and release and `memory_message` send and
   ack on any server name, with a reason telling it to ask its parent; list,
-  receive and every other tool pass, and so does everything the parent
-  calls. No daemon request. A payload it cannot read is let through. Codex
-  lists this entry too; there it allows every call, because a Codex child
-  has a board address of its own. See
+  receive, the read-only `memory_message` history and every other tool
+  pass, and so does everything the parent calls. No daemon request. A
+  payload it cannot read is let through. Codex lists this entry too; there
+  it allows every call, because a Codex child has a board address of its
+  own. See
   [Configuration](../docs/guide/configuration.md#delivery-and-recovery).
 - **Subagent board hooks** (SubagentStart / SubagentStop, schema v50; off
   with the board, `PSEUDOLIFE_AGENT_COORDINATION=0`) — list a Claude Code

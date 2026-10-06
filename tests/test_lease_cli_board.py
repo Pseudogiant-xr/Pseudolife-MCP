@@ -247,7 +247,10 @@ def test_the_operator_grants_a_projects_delegate(board, pg_url, monkeypatch, cap
                            "--for", "12h"]) == 0
     captured = capsys.readouterr()
     out = json.loads(captured.out)
-    assert captured.err == ""
+    # Registered but never attached: no live listener, so the operator is
+    # told maintainer mail would wait for its next turn (2026-10-05).
+    assert out["reachable"] is False
+    assert captured.err == out["warning"] + "\n"
     assert (out["name"], out["agent_id"], out["replaced"]) == (
         "delegate:pseudolife-mcp", delegate["agent_id"], None)
     [lease] = _post(bridge, "leases", {"name": "delegate:pseudolife-mcp"})["leases"]
@@ -271,9 +274,13 @@ def test_designate_is_a_deprecated_alias_for_delegate(board, pg_url, monkeypatch
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
     assert lease_cli.main(["designate", "pseudolife-mcp", delegate["agent_id"]]) == 0
     captured = capsys.readouterr()
-    assert json.loads(captured.out)["name"] == "delegate:pseudolife-mcp"
-    assert captured.err.count("\n") == 1 and "lease delegate" in captured.err
-    assert "deprecated" in captured.err
+    out = json.loads(captured.out)
+    assert out["name"] == "delegate:pseudolife-mcp"
+    # One deprecation line, then the never-attached grantee's no-listener
+    # warning that every grant prints (2026-10-05).
+    deprecation, warning = captured.err.splitlines()
+    assert "lease delegate" in deprecation and "deprecated" in deprecation
+    assert warning == out["warning"]
 
 
 def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(

@@ -49,7 +49,8 @@ $forward = @(@(
     'PSEUDOLIFE_TEST_DATABASE_URL',
     'PSEUDOLIFE_REQUIRE_TEST_POSTGRES', 'PSEUDOLIFE_TEST_EMBEDDER',
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
-    'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'HF_HUB_OFFLINE'
+    'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'PSEUDOLIFE_SUITE_PRUNE',
+    'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'HF_HUB_OFFLINE'
 ) | Where-Object { Test-Path "env:$_" })
 # The token file only when there is no token value: under /mnt/c it shows
 # loose permissions, and the board client refuses a credential file that is

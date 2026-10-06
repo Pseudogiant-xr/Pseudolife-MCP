@@ -3495,7 +3495,13 @@ class MemoryService(DreamOps, MaintainerOps):
             assert self._embedder is not None
             file_path = Path(path)
             if not file_path.exists():
-                raise FileNotFoundError(f"Not found: {file_path}")
+                # The caller is usually on another machine or outside the
+                # daemon's container, so say whose filesystem was searched.
+                raise FileNotFoundError(
+                    f"Not found on the server's filesystem: {file_path}. "
+                    "The path resolves where the daemon runs (with Docker, "
+                    "inside the container, e.g. a mounted volume), not on "
+                    "the client.")
             result = self._reference.ingest_file(
                 file_path, source=source, embedder=self._embedder,
             )

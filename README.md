@@ -409,6 +409,7 @@ deep material lives in the user guide:
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 | [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
 | [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
+| [Coordination recovery](docs/guide/coordination-recovery.md) | Agent mailboxes, maintainer passkeys and the board's audit log after a database restore |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -437,7 +438,7 @@ is agent context every session, so it stays lean.
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
-| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
+| `memory_history(entity, attribute?, as_of?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps; `as_of` (ISO-8601 or epoch seconds) keeps only the versions written by then. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
@@ -467,7 +468,7 @@ keep their write `date`), and `memory_fact_get` likewise drops bookkeeping
 keys from its record; pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
+**Toolset tiers.** Three visibility tiers — `minimal` (10 tools), `core`
 (24), `full` (38) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
@@ -599,23 +600,15 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`:** the installers
-up to 0.16.1 added it by that shorthand, which Claude Code records as a
-`github` source (`"source": "github"` for `pseudolife-mcp` in
-`~/.claude/plugins/known_marketplaces.json`) and refreshes over SSH. On a
-machine with no GitHub SSH key every refresh fails ("SSH host key is not in
-your known_hosts file") and the plugin stops updating. Move it to the HTTPS
-URL: if `~/.claude/settings.json` declares it under `extraKnownMarketplaces`,
-change that entry's `source` to
-`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-first (the CLI refuses an add that differs from a declared source), then run:
-
-```bash
-claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
-```
-
-Do not `marketplace remove` it first: removing a marketplace uninstalls its
-plugins.
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`** (installers up
+to 0.16.1) is refreshed over SSH, which fails on a machine with no GitHub SSH
+key. `pseudolife-mcp update` and the installers move it to the HTTPS URL
+themselves, with backups. If that step reports a failure, the manual fallback
+is: in `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), set the
+`pseudolife-mcp` entry's `source` under `extraKnownMarketplaces` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`,
+then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+(never `marketplace remove` it: that uninstalls the plugin).
 
 **One command, no checkout:** the installed shim updates the whole install
 from a release:
@@ -818,8 +811,9 @@ Claude Code do it:
 ```
 
 The plugin replaces the settings.json hook, and the daemon serves a compact
-memory core and a live briefing as session context. The full CLAUDE.md block
-below is not served; append it if you want the complete guidance.
+memory core and a live briefing as session context. By default
+(`memory_policy.variant: compact`) the full CLAUDE.md block below is not
+served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
@@ -1041,9 +1035,11 @@ guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-Hooks serve at most that short guide; the detailed block reaches an agent
-only as a standing copy. For the complete guidance, for subagent
-visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+By default (`memory_policy.variant: compact`) hooks serve at most that
+short guide, and the detailed block reaches an agent only as a standing copy
+(the `full_separate_hook` variant serves it in a separate hook; see
+[Startup memory policy](docs/guide/configuration.md#startup-memory-policy-memory_policy)).
+For the complete guidance, for subagent visibility (subagents read `CLAUDE.md` but not hook output), or in place of
 hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
@@ -1385,7 +1381,7 @@ pseudolife-mcp-daemon`).
   and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
   that environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
+  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
@@ -1465,8 +1461,10 @@ rotated password can never produce a green run by accident. Full dev setup: [CON
 - **Reflection via MCP sampling** — would let the dream borrow *Claude
   itself* as the extractor;
   [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
-- **Cross-machine sync** — memory lives on one PC's disk; syncing via
-  rclone / syncthing is left as an exercise.
+- **Replication / offline copies** — one daemon owns one bank; other
+  machines use it over the network
+  ([remote bank](docs/guide/remote-bank.md)), but there is no replica or
+  offline mode.
 - **Automated world-knowledge ingestion** — populating the world cortex
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today

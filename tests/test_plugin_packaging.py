@@ -401,6 +401,19 @@ def test_memory_loop_block_carries_recall_before_review_trigger():
     assert "compare what memory says against the files" in text
 
 
+def test_memory_loop_block_teaches_entry_correction():
+    """The block taught memory_fact_set for a stale slot but nothing for a
+    stale stored entry, so a model wanting to correct one had no taught
+    path (2026-10-04 review, M10: memory_supersede was called 4 times by
+    Claude and 3 by Codex in two months). memory_supersede is full tier,
+    which the block says where it names it, and a minimal-tier session
+    needs two expands to reach it, so the block says to expand until full."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`memory_supersede` (full tier" in text
+    assert "`memory_toolset` until full" in text
+
+
 def test_memory_loop_block_matches_examples():
     """The daemon serves the standing instructions the CLAUDE.md append used
     to provide; the two sources must stay byte-identical (modulo the
@@ -473,10 +486,19 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     unknown = referenced - set(_TOOL_TIERS)
     assert not unknown, f"instruction blocks name unregistered tools: {unknown}"
 
-    hidden_at_core = {t for t in referenced if _TOOL_TIERS[t] == "full"}
+    # A full-tier tool may appear only with "(full tier" beside every
+    # mention, so a core session is told the tool is hidden rather than
+    # sent to call it bare (2026-10-04 review, M10: the blocks never named
+    # memory_supersede, leaving a stale entry with no taught correction).
+    blocks = " ".join(" ".join((MEMORY_LOOP_BLOCK, ONBOARDING_BLOCK,
+                                STARTUP_MEMORY_CORE, note)).split())
+    hidden_at_core = {
+        t for t in referenced if _TOOL_TIERS[t] == "full"
+        and (t in ups or re.search(rf"`{t}\b(?![^`]*`\s*\(full tier)", blocks))}
     assert not hidden_at_core, (
         f"instruction blocks name full-tier tools hidden at core: "
-        f"{hidden_at_core} — promote them or drop the mention")
+        f"{hidden_at_core} — promote them, mark each mention (full tier), "
+        f"or drop the mention")
 
 
 def test_plugin_commands_reference_only_real_tools():
@@ -488,6 +510,22 @@ def test_plugin_commands_reference_only_real_tools():
         assert referenced, f"{rel}: regex found no tool mentions"
         unknown = referenced - set(_TOOL_TIERS)
         assert not unknown, f"{rel} names unregistered tools: {unknown}"
+
+
+def test_plugin_commands_say_how_to_reach_hidden_tools():
+    """The compose default tier is core, and both commands call full-tier
+    tools (memory_dream, memory_graph_review, memory_forget). Sessions
+    running them searched for those tools, found nothing and gave up
+    without expanding (2026-10-04 review, H5), so a command that names a
+    tool above the minimal tier says how to expand to it."""
+    from pseudolife_memory.mcp_server import _TOOL_TIERS
+    for rel in ("plugin/commands/dream.md", "plugin/commands/memory-status.md"):
+        text = _read(rel)
+        hidden = {t for t in _referenced_tools(text) if _TOOL_TIERS[t] != "minimal"}
+        assert hidden, f"{rel}: expected tools above the minimal tier"
+        flat = " ".join(text.split())
+        assert 'memory_toolset(action="expand")' in flat, rel
+        assert 'current: "full"' in flat, rel
 
 
 def test_memory_loop_block_carries_the_write_policy_boundary():

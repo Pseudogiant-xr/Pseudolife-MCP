@@ -52,6 +52,7 @@ class FakeCli:
         self.version = "0.15.0"
         self.processes: list[tuple[int, int, str]] = []   # what list_processes reports
         self.marketplace_update = (0, "updated")
+        self.marketplace_add: tuple[int, str] | None = None   # forces `claude plugin marketplace add`'s answer
         self.install_help = (0, "  -y, --yes   Accept")
         self.install_records = True
         self.clone_plugin: Path | None = None
@@ -127,6 +128,8 @@ class FakeCli:
             return (0, self.pipx_bin_dir + "\n") if self.pipx_bin_dir else (1, "")
         if name == "claude" and rest[:3] == ["plugin", "marketplace", "update"]:
             return self.marketplace_update
+        if name == "claude" and rest[:3] == ["plugin", "marketplace", "add"]:
+            return self._marketplace_add(rest[3])
         if name == "claude" and rest[:3] == ["plugin", "install", "--help"]:
             return self.install_help
         if name == "claude" and rest[:2] == ["plugin", "uninstall"]:
@@ -147,6 +150,32 @@ class FakeCli:
         if name == "claude" and rest[:2] == ["plugin", "update"]:
             return self._plugin_update(rest[2:], kw)
         return 91, f"unexpected call {argv}"
+
+    def _marketplace_add(self, source: str):
+        """``claude plugin marketplace add <url>`` as measured on Claude Code
+        2.1.287 (2026-10-05, a throwaway CLAUDE_CONFIG_DIR): refused while
+        settings.json declares the marketplace with another source; otherwise
+        the existing entry is re-pointed in known_marketplaces.json (its
+        clone refreshed, the plugin record untouched) and the source is
+        declared in settings.json under extraKnownMarketplaces."""
+        if self.marketplace_add is not None:
+            return self.marketplace_add
+        wanted = {"source": "git", "url": source}
+        settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+        entry = data.get("extraKnownMarketplaces", {}).get("pseudolife-mcp")
+        if entry is not None and entry.get("source") != wanted:
+            return 1, ('Adding marketplace…✘ Failed to add marketplace: Cannot add marketplace "pseudolife-mcp": '
+                       "its source doesn't match its extraKnownMarketplaces entry in user or managed settings; "
+                       "add it from the source that entry lists, or change the entry.")
+        known_file = uc.plugins_root() / "known_marketplaces.json"
+        known = json.loads(known_file.read_text(encoding="utf-8")) if known_file.is_file() else {}
+        known.setdefault("pseudolife-mcp", {})["source"] = wanted
+        known_file.parent.mkdir(parents=True, exist_ok=True)
+        known_file.write_text(json.dumps(known, indent=2), encoding="utf-8")
+        data.setdefault("extraKnownMarketplaces", {})["pseudolife-mcp"] = {"source": wanted}
+        settings.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return 0, "✔ Successfully added marketplace: pseudolife-mcp (declared in user settings)"
 
     def _plugin_update(self, args, kw):
         """``claude plugin update`` as measured on Claude Code 2.1.283: a
@@ -179,7 +208,7 @@ def _in_use(cache: Path) -> bool:
 
 def _record_plugin(home: Path, cache: Path | None, version: str = "0.15.0", scope: str = "user",
                    project: str | None = None) -> None:
-    plugins = Path(os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / ".claude" / "plugins")
+    plugins = uc.plugins_root()
     plugins.mkdir(parents=True, exist_ok=True)
     data = {"version": 2, "plugins": {}}
     if cache is not None:
@@ -190,12 +219,16 @@ def _record_plugin(home: Path, cache: Path | None, version: str = "0.15.0", scop
     (plugins / "installed_plugins.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _record_marketplace(home: Path, clone_root: Path) -> None:
-    plugins = Path(os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / ".claude" / "plugins")
+HTTPS_SOURCE = {"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}
+# What the owner/repo shorthand the installers used up to 0.16.1 recorded.
+GITHUB_SOURCE = {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"}
+
+
+def _record_marketplace(home: Path, clone_root: Path, source: dict = HTTPS_SOURCE) -> None:
+    plugins = uc.plugins_root()
     plugins.mkdir(parents=True, exist_ok=True)
     (plugins / "known_marketplaces.json").write_text(json.dumps({
-        "pseudolife-mcp": {"source": {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"},
-                           "installLocation": str(clone_root)},
+        "pseudolife-mcp": {"source": source, "installLocation": str(clone_root)},
     }, indent=2), encoding="utf-8")
 
 
@@ -810,7 +843,8 @@ def test_the_old_pipx_link_in_the_user_bin_is_replaced_by_the_launcher(cli, monk
 
 # ── the plugin cache ────────────────────────────────────────────────────────
 
-def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True, in_use: bool = False):
+def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True, in_use: bool = False,
+                    source: dict = HTTPS_SOURCE):
     """A marketplace clone of the checkout's plugin and an installed cache
     folder at 0.15.0. ``in_use`` marks the cache the way Claude Code does
     while a session runs from it: ``.in_use/<pid>`` holding the pid and its
@@ -826,7 +860,7 @@ def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True, in_u
         (cache / ".in_use").mkdir()
         (cache / ".in_use" / "42652").write_text('{"pid":42652,"procStartFt":"134352300019189034"}',
                                                  encoding="utf-8")
-    _record_marketplace(cli.home, clone_root)
+    _record_marketplace(cli.home, clone_root, source)
     _record_plugin(cli.home, cache if installed else None)
     cli.clone_plugin, cli.cache_plugin = clone, cache
     return clone, cache
@@ -1000,22 +1034,287 @@ def _declare_marketplace(home: Path, source: dict) -> Path:
     return settings
 
 
-def test_a_declared_github_marketplace_is_changed_before_the_https_add(cli, tmp_path):
-    """2026-10-04 on the homelab box the HTTPS add was refused: settings.json
-    declared the marketplace's github source under extraKnownMarketplaces,
-    and Claude Code refuses an add from another source ("its source doesn't
-    match its extraKnownMarketplaces entry"; reproduced on 2.1.287, where
-    changing the entry's source first let the same add re-point it). The
-    remedy names that step only where the declaration exists, and never the
-    remove, which uninstalls the plugin."""
+def _settings_with(source: dict | None) -> dict:
+    """A user settings file as an old install leaves it: other keys, another
+    marketplace, and (when given) this marketplace declared with ``source``."""
+    declared = {"other-mkt": {"source": {"source": "github", "repo": "someone/other"}}}
+    if source is not None:
+        declared["pseudolife-mcp"] = {"source": source, "autoUpdate": True}
+    return {"env": {"X": "1"}, "enabledPlugins": {PLUGIN_ID: True}, "extraKnownMarketplaces": declared}
+
+
+def _add_other_marketplace(known_file: Path) -> None:
+    known = json.loads(known_file.read_text(encoding="utf-8"))
+    known["other-mkt"] = {"source": {"source": "github", "repo": "someone/other"}, "installLocation": "x"}
+    known_file.write_text(json.dumps(known, indent=2), encoding="utf-8")
+
+
+def _marketplace_adds(cli):
+    return [c for c in _claude_calls(cli) if c[:3] == ["plugin", "marketplace", "add"]]
+
+
+def _backups(cli) -> list[Path]:
+    return sorted(uc.plugins_root().glob("backup-*-marketplace-https"))
+
+
+REFUSED_ADD = (1, 'Adding marketplace…✘ Failed to add marketplace: Cannot add marketplace "pseudolife-mcp": '
+                  "its source doesn't match its extraKnownMarketplaces entry in user or managed settings; add "
+                  "it from the source that entry lists, or change the entry.")
+
+
+@pytest.mark.parametrize("declared", [GITHUB_SOURCE, None], ids=["declared-in-settings", "undeclared"])
+def test_an_old_github_marketplace_moves_to_https_before_the_refresh(cli, tmp_path, declared):
+    """Installers up to 0.16.1 added the marketplace by the owner/repo
+    shorthand, which Claude Code records as a `github` source and refreshes
+    over SSH; on a host with no GitHub SSH key every refresh fails (homelab
+    box, 2026-10-04, fixed by hand). The plugin step now re-points it to the
+    HTTPS URL itself: settings.json's declaration first (Claude Code refuses
+    the add while it names another source), then the add, which re-points
+    known_marketplaces.json. Other keys and other marketplaces are kept,
+    every file is backed up first, and the refresh runs after it."""
+    _plugin_fixture(cli, tmp_path, differ=True, source=GITHUB_SOURCE)
+    known_file = uc.plugins_root() / "known_marketplaces.json"
+    _add_other_marketplace(known_file)
+    settings = cli.home / "settings.json"   # the fixture's CLAUDE_CONFIG_DIR is the fake home
+    original = json.dumps(_settings_with(declared), indent=2)
+    settings.write_text(original, encoding="utf-8")
+    known_before = known_file.read_bytes()
+
+    result = uc.update_plugin(ROOT)
+
+    assert result["state"] == "refreshed:4352892f0db6", result
+    assert result["marketplace_source"] == "migrated"
+    assert "HTTPS" in result["detail"] and "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in result["detail"]
+    acted = _claude_calls(cli)
+    add = ["plugin", "marketplace", "add", "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"]
+    assert add in acted
+    assert acted.index(add) < acted.index(["plugin", "marketplace", "update", "pseudolife-mcp"])
+    assert not any(c[:3] == ["plugin", "marketplace", "remove"] for c in acted)
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    expected = _settings_with(HTTPS_SOURCE)
+    if declared is None:
+        expected["extraKnownMarketplaces"]["pseudolife-mcp"] = {"source": HTTPS_SOURCE}
+    assert data == expected
+    known = json.loads(known_file.read_text(encoding="utf-8"))
+    assert known["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    assert known["other-mkt"]["source"] == {"source": "github", "repo": "someone/other"}
+    (backup,) = _backups(cli)
+    assert (backup / "settings.json").read_text(encoding="utf-8") == original
+    assert (backup / "known_marketplaces.json").read_bytes() == known_before
+    assert (backup / "installed_plugins.json").is_file()
+    assert str(backup) in result["detail"]
+
+
+def test_an_https_marketplace_is_left_alone_and_reported_current(cli, tmp_path):
+    """Idempotent: once the marketplace fetches over HTTPS there is no add,
+    no edit and no backup, and the step says so."""
     _plugin_fixture(cli, tmp_path, differ=False)
-    settings = _declare_marketplace(cli.home, {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"})
-    cli.marketplace_update = (1, HOST_KEY_FAILURE)
-    detail = uc.update_plugin(ROOT)["detail"]
-    step = detail.index(f"{settings} declares")
-    assert '{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}' in detail[step:]
-    assert step < detail.index("claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git")
-    assert "marketplace remove" not in detail
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(HTTPS_SOURCE)), encoding="utf-8")
+    before = settings.read_bytes()
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "current:0.15.0", result
+    assert result["marketplace_source"] == "current"
+    assert _marketplace_adds(cli) == [] and _backups(cli) == []
+    assert settings.read_bytes() == before
+
+
+@pytest.mark.parametrize("source", [
+    {"source": "github", "repo": "someone/Pseudolife-MCP-fork"},
+    {"source": "directory", "path": "C:/src/Pseudolife-MCP"},
+    {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP", "ref": "my-branch"},
+], ids=["fork", "local-directory", "pinned-ref"])
+def test_a_marketplace_someone_pointed_elsewhere_is_not_touched(cli, tmp_path, source):
+    """Only the shorthand the installers wrote is moved: a fork, a local
+    checkout or a pinned ref was somebody's choice."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=source)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(source)), encoding="utf-8")
+    before = settings.read_bytes()
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "kept", result
+    assert _marketplace_adds(cli) == [] and _backups(cli) == []
+    assert settings.read_bytes() == before
+
+
+def test_a_refused_add_puts_the_entry_back_and_the_refresh_still_runs(cli, tmp_path):
+    """Claude Code refuses the add while managed settings (which no user
+    process may edit) still declare the old source. Only this marketplace's
+    entry goes back, so a running session's write to settings.json made
+    while the add ran survives (review finding, 2026-10-05). The move
+    changed nothing, so the refresh still runs (SSH works on some hosts),
+    and the step fails with the CLI's own line."""
+    _plugin_fixture(cli, tmp_path, differ=True, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE), indent=2), encoding="utf-8")
+
+    def session_writes_then_refused(source):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        data["theme"] = "dark"   # a running Claude Code session saves a setting meanwhile
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        return REFUSED_ADD
+    cli._marketplace_add = session_writes_then_refused
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "its source doesn't match its extraKnownMarketplaces entry" in result["detail"]
+    assert "put back as it was" in result["detail"]
+    assert json.loads(settings.read_text(encoding="utf-8")) == {**_settings_with(GITHUB_SOURCE), "theme": "dark"}
+    acted = _claude_calls(cli)
+    assert ["plugin", "marketplace", "update", "pseudolife-mcp"] in acted
+    assert any(c[:2] == ["plugin", "update"] for c in acted)
+
+
+@pytest.mark.parametrize("declared", ["github", "undeclared", "no-settings-file"])
+def test_an_add_that_does_not_re_point_the_record_is_a_failure(cli, tmp_path, declared):
+    """The read-back is the proof: a zero exit that leaves
+    known_marketplaces.json on the github source is not a migration. The add
+    declares the marketplace in settings.json itself, so the entry is put
+    back as it was even where this never edited it (review finding,
+    2026-10-05): otherwise settings and known disagree and Claude Code
+    lists no marketplace at all."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    original = None
+    if declared != "no-settings-file":
+        original = _settings_with(GITHUB_SOURCE if declared == "github" else None)
+        settings.write_text(json.dumps(original), encoding="utf-8")
+
+    def declares_but_does_not_re_point(source):
+        data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+        data.setdefault("extraKnownMarketplaces", {})["pseudolife-mcp"] = {
+            "source": {"source": "git", "url": source}}
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        return 0, "✔ Marketplace 'pseudolife-mcp' already on disk"
+    cli._marketplace_add = declares_but_does_not_re_point
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "still records" in result["detail"]
+    if original is None:
+        assert not settings.exists()
+    else:
+        assert json.loads(settings.read_text(encoding="utf-8")) == original
+
+
+def test_a_symlinked_settings_file_keeps_its_link(cli, tmp_path):
+    """settings.json linked from a dotfiles checkout is edited at its target;
+    replacing the link with a plain file would cut it off (review finding,
+    2026-10-05)."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    target = tmp_path / "dotfiles" / "settings.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    link = cli.home / "settings.json"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "migrated", result
+    assert link.is_symlink()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["autoUpdate"] is True
+
+
+def test_a_settings_file_that_cannot_be_backed_up_is_a_failed_line_not_a_crash(cli, tmp_path, monkeypatch):
+    """A file another process holds, or a plugins directory that cannot be
+    written: the step says so and changes nothing, and the ladder goes on
+    (review finding, 2026-10-05)."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    before = settings.read_bytes()
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(uc.shutil, "copy2", denied)
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "Permission denied" in result["detail"] and "nothing was changed" in result["detail"]
+    assert settings.read_bytes() == before and _marketplace_adds(cli) == []
+
+
+def test_an_add_that_drops_the_plugin_record_is_named(cli, tmp_path):
+    """Measured: the add leaves installed_plugins.json byte-identical. Should
+    a Claude Code release ever uninstall on re-point, the step says how to
+    put the plugin back instead of carrying on."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    real_add = cli._marketplace_add
+
+    def add_and_drop(source):
+        answer = real_add(source)
+        _record_plugin(cli.home, None)
+        return answer
+    cli._marketplace_add = add_and_drop
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed", result
+    assert f"claude plugin install {PLUGIN_ID}" in result["detail"]
+
+
+def test_unreadable_settings_are_named_not_rewritten(cli, tmp_path):
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text('{"env": {"X": "1"},', encoding="utf-8")
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert str(settings) in result["detail"] and "not valid JSON" in result["detail"]
+    assert settings.read_text(encoding="utf-8") == '{"env": {"X": "1"},'
+    assert _marketplace_adds(cli) == []
+
+
+def test_claude_config_dir_is_where_settings_and_plugins_are_read(cli, tmp_path, monkeypatch):
+    """Claude Code keeps settings.json and its plugins directory under
+    CLAUDE_CONFIG_DIR when it is set (measured on 2.1.287, 2026-10-05); the
+    migration edits that settings.json and never ~/.claude's."""
+    config = tmp_path / "config-dir"
+    config.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    assert uc.plugins_root() == config / "plugins"
+    decoy = cli.home / ".claude" / "settings.json"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    decoy_before = decoy.read_bytes()
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    (config / "settings.json").write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "migrated", result
+    data = json.loads((config / "settings.json").read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    assert decoy.read_bytes() == decoy_before
+
+
+def test_the_plugins_directory_defaults_to_the_home_claude_folder(cli, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    assert uc.plugins_root() == cli.home / ".claude" / "plugins"
+
+
+def test_the_installer_helper_reports_in_one_line(cli, tmp_path, capsys):
+    """ops/plugin_marketplace.py (the installers' step) prints one line for a
+    marketplace it moved or found current, nothing when none is recorded,
+    and exits 1 only on a failure."""
+    assert uc.marketplace_main() == 0 and capsys.readouterr().out == ""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    assert uc.marketplace_main() == 0
+    moved = capsys.readouterr().out
+    assert moved.count("\n") == 1 and "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in moved
+    assert uc.marketplace_main() == 0
+    current = capsys.readouterr().out
+    assert current.count("\n") == 1 and "nothing to change" in current
+    _record_marketplace(cli.home, tmp_path / "marketplace", GITHUB_SOURCE)
+    (cli.home / "settings.json").write_text("{", encoding="utf-8")
+    assert uc.marketplace_main() == 1
+    assert "not valid JSON" in capsys.readouterr().out
+
+
+def test_the_installer_helper_runs_from_a_bare_checkout(tmp_path):
+    """The installers run it with whatever Python 3.10+ the host has, before
+    any shim is installed: stdlib only, from the checkout."""
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PLUGIN_CACHE_DIR"}
+    env.update({"CLAUDE_CONFIG_DIR": str(tmp_path), "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)})
+    proc = subprocess.run([sys.executable, "-I", str(ROOT / "ops" / "plugin_marketplace.py")],
+                          capture_output=True, text=True, timeout=60, env=env, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == ""
 
 
 @pytest.mark.parametrize("declared", [None, {"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}],
@@ -1386,3 +1685,88 @@ def test_codex_plugin_approval_check_survives_a_malformed_config(cli, state):
         config.write(f"\n[hooks]\nstate = {state}\n")
     shutil.copytree(ROOT / "plugin", codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin")
     assert uc.check_codex_hooks(ROOT)["state"] in ("current", "needs-approval")
+
+
+# ── delegate review of #596 (2026-10-05) ────────────────────────────────────
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_private_settings_file_keeps_its_mode(cli, tmp_path):
+    """settings.json can hold secrets in its env block; a 0600 file must not
+    come back 0644 from the umask after the rewrite."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    settings.chmod(0o600)
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_source"] == "migrated", result
+    assert settings.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("answer", [(1, "✘ Failed to add marketplace: Cleaning up old marketplace cache failed"),
+                                    (uc.TIMED_OUT, "TimeoutExpired: Command 'claude' timed out after 180 seconds")],
+                         ids=["exit-1", "timed-out"])
+def test_an_add_that_failed_after_moving_the_record_leaves_settings_matching_it(cli, tmp_path, answer):
+    """The add can re-point known_marketplaces.json and then fail or time
+    out. Putting settings back to the github source then would leave the two
+    disagreeing, the state in which Claude Code lists no marketplace at all,
+    so settings stays on HTTPS to match the record and the step says so."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    settings = cli.home / "settings.json"
+    settings.write_text(json.dumps(_settings_with(GITHUB_SOURCE)), encoding="utf-8")
+    real_add = cli._marketplace_add
+
+    def moves_then_fails(source):
+        real_add(source)
+        return answer
+    cli._marketplace_add = moves_then_fails
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and result["marketplace_source"] == "failed", result
+    assert "already records" in result["detail"]
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"]["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+    known = json.loads((uc.plugins_root() / "known_marketplaces.json").read_text(encoding="utf-8"))
+    assert known["pseudolife-mcp"]["source"] == HTTPS_SOURCE
+
+
+@pytest.mark.parametrize("known, state", [(HTTPS_SOURCE, "current"), (GITHUB_SOURCE, "failed"), (None, "failed")],
+                         ids=["already-https", "github", "no-record"])
+def test_an_unreadable_settings_file_fails_only_where_the_move_needs_it(cli, tmp_path, known, state):
+    """A host already on HTTPS (every 0.17 install) has nothing to move, so
+    a settings.json that is not valid JSON must not fail its plugin step on
+    every update; only a github record, or none, needs the file read."""
+    if known is None:
+        _plugin_fixture(cli, tmp_path, differ=False)
+        (uc.plugins_root() / "known_marketplaces.json").unlink()
+    else:
+        _plugin_fixture(cli, tmp_path, differ=False, source=known)
+    settings = cli.home / "settings.json"
+    settings.write_text('{"env": {"X": "1"},', encoding="utf-8")
+    moved = uc.migrate_marketplace(cli.tools["claude"])
+    assert moved["state"] == state, moved
+    assert settings.read_text(encoding="utf-8") == '{"env": {"X": "1"},'
+    assert _marketplace_adds(cli) == []
+
+
+def test_the_add_is_bounded_and_never_prompts(cli, tmp_path):
+    """An installer must not sit for run_cli's default ten minutes on a hung
+    clone, and git must never wait on a credential prompt nobody sees."""
+    _plugin_fixture(cli, tmp_path, differ=False, source=GITHUB_SOURCE)
+    uc.update_plugin(ROOT)
+    (index,) = [i for i, c in enumerate(cli.calls) if c[1:4] == ["plugin", "marketplace", "add"]]
+    kw = cli.run_kwargs[index]
+    assert kw.get("timeout") == uc.MARKETPLACE_ADD_TIMEOUT < 600
+    assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_the_installer_line_survives_a_console_that_cannot_encode_it(cli, monkeypatch):
+    """A Windows console piped into PowerShell encodes stdout as cp1252: a
+    path it cannot encode must not turn a successful move into a traceback
+    the installer reports as a failure."""
+    import io
+    buffer = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(buffer, encoding="cp1252"))
+    monkeypatch.setattr(uc, "migrate_marketplace", lambda claude=None: {
+        "state": "migrated", "detail": "moved (backups in C:\\Users\\Ελένη\\.claude\\plugins\\backup)"})
+    assert uc.marketplace_main() == 0
+    sys.stdout.flush()
+    assert b"backups in" in buffer.getvalue()

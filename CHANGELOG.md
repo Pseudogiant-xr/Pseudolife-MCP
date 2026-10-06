@@ -6,6 +6,253 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
+
+### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)
+- Installs from 0.16.1 and earlier recorded the Claude Code plugin
+  marketplace as a `github` source (the `Pseudogiant-xr/Pseudolife-MCP`
+  shorthand), which Claude Code refreshes over SSH. On a host with no
+  GitHub SSH key the plugin stops updating. The 2026-10-04 fix changed new
+  installs only and left existing ones to a manual edit, which held the
+  0.17.0 release.
+- The plugin step of `pseudolife-mcp update` (release and checkout modes,
+  `--clients-only`, `ops/update_clients.py`) now moves that source to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` before it
+  refreshes the plugin, whether or not the refresh is failing yet. The
+  installers do the same on a rerun, through the new
+  `ops/plugin_marketplace.py`, before their plugin step; `--claude-plugin
+  skip` / `-ClaudePlugin skip` leaves it alone.
+- How it moves: it copies `settings.json`, `known_marketplaces.json` and
+  `installed_plugins.json` to `plugins/backup-<time>-marketplace-https/`.
+  It changes only the `pseudolife-mcp` entry's source under
+  `extraKnownMarketplaces` in `settings.json`, in one rename, keeping every
+  other key. Then it runs `claude plugin marketplace add <https url>`, and
+  reads `known_marketplaces.json` back to check the record moved.
+  Claude Code refuses that add while settings declares the old source. The
+  add rewrites the entry as just its source, dropping keys such as
+  `autoUpdate`, so those are put back. The plugin record stays as it was
+  (all measured on Claude Code 2.1.287 in a throwaway `CLAUDE_CONFIG_DIR`).
+- A refused add (for example, managed settings still declaring the old
+  source), or a record that did not move, puts this marketplace's
+  `settings.json` entry back as it was (the add writes that declaration
+  itself), keeping anything else written to the file meanwhile, and fails
+  the step with the CLI's line. The refresh still runs after a failed
+  move, since it changed nothing and SSH works on some hosts. A file that
+  cannot be backed up or written is a `failed` line, not a crash. A
+  symlinked `settings.json` is edited at its target, and the file keeps its
+  permission bits. An add that moved the record and then failed or timed
+  out (it is bounded at 300 s, with git's credential prompt off) leaves
+  `settings.json` on HTTPS to match the record. A `settings.json` that is
+  not valid JSON fails the step only where a move needs it, not on a host
+  already on HTTPS. An HTTPS source is left untouched
+  and reported current in one line. A fork, a local directory or a pinned
+  ref is somebody's choice and is left as it is, as is every other
+  marketplace. It never runs `marketplace remove`, which uninstalls the
+  plugin.
+- With `CLAUDE_CONFIG_DIR` set, the client update now reads Claude Code's
+  settings and plugins directory there, as Claude Code does; before, the
+  plugin step read `~/.claude/plugins` regardless.
+
+### Fixed (2026-10-05 — two served texts named the wrong fix or delivery path)
+- The shim's "MCP SDK predates v2" message told the user to run `pip install
+  -U "mcp>=2.1,<3"`, which can install an SDK the package's own pin
+  (`mcp>=2.1,<2.2`) refuses. It now prints `"mcp>=2.1,<2.2"`, as the README
+  does.
+- The standing memory-loop block (`MEMORY_LOOP_BLOCK`, and
+  `examples/CLAUDE.memory.md` beside it) said "this briefing arrives via a
+  hook, not MCP", although the block also reaches agents as a standing file.
+  It now says "these instructions arrive via a hook or a standing file, not
+  MCP".
+
+### Changed (2026-10-05 — suite runs clean up the test copies and environments earlier runs left)
+- The WSL and second-machine full-suite runners (`ops/wsl-suite.sh`, behind
+  `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`) kept a test copy (~600 MB)
+  and a uv environment (~220 MB) per checkout and never removed them: on
+  2026-10-05 the second machine's disk went from 62% to 88% in one day (13
+  copies, 7.8 GB, plus 2.9 GB of environments; it had filled on
+  2026-10-04), and WSL on the maintainer's host held 18 copies (11 GB) and
+  3.3 GB. Each run now prunes them before it clones: copies and
+  environments unused for `PSEUDOLIFE_SUITE_PRUNE_DAYS` days (default 3),
+  then the least recently used past `PSEUDOLIFE_SUITE_KEEP` of each
+  (default 8), and lock files whose directory is gone once they are as old,
+  and prints one line saying what went and how much it freed.
+  `PSEUDOLIFE_SUITE_PRUNE=off` (or `0`, `false`, `no`) turns it off; `ops/remote-suite.ps1`
+  forwards all three to the second machine. It removes a copy or
+  environment only while holding its lock (taken without waiting, so one a
+  run is using stays), never the run's own, never one a process works in
+  or runs from (its working directory or argv[0] inside), and an
+  environment only while also holding its copy's lock (which runs of older
+  commits still take). It removes only real directories directly inside
+  the two roots it owns, checked after resolving them, prunes nothing while
+  a root is itself a symlink, and renames each out of the way before deleting it, so an
+  interrupted prune leaves nothing a later run would reuse half-deleted.
+  Mirrors are left alone. A run now holds a shared lock on its environment
+  (`<env>.lock` beside it) for its whole length, and reopens a lock file
+  the pruner removed while it waited. Pruning never fails a run.
+
+### Fixed (2026-10-05 — refusals that look like successes now say why, and bad numbers are refused up front)
+- Several tools answered a refusal or a no-op as a plain success with only
+  a code, so a model often missed it or retried blind. Each such result now
+  carries a one-sentence `note` saying what happened and what to do, and
+  stays a success: `memory_store` (`empty`, `filtered_meta` — "reads as a
+  statement about the memory system itself. Rephrase as the fact." —
+  `below_surprise_threshold`, `rejected`; the service also reports an
+  exact duplicate as `filtered_meta` when `surprise_threshold` is above 0,
+  and that one's note says it repeats a held memory word for word, with no
+  need to retry); `memory_outcome` without
+  Postgres or with lessons disabled (the outcome is not kept; do not
+  retry); `memory_get` / `memory_reinforce` `faded: true` (a wrong id, a
+  forgotten or evicted entry, or a file-mode bank); `memory_set_add` /
+  `memory_set_remove` (`member_invalid`, `member_capped` with the
+  100-member cap, `member_not_found`, `member_remove_refused`);
+  `memory_graph_review` (`bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live`, also per result in a
+  batch); `memory_forget` matching nothing (`deleted_count: 0` /
+  `removed: 0`); and `memory_world_set` `unsafe_source_url` (http(s)
+  required). The service payloads, and so the Console's REST routes, are
+  unchanged.
+- `memory_supersede` and `memory_consolidate` put their refusal sentence in
+  `error` beside the code in `reason`, the reverse of every other tool. On
+  the MCP surface the sentence is now `note`, with `reason` and
+  `target_errors` unchanged; the REST routes keep `error` for the Console.
+- Out-of-range numbers are refused when the arguments are bound, before
+  the tool runs, as an `invalid_argument` tool error naming the parameter:
+  `memory_search(top_k=-3)` used to fail deep in retrieval with "selected
+  index k out of range". `top_k` on the search tools, `memory_recent` `n`,
+  `memory_dream` `limit` and the `memory_consolidation_candidates` counts
+  must be positive. Zero used to be accepted (`top_k=0`, and
+  `memory_dream(limit=0)`, which meant the default) and is now refused
+  too; `confidence` on
+  `memory_fact_set`, `memory_world_set` and `memory_graph_relate` must be
+  within 0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; and
+  `memory_fact_set` refuses a blank entity, attribute or value, which it
+  used to store. The ranges are also written in the parameter text, since
+  Codex drops `minimum`/`maximum` from the schema it shows the model.
+- `memory_history` `as_of` says it takes an ISO-8601 date or epoch
+  seconds, not relative words, and refuses `"yesterday"` with that message
+  instead of "Invalid isoformat string". `document_ingest`'s not-found
+  error now says, once, that the path was looked up on the server's
+  filesystem, inside the container under Docker.
+
+### Fixed (2026-10-05 — a refused tool call is a tool error that says what to fix)
+- When a tool refused a call, the model got a success-shaped result such as
+  `{"error": "CoordinationRefused", "message": "missing_parameter"}`: a
+  Python class name and no word on which parameter was wrong. Transcripts
+  from 2026-10-04 show every `missing_parameter` retry by Claude and Codex
+  sessions was a guess. A refusal raised in a tool body is now an MCP tool
+  error (`isError: true`) whose text and structured content are one JSON
+  object: `error` (a stable snake_case code, never a class name), `message`
+  (one sentence naming the fix), and, where the refusal knows them,
+  `param`, `accepted`, `action`, and `mutation: "unknown"` when a write
+  tool failed in a way that leaves a write in doubt. A coded `ValueError`
+  keeps its code (`missing_parameter`, `invalid_park`, ...); one in prose is
+  `invalid_argument` with that prose; a missing file is `file_not_found`;
+  anything else is `internal_error`, whose class and text stay in the
+  daemon log. No-ops (a dropped near-duplicate, an empty read, queued mail,
+  a `withheld` or `no_path` wake receipt) stay successes, and success
+  payloads are unchanged. Refusals tools return as `{"error": ...}` dicts
+  (`unknown_action`, `bulk_confirm_required`, ...) are unchanged.
+  `invalid_argument` carries no `mutation` field, so it is meant for raises
+  that come before any write; `coordination_unavailable`, which the board
+  reports for an unexpected failure inside its call, says
+  `mutation: "unknown"` on a write tool.
+- Arguments refused before the tool runs (a wrong type, a value outside an
+  enum, a missing required argument, an unknown argument name) come back in
+  the same shape. Before, the client got pydantic's text: `1 validation
+  error for memory_searchArguments`, the value passed (`input_value=...`)
+  and a pydantic docs link. Now it is `invalid_argument` with `param` (the
+  first refused argument) and a message naming each refused argument and
+  what was wrong with it (`top_k: Input should be a valid integer, ...`),
+  never the value. An unknown argument name is `unknown_parameter`, with
+  the same sentence as before (`unknown parameter 'limit' for
+  memory_search; did you mean 'top_k'?`) and `accepted` listing the tool's
+  parameters.
+- The board names what was wrong: `missing_parameter` says what the action
+  needs (`send needs request_id`), `unexpected_parameter` names the
+  parameter, what the action takes and which action takes it instead, and
+  `unknown_coordination_action` lists the actions. `invalid_park` says which
+  of its five causes applied (an unknown `park_reason`, with the six
+  accepted ones; a park field over its length; a bad or more than 7 days
+  ahead `park_expires`; park fields with no park to refine), `invalid_text`
+  which rule the body broke (blank, NUL, over 8,192 UTF-8 bytes with its
+  size, not UTF-8), and `secret_like_body` which field looked like a
+  credential, never its text. The codes are unchanged, so callers keyed on
+  them keep working; the REST API carries the new sentences in its existing
+  `detail` field.
+
+### Changed (2026-10-05 — each memory tool says which sibling fits instead, and marks tools your tier hides)
+- A model reading one tool's description now learns when another tool is
+  the right call. `memory_fact_set` sends a narrative, decision or
+  observation to `memory_store` and many concurrent values to
+  `memory_set_add`, and says it errors on a set-valued slot;
+  `memory_fact_get` sends open questions to `memory_search`;
+  `memory_supersede` sends test junk or a never-true entry to
+  `memory_forget` and a canonical slot to `memory_fact_set`. The standing
+  instructions (`examples/CLAUDE.memory.md`, served as the session-start
+  block) teach `memory_supersede` for a stored entry that is now wrong,
+  marked full tier, with "expand via `memory_toolset` until full" (a
+  minimal-tier session needs two expands to reach it); the guard that kept full-tier tools out of those
+  instructions now admits one only when every mention says "(full tier".
+- A description that names a tool the reader's tier hides now says which
+  tier shows it, in the form `memory_fact_resolve (core)` already used by
+  `memory_search`: on `memory_fact_get` (`memory_fact_resolve`,
+  `memory_history`), `memory_fact_set` and `memory_set_add`
+  (`memory_fact_resolve`) and `memory_graph_relate`
+  (`memory_relation_define`). The 2026-10-04 review counted five "No such
+  tool" errors and about ten abandoned searches for hidden tools; every
+  session that expanded found them. A test now fails when a lower-tier
+  description names a higher-tier tool without its tier, and another when
+  `memory_toolset(action="status")`'s hand-written tier summary drifts
+  from the registry.
+- The `/dream` and `/memory-status` plugin commands say their full-tier
+  tools need `memory_toolset(action="expand")`, one tier per call, until it
+  reports `current: "full"`; the daemon's compose default is core.
+- `memory_recall` no longer quotes its current output caps as numbers
+  (they drift); it says the lists are capped.
+- The `minimal` tier grows from 9 to 10 tools by maintainer decision:
+  `memory_lesson_search` moves there from `core`. The session-start rule
+  says to recall with `memory_search` and `memory_lesson_search`, and
+  `memory_outcome` (minimal) writes the lessons, but a minimal-tier session
+  could not read them back without expanding. Measured cost on minimal:
+  tool descriptions 5,748 to 6,345 characters, parameter descriptions
+  2,742 to 2,879, and the `tools/list` manifest about 16.8 KB to 18.2 KB
+  (compact JSON). `memory_search` and `memory_toolset` no longer list it
+  under core, and the README, configuration guide, System Atlas,
+  `ops/.env.example` and the compose file give the new count.
+
+### Changed (2026-10-05 — a Claude Code session stays reachable while it is open; the Console shows whether the delegate is)
+- A maintainer message to an idle Claude Code session rang only during the
+  hour after its last turn: the plugin's Stop-hook watcher stopped at 59
+  minutes, and the documented fix, a background `wait-mail --timeout
+  14400`, never ran that long because Claude Code stops a background Bash
+  task at the tool's own timeout (30 minutes by default, 2 hours at most;
+  read in the Claude Code 2.1.286 and 2.1.287 bundles). The watcher now
+  listens for 14 days after each turn end, twice the longest delegate
+  lease, so a session is reachable for as long as it stays open without
+  arming anything. Claude Code takes a hook's `timeout` as is (no ceiling)
+  into a Node timer, so the value stays under its 24.8-day limit. After the
+  first hour the watcher polls every 30 s instead of every 5 s, checks on
+  Windows that Claude Code still runs every five minutes instead of every
+  minute, and reads the clock without spawning `date` (bash 4.2 and later),
+  so a session idle for days spawns about 0.07 processes a second (a
+  `sleep` and an `mv` every 30 s, plus `ps -W` and `awk` every five minutes
+  on Windows); a ring then fires up to 30 s after it is decided. **Codex users approve the
+  plugin's hooks once more**: the Stop entry's `timeout` changed (3600 to
+  1209600), and Codex hashes it for the Stop event.
+- Granting or extending a role (Console or `pseudolife-mcp lease
+  delegate`) now says whether the grantee has a live wake path
+  (`reachable`, and the no-path `reason`), and warns when maintainer mail
+  to it would wait for its next turn: the Console shows the warning beside
+  the success toast, the CLI prints it on stderr. The maintainer status's
+  `roles` carry the same two fields per holder, and the Roles band shows
+  "Reachable now" or "No live wake listener" under the delegate and the
+  coordinator.
+- The Console's message thread says why a maintainer message was not rung
+  (for example "no live listener (its listener lapsed)") and no longer
+  calls a nightly cap hourly.
+- The park prompt (Stop-hook gate) and the no-path fallback text no longer
+  tell Claude Code sessions to arm `wait-mail` for waits over 59 minutes.
+
 ### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
 - Nearly every board row read `claude-code` or `codex`: the label is set
   once at registration, so the maintainer could not tell sessions apart or
@@ -44,6 +291,78 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus a partial index on `episode`) and runs on daemon start. The harness
   names need the new shim, which release-mode `pseudolife-mcp update`
   installs with the clients; nothing else to do.
+
+### Fixed (2026-10-05 — a contested fact's served correction no longer tells the model to write over it)
+- A cortex fact flagged `contested: true` came back from `memory_search`
+  and `memory_fact_get` with a `correct_with` call to `memory_fact_set`,
+  and the response's `correction_note` said to run it now. The standing
+  memory instructions say the opposite: a contested slot is settled with
+  `memory_fact_resolve` after checking, because re-asserting
+  `memory_fact_set` only contests it further (seen 2026-10-04 on a live
+  recall). A contested fact's `correct_with` now names
+  `memory_fact_get(entity=..., attribute=...)` to read the contenders and
+  `memory_fact_resolve(..., accept=<the human's decision>) (core tier)` for
+  once a human decides; no `accept` value is filled in and no
+  `memory_fact_set` call is served. Contested wins over aged. Aged and
+  stale facts keep their `memory_fact_set` call and the run-it-now norm.
+  The shared `correction_note` now scopes "run its call NOW" to aged facts
+  and adds one sentence for contested ones. World facts are unchanged:
+  the world cortex never parks contenders. The standing block
+  (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
+  same.
+
+### Fixed (2026-10-05 — the standing texts teach what the server actually does)
+- The per-turn memory-change note told sessions to "`memory_store` a status
+  note" without naming the source, so a session following it literally
+  stored progress under the default source `agent`, which other sessions'
+  change notes never report and the dream mines. It now says
+  `memory_store(source="status")`, and `memory_store`'s `source` parameter
+  says that `"status"` marks in-flight progress notes, which peers see and
+  the dream skips.
+- `memory_outcome` states that `used_ids` credits only this session's
+  searches from the last hour in its first lines, instead of at the end of
+  the `used_ids` parameter text, which drops the rule.
+- The Claude Code plugin's subagent board guard now lets a subagent read
+  `memory_message(action="history")`, which is read-only (no ack, delivery
+  or wake); it used to be refused with the board writes. The refusal text,
+  `plugin/README.md` and the configuration guide list it with the allowed
+  reads. A plugin change: it reaches clients through the client update step
+  (`pseudolife-mcp update`, or `--all` / `python ops/update_clients.py` for
+  a checkout deploy); `plugin/hooks/hooks.json` is unchanged, so Codex users
+  approve nothing again.
+- Docs drift: README's `memory_history` row names its `as_of` parameter;
+  the providers guide's September Codex check notes today's tier counts
+  (full 38 tools, core 24); the configuration guide gives the minimal tier's
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens; superseded the
+  same day: about 18 KB for 10 tools once `memory_lesson_search` moved to
+  the minimal tier, above) and the full memory-loop block as about 8 KB (it
+  said 7.5 KB).
+
+### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
+- A memory tool called with an argument name it does not have used to
+  succeed with that argument thrown away: `memory_search(limit=3)` returned
+  the default 8 hits, `memory_outcome(note=...)` recorded no detail, and
+  `episode=` on `memory_world_set` vanished. Transcripts from 2026-10-04
+  showed both Claude and Codex models doing this hundreds of times (`limit`
+  on `memory_search` 140 calls and on `memory_lesson_search` 56). Such a
+  call is now an error result (`isError`) that names the parameter, offers
+  the likely one and lists what the tool accepts, for example
+  `unknown parameter 'limit' for memory_search; did you mean 'top_k'?
+  Accepted: query, top_k, ...`. Suggestions come from a small map of the
+  measured confusions (`limit` to `top_k` or `n`, `content` to `text`,
+  `note`/`notes`/`text` to `detail`) and from close spelling matches.
+  The refusal names the parameter and never echoes its value, since a
+  misnamed argument can carry a secret. Every tool's input schema now says `additionalProperties: false`
+  (29 bytes per tool; the largest schema, `memory_agents`, is 3,488 of its
+  4,000-byte cap). MCP request `_meta` is not an argument and is unaffected,
+  and stringified list arguments are still decoded.
+- The session-start episode line, the startup memory core and the resumed
+  or compacted session note now say to pass the episode to every memory
+  tool that accepts it, instead of "on every memory write": world, set,
+  resolve and graph writes take no `episode` parameter, so a model
+  following the old wording now gets a refusal there. Those writes are
+  still attributed to the session wherever the service stamps one (the
+  shim's per-session header).
 
 ### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
 - On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's
@@ -438,13 +757,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   remote-bank guide, the translated READMEs, and the client step's advice
   when the marketplace clone is missing. `tests/test_plugin_packaging.py`
   fails while any of them names the shorthand.
-- **Existing installs** keep the `github` source until it is moved; the
-  README's Updating section gives the steps. If `~/.claude/settings.json`
-  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
-  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-  (the CLI refuses an add that differs from a declared source), then run
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
-  Do not remove the marketplace first: that uninstalls its plugins.
+- **Existing installs** keep the `github` source until it is moved.
+  `pseudolife-mcp update` and the installers now move it themselves (the
+  2026-10-05 entry above); the README's Updating section keeps the manual
+  steps as a fallback.
 
 ### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
 - The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
@@ -463,11 +779,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fingerprint, or point the marketplace at HTTPS with `claude plugin
   marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
   which re-points the existing entry in place (measured on Claude Code
-  2.1.287). Claude Code refuses that add while `settings.json` declares the
-  marketplace under `extraKnownMarketplaces` with another source, as the
-  box's did, so where such a declaration exists the detail names the file
-  and says to change the entry's source to the HTTPS git URL first; it
-  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  2.1.287). It never suggests `marketplace remove`, which uninstalls the
+  plugin. (The detail also named a `settings.json` declaration to change
+  first; since 2026-10-05 the step moves the installers' old source to
+  HTTPS itself, so that advice was retired.) The step
   still installs a clone that differs from the cache,
   since that is progress, but it reports `failed` and says the clone may be
   behind, not `refreshed`. A successful marketplace update behaves as

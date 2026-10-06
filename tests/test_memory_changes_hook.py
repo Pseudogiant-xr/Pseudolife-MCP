@@ -195,6 +195,10 @@ def test_the_tail_keeps_the_rules_the_static_line_carried():
     for phrase in ("memory_search", "memory_lesson_search", "review", "compare",
                    "memory_store", "status", "memory_outcome", "used_ids"):
         assert phrase in MEMORY_CHANGES_TAIL, phrase
+    # Peers' change notes and the dream's exclusion key on the source, not
+    # the word: a tail that only says "a status note" gets stored as the
+    # default source "agent".
+    assert 'memory_store(source="status")' in MEMORY_CHANGES_TAIL
 
 
 def test_a_failing_service_answers_nothing():
