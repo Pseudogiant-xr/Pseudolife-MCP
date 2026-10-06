@@ -233,10 +233,10 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
         raise ValueError("CLI preparation changed the original executable target")
     if invoked != original_path:
         checked_metadata(home)
-        checked_metadata(invoked)
         canonical_home = home.resolve(strict=True)
         if not resolved.is_relative_to(canonical_home):
             raise ValueError("CLI relocated executable must remain inside the home")
+        checked_metadata(invoked)
         # Short names can spell the same directory; links cannot supply ownership.
         for parent in invoked.parents:
             checked_metadata(parent)
