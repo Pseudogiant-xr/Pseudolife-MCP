@@ -6,6 +6,9 @@
     "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]": "cli-main-process",
     "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help": "cli-main-process",
     "tests/test_cli_dispatch.py::test_help_lists_version": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit": "cli-main-process",
     "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations": "stdio-shim-process",
     "tests/test_shim.py::test_shim_survives_idle_gap": "stdio-shim-process",
     "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand": "stdio-shim-process",
@@ -17,10 +20,6 @@
     "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged": "stdio-shim-process",
     "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal": "stdio-shim-process"
   },
-  "unmapped": {
-    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]": "Monkeypatches Python runtimes.running_runtime; needs a disposable runtime fixture before crossing the process boundary.",
-    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]": "Monkeypatches Python runtimes.running_runtime; needs a disposable runtime fixture before crossing the process boundary.",
-    "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit": "Constructs a Python Runtime object and replaces running_runtime; not mapped to a Rust process."
-  },
+  "unmapped": {},
   "oracle_commit": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
 }

@@ -231,9 +231,19 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
         raise ValueError("prepared command must retain the original arm prefix and executable bytes")
     if original_path.resolve(strict=True) != original_resolved:
         raise ValueError("CLI preparation changed the original executable target")
-    if invoked != original_path and (not invoked.is_relative_to(home.resolve())
-                                     or not resolved.is_relative_to(home.resolve())):
-        raise ValueError("CLI relocated executable must remain inside the home")
+    if invoked != original_path:
+        checked_metadata(home)
+        checked_metadata(invoked)
+        canonical_home = home.resolve(strict=True)
+        if not resolved.is_relative_to(canonical_home):
+            raise ValueError("CLI relocated executable must remain inside the home")
+        # Short names can spell the same directory; links cannot supply ownership.
+        for parent in invoked.parents:
+            checked_metadata(parent)
+            if parent.resolve(strict=True) == canonical_home:
+                break
+        else:
+            raise ValueError("CLI relocated executable must remain inside the home")
     return selected, identity, original_identity
 
 

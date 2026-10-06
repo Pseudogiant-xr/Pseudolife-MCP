@@ -52,6 +52,18 @@ fn command(executable: &Path, home: &Path) -> Command {
     command
 }
 
+fn installed_executable(runtime: &Path) -> std::path::PathBuf {
+    let scripts = runtime.join(if cfg!(windows) { "Scripts" } else { "bin" });
+    fs::create_dir_all(&scripts).unwrap();
+    let executable = scripts.join(if cfg!(windows) {
+        "pseudolife-stdio.exe"
+    } else {
+        "pseudolife-stdio"
+    });
+    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    executable
+}
+
 fn first_line() -> String {
     format!("pseudolife-mcp {}\n", env!("CARGO_PKG_VERSION"))
 }
@@ -64,14 +76,16 @@ fn assert_output(output: Output, expected: &str) {
 
 #[test]
 fn crate_version_matches_the_pinned_python_package() {
-    let version = include_str!("../../../pyproject.toml")
+    let root = std::env::var_os("PSEUDOLIFE_PORT_ORACLE_ROOT")
+        .expect("prepare pinned metadata with evals.rust_port.phase1_oracle --metadata-only");
+    let metadata = fs::read_to_string(Path::new(&root).join("pyproject.toml")).unwrap();
+    let version = metadata
         .lines()
         .find_map(|line| {
             line.strip_prefix("version = \"")
                 .and_then(|value| value.strip_suffix('"'))
         })
         .unwrap();
-    assert_eq!(version, "0.17.0"); // pyproject.toml at oracle eb0c13e9c5036aa2b95e7fccb77f41ca1c095493.
     assert_eq!(env!("CARGO_PKG_VERSION"), version);
 }
 
@@ -114,13 +128,7 @@ fn installed_identity_reads_its_own_manifest_and_falsey_commit_source() {
         } else {
             "data/pseudolife-mcp/runtimes/000001"
         });
-        fs::create_dir_all(&runtime).unwrap();
-        let executable = runtime.join(if cfg!(windows) {
-            "pseudolife-stdio.exe"
-        } else {
-            "pseudolife-stdio"
-        });
-        fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+        let executable = installed_executable(&runtime);
         fs::write(runtime.join("runtime.json"), marker).unwrap();
         let expected = format!("{}runtime {} ({origin})\n", first_line(), runtime.display());
         assert_output(
@@ -146,13 +154,7 @@ fn missing_malformed_nonobject_and_unmanaged_markers_do_not_claim_runtime_identi
     ] {
         let home = DisposableHome::new();
         let runtime = home.path("runtime-root").join(name);
-        fs::create_dir_all(&runtime).unwrap();
-        let executable = runtime.join(if cfg!(windows) {
-            "pseudolife-stdio.exe"
-        } else {
-            "pseudolife-stdio"
-        });
-        fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+        let executable = installed_executable(&runtime);
         if let Some(marker) = marker {
             fs::write(runtime.join("runtime.json"), marker).unwrap();
         }
@@ -180,13 +182,7 @@ fn overrides_select_the_layout_and_half_overrides_keep_the_default() {
     });
     let custom = home.path("custom/０００００１");
     for runtime in [&default, &custom] {
-        fs::create_dir_all(runtime).unwrap();
-        let executable = runtime.join(if cfg!(windows) {
-            "pseudolife-stdio.exe"
-        } else {
-            "pseudolife-stdio"
-        });
-        fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+        let executable = installed_executable(runtime);
         fs::write(
             runtime.join("runtime.json"),
             r#"{"source_commit":"fixture-commit"}"#,
@@ -228,21 +224,16 @@ fn overrides_select_the_layout_and_half_overrides_keep_the_default() {
 }
 
 #[test]
-fn a_valid_manifest_beside_a_different_executable_directory_is_not_the_running_identity() {
+fn a_valid_manifest_above_the_installed_executable_is_the_running_identity() {
     let home = DisposableHome::new();
     let runtime = home.path("runtimes/000001");
-    fs::create_dir_all(runtime.join("bin")).unwrap();
+    let executable = installed_executable(&runtime);
     fs::write(
         runtime.join("runtime.json"),
-        r#"{"source_commit":"not-the-executable-directory"}"#,
+        r#"{"source_commit":"installed-runtime-commit"}"#,
     )
     .unwrap();
-    let executable = runtime.join("bin").join(if cfg!(windows) {
-        "pseudolife-stdio.exe"
-    } else {
-        "pseudolife-stdio"
-    });
-    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+
     let mut process = command(&executable, &home.0);
     process
         .env("PSEUDOLIFE_SHIM_RUNTIMES", runtime.parent().unwrap())
@@ -254,5 +245,46 @@ fn a_valid_manifest_beside_a_different_executable_directory_is_not_the_running_i
                 "launcher"
             }),
         );
-    assert_output(process.arg("version").output().unwrap(), &first_line());
+    assert_output(
+        process.arg("version").output().unwrap(),
+        &format!(
+            "{}runtime {} (source commit installed-runtime-commit)\n",
+            first_line(),
+            runtime.display()
+        ),
+    );
+}
+
+#[test]
+fn a_binary_at_the_runtime_root_does_not_claim_installed_identity() {
+    let home = DisposableHome::new();
+    let runtime = home.path("runtimes/000001");
+    fs::create_dir_all(&runtime).unwrap();
+    fs::write(
+        runtime.join("runtime.json"),
+        r#"{"source_commit":"fixture-commit"}"#,
+    )
+    .unwrap();
+    let executable = runtime.join(if cfg!(windows) {
+        "pseudolife-stdio.exe"
+    } else {
+        "pseudolife-stdio"
+    });
+    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    assert_output(
+        command(&executable, &home.0)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", runtime.parent().unwrap())
+            .env(
+                "PSEUDOLIFE_SHIM_LAUNCHER",
+                home.path(if cfg!(windows) {
+                    "launcher.exe"
+                } else {
+                    "launcher"
+                }),
+            )
+            .arg("version")
+            .output()
+            .unwrap(),
+        &first_line(),
+    );
 }

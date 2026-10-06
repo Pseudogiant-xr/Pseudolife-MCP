@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 from .cli_corpus import corpus
 from .harness import (Policy, capture_platform, compare, execute, isolated_env,
@@ -66,9 +67,10 @@ def run(root, command, candidate_root, evidence_directory, resource):
     source = require_phase1_source(root)
     require_import_root(root)
     runtime = runtime_metadata(root)
+    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     if sys.version_info[:2] != (3, 11) or not runtime["source_origin_matches_selected_root"] \
-            or runtime["package_runtime_version"] != "0.16.1" \
-            or runtime["distribution_versions"]["pseudolife-mcp"] != "0.16.1":
+            or runtime["package_runtime_version"] != version \
+            or runtime["distribution_versions"]["pseudolife-mcp"] != version:
         raise RuntimeError("CLI capture requires the genuine pinned installed package runtime")
     python = [sys.executable, "-m", "pseudolife_memory.cli"]
     identity = candidate_identity(command, candidate_root)

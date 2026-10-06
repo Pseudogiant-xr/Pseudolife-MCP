@@ -5,7 +5,7 @@ The current version-branch behavioural oracle target is Python 0.17.0 at
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
-Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values and lone Unicode surrogates are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
+Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
 
 The [local version evidence at `62e4f590`](../evals/results/rust-phase2b-version-62e4f590/README.md)
 records both-platform release corpora and bare/installed paired measurements.

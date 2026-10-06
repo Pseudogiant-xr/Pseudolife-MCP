@@ -60,7 +60,7 @@ def test_minimal_runtime_seeds_identical_bytes_and_preserves_public_prefix(tmp_p
     else:
         root = home / "override" if spec["layout_kind"] == "override" else \
             home / ("local" if platform == "nt" else "data") / "pseudolife-mcp"
-        assert native.parent == root / "runtimes" / "000001"
+        assert native.parent == root / "runtimes" / "000001" / ("Scripts" if platform == "nt" else "bin")
     import base64
     import json
     markers = {path: json.loads(base64.b64decode(value))
