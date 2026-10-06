@@ -21,7 +21,10 @@ The [manifest](manifest.json) records exact source and receipt identities and
 focused command exits. Five captured source files remain byte-identical across
 platforms and at packaging; canonical Git identities remain separate from
 captured checkout-byte hashes. Registry archive checksum and linked crate file
-hashes are retained in each receipt. The standalone linked test and clippy pass
+hashes are retained in each receipt. The manifest also distinguishes captured
+receipt-byte hashes from canonical Git receipt hashes: Git stores the Windows
+JSON with LF line endings, while its retained capture uses CRLF.
+The standalone linked test and clippy pass
 on both platforms; workspace resolver tests pass 10/10 on Windows and 9/9 on
 Linux with default features and without default features. Formatting also passes.
 

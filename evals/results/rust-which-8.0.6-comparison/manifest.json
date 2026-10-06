@@ -170,10 +170,6 @@
       }
     ]
   },
-  "receipt_sha256": {
-    "windows": "824f23635c5a4817fdcc395b77aa0d5e081d8b9216fb74cc999913b8ddc16e1e",
-    "linux": "5dcb8e05f8982862e451938c03e29a9515ab048c2b31ab8cc652bf3e441fd1d1"
-  },
   "limits": [
     "No full suite or new hosted matrix is claimed.",
     "The standalone comparison is manually invoked; the existing Rust workflow covers workspace contracts in both feature configurations but does not run this separate crate.",
@@ -184,5 +180,19 @@
     "rust/shim/tests/unix_accounts_lookup/mod.rs"
   ],
   "inherited_users_test_matches_integrated_users_base": true,
-  "original_which_fixture_and_resolver_tests_unchanged_from_f883": true
+  "original_which_fixture_and_resolver_tests_unchanged_from_f883": true,
+  "captured_receipt_byte_sha256": {
+    "windows": "824f23635c5a4817fdcc395b77aa0d5e081d8b9216fb74cc999913b8ddc16e1e",
+    "linux": "5dcb8e05f8982862e451938c03e29a9515ab048c2b31ab8cc652bf3e441fd1d1"
+  },
+  "canonical_git_receipt_bindings": {
+    "windows": {
+      "blob": "594abf7c593975e9ed222b54e3bc5d6609186c27",
+      "byte_sha256": "9cb1ad18d66306d4361c7fb40a91b347a62d707f1fb9d8b547dad9c08f82caca"
+    },
+    "linux": {
+      "blob": "d3a366485332a1e0cde9603c2265ad95d5efb450",
+      "byte_sha256": "5dcb8e05f8982862e451938c03e29a9515ab048c2b31ab8cc652bf3e441fd1d1"
+    }
+  }
 }
