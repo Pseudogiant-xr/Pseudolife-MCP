@@ -181,7 +181,7 @@ async fn wait_lock(
 fn start(args: &Args) -> Result<Child, RunError> {
     let original = &args.command[0];
     #[cfg(windows)]
-    let program = which::which(original)
+    let program = crate::lifecycle::find_executable(original)
         .ok()
         .map(|p| p.into_os_string())
         .unwrap_or_else(|| original.into());
