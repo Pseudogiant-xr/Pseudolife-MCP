@@ -70,6 +70,16 @@ fn try_lock(file: &File) -> io::Result<bool> {
         Err(error)
     }
 }
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn unlock(file: &File) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::{Storage::FileSystem::UnlockFileEx, System::IO::OVERLAPPED};
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    // Unlock exactly the byte-zero range acquired by try_lock.
+    // Like Python, ignore unlock errors; closing the handle still releases it.
+    let _ = unsafe { UnlockFileEx(file.as_raw_handle() as _, 0, 1, 0, &mut overlapped) };
+}
 #[cfg(unix)]
 fn try_lock(file: &File) -> io::Result<bool> {
     match rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
@@ -175,6 +185,10 @@ impl Lock {
         Ok(true)
     }
     pub fn release(&mut self) {
+        #[cfg(windows)]
+        if let Some(file) = &self.file {
+            unlock(file);
+        }
         self.file = None;
     }
 }
@@ -222,4 +236,28 @@ pub fn instance_id(directory: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unlock_releases_first_byte_while_original_handle_remains_open() {
+        let path = std::env::temp_dir().join(format!("lease-unlock-{}.lock", uuid::Uuid::new_v4()));
+        let mut original = Lock::new(path.clone());
+        let mut contender = Lock::new(path.clone());
+        assert!(matches!(original.acquire(), Ok(true)));
+        assert!(matches!(contender.acquire(), Ok(false)));
+
+        // Keep the actual owning handle open: dropping it cannot satisfy this test.
+        let file = original.file.as_ref().expect("acquired handle");
+        unlock(file);
+        assert!(matches!(contender.acquire(), Ok(true)));
+        assert!(file.metadata().is_ok());
+
+        original.release();
+        contender.release();
+        fs::remove_file(path).unwrap();
+    }
 }

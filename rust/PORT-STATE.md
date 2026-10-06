@@ -1047,18 +1047,7 @@ bindings were checked against both native checkouts and the pinned oracle.
 | Windows | `lease-list-measurement-windows-3x10.json` | `52fefa6a010ba004abedacabcf93ee98fe3f1f6181b72fe9573602d448fe4619` |
 | Linux | `lease-list-measurement-linux-3x10.json` | `e37502bcb9eb12fbdb82bede34cb78834ca66dd4f4acb6a6f2bf2b59b88b3ed6` |
 
-Descriptive timings and observed repeat floors below are milliseconds. Median
-and nearest-rank p50 differ; these ranges are not confidence intervals.
-
-| OS / arm | Median | p50 | p95 | Median-control floor | Repeat-p50 floor | Repeat-p95 floor |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Windows / Python | 567.171 | 567.123 | 596.485 | 7.126 | 9.169 | 21.462 |
-| Windows / Rust | 22.453 | 22.343 | 38.967 | 0.888 | 0.101 | 66.529 |
-| Linux / Python | 347.021 | 346.634 | 355.962 | 4.007 | 3.853 | 6.414 |
-| Linux / Rust | 83.574 | 83.521 | 85.894 | 1.332 | 1.334 | 0.500 |
-
-The Windows Rust repeat-p95 floor is 66.529 ms; the observed dispersion is
-retained. Local untracked `lease-list-measurement-results.md` and
+Local untracked `lease-list-measurement-results.md` and
 `lease-list-measurement-selfcheck.json` retain receipt hashes and recomputed
 metrics. Timed rows omit raw stdout/stderr/exit and post-home payloads: exact
 recorded arm-level controls remain distinct from the instrument's programmatic
