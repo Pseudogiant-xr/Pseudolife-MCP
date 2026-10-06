@@ -11,7 +11,7 @@ from .harness import capture_platform, write_new
 from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
-from .stdio_judge import (StdioPolicy, judge, eof_policy, judge_sensitivity_controls,
+from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_sensitivity_controls,
                           retain_stderr, verifies_frozen_capture)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
@@ -73,7 +73,7 @@ def corpus(root, command, clearance):
                               "exit": result["exit_code"], "database_dropped": True}), flush=True)
     policy = StdioPolicy()
     differences = [{"era": expected["era"], **difference}
-        for expected, actual in zip(arms[:2], arms[2:]) for difference in judge(expected, actual, policy)]
+        for expected, actual in zip(arms[:2], arms[2:]) for difference in judge_with_evidence(expected, actual, policy)]
     return {"arms": arms, "differences": differences, "resource_check": resource,
             "policy": policy.name, "named_normalizations": ["source-text-lf"],
             "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
@@ -102,7 +102,7 @@ def eof(root, command):
         actual["arm"] = "candidate"
         cells.append(actual)
         policy = eof_policy(evidence, expected["era"], expected["case"])
-        compared = judge(expected, actual, policy)
+        compared = judge_with_evidence(expected, actual, policy)
         verified = same_platform and verifies_frozen_capture(historical, live, policy)
         if verified:
             compared = retain_stderr(compared, live, actual)
@@ -179,6 +179,9 @@ def main():
     receipt["differences"].extend(receipt["scenarios"]["differences"])
     from .stdio_process_controls import run as process_controls
     receipt["process_controls"] = process_controls(root)
+    for control in receipt["process_controls"]["controls"].values():
+        control["differences"] = retain_stderr(control["differences"],
+            receipt["process_controls"]["oracle_observed"], control["observed"])
     if not args.skip_generic_controls:
         from .full_bank import full_corpus, run as generic_run
         _, generic = generic_run(full_corpus(), oracle_root=root,
@@ -209,6 +212,7 @@ def main():
             generic = receipt["generic_controls"]
             safe["generic_controls"] = {key: generic[key] for key in (
                 "status", "cases", "differences", "identity_proxy_validation", "oracle_source_check")}
+            safe["generic_controls"]["policy_instances"] = generic.get("policy_instances", [])
             safe["generic_controls"]["graded_controls"] = {name: {key: result[key] for key in (
                 "rejected", "differences", "expected_difference", "correct_status")} for name, result in generic["graded_controls"].items()}
         write_new(args.public_out, safe)

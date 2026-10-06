@@ -45,5 +45,5 @@ def run(root):
                                     "differences": differences, "observed": actual}
     finally:
         cleanup = fixture.close()
-    return {"controls": results, "fixture_cleanup": cleanup,
+    return {"controls": results, "oracle_observed": expected, "fixture_cleanup": cleanup,
             "scope": "Real public Python CLI forwarding controls; not a Rust parity claim or bank identity proof."}

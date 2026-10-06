@@ -11,13 +11,14 @@ from .wire import replacements
 STDERR_EVIDENCE_LIMIT = 64 * 1024
 
 
-def needs_stderr_evidence(difference):
+def needs_stderr_evidence(difference, *, include_boundaries=True):
     path = difference.get("path", "")
-    return any(path == prefix or path.startswith(prefix + "/")
-               for prefix in ("/stderr", "/frames", "/exit_code"))
+    prefixes = ("/stderr", "/frames", "/exit_code") + (("/json",) if include_boundaries else ())
+    return (include_boundaries and path == "/") or any(
+        path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
 
 
-def retain_stderr(differences, expected, actual):
+def retain_stderr(differences, expected, actual, *, include_boundaries=True):
     evidence = {}
     for arm, transcript in (("oracle", expected), ("candidate", actual)):
         record = {"arm": arm, "era": transcript.get("era"), "pid": transcript.get("pid"),
@@ -32,7 +33,8 @@ def retain_stderr(differences, expected, actual):
             record.update(stderr_b64=base64.b64encode(raw[:STDERR_EVIDENCE_LIMIT]).decode("ascii"),
                           byte_count=len(raw), truncated=len(raw) > STDERR_EVIDENCE_LIMIT)
         evidence[arm] = record
-    return [{**difference, "stderr_evidence": evidence} if needs_stderr_evidence(difference)
+    return [{**difference, "stderr_evidence": evidence} if needs_stderr_evidence(
+                difference, include_boundaries=include_boundaries)
             else difference for difference in differences]
 
 
@@ -128,12 +130,18 @@ def _judge(expected, actual, policy):
 
 
 def judge(expected, actual, policy):
+    """Keep the original comparator result schema for existing harness callers."""
     for transcript in (expected, actual):
         try:
             base64.b64decode(transcript["stderr_b64"], validate=True)
         except (KeyError, TypeError, ValueError):
             return retain_stderr([{"path": "/stderr", "reason": "missing_stderr_bytes"}], expected, actual)
-    return retain_stderr(_judge(expected, actual, policy), expected, actual)
+    return retain_stderr(_judge(expected, actual, policy), expected, actual, include_boundaries=False)
+
+
+def judge_with_evidence(expected, actual, policy):
+    """Retained receipts require both arms' evidence for every stdio boundary."""
+    return retain_stderr(judge(expected, actual, policy), expected, actual)
 
 
 def verifies_frozen_capture(frozen, live, policy):

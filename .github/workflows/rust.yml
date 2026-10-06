@@ -73,6 +73,12 @@ jobs:
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
+      - name: Check all targets without default features
+        run: cargo check --locked --all-targets --no-default-features -j 4
+      - name: Clippy without default features
+        run: cargo clippy --locked --all-targets --no-default-features -j 4 -- -D warnings
+      - name: Nextest without default features
+        run: cargo nextest run --locked --all-targets --no-default-features -j 4
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - uses: actions/upload-artifact@v4
@@ -118,6 +124,8 @@ jobs:
         timeout-minutes: 10
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Run every eval harness test
+        run: python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard
       - name: Run unchanged candidates and differential judges
         timeout-minutes: 15
         shell: pwsh
@@ -142,6 +150,10 @@ jobs:
           $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
           $oracleSource = Join-Path $oracleRoot 'source'
+          $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
+          $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
+          & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $judgeBootstrap = @'
           import pathlib, subprocess, sys
           from evals.rust_port.provenance import module_command
@@ -156,5 +168,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rust-parity-${{ runner.os }}
-          path: evals/results/rust-phase1-ci-*.json
+          path: |
+            evals/results/rust-phase1-ci-*.json
+            evals/results/rust-cli-argv-*.json
           if-no-files-found: warn

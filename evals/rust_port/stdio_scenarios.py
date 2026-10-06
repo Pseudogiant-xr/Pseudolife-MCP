@@ -10,7 +10,7 @@ from .harness import capture_platform
 from .stdio import capture
 from .stdio_capture import initialize, modern_meta
 from .stdio_corpus import ERAS
-from .stdio_judge import StdioPolicy, concurrent_policy, judge, retain_stderr
+from .stdio_judge import StdioPolicy, concurrent_policy, judge_with_evidence, retain_stderr
 from .stdio_scenario_fixture import ScenarioFixture
 
 
@@ -102,7 +102,7 @@ def startup(root, command, contract):
                                        startup_difference(result, contract, case, url, credential_file, records))
                     pair.append(result)
                 differences.extend(retain_stderr(contract_differences, *pair))
-                differences.extend({"case": case, **difference} for difference in judge(*pair, StdioPolicy()))
+                differences.extend({"case": case, **difference} for difference in judge_with_evidence(*pair, StdioPolicy()))
         finally:
             cleanup = fixture.close() if fixture else {"closed_endpoint_released": True}
             if socket_owner:
@@ -189,7 +189,7 @@ def run(root, command):
                 pair.append(result)
             policy = concurrent_policy(evidence, capture_platform()["os"].lower(), era, release_order)
             differences.extend({"era": era, "release_order": release_order, **difference}
-                               for difference in judge(*pair, policy))
+                               for difference in judge_with_evidence(*pair, policy))
             cells.extend(pair)
     for cell in [*startup_result["cells"], *cells]:
         cleanup = cell["fixture_cleanup"]

@@ -78,6 +78,16 @@ Do not rely on a serializer's defaults to reproduce Python coercion or missing
 field behaviour. Test unknown fields, wrong types, nulls, empty inputs and
 boundary values against the oracle. Error text may be user-visible contract.
 
+### `nondeterministic-bytes-semantic`: generated registration name
+
+Fields governed: `/body/name` in `register-sender` and `register-recipient` only; `/body/name_source`, `/body/label` and the raw `/body/agent_id` gate the rule. First case: `register-sender`.
+
+Before normalization, require `name_source == ""`, a nonempty string `label`, canonical lowercase hexadecimal `agent_id` matching `[0-9a-f]{32}`, and `name == label + " " + raw_agent_id[:8]`. Replace only those eight generated characters with the actor's named prefix token; label, separator, name source and every surrounding field stay exact. Explicit names and other operations receive no name normalization. Earlier response shapes without both naming fields remain exact; partial naming shapes fail.
+
+Wire-length adjustment touches only the original escaped span of those eight decoded characters, preserving the prefix's Unicode escapes, quoting, whitespace and all surrounding JSON bytes. Per-arm `policy_instances` retain case, arm, policy, raw name, raw label, raw name source, raw ID prefix and normalized name; no credential body is retained. The Phase 1 public CI receipt exports these instances under `generic_controls`.
+
+Instances: `register-sender /body/name`; `register-recipient /body/name`, across each fresh generic arm. Historical hosted runs 37428908416 (#602) and 37429259333 (#603) each show these two cases in arms 1 and 2; their downloaded public receipts contain no raw names, so they prove failure locations, not the raw semantic relation. Source `_board_name` / `_public` and synthetic rejection controls establish the rule; next execution must supply retained raw instances.
+
 ## Errors and recovery
 
 Map each failure at its public boundary: MCP error code/data/message, HTTP status

@@ -301,8 +301,12 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
         "import json,pathlib,sys\npathlib.Path(sys.argv[sys.argv.index('--result-file')+1]).write_text('0\\n')\npathlib.Path({}).write_text(json.dumps(sys.argv[1:]))\n",
         serde_json::to_string(sentinel.to_str().unwrap()).unwrap()
     )).unwrap();
+    let health_gate = std::sync::Arc::new(common::ResponseGate::default());
     let fixture = common::Fixture::start_with(common::Setup {
-        health: vec![common::Reply::Http(200, health().to_string())],
+        health: vec![common::Reply::Gated(
+            health_gate.clone(),
+            Box::new(common::Reply::Http(200, health().to_string())),
+        )],
         ..Default::default()
     });
     let interpreter = python();
@@ -313,6 +317,29 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
             ("PYTHONPATH", home.0.to_str().unwrap()),
         ],
     );
+    let attempt = shim
+        .state_dir()
+        .join(".pseudolife-mcp/update-clients.99.0.0.attempt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|record| record.verb == "GET" && record.path == "/health")
+    {
+        assert!(
+            Instant::now() < deadline,
+            "built binary did not request health"
+        );
+        assert!(!sentinel.exists(), "updater ran before health request");
+        assert!(!attempt.exists(), "updater attempted before health request");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The local startup probe times out at 250 ms; hold it for a bounded
+    // interval below that deadline, checking the persistent markers throughout.
+    assert_updater_absent(&sentinel, &attempt, Duration::from_millis(100));
+    health_gate.release();
     let deadline = Instant::now() + Duration::from_secs(5);
     while !fixture
         .records
@@ -328,13 +355,7 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
         std::thread::sleep(Duration::from_millis(5));
     }
     // Startup is observable at the upstream boundary; no client frame exists.
-    assert!(!sentinel.exists());
-    assert!(
-        !shim
-            .state_dir()
-            .join(".pseudolife-mcp/update-clients.99.0.0.attempt")
-            .exists()
-    );
+    assert_updater_absent(&sentinel, &attempt, Duration::from_millis(200));
     shim.send(json!({"jsonrpc":"2.0","id":"open","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"updater-frame-proof","version":"1"}}}));
     assert!(
         shim.receive()["result"]["instructions"]
@@ -381,6 +402,21 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
             .contains("started the unattended client update")
     );
     fixture.assert_deleted();
+}
+
+fn assert_updater_absent(sentinel: &Path, attempt: &Path, delay: Duration) {
+    let deadline = Instant::now() + delay;
+    loop {
+        assert!(!sentinel.exists(), "updater ran before first flushed frame");
+        assert!(
+            !attempt.exists(),
+            "updater attempted before first flushed frame"
+        );
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 fn runtime_update_fixture_at(profile: Option<&str>) -> (DisposableHome, Output, Value) {
     let home = DisposableHome::new();
