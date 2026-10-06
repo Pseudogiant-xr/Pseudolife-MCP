@@ -11,6 +11,13 @@ use std::{
     time::Duration,
 };
 
+const HTTP_FORBIDDEN_INPUT_REFUSED: &str =
+    "[shim] invalid PSEUDOLIFE_MCP_TOKEN: forbidden HTTP header bytes.";
+
+fn forbidden_header_input(token: &str) -> bool {
+    token.chars().any(|c| matches!(u32::from(c), 0..=8 | 10..=31 | 127))
+}
+
 fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -418,6 +425,12 @@ async fn run_inner(mode: &str) -> ExitCode {
         if let Ok(token) = std::env::var("PSEUDOLIFE_MCP_TOKEN")
             && !token.is_empty()
         {
+            // http-forbidden-input-refused: HTAB and non-control values retain
+            // their existing behavior; only forbidden header grammar is changed.
+            if forbidden_header_input(&token) {
+                crate::stderrln!("{HTTP_FORBIDDEN_INPUT_REFUSED}");
+                return ExitCode::FAILURE;
+            }
             // urllib's HTTP/1 header writer encodes values as Latin-1.
             let bytes: Result<Vec<u8>, _> = format!("Bearer {token}")
                 .chars()
@@ -440,6 +453,22 @@ async fn run_inner(mode: &str) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn forbidden_header_grammar_preserves_tab_and_non_control_unicode() {
+        for point in 0..=127 {
+            let token = char::from_u32(point).unwrap().to_string();
+            assert_eq!(
+                super::forbidden_header_input(&token),
+                matches!(point, 0..=8 | 10..=31 | 127)
+            );
+        }
+        for token in ["", "fixture", "fixture\tvalue", "caf\u{e9}", "\u{1f9e0}"] {
+            assert!(!super::forbidden_header_input(token));
+        }
+        assert!(super::forbidden_header_input("fixture\r\n value"));
+        assert!(super::forbidden_header_input("\u{1f9e0}\u{7f}"));
+    }
+
     #[test]
     fn extended_unc_drive_prefix_is_case_insensitive() {
         for value in [

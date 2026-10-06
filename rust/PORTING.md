@@ -23,6 +23,57 @@ boundaries. A compiling translation does not establish parity.
 
 ## Evidence and ownership
 
+### Prepared episode policy instances
+
+The episode branch integrates Python master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+Its named policies and additive executable nodes are preparation; final-head
+runtime receipts, hosted execution, measurements and independent review are
+pending. Episode mode rows remain deferred.
+
+- **`http-forbidden-input-refused`:** field `PSEUDOLIFE_MCP_TOKEN` configured
+  bearer; first case `token-del`. Reject DEL (U+007F), C0 U+0000–U+0008 and
+  U+000A–U+001F, including CR/LF folding, with exit 1 and named diagnostic
+  `HTTP_FORBIDDEN_INPUT_REFUSED`: `[shim] invalid PSEUDOLIFE_MCP_TOKEN: forbidden HTTP header bytes.`
+  Stdout stays empty, stderr retains platform newlines, home bytes stay exact
+  and no episode POST is sent. Validation stays after accepted stdin, origin,
+  successful health and title derivation; earlier silent gates remain earlier.
+  Instances: `token-del`, `token-control`, `token-fold`, `bearer-del`,
+  `bearer-control`, `bearer-fold`, `token-invalid-line`. The first six are
+  three aliased vectors. The seventh contains CRLF despite its historical
+  exact result. Expected refusal bytes are explicitly a candidate oracle,
+  `ported-with-substitution`, never Python bytes. HTAB, Latin-1/non-Latin-1,
+  token-file-only and empty-environment controls keep their existing behavior.
+- **`nondeterministic-bytes-semantic`:** decoded POST `/title` minute, first
+  case `episode-key-11-episode-start`; second `episode-repair-cwd-12`.
+  The exact prefix and ` - YYYY-MM-DD HH:MM` shape, calendar-valid local
+  minute and JSON escape spelling remain required. Two raw Python captures
+  must first show distinct minutes with exact surrounding observations.
+  Each arm needs its own finite ordered numeric invocation window shorter
+  than 60 seconds and per-endpoint UTC offsets/local minutes; the title
+  belongs to that arm's endpoint minute set. Missing bounds are incomplete.
+  Only the 16 minute bytes differ; every other body, header, input, stream,
+  exit and file byte stays exact. No random-field policy applies here.
+  `episode_policy.py` is an additive checker for this narrowly bound shape;
+  historical receipts are not upgraded by adding it. The retained cwd-12
+  receipts lack numeric windows and still require recapture.
+- **`python-traceback-not-contract`:** no retained episode instance. Any
+  future uncaught exception comparison preserves terminal exception text,
+  stdout, exit and poststate; only traceback header/frames are deferred.
+  Existing invalid-origin diagnostics remain exact.
+
+The separate direct group-12 decision permits `ported-with-substitution`
+only for `active-health-head` and `active-health-chunk-size`: reqwest's
+header/chunk-framing inactivity behavior remains, with a Phase 5 carryover.
+This is not a fourth parity policy. Active/stalled health and POST body
+controls remain exact; historical failed controls and private proxy failures
+remain failures. No new body-stall allowance is introduced.
+
+`episode_policy_cases.json` enumerates the 57 raw-header-difference case IDs
+per OS outside these policies. Implicit header presence, value and casing,
+including comparator exclusions, remain deferred. HTTPS, proxy/trust and
+locale-default stdin behavior are also unproved; no broad transport parity
+claim follows from the additive loopback fixture nodes.
+
 Tests decide where implementation and documentation disagree. Where tests are
 silent, record the Python behaviour and the coverage gap in `PARITY.md` before
 porting it. Existing tests remain unchanged. The maintainer selected an external

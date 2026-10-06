@@ -1,0 +1,112 @@
+{
+  "status": "preparation only; no final-head runtime proof; episode modes deferred",
+  "oracle_target": "0b46bb8e2010cf0e428dd650b98cedb165ad3d75",
+  "http-forbidden-input-refused": {
+    "field": "PSEUDOLIFE_MCP_TOKEN",
+    "first_case_id": "token-del",
+    "candidate_oracle_label": "ported-with-substitution; candidate refusal bytes, not Python bytes",
+    "case_ids": [
+      "token-del",
+      "token-control",
+      "token-fold",
+      "bearer-del",
+      "bearer-control",
+      "bearer-fold",
+      "token-invalid-line"
+    ]
+  },
+  "nondeterministic-bytes-semantic": {
+    "field": "POST /title minute suffix",
+    "first_case_id": "episode-key-11-episode-start",
+    "case_ids": [
+      "episode-key-11-episode-start",
+      "episode-repair-cwd-12"
+    ],
+    "required_capture": "two raw Python captures; per-arm numeric before/after, endpoint UTC offsets and local minutes; all surrounding bytes exact",
+    "incomplete_retained_case_ids": [
+      "episode-repair-cwd-12"
+    ]
+  },
+  "python-traceback-not-contract": {
+    "case_ids": []
+  },
+  "direct_group12_decision": {
+    "case_ids": [
+      "active-health-head",
+      "active-health-chunk-size"
+    ],
+    "phase5_carryover": "reqwest header/chunk-framing inactivity only; active and stalled body controls stay exact; no fourth policy"
+  },
+  "outside_policy_raw_header_differences": {
+    "case_ids_per_os": [
+      "episode-key-6-episode-start",
+      "episode-key-6-episode-end",
+      "episode-key-7-episode-start",
+      "episode-key-7-episode-end",
+      "episode-key-8-episode-start",
+      "episode-key-8-episode-end",
+      "episode-key-9-episode-start",
+      "episode-key-9-episode-end",
+      "episode-key-10-episode-start",
+      "episode-key-10-episode-end",
+      "episode-key-11-episode-start",
+      "episode-key-11-episode-end",
+      "episode-key-12-episode-start",
+      "episode-key-12-episode-end",
+      "episode-duplicate",
+      "episode-surrogate",
+      "episode-nan",
+      "episode-infinity",
+      "episode-overflow",
+      "episode-bigint",
+      "episode-cwd-0",
+      "episode-cwd-1",
+      "episode-cwd-2",
+      "episode-cwd-3",
+      "episode-cwd-4",
+      "episode-cwd-5",
+      "episode-cwd-6",
+      "episode-cwd-7",
+      "episode-cwd-8",
+      "episode-cwd-9",
+      "episode-cwd-10",
+      "episode-cwd-11",
+      "episode-cwd-12",
+      "health-0",
+      "health-1",
+      "health-2",
+      "health-3",
+      "health-4",
+      "health-5",
+      "health-6",
+      "health-7",
+      "health-8",
+      "health-degraded",
+      "health-redirect",
+      "post-redirect",
+      "post-cross-origin",
+      "post-error",
+      "environment-token",
+      "latin1-token",
+      "non-latin1-token",
+      "token-file-only",
+      "empty-environment-token",
+      "title-owned-home",
+      "title-nested-git",
+      "title-nearest-git",
+      "title-git-file",
+      "title-relative"
+    ],
+    "count_per_os": 57,
+    "status": "deferred; implicit header presence/value/casing and comparator exclusions have no approved waiver"
+  },
+  "unproved": [
+    "HTTPS",
+    "proxy/trust",
+    "locale-default stdin",
+    "final-head both-OS raw receipts",
+    "hosted additive executable-node outcomes",
+    "committed paired measurements and floors",
+    "fresh independent review"
+  ]
+}

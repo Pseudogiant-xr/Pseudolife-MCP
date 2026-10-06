@@ -98,6 +98,33 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 
 ## Per-phase selection and acceptance gaps
 
+Episode preparation integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+The [prepared episode policy entries](PORTING.md#prepared-episode-policy-instances)
+name the refusal, title-minute and separate direct group-12 instances;
+[the case ledger](../evals/rust_port/episode_policy_cases.json) retains all
+57 outside-policy raw-header case IDs per OS. Both episode modes remain
+deferred. Static checker tests do not rebind historical receipts or establish
+runtime acceptance. New `test_episode_executable.py` nodes launch the candidate
+when explicitly configured in the both-OS hosted lane; that wiring has not yet
+run on the prepared head. The original ten in-process episode/title nodes and
+all existing eval assertions remain unchanged.
+
+The input producers are `episode_cli.py::_read_stdin` (legacy host hook JSON),
+its environment-only bearer and `shim.py::probe_health` (stdlib HTTP health
+reply), plus `session_title.py::title_from_cwd` (host cwd and local clock).
+`ops/install-hook.sh` and `.ps1` remove the obsolete episode hooks; ordinary
+shim session lifecycle is a separate producer/path. Legacy hook comments name
+a string session ID and filesystem cwd, but this checkout contains no strict
+host schema constraining arbitrary caller stdin. The health producer sends
+UTF-8 JSON; the HTTP boundary still permits malformed remote replies. No
+installer or daemon producer was found for NaN/Infinity, giant integers,
+989-container recursion boundaries or synthetic non-string cwd/session IDs.
+Those inputs remain in the retained corpus and compatibility implementation:
+this inventory does not authorize deleting coverage or narrowing an open
+public CLI contract. Surrogate filesystem path spelling and normal title path
+rules remain observable on host paths; further simplification needs an
+explicit producer-domain decision, not an interpreter-version assumption.
+
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.
 
 Phase 1: selected real stdio/HTTP nodes in `test_shim.py` plus audited subprocess recovery cases; original entire shim/credential/tier/identity/recovery file pools remain Python. `test_shim_autostart.py`, `test_shim_python.py` and `test_shim_prompt.py` are extractor tooling, not MCP shim coverage; do not select them based on name alone. For `_proxy` private snippets add equivalent binary probes rather than claim they exercise Rust.

@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Fixed (2026-10-07 — native episode bearer refusal)
+
+- The experimental native episode hooks refuse configured bearers containing
+  forbidden HTTP header controls with a named diagnostic and exit 1. Additive
+  executable and title-clock policy controls are wired into the parity lane;
+  final-head runtime acceptance remains pending and the modes remain deferred.
+
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 
 - The experimental native `version` command reports an installed runtime only

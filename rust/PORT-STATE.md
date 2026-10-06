@@ -1,5 +1,36 @@
 # Rust port state
 
+## Episode preparation on current master
+
+The episode branch integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+Configured forbidden bearer controls now have the agreed named exit-1 refusal;
+episode runtime acceptance remains unvalidated and both modes stay deferred.
+The accepted CLI-VERSION row and its final proof below are preserved.
+
+`PORTING.md` records the refusal/title-minute instances and direct group-12
+header/chunk-framing carryover. `evals/rust_port/episode_policy_cases.json`
+lists all 57 outside-policy raw-header IDs per OS. Title checking requires two
+distinct raw Python minutes and each arm's numeric/local window, without
+clearing any surrounding bytes. The retained cwd-12 windows remain incomplete.
+No HTTPS, proxy/trust, locale-default stdin or full wire claim is added.
+
+Additive `test_episode_executable.py` nodes use the shared isolated environment,
+owned subprocess and exact file snapshot helpers. Both-OS hosted parity is
+wired to provide the freshly built candidate explicitly. Only pure policy
+controls and the current-source help drift guard were run during preparation;
+no executable nodes, builds or services ran. Original oracle tests/conftest and
+existing eval assertions remain unchanged from the integrated master.
+
+The merge resolved source conflicts in `main.rs` (preserving master's opaque
+argv/unknown-mode dispatch plus episode routing) and `cli_measurement.py`
+(preserving master's warmed image/state protocol plus episode owned-state
+callbacks). The repository's manual-source-conflict local-full gate therefore
+remains outstanding, along with both-OS default/no-default Rust checks, final
+raw episode proofs, hosted outcomes, committed paired measurements/floors,
+fresh line-ratio accounting, independent review and publication checks.
+Historical measurements, failures and their source identities remain below;
+none certify this preparation.
+
 ## Episode leaf candidate
 
 Native `episode-start` and `episode-end` are implemented before shim attachment
