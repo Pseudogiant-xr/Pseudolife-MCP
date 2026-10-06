@@ -578,8 +578,11 @@ the Python arm stays raw. Non-ASCII/surrogate inputs keep their existing exact
 oracle contracts; this policy does not authorize other fields or transports.
 
 `evals/rust_port/lease_policy_preparation.py` is an offline preparation checker,
-with additive static tests. It is not wired into the existing judge, corpus or
-measurement instrument and does not establish native executable coverage.
+with additive static tests. Its exact refusal expectation is also used by the
+separate executable `lease_headers` lane, which retains the raw Python arm and
+labels candidate substitution evidence. The existing judge, corpus and
+measurement instrument remain unchanged; the offline checker alone does not
+establish native executable coverage.
 
 Lease Unix-second display follows the scoped Chrono local-zone substitution in
 PARITY.md: supported daemon timestamps retain ordinary local time and date

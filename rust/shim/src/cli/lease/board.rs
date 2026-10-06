@@ -13,6 +13,7 @@ pub struct Failure {
     pub text: String,
     pub transient: bool,
     pub code: Option<String>,
+    pub fatal_header: bool,
 }
 impl Failure {
     fn refused(text: impl Into<String>) -> Self {
@@ -20,8 +21,30 @@ impl Failure {
             text: text.into(),
             transient: false,
             code: None,
+            fatal_header: false,
         }
     }
+    fn forbidden(field: &str) -> Self {
+        Self {
+            text: format!("HTTP_FORBIDDEN_INPUT_REFUSED: invalid {field} header"),
+            fatal_header: true,
+            ..Self::refused("")
+        }
+    }
+    pub fn report(&self) -> i32 {
+        super::say(&format!("lease: {}", self.text));
+        1
+    }
+}
+fn forbidden(value: &Text) -> bool {
+    value.codepoints().iter().any(|&c| c < 32 || c == 127)
+}
+fn instance_header(field: &str, value: &Text) -> Result<reqwest::header::HeaderValue, Failure> {
+    if forbidden(value) {
+        return Err(Failure::forbidden(field));
+    }
+    reqwest::header::HeaderValue::from_str(&value.clean())
+        .map_err(|_| Failure::refused("the board failed unexpectedly (LocalProtocolError)"))
 }
 struct Session {
     agent: Option<Text>,
@@ -62,8 +85,8 @@ impl Board {
                 ));
             }
             request = request
-                .header("X-PL-Agent", agent.clean())
-                .header("X-PL-Agent-Key", key.clean());
+                .header("X-PL-Agent", instance_header("agent_id", agent)?)
+                .header("X-PL-Agent-Key", instance_header("credential", key)?);
         }
         let failure = |e: reqwest::Error| Failure {
             text: format!(
@@ -81,6 +104,7 @@ impl Board {
             ),
             transient: session.answered,
             code: None,
+            fatal_header: false,
         };
         let response = request.send().await.map_err(&failure)?;
         let status = response.status().as_u16();
@@ -104,6 +128,11 @@ impl Board {
                 ));
             }
         };
+        for (field, value) in [("agent_id", agent), ("credential", key)] {
+            if forbidden(value) {
+                return Err(Failure::forbidden(field));
+            }
+        }
         let mut session = self.session.lock().await;
         session.agent = Some(agent.to_owned());
         session.credential = Some(key.to_owned());
@@ -205,38 +234,68 @@ fn decode(status: u16, payload: Option<Value>) -> Result<Value, Failure> {
         },
         transient,
         code: code.map(str::to_owned),
+        fatal_header: false,
     })
 }
-pub fn connect(no_board: bool) -> Result<Arc<Board>, String> {
+pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
     if no_board {
-        return Err("--no-board was given".into());
+        return Err(Failure::refused("--no-board was given"));
     }
-    let url=crate::daemon_url::from_environment().map_err(|_|"PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) origin (scheme, host and optional port only)".to_owned())?;
-    let unusable = |e| format!("the bearer credential is unusable ({e})");
+    let url=crate::daemon_url::from_environment().map_err(|_|Failure::refused("PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) origin (scheme, host and optional port only)"))?;
+    // Environment tokens are header values, while private files may carry a
+    // trailing line terminator that the credential decoder strips.
+    if std::env::var_os("PSEUDOLIFE_MCP_TOKEN_FILE").is_none()
+        && std::env::var("PSEUDOLIFE_MCP_TOKEN")
+            .is_ok_and(|token| token.bytes().any(|c| c < 32 || c == 127))
+    {
+        return Err(Failure::forbidden("bearer"));
+    }
+    const FORBIDDEN_BEARER: &str = "HTTP_FORBIDDEN_INPUT_REFUSED: invalid bearer header";
+    let unusable = |e: crate::credentials::CredentialError| {
+        if e.0 == FORBIDDEN_BEARER {
+            Failure::forbidden("bearer")
+        } else {
+            Failure::refused(format!("the bearer credential is unusable ({e})"))
+        }
+    };
     let snapshot = crate::credentials::CredentialProvider::from_environment()
         .map_err(unusable)?
-        .snapshot()
+        .snapshot_checked(|raw| {
+            let Ok(text) = std::str::from_utf8(raw) else {
+                return Ok(());
+            };
+            // Strip only the decoder's CR/LF file terminator, preserving TAB
+            // and every other C0 byte for forbidden-header admission.
+            let token = text.trim_end_matches(['\r', '\n']);
+            if token.bytes().any(|c| c < 32 || c == 127) {
+                Err(crate::credentials::CredentialError(FORBIDDEN_BEARER))
+            } else {
+                Ok(())
+            }
+        })
         .map_err(unusable)?;
     let Some(token) = snapshot.token() else {
-        return Err(
-            "no bearer token (set PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE)".into(),
-        );
+        return Err(Failure::refused(
+            "no bearer token (set PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE)",
+        ));
     };
     let token = crate::credentials::decode_token(token.as_bytes()).map_err(unusable)?;
     if !token.is_ascii() {
-        return Err("the board failed unexpectedly (UnicodeEncodeError)".into());
+        return Err(Failure::refused(
+            "the board failed unexpectedly (UnicodeEncodeError)",
+        ));
     }
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,
         reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-            .map_err(|_| "the board failed unexpectedly (LocalProtocolError)".to_owned())?,
+            .map_err(|_| Failure::refused("the board failed unexpectedly (LocalProtocolError)"))?,
     );
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .default_headers(headers)
         .build()
-        .map_err(|_| "the board failed unexpectedly (RuntimeError)".to_owned())?;
+        .map_err(|_| Failure::refused("the board failed unexpectedly (RuntimeError)"))?;
     Ok(Arc::new(Board {
         url,
         client,

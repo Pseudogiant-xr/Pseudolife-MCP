@@ -502,8 +502,10 @@ pub async fn check(args: &Args) -> i32 {
     let mut report = json!({"available":false,"reason":Value::Null,"holder":Value::Null,"expected_end":Value::Null,"stale":false,"queued":0,"queue":json!([])});
     let mut reason = None;
     match board::connect(false) {
-        Err(e) => reason = Some(e),
+        Err(e) if e.fatal_header => return e.report(),
+        Err(e) => reason = Some(e.text),
         Ok(client) => match client.leases(Some(name)).await {
+            Err(e) if e.fatal_header => return e.report(),
             Err(e) => reason = Some(e.text),
             Ok((leases, _)) => {
                 report["available"] = json!(true);
@@ -675,10 +677,12 @@ pub async fn list(args: &Args) -> i32 {
     let mut leases = vec![];
     let mut truncated = false;
     match board::connect(false) {
-        Err(e) => reason = Some(e),
+        Err(e) if e.fatal_header => return e.report(),
+        Err(e) => reason = Some(e.text),
         Ok(client) => {
             url = Some(client.url.clone());
             match client.leases(args.name.as_deref()).await {
+                Err(e) if e.fatal_header => return e.report(),
                 Err(e) => reason = Some(e.text),
                 Ok((l, t)) => {
                     leases = l;

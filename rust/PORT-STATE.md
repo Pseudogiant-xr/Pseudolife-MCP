@@ -1080,3 +1080,29 @@ remain pending. CLI-LEASE stays deferred: fatal forbidden-header refusal and
 executable corpus, successful-child own invocation windows and second oracle
 capture, explicit Windows unlock and Ctrl-C, `hold`/`break`/`delegate` policies,
 the final both-OS/hosted matrix and measurements still require closure.
+
+
+### Lease master-forward and forbidden-header candidate
+
+Master `df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff` is integrated by ordinary
+merge, retaining both historical evidence sections, lease Chrono/platform
+features and the LF help-asset rule. The Windows lease child lookup now uses
+master's `lifecycle::find_executable` after the `which` dependency removal;
+lookup failure still falls back to the original command. The lockfile delta
+only removes that dependency and its unused package entry. Original Python
+source and original `tests/`/conftest bytes are unchanged.
+
+The fatal forbidden-header candidate and its additive public-process corpus
+close only the implementation gap for the approved header policy. Prior
+`49342a21` hosted results remain historical on the old `181a50d1` base. New
+local evidence retains its own exact source and executable identities; fresh
+review and successor hosted checks are separate. CLI-LEASE stays deferred.
+Successful-child own invocation windows and second oracle capture, explicit
+Windows unlock/Ctrl-C, measurements and final acceptance remain pending.
+
+`hold`, `break`, `delegate` and `designate` remain Phase 4. This native
+candidate loses those four actions until Phase 4; each must explicitly refuse
+with exit 1 and a diagnostic containing `deferred in this candidate`, without
+Python or silent fallback. A future CLI-LEASE-core check/list/run row may be
+accepted only through its own gates, and full CLI-LEASE requires every action
+to be native. This candidate makes neither promotion.

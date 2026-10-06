@@ -384,6 +384,19 @@ Linux collection failure remains private and is excluded from acceptance.
 
 ## Combined version capture scope
 
+The additive `evals.rust_port.lease_headers` lane runs the public candidate
+against a disposable loopback HTTP peer and retains the genuine pinned Python
+arm unchanged. It labels only the approved `http-forbidden-input-refused`
+candidate substitution: exact exit 1, empty stdout, field-only stderr and
+unchanged pre-state, with no lease/release request or child launch. The corpus
+retains the eight DEL/CR/LF/NUL instance cases, all C0 bytes and folded values
+in the three approved fields, bearer-file inputs, and check/list propagation.
+Non-ASCII/surrogate and ordinary bearer-file cases compare raw bytes exactly.
+Six output/file/request mutation controls accompany each refusal. The Parity
+job runs this separate lane without a database or daemon; existing corpus
+normalizations and Python source are unchanged. This scoped lane does not
+promote CLI-LEASE or cover its deferred action, timing and lifecycle work.
+
 Frozen `5220b5ee` Windows/Linux CLI cells cover 28 exact byte/state cases and
 112 rejected mutations per OS. Thirteen version cases include a Python-
 shaped marker and native image with canonical console missing, plus a valid

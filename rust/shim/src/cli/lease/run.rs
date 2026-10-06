@@ -11,6 +11,7 @@ use tokio::{
 };
 
 enum RunError {
+    ForbiddenHeader(String),
     TimedOut,
     Lock(String),
     CannotRun(i32, String),
@@ -106,6 +107,7 @@ async fn wait_board(
                                 text: "the board failed unexpectedly (OverflowError)".into(),
                                 transient: false,
                                 code: None,
+                                fatal_header: false,
                             },
                         )?,
                     );
@@ -124,6 +126,7 @@ async fn wait_board(
                         ),
                         transient: false,
                         code: None,
+                        fatal_header: false,
                     });
                 }
             }
@@ -133,6 +136,7 @@ async fn wait_board(
                 text: String::new(),
                 transient: true,
                 code: Some("wait_timeout".into()),
+                fatal_header: false,
             });
         }
     }
@@ -281,11 +285,13 @@ async fn work(
     });
     let mut skipped = None;
     match board::connect(args.no_board) {
-        Err(reason) => skipped = Some(reason),
+        Err(e) if e.fatal_header => return Err(RunError::ForbiddenHeader(e.text)),
+        Err(reason) => skipped = Some(reason.text),
         Ok(client) => {
             *board = Some(client.clone());
             match wait_board(&client, &args, deadline).await {
                 Ok(()) => *renewer = Some(Renewer::start(client, args.clone())),
+                Err(e) if e.fatal_header => return Err(RunError::ForbiddenHeader(e.text)),
                 Err(e) if e.code.as_deref() == Some("wait_timeout") => {
                     return Err(RunError::TimedOut);
                 }
@@ -356,6 +362,10 @@ pub async fn run(args: Args) -> i32 {
         }
     };
     let code = match result {
+        Err(RunError::ForbiddenHeader(message)) => {
+            say(&format!("lease: {message}"));
+            return 1;
+        }
         Ok(code) => code,
         Err(RunError::TimedOut) => {
             say(&format!(

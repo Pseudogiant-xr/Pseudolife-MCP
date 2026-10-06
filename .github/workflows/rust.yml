@@ -163,6 +163,9 @@ jobs:
           $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
           $oracleSource = Join-Path $oracleRoot 'source'
+          $leaseHeaderReceipt = Join-Path $env:RUNNER_TEMP 'lease-header-policy.json'
+          & $oraclePython -m evals.rust_port.lease_headers --root $checkoutRoot --candidate $candidatePath --out $leaseHeaderReceipt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
           $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
           & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
@@ -221,4 +224,5 @@ jobs:
             evals/results/rust-phase2-ci-*.json
             evals/results/rust-cli-argv-*.json
             ${{ runner.temp }}/phase2b-cli-process-public.json
+            ${{ runner.temp }}/lease-header-policy.json
           if-no-files-found: warn
