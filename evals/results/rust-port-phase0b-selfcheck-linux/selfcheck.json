@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "capture_platform": {
+    "os": "Linux",
+    "architecture": "x86_64"
+  },
+  "resource_check": {
+    "checked_at_utc": "2026-10-03T05:54:07Z",
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "offline_resource_checked_at_utc": "2026-10-03T05:54:07Z",
+    "offline_resource_clearance_used": true,
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+  },
+  "compared_http_headers": [
+    "content-type",
+    "content-length",
+    "cache-control",
+    "location",
+    "www-authenticate",
+    "allow",
+    "retry-after",
+    "mcp-protocol-version",
+    "mcp-session-id",
+    "x-pl-board"
+  ],
+  "normalization_rules": [
+    "source-text-lf",
+    "session-id-bijection",
+    "epoch-type-unit-magnitude",
+    "raw-mcp-retained-not-compared",
+    "content-length-fixed-framing",
+    "content-length-authorized-wire-spans"
+  ],
+  "python_control": {
+    "schema": 1,
+    "capture_platform": {
+      "os": "Linux",
+      "architecture": "x86_64"
+    },
+    "cases": 11,
+    "differences": [],
+    "passed": true
+  },
+  "broken_rust": {
+    "schema": 1,
+    "capture_platform": {
+      "os": "Linux",
+      "architecture": "x86_64"
+    },
+    "cases": 11,
+    "differences": [
+      {
+        "case": "cli-help",
+        "path": "/stdout_b64",
+        "reason": "value"
+      },
+      {
+        "case": "cli-unknown",
+        "path": "/exit_code",
+        "reason": "value"
+      },
+      {
+        "case": "cli-unknown",
+        "path": "/stderr_b64",
+        "reason": "value"
+      },
+      {
+        "case": "cli-unknown",
+        "path": "/stdout_b64",
+        "reason": "value"
+      }
+    ],
+    "passed": false
+  },
+  "negative_control": {
+    "language": "Rust",
+    "source_sha256": "5da54f33fec448f04a2467f207764d8acbc191bca96efff2594eac2c22b6c9f2",
+    "binary_sha256": "14fb5399053fadf99f028033c0ff542123264e56d4df3f035d107575d1e06309",
+    "scope": "deliberately broken CLI fixture; no production Rust implementation"
+  },
+  "owned_oracle_stopped": true,
+  "fixture": {
+    "schema": 1,
+    "seed": 150052,
+    "entries": 6,
+    "kind": "in-memory-transport-seam"
+  },
+  "environment": {
+    "parent_runtime": {
+      "python": "3.11.15",
+      "executable_basename": "python",
+      "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+      "environment_kind": "virtualenv",
+      "distribution_versions": {
+        "pseudolife-mcp": "0.15.0",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.14.1+cpu",
+        "psycopg": "3.3.6",
+        "sentence-transformers": "6.1.0"
+      },
+      "package_runtime_version": "0.15.0",
+      "source_origin_matches_selected_root": true,
+      "source_file": "pseudolife_memory/__init__.py",
+      "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+    },
+    "actual_child_runtime": {
+      "python": "3.11.15",
+      "executable_basename": "python",
+      "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+      "environment_kind": "virtualenv",
+      "distribution_versions": {
+        "pseudolife-mcp": "0.15.0",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.14.1+cpu",
+        "psycopg": "3.3.6",
+        "sentence-transformers": "6.1.0"
+      },
+      "package_runtime_version": "0.15.0",
+      "source_origin_matches_selected_root": true,
+      "source_file": "pseudolife_memory/__init__.py",
+      "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+    },
+    "python_cli_runtime_probes": {
+      "observation": "separate process with the CLI's interpreter, environment and selected source",
+      "runtimes": {
+        "record": {
+          "python": "3.11.15",
+          "executable_basename": "python",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "environment_kind": "virtualenv",
+          "distribution_versions": {
+            "pseudolife-mcp": "0.15.0",
+            "mcp": "2.1.1",
+            "httpx": "0.28.1",
+            "torch": "2.14.1+cpu",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0"
+          },
+          "package_runtime_version": "0.15.0",
+          "source_origin_matches_selected_root": true,
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+        },
+        "replay": {
+          "python": "3.11.15",
+          "executable_basename": "python",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "environment_kind": "virtualenv",
+          "distribution_versions": {
+            "pseudolife-mcp": "0.15.0",
+            "mcp": "2.1.1",
+            "httpx": "0.28.1",
+            "torch": "2.14.1+cpu",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0"
+          },
+          "package_runtime_version": "0.15.0",
+          "source_origin_matches_selected_root": true,
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+        }
+      }
+    },
+    "source_head": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+    "instrument_head": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+    "instrument_dirty": true,
+    "instrument_sha256": {
+      "__init__.py": "b81bf969b568b1b1770afc917f5aa62c8f947eaa982b3a07e38be60c241de694",
+      "acceptance.py": "319dcb402754ae0ce7c65e98cb84fc02eeb7e976c5ca92bb3f3d33da3a4bc957",
+      "candidate.py": "b863c1bbca733dd27424d7c94874871e63850cd4bc102ef846426837a9e5828c",
+      "controls.py": "e88ec25c5c0d17ea4fef2276348a8a09ebccd17fb087b66d8284126157ccf923",
+      "fixtures.py": "e5aa794cfe4abd49b50bcdb94c9769fd1990756d28bda4065fb563e5871fd8e8",
+      "full_bank.py": "7826b7ffb0f4869eabe257a6d021e06b7f30e6f5a28e638434b2624aad6af1e6",
+      "full_seed.json": "55ea8c2bfa6b242572f2a5de4d355ba95d370ba9ca4c228eb3e13e0de7e4a80a",
+      "harness.py": "7048d69f04f5afdfd57062170b9167617cf64fcb8253b485a316261eb2b3dbdd",
+      "oracle.py": "1090bfde35b5ebb930cf4c5ed5b113a2ffc380c8d9b5212b59d09f753c72fbf5",
+      "oracle_tests.json": "edbeb91ca912f5570644c21a435edf585628169dc7f0a5b49a3fbbfbba6cafaf",
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+      "provenance.py": "13ca095bf79a686eea950b4344e58a7f2d330b4737bc211b1724869cb35836a2",
+      "pytest_plugin.py": "6e2a8eb38fd31256b404afb14dddc8bdad243db074ef2f777d9457ce1485193a",
+      "seed.json": "bf1dfd16af73b2076dfebd224a6dd96c74b2fc2d35b617ba240bd65f8c8001c1",
+      "selfcheck.py": "9590b8b86a3e8f6f9e7f0ba36021ba8c60a82ab3682405083239ffab1a16c77c",
+      "test_boundary_regressions.py": "e6da13eb3765189605075434ee83abb6d40d7875105c84337a29605d2ff99c4a",
+      "test_candidate.py": "bf9cf7308367c53a3bbbcfd8f8723857b2ba50ab874ec7d281633e13fe593d13",
+      "test_capture_provenance.py": "39d64e08ec8a828903a4f1726de78026fb1d0f4046ce391be0995e51a7384b6c",
+      "test_full_bank.py": "bb8cec4731e92f18eb17d61f1e01019c79b3273c899a064b09dfce0f6d04724e",
+      "test_harness.py": "07f845ade5c19189e7311b9f2f588401c5409cc5861ed4c2ffac82658a055bc3",
+      "test_instrument_routing.py": "537722fae96e2f26e341cbfa09a86fa86d894cd6a3a8ffea1363f1f4f8cbff25",
+      "test_oracle_boundary.py": "0b5ebc5c8f788b4cb1f21a9c13c59a8298bfa9446ef3d707d929236f308269cc",
+      "test_phase0b.py": "465f59aec63f26210c2866457140cef64bc8193d847e0e00bb9b5eff99625f83",
+      "test_processes.py": "218a6c1853d9892f2409c3ffd4f1aa3998b2cbd6cecd7f48de0daf23651de669",
+      "test_provenance.py": "079faf8d8a3766478b38c59248ed04a90df6b5b14f735d546fa4ff3816c74624",
+      "test_runtime_provenance.py": "da89105d5de21713ad0222f161fb59343b4a1a83567f9e94ff72c42cf1e895c4",
+      "test_wire.py": "e173801afd859e63a63ed68eb319de7f58121d4bd7be0966ebde373c460f0318",
+      "url_reference.py": "07231218b05e1282f54a5aadb01954fd70b8d2c6af1ad7e121ccad54c374e453",
+      "wire.py": "958c13b6564343c57fe7c0201c5a3e84f774aac45fe12eb5f3e3849d75e13328"
+    },
+    "process_helper_sha256": {
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "source_schema": 53,
+    "historical_oracle": {
+      "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+      "source_schema": 52
+    },
+    "historical_source_comparison_available": false,
+    "phase_oracle": {
+      "source_head": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+      "source_schema": 53
+    },
+    "production_source_matches_phase_oracle": true,
+    "production_source_matches_historical": false,
+    "source_comparison_paths": [
+      "pseudolife_memory",
+      "pyproject.toml",
+      "tests/pg_defaults.py",
+      "tests/test_cli_dispatch.py",
+      "tests/conftest.py"
+    ],
+    "oracle_commit": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+    "requested_protocol": "2026-07-28",
+    "negotiated_protocol": "2025-11-25"
+  },
+  "scope": "CLI process and real Python HTTP/MCP handlers with in-memory fixture service; no storage or model parity",
+  "external_pytest_plugin": {
+    "results": {
+      "python": {
+        "exit_code": 0,
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "broken_rust": {
+        "exit_code": 1,
+        "tests": 5,
+        "failures": 5,
+        "errors": 0,
+        "skipped": 0
+      },
+      "unmapped_refused": {
+        "exit_code": 4,
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "unchanged_sources_sha256": {
+      "tests/test_cli_dispatch.py": "37db88abbb33a76481242c7ef062e89189e02fd3e1715e62ee9115d2d8720cb2",
+      "tests/conftest.py": "04ffcacf0ba01630f796cf7c16ff3d8a38d9bc6831b0eb04199e3f5a1d5de488"
+    },
+    "adapter_runtime_probes": {
+      "observation": "separate process with the pytest adapter's interpreter, environment and source bootstrap",
+      "runtimes": {
+        "python": {
+          "python": "3.11.15",
+          "executable_basename": "python",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "environment_kind": "virtualenv",
+          "distribution_versions": {
+            "pseudolife-mcp": "0.15.0",
+            "mcp": "2.1.1",
+            "httpx": "0.28.1",
+            "torch": "2.14.1+cpu",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0"
+          },
+          "package_runtime_version": "0.15.0",
+          "source_origin_matches_selected_root": true,
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+        },
+        "broken_rust": {
+          "python": "3.11.15",
+          "executable_basename": "python",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "environment_kind": "virtualenv",
+          "distribution_versions": {
+            "pseudolife-mcp": "0.15.0",
+            "mcp": "2.1.1",
+            "httpx": "0.28.1",
+            "torch": "2.14.1+cpu",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0"
+          },
+          "package_runtime_version": "0.15.0",
+          "source_origin_matches_selected_root": true,
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+        },
+        "unmapped_refused": {
+          "python": "3.11.15",
+          "executable_basename": "python",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "environment_kind": "virtualenv",
+          "distribution_versions": {
+            "pseudolife-mcp": "0.15.0",
+            "mcp": "2.1.1",
+            "httpx": "0.28.1",
+            "torch": "2.14.1+cpu",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0"
+          },
+          "package_runtime_version": "0.15.0",
+          "source_origin_matches_selected_root": true,
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+        }
+      }
+    },
+    "adapter": "whole CLI process; original assertions and SystemExit expectations preserved"
+  }
+}

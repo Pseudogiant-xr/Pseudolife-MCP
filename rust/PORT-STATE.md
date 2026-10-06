@@ -1,47 +1,80 @@
 # Rust port state
 
-The Python oracle is pinned to `136a34ae95e981a691fcc31ba9fb4f35d83d4249`
-(0.15.0, schema 52). Phase 0 is complete with reviewed PR #540 open;
-GitHub CI is pending. No production Rust surface has been accepted.
+The Python oracle for phases 0b and 1 is pinned to master
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53).
+Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
+[PR #546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546).
+The final appendix review and all ten CI checks passed at `9a62ed02`.
+Subsequent PR updates require fresh review and current-merge-ref CI.
+No production Rust surface has been accepted.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
-| 0: Behaviour inventory and oracle selection | Complete; BASE and RULES accepted, production rows deferred | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540) | `PARITY.md` |
-| 0: Porting rulebook | Complete with trial corrections | #540 | `PORTING.md` |
-| 0: Differential harness and negative control | Reviewed full-daemon replay and compiled negative CLI control | #540 | `evals/rust_port/`; `evals/results/rust-port-phase0-selfcheck-r6/`; `evals/results/rust-port-phase0-full-bank-r5/` |
-| 0: Python baseline and hosted CI measurements | Reviewed captures; historical source bytes reconstructable | #540 | `evals/rust_baseline/README.md`; `evals/results/rust-rewrite-baseline-*-r5.json`; `evals/results/rust-rewrite-source-reconstruction.json` |
-| 0: Disposable three-unit trial and two adversarial reviews | Complete; both reviewers' counterexamples reproduced | #540 | Corrections recorded in `PORTING.md`; no trial code ships |
-| 0: Independent PR review and publication | Review approved; committed-head WSL suite passed; PR open | #540 | Tested source commit `5f4152bbee7424bbbcfee63f1283a39810e34afd`; validation in PR body |
-| 1: Stdio shim | Blocked on MCP-WIRE and SHIM-LIFECYCLE parity; bounded prototype under repair | — | No production Rust parity accepted; full phase oracle CI and performance evidence remain absent |
-| 2: Client CLI leaves | Blocked on CLI-HOOK and remaining CLI rows; bounded prompt-hook prototype under repair | — | No production Rust parity accepted; full phase oracle CI and performance evidence remain absent |
-| 3: Daemon read path | Prepared only; implementation not started | — | Phase 0 artifact-commit prerequisite satisfied; HTTP-SECURITY is the first bounded unit |
-| 4: Daemon writes and background duties | Deferred | — | Read path and contract prerequisites |
-| 5: Cutover and retirement | Deferred | — | Maintainer owns merges and deployment |
+| 0: Inventory, rulebook and disposable trial | Complete; phase 0b closes the historical gaps | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540), [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Historical source pin 136a34ae; trial corrections retained in PORTING.md; current-pin gap evidence below |
+| 0: Historical selfcheck and full-bank replay | Retained as evidence about the original oracle, not current Rust parity | #540 | evals/results/rust-port-phase0-selfcheck-r6/; evals/results/rust-port-phase0-full-bank-r5/ |
+| 0b / 2.1: Candidate harness and graded HTTP/MCP controls | Implemented; acceptance evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-port-phase0b-acceptance.json; 25 full-bank cases with zero differences, command and URL lanes passed, seven named controls rejected, garbage Rust rejected |
+| 0b / 2.2: Linux daemon and Windows/Linux client captures | Implemented; same-platform replay evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-port-phase0b-full-bank-linux/run.json; rust-port-phase0b-selfcheck-linux/selfcheck.json (11 cases); rust-port-phase0b-cli-windows/selfcheck.json (two CLI cases); zero replay differences |
+| 0b / 2.3: Exhaustive register and per-file buckets | Implemented; source inventory verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PARITY.md; test-buckets.json; contract-inventory.json; test_contract_inventory.py; audit: 406 files, five candidate nodes, no missing surfaces; 21 audit tests pass |
+| 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
+| 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
+| 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
+| 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
+| 2: Client CLI leaves | deferred | — | CLI rows and 25-mode checklist in PARITY.md |
+| 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
+| 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
+| 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
 
-## Decisions
+## Decisions and constraints
 
-- 2026-10-03: The maintainer chose an external pytest plugin for implementation
-  selection. Existing tests, including `tests/conftest.py`, remain immutable.
-- Baseline host names use anonymous labels with hardware and software details;
-  measured artifacts must not contain local account names or network addresses.
-- The phase 0 evidence describes the pinned oracle, not subsequent upstream
-  changes. The integration base is `d3980687` (schema 53);
-  accepting a different production schema target requires a maintainer decision.
+- The phase 0b brief re-pins the oracle to master at phase start. The port makes
+  no DDL changes, adds no tables and repurposes no columns. Upstream schema bumps
+  follow CLAUDE.md's seven-place checklist and a new phase pin.
+- Daemon captures and baselines run on Linux; current phase 0b receipts were
+  captured on WSL2, while production runs in a Linux container. Shim and CLI
+  captures run on Windows and Linux. Every receipt records its platform and uses anonymous host
+  labels with hardware/software details.
+- Existing tests and conftest stay immutable; candidate routing uses the external
+  pytest plugin and the concrete nodes in test-buckets.json only.
+- The old Console was replaced by Console v3 on master, with /ui/next/ removed.
+  Other proposed simplifications remain open and are not implemented by the port.
+- Historical captures keep their recorded source identity. R6 selfcheck and
+  full-bank R5 remain in-tree; superseded R4/R5 selfchecks are preserved outside
+  the tree and recoverable from PR #540's recorded tree at `f2ee1524`.
+- The daemon baseline uses the phase oracle above. Hosted CI noise controls use
+  the reviewed PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e` and
+  Actions run 37090575829; their distinct source identity remains recorded.
+  The receipt rust-phase0b-ci-same-head.json includes successful attempts 1, 3
+  and 4. Failed attempt 2 (a wait-mail timing test) and the interrupted master
+  repeat are excluded. Job-span median is 1,651 seconds with an 86-second
+  observed range. Original-created-time totals include earlier attempts and
+  are not execution latency. Appendix review and all ten phase 0b CI checks
+  passed separately at `9a62ed02`.
+- The Linux matrix's shared provenance helper was frozen before the final
+  harness helper. Its exact bytes are retained in
+  evals/results/rust-phase0b-baseline-runtime-provenance-32740c866530c6b4.py
+  and bound by rust-phase0b-baseline-source-reconstruction.json; no baseline
+  capture was edited or relabelled.
+- Phase 0b is test/evaluation-only and requires the touched/dependent selection,
+  not a local full suite under the brief and CLAUDE.md. When required later,
+  full-suite receipts come from ops/wsl-suite.ps1 or ops/remote-suite.ps1 with
+  machine and commit in the shared suite-results directory.
 
-## Verified gaps
+## Deferred prerequisites
 
-- The configuration guide documents that the default Qwen model has no supplied
-  ONNX artifact and falls back to torch. The phase 3 same-graph prerequisite and
-  floating-point tolerance remain unverified; no bit-identical claim is accepted.
-- Tests importing Python internals cannot demonstrate Rust wire parity merely by
-  changing a file-level selection. The inventory must identify those boundaries.
-- The isolated shim smoke with installed MCP SDK 2.1.1 negotiated `2025-11-25`
-  after an initialize request for `2026-07-28`. This probes legacy negotiation;
-  the modern `server/discover` path has only bounded experimental evidence.
+- The pyproject.toml onnx-extra comment claims bit-identical embeddings while
+  docs/guide/configuration.md says default Qwen has no supplied ONNX artifact.
+  Both remain unchanged here. Phase 3 requires maintainer docs resolution and a
+  named same-graph/tokenizer comparison with measured error before a tolerance
+  or embedding-equivalence claim is accepted.
+- All internal test equivalents marked pending are future implementation work,
+  not accepted wire parity. Inventory coverage alone does not close production
+  behavior rows.
+- The legacy MCP negotiation evidence from #540 is about its original pin;
+  current and earlier protocol revisions require separate current-pin evidence.
 
 ## Resume
 
-Check PR #540 CI before maintainer merge. Complete the deferred phase 1 and 2
-parity rows, including their oracle CI and measurement artifacts; the experimental
-units do not establish phase completion. Keep the recorded schema 52 oracle
-separate from the schema 53 integration base, and preserve historical measurements.
+Phase 0 is complete, with all five gap implementations, measurement receipts,
+final appendix review and ten passing CI checks recorded at `9a62ed02` in
+PR #546. Subsequent PR updates require fresh review and current-merge-ref CI.
+Phase 1 parity rows stay deferred until phase 0b is merged.

@@ -1,7 +1,7 @@
 # Porting contract
 
 The behavioural oracle is Python 0.15.0 at
-`136a34ae95e981a691fcc31ba9fb4f35d83d4249`, using PostgreSQL schema 52.
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681`, using PostgreSQL schema 53.
 This rulebook governs an incremental port at executable and daemon-subsystem
 boundaries. A compiling translation does not establish parity.
 
@@ -66,7 +66,12 @@ supported protocol versions and platform behaviour are demonstrated.
 ## HTTP and authentication
 
 Preserve constant-time bearer comparison for both byte encodings, fail-closed
-token parsing, loopback-only hooks and the existing DNS-rebinding policy.
+token parsing and the existing DNS-rebinding policy. Hooks use the tokenless
+Host and Origin header check in `web/api.py:_browser_gate`; it is skipped when
+authentication is configured and does not check the peer address. With no
+headers present the gate passes. The MCP mount separately applies the SDK's
+token-aware transport-security policy: loopback Host/Origin patterns with
+rebinding protection when tokenless, protection disabled with configured auth.
 Redirect refusal applies to every credential-bearing header, including custom
 identity headers. Use explicit timeouts and cancellation; preserve streaming,
 long-poll and backpressure semantics. Protocol negotiation must cover the
@@ -80,8 +85,10 @@ credential defaults from the caller's installed client configuration.
 
 ## SQL and durable state
 
-Read and write schema 52 without DDL changes, new tables or repurposed columns
-during phases 1–4. Use bound parameters, explicit transaction ownership and
+Read and write the recorded phase-start schema (53 for phases 0b and 1) without
+DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
+each phase start; any upstream schema bump follows CLAUDE.md's seven-place
+checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
 oracle-equivalent isolation/locking behaviour. Preserve HLC ordering, contender
 selection, audit-chain bytes, mail cursors, lease fencing and FIFO queue rules.
 Hydration and clean-exit flush are part of the contract, not optional caches.
@@ -104,6 +111,53 @@ equivalence claim follows from comparator support alone.
 
 ## Measurement and acceptance
 
+Daemon oracle captures and baselines run on Linux; the current phase 0b receipts
+were captured on WSL2, while the production daemon runs in a Linux container.
+Shim and CLI captures run on Windows and Linux. Every capture receipt
+records its platform; a missing platform is a validation failure. Historical
+PR #540 captures retain their original commit and platform and cannot stand in
+for the phase 0b pin.
+
+The named `source-text-lf` rule normalizes CRLF and CR to LF on both sides at
+`/body/result/tools/*/description`, the source-derived MCP descriptions in the
+current corpus. Other parsed docstring or help fields require their own named
+paths before this rule applies.
+CLI stdout and stderr, including raw CLI help bytes, remain byte-exact on the
+capture platform. `source-text-lf` applies to parsed source-derived text fields,
+never a silent global normalization of streams. Captured raw MCP text bytes remain beside the
+parsed form for later stricter comparison without recapture.
+
+The HTTP header comparison allowlist is `content-type`, `content-length`,
+`cache-control`, `location`, `www-authenticate`, `allow`, `retry-after`,
+`mcp-protocol-version`, `mcp-session-id` and `x-pl-board`. Header names are
+case-insensitive; missing and present headers differ. MCP session IDs may be
+fixture-symbolic under a named rule. `content-length` is excluded only where
+one side uses fixed framing and the other chunked framing, with the exclusion
+recorded in the receipt. The coordination-start hook deliberately sets
+`x-pl-board`; transport-generated `date` and `server` are outside this allowlist.
+
+The named `content-length-authorized-wire-spans` rule validates a retained
+declared length against the received entity bytes, then adjusts its compared
+value only by the byte deltas of disjoint raw tokens changed by authorized
+identity, clock or source-text line-ending normalization. Nested JSON escaping is preserved. Raw length,
+adjustment and compared length are recorded; bytes outside those tokens still
+count. Whole-body reserialization cannot supply the adjustment. This is
+normalized length parity, not a claim that the raw headers are identical, and
+does not introduce another header exclusion.
+
+Epoch normalization preserves numeric type, sign, unit and magnitude class:
+seconds versus milliseconds differ and integer versus float differs. Normalize
+only named fixture-generated nondeterminism; never turn all positive epochs
+into one sentinel. Duplicate JSON object keys are detected before parsing a
+candidate response and are recorded as a difference.
+Epoch symbols mask exact values and fractional precision while retaining the
+type, unit and magnitude checks above. HLC values become symbols after format
+and declared continuity/order checks, so their component values and digit widths
+are not compared and no HLC unit or magnitude parity is established. Mailbox
+cursors retain their numeric suffix exactly while replacing the validated agent
+identity with a symbol; no exact byte parity is established for that replaced
+identity.
+
 Every published performance value comes from a script under `evals/` and an
 artifact under `evals/results/`. Record the oracle and candidate commits, dirty
 state, anonymous host identifier and hardware/software, model identity, fixture
@@ -115,6 +169,35 @@ Self-validate the differential harness against Python and a deliberately broken
 compiled Rust fixture before trusting it. This proves the comparison mechanism,
 not parity of any production Rust surface. Preserve request/response evidence
 and report precisely which selected tests exercised which implementation.
+
+The phase 0b acceptance receipt is
+`evals/results/rust-port-phase0b-acceptance.json`: the 25-case full-bank corpus
+passes through an owned Python command and an attested external URL, all seven
+graded proxy controls include their expected rejection reason, and the Linux
+selfcheck and Windows CLI replay have zero differences. The compiled garbage
+Rust fixture is rejected on both platforms. URL candidates need the disposable
+bank adapter documented in `evals/rust_port/README.md`; arbitrary production
+servers cannot be pointed at a bank. This acceptance covers the selected
+synthetic corpora, not every registered surface or a production Rust port.
+
+The phase 3 daemon reference is the Linux (WSL2) 2,000/20,000-entry matrix in
+`evals/results/rust-phase0b-daemon-scaling-linux.json`, with three repeats per
+bank/thread combination and separate warm/cold arms. Both policies use CPU
+fp32; the production-thread policy resolves to four threads on the recorded
+host. The 20,000-entry arm raises only flat-band capacity to retain its corpus.
+Generated entry vectors measure resident storage and scoring scale, while query
+embeddings use the real model. RSS scaling includes indexes, entry objects and
+allocator effects; vector tensor bytes are a lower bound. Match these conditions
+and each cell's measured noise floor before making a phase 3 comparison.
+
+The baseline's exact shared provenance helper predates the final harness helper.
+`evals/results/rust-phase0b-baseline-source-reconstruction.json` binds it to
+`evals/results/rust-phase0b-baseline-runtime-provenance-32740c866530c6b4.py`.
+Use those preserved bytes to reconstruct the frozen baseline; do not substitute
+the current helper or relabel the capture. Hosted CI repeats use the reviewed
+PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e`, independently of the
+daemon oracle above. They measure only that fixed CI reference's noise; a
+cancelled master repeat supplies no successful control.
 
 Phase completion is governed by `PORT-STATE.md` and `PARITY.md`. No deferred row
 counts as complete. Maintainer decisions are required to retire behaviour,

@@ -40,7 +40,7 @@ def test_clock_types_presence_and_relative_constraints_are_load_bearing():
     rules = {"times": {"/created": "epoch", "/expires": "epoch"},
              "constraints": [{"left": "/created", "op": "lt", "right": "/expires"}]}
     assert normal.apply({"created": 10.0, "expires": 20.0}, rules) == {
-        "created": "<epoch:float>", "expires": "<epoch:float>"}
+        "created": "<epoch:float:epoch-unit=other:magnitude=1>", "expires": "<epoch:float:epoch-unit=other:magnitude=1>"}
     for bad in ({"created": 30.0, "expires": 20.0}, {"created": "x", "expires": 20.0},
                 {"created": 10.0}, {"created": float("nan"), "expires": 20.0}):
         with pytest.raises(ValueError):
@@ -82,7 +82,7 @@ def test_fact_mutation_read_history_keep_same_clocks_and_strict_version_order():
     normalize_payload(normal, {"record": fact("violet", 20.0)}, "fact-get")
     versions = [fact("amber", 10.0, superseded_at=20.0), fact("violet", 20.0)]
     safe = normalize_payload(normal, {"versions": versions}, "fact-history")
-    assert safe["versions"][1]["asserted_at"] == "<fact.violet.asserted_at:float>"
+    assert safe["versions"][1]["asserted_at"] == "<fact.violet.asserted_at:float:epoch-unit=other:magnitude=1>"
     with pytest.raises(ValueError):
         normalize_payload(normal, {"record": fact("violet", 21.0)}, "fact-get")
     with pytest.raises(ValueError):

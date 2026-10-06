@@ -1,0 +1,1201 @@
+{
+  "limitations": [
+    "Three distinct successful attempts share exact head, workflow, job dimensions, public runner labels and steps.",
+    "Hosted runner hardware and ambient load remain unknown; descriptive range is not a confidence interval.",
+    "Created-to-last-job includes elapsed time before reruns; compare job_span_s or attempt_started_to_last_job_s for reruns.",
+    "Read-only collection does not trigger CI; no speedup claim."
+  ],
+  "provenance": {
+    "host": {
+      "architecture": "AMD64",
+      "label": "ci-collector",
+      "logical_cpus": 16,
+      "os": "Windows",
+      "os_release": "10",
+      "physical_cpus": 8,
+      "ram_bytes": 66190344192
+    },
+    "instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "b3f31d72369899c9c4c6d84fefc750c5e644c98c1318427069c93e83bea124df",
+      "evals/rust_baseline/ci.py": "b2307be414101636e33472388006877c97145e0ff827e7c7438935b202514d28",
+      "evals/rust_baseline/common.py": "33d9014c3de073a059c14fa11db66281646d355e1f97d1f27858565af399c12f",
+      "evals/rust_baseline/daemon.py": "e659db38d50358106f0a3967430a2fe7ec559ffd9440036b928f3e91d74dca9c",
+      "evals/rust_baseline/daemon_child.py": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+      "evals/rust_baseline/scaling.py": "4df2f32c0e17b07a9ef2477d9037571cc7fffa204e64bfe3f60e30b830390bd7",
+      "evals/rust_baseline/scaling_child.py": "481c77113ef0b6f02d6c5681baa9acb85236d52ee552a296676f2dfc3ddb1517",
+      "evals/rust_baseline/shim.py": "8f6dc026b7256b6fb7f06b94cf38d6607b10af8928cdadb32ceb41cc39ae046e",
+      "evals/rust_baseline/test_baseline.py": "db91272bf80761bbf4108420150246f081016ab75c818d73cb3a9742aba12763",
+      "evals/rust_baseline/test_review_fixes.py": "8e351f2501b39fd99199a060b21beb010e829316652b1b538e98f73a15025cd8",
+      "evals/rust_baseline/test_scaling.py": "36124408bc76d8d101031c633d5264166ca84241c43926db8e02d12f6f17fdd2",
+      "evals/rust_baseline/transport.py": "c69e07cfed0440fe0ead0a3be7faa7400e7ffe1f376a7ee446f85eb38779380f"
+    },
+    "measured_at_utc": "2026-10-03T06:57:50Z",
+    "parent_runtime": {
+      "dependencies": {
+        "httpx": "0.28.1",
+        "mcp": "2.1.1",
+        "psutil": "7.2.2",
+        "psycopg": "3.3.4",
+        "sentence-transformers": "5.3.0",
+        "torch": "2.10.0+cu126"
+      },
+      "python": "3.11.9"
+    },
+    "process_helper_sha256": {
+      "codex_doorbell.py": "00cb503e46456bfe92f127336fba19bbf46a0c5bc553b42d4fbeb814fd0b9388",
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "13ca095bf79a686eea950b4344e58a7f2d330b4737bc211b1724869cb35836a2"
+    },
+    "source_dirty": true,
+    "source_head": "c317adc4aaf5f4ae68c760add404f34af2910440",
+    "source_schema": 53
+  },
+  "provenance_scope": "collector",
+  "runs": [
+    {
+      "attempt_started_to_last_job_s": 1745.0,
+      "conclusion": "success",
+      "created_at": "2026-10-03T02:39:50Z",
+      "created_to_last_job_s": 1745.0,
+      "event": "pull_request",
+      "head_sha": "f2ee15241c29e439c9aaad6fd271683a7a065b3e",
+      "job_span_s": 1724.0,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "name": "test-lite-linux",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 8.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, plus the lite extra)",
+              "wall_s": 56.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 13.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 10.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Start embedded PostgreSQL (the [lite] path under test)",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (full suite vs embedded PG 18, 2 xdist workers)",
+              "wall_s": 1054.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 1154.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-windows",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "windows-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 12.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 33.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 195.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)",
+              "wall_s": 650.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 1.0
+            }
+          ],
+          "wall_s": 895.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-macos",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "macos-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 6.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 6.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 45.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Check the shell under test is macOS's bash 3.2",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Hook, installer and embedded-provider tests",
+              "wall_s": 681.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 3.0
+            }
+          ],
+          "wall_s": 746.0
+        },
+        {
+          "conclusion": "success",
+          "name": "frontend",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Type check (warnings fail)",
+              "wall_s": 7.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Unit tests",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Rebuild the committed console",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "The committed build matches the source",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 1.0
+            }
+          ],
+          "wall_s": 28.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Initialize containers",
+              "wall_s": 16.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 8.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, mirroring the daemon image)",
+              "wall_s": 58.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 12.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 11.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (offline + deterministic, 2 xdist workers)",
+              "wall_s": 1605.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Stop containers",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 1724.0
+        }
+      ],
+      "run_attempt": 1,
+      "run_id": 37090575829,
+      "run_started_at": "2026-10-03T02:39:50Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37090575829/attempts/1",
+      "workflow_blob_sha": "c3073f83da857bf695c0197d61d63981489bf279",
+      "workflow_id": 314164633,
+      "workflow_path": ".github/workflows/ci.yml"
+    },
+    {
+      "attempt_started_to_last_job_s": 1642.0,
+      "conclusion": "success",
+      "created_at": "2026-10-03T02:39:50Z",
+      "created_to_last_job_s": 13694.0,
+      "event": "pull_request",
+      "head_sha": "f2ee15241c29e439c9aaad6fd271683a7a065b3e",
+      "job_span_s": 1638.0,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "name": "frontend",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Type check (warnings fail)",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Unit tests",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Rebuild the committed console",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "The committed build matches the source",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 18.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-windows",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "windows-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 17.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 13.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 127.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)",
+              "wall_s": 621.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 785.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-linux",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, plus the lite extra)",
+              "wall_s": 59.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 7.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 9.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Start embedded PostgreSQL (the [lite] path under test)",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (full suite vs embedded PG 18, 2 xdist workers)",
+              "wall_s": 1064.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 1191.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Initialize containers",
+              "wall_s": 12.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 4.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, mirroring the daemon image)",
+              "wall_s": 56.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 7.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 9.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (offline + deterministic, 2 xdist workers)",
+              "wall_s": 1540.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Stop containers",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 1638.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-macos",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "macos-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 6.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 37.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Check the shell under test is macOS's bash 3.2",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Hook, installer and embedded-provider tests",
+              "wall_s": 679.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 1.0
+            }
+          ],
+          "wall_s": 732.0
+        }
+      ],
+      "run_attempt": 3,
+      "run_id": 37090575829,
+      "run_started_at": "2026-10-03T06:00:42Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37090575829/attempts/3",
+      "workflow_blob_sha": "c3073f83da857bf695c0197d61d63981489bf279",
+      "workflow_id": 314164633,
+      "workflow_path": ".github/workflows/ci.yml"
+    },
+    {
+      "attempt_started_to_last_job_s": 1655.0,
+      "conclusion": "success",
+      "created_at": "2026-10-03T02:39:50Z",
+      "created_to_last_job_s": 15353.0,
+      "event": "pull_request",
+      "head_sha": "f2ee15241c29e439c9aaad6fd271683a7a065b3e",
+      "job_span_s": 1651.0,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "name": "test",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Initialize containers",
+              "wall_s": 18.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, mirroring the daemon image)",
+              "wall_s": 60.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 7.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 8.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (offline + deterministic, 2 xdist workers)",
+              "wall_s": 1547.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Stop containers",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 1.0
+            }
+          ],
+          "wall_s": 1651.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-linux",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 6.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (CPU torch first, plus the lite extra)",
+              "wall_s": 57.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Restore HuggingFace cache",
+              "wall_s": 9.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Warm the embedders (downloads only on cache miss)",
+              "wall_s": 9.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Start embedded PostgreSQL (the [lite] path under test)",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Tests (full suite vs embedded PG 18, 2 xdist workers)",
+              "wall_s": 1054.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Upload test diagnostics",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 1146.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-windows",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "windows-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 10.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 25.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 160.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)",
+              "wall_s": 575.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 775.0
+        },
+        {
+          "conclusion": "success",
+          "name": "test-lite-macos",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "macos-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 8.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "wall_s": 12.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install (dev + lite)",
+              "wall_s": 60.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Check the shell under test is macOS's bash 3.2",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Hook, installer and embedded-provider tests",
+              "wall_s": 683.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 1.0
+            }
+          ],
+          "wall_s": 770.0
+        },
+        {
+          "conclusion": "success",
+          "name": "frontend",
+          "runner": {
+            "hardware": null,
+            "labels": [
+              "ubuntu-latest"
+            ],
+            "metadata_source": "Actions Jobs API"
+          },
+          "steps": [
+            {
+              "conclusion": "success",
+              "name": "Set up job",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "wall_s": 5.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Run actions/setup-node@v4",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Install",
+              "wall_s": 3.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Type check (warnings fail)",
+              "wall_s": 7.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Unit tests",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Rebuild the committed console",
+              "wall_s": 2.0
+            },
+            {
+              "conclusion": "success",
+              "name": "The committed build matches the source",
+              "wall_s": 1.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/setup-node@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "wall_s": 0.0
+            },
+            {
+              "conclusion": "success",
+              "name": "Complete job",
+              "wall_s": 0.0
+            }
+          ],
+          "wall_s": 25.0
+        }
+      ],
+      "run_attempt": 4,
+      "run_id": 37090575829,
+      "run_started_at": "2026-10-03T06:28:08Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37090575829/attempts/4",
+      "workflow_blob_sha": "c3073f83da857bf695c0197d61d63981489bf279",
+      "workflow_id": 314164633,
+      "workflow_path": ".github/workflows/ci.yml"
+    }
+  ],
+  "schema": 2,
+  "status": "same-head-hosted-ci-baseline",
+  "summary": {
+    "attempt_started_to_last_job_s": {
+      "max": 1745.0,
+      "median": 1655.0,
+      "min": 1642.0,
+      "n": 3,
+      "p50": 1655.0,
+      "p95": 1745.0
+    },
+    "hosted_wall_s": {
+      "max": 15353.0,
+      "median": 13694.0,
+      "min": 1745.0,
+      "n": 3,
+      "p50": 13694.0,
+      "p95": 15353.0
+    },
+    "job_span_s": {
+      "max": 1724.0,
+      "median": 1651.0,
+      "min": 1638.0,
+      "n": 3,
+      "p50": 1651.0,
+      "p95": 1724.0
+    },
+    "lanes_s": {
+      "frontend": {
+        "max": 28.0,
+        "median": 25.0,
+        "min": 18.0,
+        "n": 3,
+        "p50": 25.0,
+        "p95": 28.0
+      },
+      "test": {
+        "max": 1724.0,
+        "median": 1651.0,
+        "min": 1638.0,
+        "n": 3,
+        "p50": 1651.0,
+        "p95": 1724.0
+      },
+      "test-lite-linux": {
+        "max": 1191.0,
+        "median": 1154.0,
+        "min": 1146.0,
+        "n": 3,
+        "p50": 1154.0,
+        "p95": 1191.0
+      },
+      "test-lite-macos": {
+        "max": 770.0,
+        "median": 746.0,
+        "min": 732.0,
+        "n": 3,
+        "p50": 746.0,
+        "p95": 770.0
+      },
+      "test-lite-windows": {
+        "max": 895.0,
+        "median": 785.0,
+        "min": 775.0,
+        "n": 3,
+        "p50": 785.0,
+        "p95": 895.0
+      }
+    },
+    "noise_floor_available": true,
+    "same_head_controls": {
+      "f2ee15241c29e439c9aaad6fd271683a7a065b3e": {
+        "available": true,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": 86.0,
+        "repeat_medians": [
+          1724.0,
+          1638.0,
+          1651.0
+        ]
+      }
+    }
+  }
+}

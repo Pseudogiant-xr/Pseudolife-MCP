@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "oracle_commit": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+  "oracle_schema": 53,
+  "python_full_bank": {
+    "cases": 25,
+    "differences": [],
+    "owned_command": "passed",
+    "external_url": "passed"
+  },
+  "graded_controls": [
+    {
+      "control": "missing-key",
+      "expected_difference": "field_presence",
+      "observed_differences": [
+        {
+          "path": "/body/cortex",
+          "reason": "field_presence"
+        },
+        {
+          "path": "/body/count",
+          "reason": "field_presence"
+        },
+        {
+          "path": "/body/entries/0/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/2/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/content_length/compared",
+          "reason": "value"
+        },
+        {
+          "path": "/headers/content-length",
+          "reason": "value"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "ranking-order",
+      "expected_difference": "ranking_order",
+      "observed_differences": [
+        {
+          "path": "/body/cortex",
+          "reason": "field_presence"
+        },
+        {
+          "path": "/body/entries",
+          "reason": "ranking_order"
+        },
+        {
+          "path": "/body/entries/0/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/0/id",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/0/score",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/0/surprise_score",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/0/text",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/id",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/score",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/surprise_score",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/text",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/2/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/content_length/compared",
+          "reason": "value"
+        },
+        {
+          "path": "/headers/content-length",
+          "reason": "value"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "epoch-milliseconds",
+      "expected_difference": "epoch_unit",
+      "observed_differences": [
+        {
+          "path": "/body/cortex",
+          "reason": "field_presence"
+        },
+        {
+          "path": "/body/entries/0/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/0/timestamp",
+          "reason": "epoch_unit"
+        },
+        {
+          "path": "/body/entries/1/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/2/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/content_length/compared",
+          "reason": "value"
+        },
+        {
+          "path": "/headers/content-length",
+          "reason": "value"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "integer-float",
+      "expected_difference": "type",
+      "observed_differences": [
+        {
+          "path": "/body/cortex",
+          "reason": "field_presence"
+        },
+        {
+          "path": "/body/count",
+          "reason": "type"
+        },
+        {
+          "path": "/body/entries/0/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/1/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/body/entries/2/access_count",
+          "reason": "value"
+        },
+        {
+          "path": "/content_length/compared",
+          "reason": "value"
+        },
+        {
+          "path": "/headers/content-length",
+          "reason": "value"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "error-as-success",
+      "expected_difference": "tool_error_envelope",
+      "observed_differences": [
+        {
+          "path": "/body/result/isError",
+          "reason": "tool_error_envelope"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "tool-description",
+      "expected_difference": "value",
+      "observed_differences": [
+        {
+          "path": "/body/result/tools/0/description",
+          "reason": "value"
+        }
+      ],
+      "rejected": true
+    },
+    {
+      "control": "duplicate-key",
+      "expected_difference": "duplicate_json_key",
+      "observed_differences": [
+        {
+          "path": "/body",
+          "reason": "duplicate_json_key"
+        }
+      ],
+      "rejected": true
+    }
+  ],
+  "same_platform_replays": {
+    "linux_selfcheck": {
+      "schema": 1,
+      "capture_platform": {
+        "os": "Linux",
+        "architecture": "x86_64"
+      },
+      "cases": 11,
+      "differences": [],
+      "passed": true
+    },
+    "windows_cli": {
+      "schema": 1,
+      "capture_platform": {
+        "os": "Windows",
+        "architecture": "AMD64"
+      },
+      "cases": 2,
+      "differences": [],
+      "passed": true
+    }
+  },
+  "garbage_rust": {
+    "rejected": true,
+    "linux": {
+      "schema": 1,
+      "capture_platform": {
+        "os": "Linux",
+        "architecture": "x86_64"
+      },
+      "cases": 11,
+      "differences": [
+        {
+          "case": "cli-help",
+          "path": "/stdout_b64",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/exit_code",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/stderr_b64",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/stdout_b64",
+          "reason": "value"
+        }
+      ],
+      "passed": false
+    },
+    "windows": {
+      "schema": 1,
+      "capture_platform": {
+        "os": "Windows",
+        "architecture": "AMD64"
+      },
+      "cases": 2,
+      "differences": [
+        {
+          "case": "cli-help",
+          "path": "/stdout_b64",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/exit_code",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/stderr_b64",
+          "reason": "value"
+        },
+        {
+          "case": "cli-unknown",
+          "path": "/stdout_b64",
+          "reason": "value"
+        }
+      ],
+      "passed": false
+    },
+    "source_sha256": "5da54f33fec448f04a2467f207764d8acbc191bca96efff2594eac2c22b6c9f2"
+  },
+  "scope": "instrument acceptance on synthetic disposable data; no production Rust implementation parity claim",
+  "evidence": {
+    "full_bank": {
+      "path": "evals/results/rust-port-phase0b-full-bank-linux/run.json",
+      "sha256": "5a7fb5c16694a9958d7268432c5f84e52f9d622818e9150f20291fbea37ec1bf"
+    },
+    "linux_selfcheck": {
+      "path": "evals/results/rust-port-phase0b-selfcheck-linux/selfcheck.json",
+      "sha256": "02e7b23ed471d5d2af8f5bddddb820befd1d40a945d1dc9b9b1d2daa8b2c8798"
+    },
+    "windows_cli": {
+      "path": "evals/results/rust-port-phase0b-cli-windows/selfcheck.json",
+      "sha256": "1ce86d5ee13cb3067cfe7e9719a558841e3419260edec2afe86668862fed92cf"
+    }
+  }
+}
