@@ -2124,11 +2124,11 @@
         "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
         "tests/test_shim.py::test_shim_forwards_stringified_list_param",
         "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
+        "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+        "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
         "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
         "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
-        "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself",
-        "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
-        "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal"
+        "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself"
       ],
       "remaining_nodes": "oracle"
     },
