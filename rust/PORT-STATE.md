@@ -45,9 +45,12 @@ Windows and Linux, with 26 actual CLI calls per arm. These uncommitted-candidate
 proofs are preparatory: the full runner still requires committed clean Rust
 source before it can emit an acceptance receipt.
 
-Dedicated hook production is 1,029 lines plus a 76-line JSON caller wrapper;
-the reused JSON data module has 706 production lines. These physical counts
-exclude test modules, public process tests and the help asset.
+Dedicated hook production contains 1,030 physical lines plus a 76-line JSON
+caller wrapper and a reused 707-line JSON data module, or 1,813 total. This
+includes separator blanks before test modules; the earlier 1,811-line total
+excluded two such blanks. Against the shared pinned Python `briefing_cli.py`
+module (251 lines), the ratio is 7.22311. Tests, assets and dispatch are excluded.
+This count covers both `briefing` and `prompt-hook`, with no ratio target.
 
 The first credential-file proof refused an unprotected Windows token file and
 is rejected as positive-path evidence. Later env-token proofs establish actual
