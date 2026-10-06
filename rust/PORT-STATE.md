@@ -1,6 +1,16 @@
 # Rust port state
 
-## Episode wire preparation after delegated disposition
+## Episode distinct-field ordering disposition
+
+The additive associated-wire comparator permits order differences among
+distinct field names. The strict ordered-pair comparator and its original
+tests remain diagnostics; duplicates and case collisions reject before any
+mapping conversion. The 57-ID Accept boundary and exact request line,
+terminator, body-read bytes, auth/routing, values and other presence remain.
+Raw evidence is retained, and both episode modes remain deferred pending
+final functional, measurement, review and hosted gates.
+
+## Historical episode wire preparation after delegated disposition
 
 The new wire comparator applies named field-name association and the exact
 57-case absent-Accept versus candidate `*/*` disposition. The episode health

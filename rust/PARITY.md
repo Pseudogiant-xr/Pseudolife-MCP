@@ -108,6 +108,14 @@ header-only replay of the historical 57 IDs matches 56 per OS; retained
 title-minute difference, so it matches 55/57 there and 56/57 on Windows.
 These projections establish comparator behavior, not current-head acceptance.
 
+The subsequent delegated header-order disposition admits distinct-field-name
+ordering differences through the additive associated-wire comparator. The
+strict ordered-pair comparator and its original rejecting assertions remain
+diagnostics. Duplicate names and case collisions still reject; request line,
+terminator, body-read bytes, routing/auth, all values and presence remain exact,
+apart from the already recorded 57-ID Accept instance. Raw receipt order is
+retained. This changes no native candidate output or application-observer claim.
+
 Independent bounded application audit at exact master
 `0b46bb8e2010cf0e428dd650b98cedb165ad3d75` inspected all 128 Python files under
 `pseudolife_memory/`: AST inventory found 17 explicit header-read sites and no

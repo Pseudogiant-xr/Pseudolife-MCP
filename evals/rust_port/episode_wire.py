@@ -70,3 +70,18 @@ def wire_observations_match(case_id, oracle, candidate):
                 and _value(right["headers"], "accept") == "*/*":
             right["headers"] = _without(right["headers"], "accept")
     return not compare(expected, actual, Policy(source_text_paths=(), ignored_values=()))
+
+
+def associated_wire_observations_match(case_id, oracle, candidate):
+    """Associate distinct names; keep the strict ordered-pair API as a diagnostic.
+
+    The delegated order disposition does not admit duplicate names, case
+    collisions, changed values or framing. Validate pairs before converting
+    them to a mapping, so multiplicity cannot disappear through overwrite.
+    """
+    expected, actual = copy.deepcopy(oracle), copy.deepcopy(candidate)
+    for observation in (expected, actual):
+        for request in observation["wire"]:
+            headers = associated_headers(request["headers"])
+            request["headers"] = headers if isinstance(headers, Mapping) else dict(headers)
+    return wire_observations_match(case_id, expected, actual)

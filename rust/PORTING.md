@@ -91,7 +91,13 @@ Both modes remain deferred pending final-head executable proof.
   every value and presence remains exact except the following named case.
   Any duplicate name or case collision fails closed, even with equal values:
   no overwrite, comma coalescing or whitespace normalization. Ordered-pair
-  captures retain order. Historical mapping receipts lost duplicate-line
+  captures retain raw order. The subsequent delegated disposition permits
+  ordering differences among distinct field names, through
+  `associated_wire_observations_match`; the existing ordered-pair comparator
+  remains a strict diagnostic. Same-name multiplicity and case collisions
+  are rejected before any mapping conversion. Request line, terminator,
+  body-read bytes, routing, auth, values and other presence remain exact.
+  Historical mapping receipts lost duplicate-line
   information before comparison and cannot prove duplicate absence or raw
   header ordering/framing equality.
 - **`episode-absent-accept-wildcard`:** only the exact 57 recorded IDs in
