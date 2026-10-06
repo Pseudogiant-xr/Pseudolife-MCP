@@ -247,7 +247,7 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     return selected, identity, original_identity
 
 
-def observe(case, command, commands, *, root, home, url, prepare=None):
+def observe(case, command, commands, *, root, home, url, prepare=None, process_timing=None):
     # Both arms occupy the same disposable path, reset before each launch. Path
     # text remains contractual; no broad home/path replacement is permitted.
     reset_home(home)
@@ -305,7 +305,8 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
         launch_env = copy.deepcopy(env)
         response = run_cli(selected, arguments, cwd=root, env=env,
                            timeout=case.get("timeout_seconds", 10),
-                           stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
+                           stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True),
+                           **({"process_timing": process_timing} if process_timing is not None else {}))
         if "expected_stdout" in case:
             version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
             expected = case["expected_stdout"].format(version=version)

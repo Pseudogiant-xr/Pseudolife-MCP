@@ -144,6 +144,16 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                 selected_identity = installed[arm]["selected_identity"]
                 original_identity = installed[arm]["original_identity"]
                 binding = copy.deepcopy(installed[arm]["binding"])
+                if fixture_url is not None:
+                    # Warm images still need a fresh owned episode before every CLI.
+                    prepared_case = copy.deepcopy(case)
+                    prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
+                    prepared, prepared_identity, prepared_original = prepared_command(
+                        prepared_case, commands[arm], prefixes, root=root,
+                        home=active_home, env=env, prepare=prepare)
+                    if prepared_case != case or prepared != selected \
+                            or prepared_identity != selected_identity or prepared_original != original_identity:
+                        raise ValueError("CLI warmup preparation must retain recorded inputs and images")
             elif prepare is None:
                 reset_home(active_home)
                 env = isolated_env(active_home)

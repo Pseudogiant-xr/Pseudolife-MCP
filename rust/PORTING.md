@@ -81,6 +81,15 @@ claim follows from the additive loopback fixture nodes.
 
 ### Narrow episode wire disposition
 
+Episode timeout capture may request `process_timing` from `observe`/`run_cli`.
+Its `communicate_completed_monotonic` value is a subprocess completion upper
+bound recorded before ownership cleanup and post-exit snapshots/image hashing.
+The existing stalled-body time bound is unchanged; new captures anchor that
+bound to this endpoint and retain the historical later capture endpoint as a
+diagnostic. This is an instrument correction, not a native body-stall policy.
+Equal-image warm episode measurements reopen the owned episode before every
+control, warmup and timed invocation, with setup and state readback untimed.
+
 The delegated 2026-10-07 decision permits two explicitly named comparisons
 in `episode_wire.py`; it requires Referer absence through implementation.
 Both modes remain deferred pending final-head executable proof.

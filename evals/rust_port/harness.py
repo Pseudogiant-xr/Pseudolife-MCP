@@ -12,6 +12,7 @@ import platform
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 from typing import Any
 import urllib.error
 import urllib.parse
@@ -205,9 +206,13 @@ def _ordinary_cli_exit(value):
     return type(value) is int and 0 <= value <= 255
 
 
-def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float, stdin: bytes = b"") -> dict:
+def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float, stdin: bytes = b"",
+            process_timing: dict | None = None) -> dict:
     with owned_process([*prefix, *argv], cwd=cwd, env=env, stdin=subprocess.PIPE) as proc:
         stdout, stderr = proc.communicate(input=stdin, timeout=timeout)
+        if process_timing is not None:
+            # Communicate return bounds process completion before cleanup/capture.
+            process_timing["communicate_completed_monotonic"] = time.monotonic()
     if not _ordinary_cli_exit(proc.returncode):
         raise AbnormalTermination()
     return {"exit_code": proc.returncode,
