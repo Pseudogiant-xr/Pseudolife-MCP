@@ -4,13 +4,78 @@
 
 Native `doorbell-prompt-seen` is implemented against the
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remains deferred.
-Source-bound diagnostics for the preceding candidate match 110 Windows and 109
-Linux ordinary public process cases and reject 440 and 436 candidate exit/stream/file
-mutations. Valid configured integer limits (640, unlimited and 5000) and the
-Windows surrogate username path counterexample are included. The genuine
-pre-code Python proof and first native pair independently verify nonce receipt,
-unchanged pending state, private files and cleanup. Final captures bind their
-own later binaries rather than reusing the first pair's identity.
+Current committed ordinary captures at `5803ea08767316078d9b3f4877c4db5376a489bf`
+bind the genuine 0.17.0 runtime, current loaded helpers, Rust/Cargo inputs and
+final binaries before and after capture. Their declared exit/stream/complete
+home-file comparisons are exact, with no added normalization or exclusions.
+
+| OS | Exact ordinary pairs | Rejected exit/stream/file mutations | Exit / cleanup |
+| --- | ---: | ---: | --- |
+| Windows | 110/110 | 440/440 | 0 / verified |
+| Linux | 109/109 | 436/436 | 0 / verified |
+
+These rows include configured integer limits and signed zero, stdin/pending-file
+counterexamples and the Windows surrogate username path. Separate committed
+first-cell proofs on both OSes retain the original version2-positive stdin and
+pending JSON plus LF, and capture the actual nonce-plus-LF receipt, unchanged
+pending bytes and `0` lock. They prove this bounded positive receipt behavior,
+not daemon-dependent delivery or full-mode acceptance.
+
+Untracked local corpus files are
+`doorbell-current-committed-windows-corpus.json` (SHA256
+`5f0f28f86320c6332aa2062107fd141ab36a951c5130673ee18d245828b53787`)
+and `doorbell-current-committed-linux-corpus.json` (SHA256
+`0019e66ed831bf24fcc00749c3db043e019612b983b95a0ad2d8afe648cc95ea`).
+The artifact/source index is `doorbell-briefing-current-committed-manifest.json`.
+The retained Windows executable SHA256 is
+`a3665b4b2beba79da35e48d85ac44527f6628e04eea7af83e14195ace20d6b89`;
+the Linux executable SHA256 is
+`dc63a31c2ef33e2cb485ede4d22dc5408fdc5b1211f1051da36f5d72f7ad28b4`.
+
+The approved measurement instrument is committed at
+`e28a2bbfc3212571a26a5dcb48c92f9a43455761`, tree
+`03e07d2e2b664cb684ea153c0c2e556d8b8c37b6`. It reuses the exact positive case
+and recreates its recorded pending bytes through the pinned private writer.
+Both OSes completed a separate 1x1 plumbing smoke and a 3x10 alternating paired
+capture, with two untimed controls per receipt, exit 0 and verified cleanup.
+The initial Linux smoke stopped before timing because the private launcher PATH
+lacked the pinned CLI entry point; its failed artifacts remain intact. After a
+private PATH correction, attempt2 passed with separate archive names; no tracked
+repair was needed.
+
+| OS | Arm | Samples | Median ms | Repeat-median floor ms |
+| --- | --- | ---: | ---: | ---: |
+| Windows | Python | 30 | 190.441 | 13.277 |
+| Windows | Rust | 30 | 26.751 | 15.457 |
+| Linux | Python | 30 | 227.696 | 10.014 |
+| Linux | Rust | 30 | 55.863 | 0.368 |
+
+These are local observations of the retained debug-path binaries with warm
+filesystem caches. The floor is the max-minus-min of three repeat-block medians,
+not a confidence interval or significance test. Executable hashes and sizes are
+bound, but the producing compiler and build profile are not attested; these
+cells establish no general performance or speedup claim.
+
+Captured untimed controls retain exit 0, empty stdout/stderr and complete pre/post
+home snapshots matching across arms and OSes: unchanged LF-terminated pending
+JSON, a 33-byte nonce-plus-LF seen marker and a one-byte `0` lock. Recorded file
+metadata is `private=true`, `nlink=1`, with mode `0o600` on Linux and `0o666` on
+Windows. ACL entries were not captured; Windows mode alone does not prove ACL
+privacy. Timed samples were checked programmatically against the untimed bytes,
+state and environment, including metadata checks outside the unchanged timer.
+Their retained rows contain timing, size, arm order, execution identity and a
+files/environment validator; raw per-sample stdout, stderr, exit and complete
+file snapshots were not retained. Validator flags cannot reconstruct those absent
+raw captures.
+
+Untracked local final receipts are `doorbell-measurement-windows-final.json`
+(SHA256 `6a8adf72a2aabe9abf10c2597cd0056511ce5dcaf1a09f8b4c24209948ec316a`)
+and `doorbell-measurement-linux-final.json`
+(SHA256 `37750ec024d35920666d31f64bf6176e8cb4d5ca8fe3d2cde629016c7d3763ec`).
+`doorbell-measurement-audit.json` retains the recalculated summaries, scoped clean
+instrument/production bindings and unchanged runtime/helper/binary identities;
+the broad oracle dirty flag describes its eval overlay. These files are local
+evidence, not tracked or published acceptance assets.
 
 Separate fault and metadata probes retain fourteen unmatched Python traceback
 cases and two legacy migration clock-byte differences per platform. Native
@@ -28,11 +93,13 @@ limits still suppressed receipts. Parsing the limit as a signed integer repairs
 `-0` and `-0000`; new source-bound probes match all 12 Windows and 10 Linux pairs,
 including stdin and pending-file counterexamples. Seven native unit tests pass
 again on each host, with explicit signed-zero boundary regressions. These narrow
-checks do not rebind the preceding full corpus to the new binary.
+checks preceded the committed ordinary captures above.
 Original tests and the generic process fixture remain unchanged. Initial
-independent review requested changes; the repaired tree still requires review.
-Committed acceptance, CI and measurement remain
-outstanding. No full-port or performance claim follows from these cells.
+independent review requested changes; the measurement instrument subsequently
+received scoped approval. Full-mode fault/traceback,
+migration clock policy, hosted CI and evidence-successor
+review remain outstanding. No ported status or full-port claim follows from
+the ordinary corpus, bounded positive proof or debug-path measurements.
 
 The external pytest adapter now routes the four unchanged CoordinationPrompt
 hook nodes through their original shell launcher and marker-writing Python
@@ -49,14 +116,22 @@ Its runtime gate derives the package version from the selected pinned source
 and retains Python 3.11, source-origin and installed-distribution checks.
 Preparatory `process_tests` captures pass all nine nodes in Python and native
 arms on both hosts, with 33 dispatcher controls passing per host. The candidate
-Rust source is still dirty; the committed-clean-source acceptance gate remains
-intact, and these component captures are not full acceptance receipts.
+source was dirty in those preparatory captures; their historical status is
+unchanged. The later scoped committed evidence above does not turn these
+component captures into full acceptance receipts.
 
 The three leaf modules contain 1,297 physical production lines, including
-comments and blank lines but excluding their `cfg(test)` sections: receipt
-handling 330, private file machinery 239 and Python JSON domain parser 728.
-Dispatch edits are additional. Eval/test code and evidence assets are excluded
-from this count; it does not establish the required line-ratio closure.
+comments and blank lines but excluding tests and assets: receipt handling 330,
+private file machinery 239 and JSON-domain compatibility 728. Dispatch adds four
+lines separately. The pinned Python mode module `codex_doorbell_state.py` has
+369 lines, giving a module ratio of 3.515; that denominator includes unported
+reservation and resolution paths. The relevant callable footprint is 186 lines
+there plus 129 selected external-helper lines, giving a scoped ratio of
+1,297 / 315 = 4.117. Excluding the 728-line JSON compatibility helper gives
+569 / 315 = 1.806; Python standard-library JSON source is not added to the
+denominator. Local `doorbell-line-ratio-counts.json` records source hashes,
+function ranges and counting rules. These labelled counts imply no ratio target
+or ported status.
 
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
