@@ -12,19 +12,31 @@ import tomllib
 from .common import lease_gate, provenance
 from .shim_measurement import artifact_identity, metric_cells
 from evals.rust_port.cli_corpus import STREAM_CONTRACT
-from evals.rust_port.cli_process import cli_binding, prepared_command, remove_root_link, reset_home, snapshot
-from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
+from evals.rust_port.cli_process import cli_binding, fixture_env, prepared_command, remove_root_link, reset_home, snapshot
+from evals.rust_port.harness import _base_url, capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
 from evals.rust_port.provenance import require_import_root, runtime_metadata
 from evals.rust_port.stdio_capture import require_phase1_source
 
 
-def measure(args, resource, *, prepare=None, case=None):
+def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify=None):
     mode = getattr(args, "mode", "help")
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
     if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv) \
             or argv[0] not in {mode, "--" + mode}:
         raise ValueError("measurement argv must name the selected CLI mode")
+    if fixture_url is not None:
+        from .transport import TOKEN
+        from evals.rust_port.episode_corpus import cases
+        _base_url(fixture_url)
+        accepted = next(row for row in cases() if row["id"] == "episode-key-7-episode-end")
+        accepted["environment_deltas"] = {"PSEUDOLIFE_MCP_TOKEN": TOKEN}
+        if mode != "episode-end" or argv != accepted["argv"] or case != accepted \
+                or getattr(args, "layout", "bare") != "bare" \
+                or not callable(prepare) or not callable(verify):
+            raise ValueError("daemon measurement requires the recorded authenticated episode-end case and state callbacks")
+    elif verify is not None:
+        raise ValueError("state verification requires the owned episode-end fixture")
     root = args.oracle_root.resolve()
     pin = require_phase1_source(root)
     require_import_root(root)
@@ -47,6 +59,12 @@ def measure(args, resource, *, prepare=None, case=None):
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
                "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+    if fixture_url is not None:
+        from . import transport
+        helpers["evals/rust_port/cli_process.py"].append(fixture_env)
+        helpers["evals/rust_port/harness.py"].append(_base_url)
+        helpers["evals/rust_port/episode_corpus.py"] = [cases]
+        helpers["evals/rust_baseline/transport.py"] = [Path(transport.__file__)]
     instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     layout = getattr(args, "layout", "bare")
     if layout == "installed" and prepare is None:
@@ -59,11 +77,14 @@ def measure(args, resource, *, prepare=None, case=None):
     if (prepare is None) != (case is None):
         raise ValueError("prepared measurement requires both a callback and a recorded case")
     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
-                             or case.get("environment_deltas") or case.get("pre_files_b64")):
+                             or (fixture_url is None and case.get("environment_deltas"))
+                             or case.get("pre_files_b64")):
         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
+    case = copy.deepcopy(case)
     prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
+    state_checks = []
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
 
@@ -76,13 +97,20 @@ def measure(args, resource, *, prepare=None, case=None):
             else:
                 home = directory / "cli-home"
                 reset_home(home)
-                env = isolated_env(home)
-                env.update({"XDG_DATA_HOME": str(home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
-                            "PYTHONDONTWRITEBYTECODE": "1"})
                 prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
+                if fixture_url is not None:
+                    env = fixture_env(home, prefixes, fixture_url)
+                    env.update(case["environment_deltas"])
+                else:
+                    env = isolated_env(home)
+                    env.update({"XDG_DATA_HOME": str(home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                                "PYTHONDONTWRITEBYTECODE": "1"})
                 try:
+                    prepared_case = copy.deepcopy(case) if fixture_url is not None else case
                     selected, selected_identity, original_identity = prepared_command(
-                        case, commands[arm], prefixes, root=root, home=home, env=env, prepare=prepare)
+                        prepared_case, commands[arm], prefixes, root=root, home=home, env=env, prepare=prepare)
+                    if fixture_url is not None and prepared_case != case:
+                        raise ValueError("CLI preparation must retain the recorded inputs")
                     binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(home),
                                "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                              "effective_argv": [*selected, *argv], "cwd": str(root),
@@ -98,6 +126,16 @@ def measure(args, resource, *, prepare=None, case=None):
                 elapsed = (time.perf_counter() - started) * 1000 if timed else None
                 if binding is not None:
                     binding["post_files_b64"] = snapshot(home)
+                    if fixture_url is not None:
+                        state = verify(copy.deepcopy(case), home, env, list(selected), copy.deepcopy(prefixes),
+                                       copy.deepcopy(response))
+                        state_checks.append({"arm": arm, "label": label, "timed": timed,
+                                             "readback": copy.deepcopy(state)})
+                        if env != binding["environment"] or snapshot(home) != binding["post_files_b64"]:
+                            raise RuntimeError("CLI state verification changed the captured home or environment")
+                        if response != {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""} \
+                                or binding["post_files_b64"] != binding["pre_files_b64"]:
+                            raise RuntimeError("CLI episode-end requires the accepted empty streams and unchanged home")
                     if command_identity(selected, root) != selected_identity \
                             or command_identity(commands[arm], root) != original_identity:
                         raise RuntimeError("CLI executable changed during measurement capture")
@@ -152,16 +190,22 @@ def measure(args, resource, *, prepare=None, case=None):
             "candidate_executable": binary, "python_executable": python_identity,
             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
             "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
+            **({"fixture_url": fixture_url, "independent_state_checks": state_checks,
+                "database_byte_equality_claimed": False} if fixture_url is not None else {}),
             "resource_check": resource,
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
-            "limitations": ["Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
+            "limitations": ["Fresh public CLI process with warm OS filesystem cache against an already running owned daemon."
+                            if fixture_url is not None else
+                            "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
-                            "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+                            "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file and independent state checks are untimed.",
+                            *(["Each seeded empty root must close independently; generated IDs/times are retained, not compared across arms."]
+                              if fixture_url is not None else []),
                             "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
                             "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
                             "Smoke is plumbing evidence only." if args.smoke else "Final samples require the caller's quiet CPU window."]}
