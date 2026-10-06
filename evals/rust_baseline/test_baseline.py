@@ -110,6 +110,10 @@ class BaselineTests(unittest.TestCase):
         except psutil.NoSuchProcess:
             return
         try:
+            child.wait(timeout=2)
+        except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+            pass
+        try:
             alive = child.is_running() and child.status() != psutil.STATUS_ZOMBIE
         except psutil.NoSuchProcess:
             alive = False
