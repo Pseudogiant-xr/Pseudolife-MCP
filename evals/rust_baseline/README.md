@@ -264,6 +264,20 @@ recorded raw hash. Other bytes remain unchanged; the baseline instrument files
 used LF bytes. Do not normalize all files or treat a different digest as equivalent.
 Historical captures remain unchanged.
 
+Paired shim receipts bind the historical R5 artifact to its pinned Git blob and
+canonical SHA256, so Windows checkout line-ending filters cannot change that
+reference. R5 is a historical, noncomparable capture: its Windows Python
+initialize-return p50 was 644.687 ms, versus 811.841 ms in the later paired
+capture. The later first-frame p50 was 811.794 ms, so the timing boundary does
+not explain the difference. Source pins, schema/version, dependencies,
+instrumentation and process ownership changed; ambient load and cache state
+were uncontrolled. No matched crossover isolates the cause. Retain R5 unchanged
+and compare each new pair using its own recorded runtime, source and noise floors.
+The canonical LF blob SHA256 is
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`
+for Git blob `a7ddf073f0e8102cecdc2947bffc0b2f546151cd`; a checkout's CRLF
+working-copy digest does not replace that binding.
+
 The same recipe applies to capture bytes: `receipts` covers the eight execution
 receipts, and `referenced_artifacts` covers the eight full-bank/selfcheck corpus
 and oracle artifacts. Reconstruct each from its Git blob before checking its
@@ -273,3 +287,13 @@ recipes work on a clean Linux checkout without Windows checkout filters.
 Source bindings resolve by path plus raw digest. Different selfcheck versions
 retain older source recipes with their declared `source_commit`, while this
 baseline and the full-bank capture remain unchanged.
+
+The current post-retirement shim pairs at `690bb8ac` are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`. Each arm contains
+three repeat blocks of ten samples; PORT-STATE.md reports pooled nearest-rank
+p50/p95 and each arm's observed repeat-quantile range. Both normal and separate
+RSS launches exited cleanly. The two 2e628b27 pairs remain named historical
+before-retirement references with their original source/runtime bindings.
+The oracle and other candidate behavior changed between captures, so their
+difference is not an isolated causal estimate of retiring the SDK preflight.

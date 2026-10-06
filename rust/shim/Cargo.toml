@@ -1,0 +1,45 @@
+[package]
+name = "pseudolife-stdio"
+version = "0.17.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+default-run = "pseudolife-stdio"
+
+[features]
+default = ["codex-delivery"]
+codex-delivery = ["dep:tokio-tungstenite"]
+
+[dependencies]
+rmcp.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+http.workspace = true
+sse-stream.workspace = true
+tokio-util.workspace = true
+
+serde.workspace = true
+fs2.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+
+unicode-normalization.workspace = true
+which.workspace = true
+chrono.workspace = true
+unicode-casefold.workspace = true
+tokio-tungstenite = { workspace = true, optional = true }
+process-wrap.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+rustix.workspace = true
+users.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

@@ -15,8 +15,9 @@ import re
 import sys
 
 from .harness import (HttpClient, Policy, compare, isolated_env, write_new, strict_json_loads,
-                      capture_platform, HTTP_HEADER_ALLOWLIST, NORMALIZATION_RULES)
+                      capture_platform, HTTP_HEADER_ALLOWLIST, NORMALIZATION_RULES, observe_boundary)
 from .provenance import require_oracle_source as require_historical_source, source_metadata, runtime_metadata
+from .registration_policy import POLICY_NAME, REGISTRATION_CASES, generated_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED = json.loads(Path(__file__).with_name("full_seed.json").read_text(encoding="utf-8"))["seed"]
@@ -303,7 +304,12 @@ def normalize_payload(normal, payload, operation):
         raise ValueError("synthetic seed store rejected")
     elif operation == "store-empty" and (payload.get("stored") is not False or payload.get("reason") != "empty"):
         raise ValueError("empty store contract failed")
-    return normal.apply(payload, rules)
+    evidence = (generated_name(payload, operation.removeprefix("register-"))
+                if operation in REGISTRATION_CASES else None)
+    normalized = normal.apply(payload, rules)
+    if evidence is not None:
+        normalized["name"] = evidence["normalized_name"]
+    return normalized
 
 
 def observe(corpus, url, token, *, candidate=False):
@@ -320,12 +326,10 @@ def observe(corpus, url, token, *, candidate=False):
             key_actor = "sender" if identity == "wrong-recipient" else identity
             headers.update({"X-PL-Agent": normal.bindings[actor + ".agent_id"],
                             "X-PL-Agent-Key": normal.bindings[key_actor + ".credential"]})
-        try:
-            response = client.execute(request, case["surface"], runtime_headers=headers)
-        except ValueError as exc:
-            if not candidate:
-                raise
-            records.append({**case, "response": {"boundary_error": type(exc).__name__}})
+        operation = lambda: client.execute(request, case["surface"], runtime_headers=headers)
+        response = observe_boundary(operation, client) if candidate else operation()
+        if "boundary_error" in response:
+            records.append({**case, "response": response})
             continue
         raw = response.pop("_wire_body", None)
         original_body = copy.deepcopy(response["body"])
@@ -347,6 +351,10 @@ def observe(corpus, url, token, *, candidate=False):
         if raw is not None:
             normalize_content_length(response, raw, original_body)
         records.append({**case, "response": response})
+        if case["operation"] in REGISTRATION_CASES and response["status"] == 200:
+            evidence = generated_name(original_body, case["operation"].removeprefix("register-"))
+            if evidence is not None:
+                records[-1]["policy_evidence"] = evidence
         serialized = json.dumps(records[-1], allow_nan=False)
         credentials = [v for name, v in normal.bindings.items() if normal.kinds[name] == "credential"]
         raw_text = base64.b64decode(response.get("raw_mcp_body_b64", "")).decode("utf-8")
@@ -360,6 +368,17 @@ def environment_metadata(root=ROOT):
     from evals.rust_baseline.common import provenance
     return {**source_metadata(root), "parent_runtime": runtime_metadata(ROOT),
         "baseline_instrument_sha256": provenance(source_root=root)["instrument_sha256"]}
+
+
+def case_policy(case, score_abs_tol=1e-6):
+    if case["expect"].get("tool_error"):
+        return Policy(abs_tol=score_abs_tol)
+    return Policy(abs_tol=score_abs_tol,
+        score_paths=("/body/entries/*/score", "/body/result/structuredContent/entries/*/score",
+                     "/body/result/content/*/text/entries/*/score"),
+        json_text_paths=("/body/result/content/*/text",),
+        ranking_paths=("/body/entries", "/body/result/structuredContent/entries",
+                       "/body/result/content/*/text/entries"))
 
 
 def private_home_overrides(private):
@@ -376,8 +395,13 @@ def private_home_overrides(private):
 
 def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
         offline_resource_checked_at=None, candidate_url=None, candidate_command=None, candidate_nonce=None,
-        validate_controls=False, validate_url_candidate=False):
-    require_historical_source(oracle_root)
+        validate_controls=False, validate_url_candidate=False, phase1_protocol_fixture=False):
+    if phase1_protocol_fixture:
+        from .stdio_capture import require_phase1_source
+        source_check = require_phase1_source(oracle_root)
+    else:
+        require_historical_source(oracle_root)
+        source_check = {"oracle_head": "3691f5cb75487d3fda54a6bde6fab35dcf32c681"}
     from evals.rust_baseline.common import lease_gate
     from evals.rust_baseline.daemon import disposable_database, launched_daemon, private_directory
     from evals.rust_baseline.transport import TOKEN
@@ -392,10 +416,16 @@ def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
         raise ValueError("candidate URL and owned command are mutually exclusive")
     from .candidate import command_identity, launched_candidate, external_candidate
     from .controls import capture_controls
+    policies = {case["id"]: case_policy(case, score_abs_tol) for case in corpus.get("cases", [])}
     candidate_identity = (command_identity(candidate_command) if candidate_command else
         {"kind": "external-url" if candidate_url else "python-reference"})
     passes, cleanup_results, control_results = [], [], {}
-    for arm in (["oracle", "candidate", "url-reference"] if validate_url_candidate else ["oracle", "candidate"]):
+    arms = ["oracle", "candidate"]
+    if validate_url_candidate:
+        arms.append("url-reference")
+    if validate_controls:
+        arms.append("identity-proxy")
+    for arm in arms:
         resource = (lease_gate(board_checked_at, offline_resource_checked_at=offline_resource_checked_at)
                     if offline_resource_checked_at else lease_gate(board_checked_at))
         with disposable_database() as dsn, private_directory() as private, ExitStack() as adapters:
@@ -411,41 +441,58 @@ def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
             elif arm == "candidate" and candidate_url:
                 launcher = external_candidate(candidate_url, dsn, TOKEN, candidate_nonce=candidate_nonce)
             else:
-                launcher = launched_daemon(dsn, private, env_extra=overrides, source_root=oracle_root)
+                fixture_options = {"child_module": "evals.rust_port.stdio_daemon"} if phase1_protocol_fixture else {}
+                launcher = launched_daemon(dsn, private, env_extra=overrides, source_root=oracle_root, **fixture_options)
             with launcher as launched:
                 url, cleanup = launched[-2:]
+                identity_cleanup = None
+                if arm == "identity-proxy":
+                    from .controls import mutation_proxy
+                    url, identity_cleanup = adapters.enter_context(mutation_proxy(url, "identity"))
                 # Non-reference candidates are allowed to produce differences;
                 # the Python oracle must satisfy the corpus's own assertions.
                 if arm == "url-reference" or arm == "candidate" and (candidate_command or candidate_url):
                     passes.append(observe(corpus, url, TOKEN, candidate=True))
                 else:
                     passes.append(observe(corpus, url, TOKEN))
+                if arm == "oracle":
+                    for record in passes[-1]:
+                        if record["id"] not in policies:
+                            policies[record["id"]] = case_policy(record, score_abs_tol)
                 if arm == "oracle" and validate_controls:
-                    control_results = capture_controls(corpus, passes[-1], url, TOKEN)
+                    control_results = capture_controls(corpus, passes[-1], url, TOKEN, policies=policies)
             adapters.close()
+            if identity_cleanup is not None:
+                cleanup["identity_proxy"] = identity_cleanup
+                if identity_cleanup["mutations"] != 0:
+                    raise RuntimeError("identity proxy mutated a response")
             if adapter_cleanup is not None:
                 cleanup["reference_adapter"] = adapter_cleanup
             cleanup_results.append({**cleanup, "arm": arm, "database_dropped": False,
                                     "resource_check": resource})
         cleanup_results[-1]["database_dropped"] = True
     differences = []
-    policy = Policy(abs_tol=score_abs_tol, score_paths=("/body/entries/*/score", "/body/result/structuredContent/entries/*/score",
-        "/body/result/content/*/text/entries/*/score"), json_text_paths=("/body/result/content/*/text",),
-        ranking_paths=("/body/entries", "/body/result/structuredContent/entries", "/body/result/content/*/text/entries"))
     for index, candidate_records in enumerate(passes[1:], start=1):
         for expected, actual in zip(passes[0], candidate_records):
-            case_policy = Policy(abs_tol=score_abs_tol) if expected["expect"].get("tool_error") else policy
             differences.extend({"case": expected["id"], "arm": index, **difference} for difference in compare(
-                expected["response"], actual["response"], case_policy))
+                expected["response"], actual["response"], policies[expected["id"]]))
     return {"schema": 1, "capture_platform": capture_platform(), "records": passes[0]}, {
         "schema": 1, "capture_platform": capture_platform(), "status": "passed" if not differences else "failed",
         "cases": len(passes[0]), "differences": differences, "cleanup": cleanup_results,
         "resource_check": resource, "environment": environment_metadata(oracle_root), "seed": corpus["seed"],
-        "scope": corpus["scope"], "score_abs_tolerance": policy.abs_tol,
+        "oracle_source_check": source_check,
+        "embedding_fixture": "deterministic test embeddings; no model parity" if phase1_protocol_fixture else None,
+        "scope": corpus["scope"], "score_abs_tolerance": score_abs_tol,
         "candidate": candidate_identity, "graded_controls": control_results,
+        "identity_proxy_validation": "passed" if validate_controls and not any(
+            d["arm"] == len(passes) - 1 for d in differences) else "failed" if validate_controls else "not-run",
         "url_candidate_validation": "passed" if validate_url_candidate and not any(d["arm"] == 2 for d in differences)
                                     else "failed" if validate_url_candidate else "not-run",
-        "compared_http_headers": list(HTTP_HEADER_ALLOWLIST), "normalization_rules": list(NORMALIZATION_RULES),
+        "policy_instances": [{"case": record["id"], "arm": arm, **record["policy_evidence"]}
+                             for arm, records in enumerate(passes) for record in records
+                             if "policy_evidence" in record],
+        "compared_http_headers": list(HTTP_HEADER_ALLOWLIST),
+        "normalization_rules": [*NORMALIZATION_RULES, POLICY_NAME],
         "ranking_order": "strict; sequential integer memory IDs retained exactly"}
 
 
@@ -463,6 +510,7 @@ def main():
     candidate.add_argument("--candidate-command-json", help="JSON argv for runner-owned candidate")
     candidate.add_argument("--python-candidate", action="store_true", help="exercise the owned-command path with Python")
     parser.add_argument("--validate-controls", action="store_true")
+    parser.add_argument("--phase1-protocol-fixture", action="store_true", help="Phase 1 pin and deterministic protocol-only embeddings")
     parser.add_argument("--candidate-nonce", help="private readiness nonce from the externally owned adapter")
     parser.add_argument("--validate-url-candidate", action="store_true", help="prove the URL lane with another fresh Python bank")
     args = parser.parse_args()
@@ -484,7 +532,8 @@ def main():
                                   offline_resource_checked_at=args.offline_resource_checked_at,
                                   candidate_url=args.candidate_url, candidate_command=command,
                                   candidate_nonce=args.candidate_nonce, validate_controls=args.validate_controls,
-                                  validate_url_candidate=args.validate_url_candidate)
+                                  validate_url_candidate=args.validate_url_candidate,
+                                  phase1_protocol_fixture=args.phase1_protocol_fixture)
     except Exception as exc:
         write_new(args.out_dir / "run.json", {"schema": 1, "capture_platform": capture_platform(),
                                              "status": "failed", "error_type": type(exc).__name__,

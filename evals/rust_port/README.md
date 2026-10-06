@@ -157,3 +157,167 @@ original assertions and SystemExit expectations are unchanged. Broader CLI,
 shim and storage routing remain pending. Protocol negotiation records what the
 installed MCP SDK actually supports; initializing a requested July-2026 protocol
 that falls back to an older revision does not establish modern support.
+# Phase 1 stdio judge
+
+Run the bounded shim judge from a checkout installed with `[dev,lite]`:
+
+```sh
+python -m evals.rust_port.phase1 --candidate-json '["/absolute/path/pseudolife-stdio"]' --candidate-root /absolute/candidate-checkout --out /private/phase1.json --public-out evals/results/phase1.json --offline-resource-checked-at VERIFIED_UTC_TIME
+```
+
+Omit `--candidate-json` for Python self-replay. The command selects eight public
+stdio test functions without changing their assertions, runs both protocol eras
+on fresh guarded disposable PostgreSQL banks, and exercises EOF, refusal,
+credential rotation, recovery and graded forwarding controls. PostgreSQL must
+already be available through the existing `tests.pg_defaults` resolver or
+`PSEUDOLIFE_BENCH_ADMIN_URL`. The clearance timestamp is the lead's independent
+resource check; the runner also checks the local full-suite lease. No full test
+suite runs.
+
+Receipt schema 2 records each selected node's outcome from pytest's private
+JUnit report. Exit zero alone is insufficient: skipped, errored, failed,
+missing, duplicate or unexpected nodes cannot produce a passing receipt.
+The public summary retains node identities/outcomes and the XML hash; raw test
+output, error messages and XML stay beside the private receipt.
+
+`--candidate-root` names the native Git checkout that holds the committed Rust
+source, independently of `--oracle-root`. It must resolve on the OS running the
+judge; a Windows checkout path with unavailable Git metadata is not a Linux
+source identity. Receipts record its commit/tree, clean source hashes and binary
+SHA-256, and bind the process tests and every candidate real-bank, EOF, fault,
+startup and concurrent-call cell to that executable. The source/binary pairing
+is not a build attestation: retain the build evidence separately. Python
+self-replays bind the interpreter and
+the checked production oracle source instead.
+
+All judge sections must run for a complete passing receipt. The `--skip-*`
+switches produce incomplete evidence. Process-test reuse refuses legacy
+receipts, differing platform/oracle/instrument fingerprints, missing per-node
+passes or a different executable. Final Python self-replays run fresh without
+reuse or skip switches, once per platform after the instrument is frozen.
+
+For a CI runner with `[lite]` installed and no prestarted PostgreSQL, use
+`python -m evals.rust_port.phase1_ci` with the same arguments. It provisions a
+fresh owned embedded instance through the existing provider, supplies disposable
+test/admin URLs internally, and stops the listener before writing
+`<private-receipt>.postgres.json`. It never prints database credentials.
+
+`--port-stdio-json` and `PSEUDOLIFE_PORT_STDIO_JSON` select the candidate for the
+external pytest adapter. Unmapped functions and private Python entrypoints are
+rejected. Without these switches, tests retain their Python default. Only public
+default, `shim` and `channel` launches can be replaced.
+The stdio harness binds `PSEUDOLIFE_MCP_PYTHON` to its own `sys.executable`;
+`env_extra` may override it, including with an empty value. The external stdio
+adapter preserves a selector in the test's child environment, otherwise uses
+the explicitly configured caller selector or its own interpreter. The CLI
+adapter uses that same caller-or-interpreter choice. These bindings do not
+change remote or no-spawn controls. The Parity workflow runs the instrument
+with the prepared oracle interpreter and explicitly selects it for children.
+For a full-suite gate, add `--port-full-suite` with `--port-stdio-json`:
+all mapped stdio nodes use Rust, and every other collected node runs its original
+Python assertions. This mode reports both counts and refuses a selection with
+zero mapped stdio nodes. The default explicit selection still rejects unmapped
+nodes; neither mode skips or deselects assertions.
+
+The `stdio-raw-compared` policy retains and compares stdout bytes, including
+member order, spacing, integer spelling and line framing. It changes only named
+source newline spans at `/body/result/tools/*/description` and
+`/body/result/instructions`. Stderr's allowlist is empty and exit codes are exact.
+`eof-observed-final-pair-orders` permits only the observed final two connection
+errors to swap; their bytes, multiplicity and all preceding frames stay exact.
+Each platform supplies its own byte oracle. Frozen Windows observations authorize
+only the observed ID order sets on Linux, not stream newline normalization.
+
+Generic HTTP controls use the exact per-case comparison Policy used for the
+real candidate, including embedded JSON and ranking checks. Malformed responses
+pass through the shared boundary observation wrapper and generic comparator.
+The identity proxy seeds a fresh bank and must make zero mutations and produce
+zero differences. HTTP raw bodies remain retained but ignored until Phase 3.
+Deterministic test embeddings establish protocol and storage execution, not
+model or retrieval parity. Historically, at `2e628b27`, all 125 scoped Phase 1
+internal functions named Rust targets with Windows/Linux assertion evidence.
+The current mapping contains 121 completed equivalents, exactly 3 SDK cases
+retired-by-decision, and 1 pending postframe update-scheduling substitution.
+The pending row now records targeted Windows/Linux evidence at frozen tree
+`a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
+and successful reruns, and Linux passed all four checks (66 integration and
+5 wire cases). The 55 other internal functions remain outside this phase.
+The inventory mapping is frozen before acceptance; its pending labels remain
+unchanged. Final bounded implementation acceptance is recorded separately in
+`evals/results/rust-phase1-closeout-8b7a6c95.json` and PORT-STATE.md; current
+documentation PR-head CI, full suites and final review remain required before ready.
+
+The final judge always executes the seven startup scenarios and six concurrent
+call cells in addition to the original nineteen candidate cells. Both scenario
+JSON contracts are included in the instrument fingerprint; public bindings
+retain the executable identity of all thirty-two cells, while their raw streams
+remain private. Startup stderr still has no allowlist. Concurrent call order is
+authorized only by the separately captured per-platform final-pair contract.
+
+After merging newer Python source, keep the oracle at its recorded pin. Prepare
+an isolated oracle from the current checkout-installed dependency runtime:
+
+```sh
+python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
+cd /private/new-phase1-oracle/source
+export PATH="$PWD/../runtime/bin:$PATH"
+../runtime/bin/python -m evals.rust_port.phase1_ci --oracle-root . --candidate-json '["/absolute/current/rust/target/release/pseudolife-stdio"]' --candidate-root /absolute/current --out /private/new-result.json --public-out /absolute/current/evals/results/new-result.json --offline-resource-checked-at VERIFIED_UTC_TIME
+```
+
+On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
+directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
+creates a detached clone at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, overlays
+only the current harness instruments, and installs that oracle editable without
+dependencies in a private runtime. It checks both source bytes and imported
+package/version identity. The candidate is the current absolute binary path;
+the immutable test functions execute from the pinned source. Dependency paths
+come from the caller's installed `[dev,lite]` runtime. The destination must be new.
+
+
+Historical candidate `2e628b27` receipts are retained at
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json` to reconstruct the
+strict-judge evidence associated with the original paired measurements below.
+They record zero differences and process cleanup, but lack actual pytest node
+outcomes; their binary bindings were added outside the committed instrument.
+They are explicitly historical and cannot satisfy final close-out acceptance
+or be reused by schema 2. Their recorded source identities remain unchanged.
+
+Keep one current complete combined receipt per replay kind (`python-self` or
+`rust-candidate`) and platform (Windows or Linux). Promote four fresh receipts
+only after checking their final instrument fingerprints, source/executable
+bindings, all eight actual node passes, zero differences and cleanup.
+The four current 690bb8ac captures are
+`rust-port-phase1-python-windows-690bb8ac.json`,
+`rust-port-phase1-python-linux-690bb8ac.json`,
+`rust-port-phase1-rust-windows-690bb8ac.json` and
+`rust-port-phase1-rust-linux-690bb8ac.json` under `evals/results/`.
+They each record eight actual pytest passes, 32 bound candidate cells, zero
+retained-wire differences and verified complete private cleanup. The public
+files exactly use the committed export behavior, omitting raw stream cells.
+Separate `rust-port-phase1-cli-python-{windows,linux}-690bb8ac.json` receipts
+record five Python dispatcher passes per OS; they are not Rust CLI coverage.
+The eleven other superseded or failed Phase 1 receipts are pruned;
+they have no retained-history exception. The two named `2e628b27` files above
+are the sole historical exception. The contaminated Windows measurement smoke
+is removed; it is not measurement evidence.
+
+Paired measurements of `2e628b27` completed three ten-sample repeats per arm
+on each platform, with SDK preflight included and all 120 launches clean.
+Receipts are `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`. Peak RSS is sampled;
+executable size excludes runtime/dependency footprint. These two paired
+receipts are retained as the named before-retirement measurement history,
+with their original source/runtime bindings; they are not current evidence.
+
+Current post-retirement pairs are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`, each three repeats
+of ten samples per arm with clean normal and separate RSS launches. PORT-STATE.md
+records their numeric quantiles and per-arm repeat floors. Historical r5 remains
+unchanged and noncomparable; its canonical LF Git blob SHA256 is
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
+Implementation-head suites and integrated CI passed at `8b7a6c95`; the separate
+close-out ledger preserves their source chain and actual routing. Current
+documentation PR-head suites, CI and final independent review remain required
+before #560 is marked ready.

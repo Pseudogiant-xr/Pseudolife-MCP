@@ -1,12 +1,19 @@
 # Rust port state
 
-The Python oracle for phases 0b and 1 is pinned to master
-`3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53).
+The current phase 1 oracle is
+`3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55).
+Historical phase 1 close-out evidence retains
+`f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54); existing receipts keep their executed identities.
+The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
+existing receipts retain their original source identities.
+The historical phase 0b oracle remains
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53);
+existing phase 0b receipts retain that source identity.
 Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 [PR #546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546).
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
-No production Rust surface has been accepted.
+Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
@@ -18,14 +25,39 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
-| 2: Client CLI leaves | deferred | — | CLI rows and 25-mode checklist in PARITY.md |
+| 1: Stdio shim | Phase 2b final acceptance pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current PR-head suites, integrated CI and final review must pass before #560 is marked ready. |
+| 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
 
+## Phase 2c publication snapshot
+
+Snapshot: 2026-10-06 08:57 UTC. These are the published heads and observed workflow results, not acceptance of later local changes. The current local Linux cleanup repair still requires its own hosted CI and candidate-routed full suites. A run validates only its recorded head.
+
+| Branch | PR | Published head | Base | Rust workflow run / status | Next action |
+|---|---|---|---|---|---|
+| `codex/rust-phase1` | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), draft | `5ff045b0` | `master` @ `3c01bb31` | #37434566225: Rust and Parity green on both OSes; general CI #37434566230 green | Review and publish the Linux cleanup deadline repair; require its own CI, one routed full suite per machine, and final readiness review. |
+| `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` | `codex/rust-phase1` | No run on this head; #37315503446 belongs to historical `ac0c64a1` | Complete the installed-layout identity correction and source-bound checks, then align with the final phase 1 base and rebind evidence. |
+| `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
+| `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), draft | `7171d6cc` | `codex/rust-phase2b-version` | #37429570773: Rust green, Parity red on both OSes | Carry shared repairs after version is ported; investigate the additional unretained normal-transcript stderr difference with final-head raw evidence. |
+| `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), draft | `2c026331` | `codex/rust-phase2b-version` | #37429996211: Rust green, Parity red on both OSes | Apply traceback, clock and temporary-name rules; carry shared repairs after version is ported, then rebind mode evidence. |
+| `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881: Rust and Parity green on both OSes | Preserve #589 until its dependent fixture and evidence split is complete. |
+| `codex/rust-phase2b-fixes` | Folded into #560; redundant worktree archived | `7f890590` (local ref) | `master` | Historical #37242617729 failed before folding | Validate the surviving fixes through #560; no redundant PR. |
+| `codex/rust-phase2` | [#589](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/589), draft | `c9705e88` | `codex/rust-phase1` | Historical #37253327797 succeeded | Preserve until the dependent fixture and evidence split is complete. |
+| `codex/rust-phase2c-users` | [#607](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/607), draft | `43e05ac1` | `codex/rust-phase1` | #37438008142 in progress | Complete hosted checks for the independently reviewed users-only removal. |
+
 ## Decisions and constraints
 
+- Phase 1 starts from master `0b015f92` on `codex/rust-phase1`.
+  PR #546 was still open at branch creation; its branch head `31f8475e`
+  was merged into the phase 1 branch at `93012944`, as the phase 1 brief
+  permits. PR #546 and its branch are unchanged. The maintainer owns its merge.
+- The historical phase 1 window ended at 2026-10-04 12:30 AEDT (01:30 UTC).
+  The close-out window ends at 2026-10-05 13:00 AEDT (02:00 UTC);
+  incomplete acceptance retains explicit pending evidence and a draft PR.
 - The phase 0b brief re-pins the oracle to master at phase start. The port makes
   no DDL changes, adds no tables and repurposes no columns. Upstream schema bumps
   follow CLAUDE.md's seven-place checklist and a new phase pin.
@@ -33,14 +65,14 @@ No production Rust surface has been accepted.
   captured on WSL2, while production runs in a Linux container. Shim and CLI
   captures run on Windows and Linux. Every receipt records its platform and uses anonymous host
   labels with hardware/software details.
-- Existing tests and conftest stay immutable; candidate routing uses the external
-  pytest plugin and the concrete nodes in test-buckets.json only.
+- Existing files under `tests/`, including `tests/conftest.py`, stay immutable; candidate routing uses the external
+  pytest plugin and the concrete nodes in phase1-test-buckets.json only.
 - The old Console was replaced by Console v3 on master, with /ui/next/ removed.
   Other proposed simplifications remain open and are not implemented by the port.
 - Historical captures keep their recorded source identity. R6 selfcheck and
   full-bank R5 remain in-tree; superseded R4/R5 selfchecks are preserved outside
   the tree and recoverable from PR #540's recorded tree at `f2ee1524`.
-- The daemon baseline uses the phase oracle above. Hosted CI noise controls use
+- The phase 0b daemon baseline uses its historical `3691f5cb` oracle. Hosted CI noise controls use
   the reviewed PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e` and
   Actions run 37090575829; their distinct source identity remains recorded.
   The receipt rust-phase0b-ci-same-head.json includes successful attempts 1, 3
@@ -66,15 +98,423 @@ No production Rust surface has been accepted.
   Both remain unchanged here. Phase 3 requires maintainer docs resolution and a
   named same-graph/tokenizer comparison with measured error before a tolerance
   or embedding-equivalence claim is accepted.
-- All internal test equivalents marked pending are future implementation work,
-  not accepted wire parity. Inventory coverage alone does not close production
-  behavior rows.
+- Historically, `2e628b27` named targeted Rust equivalents for all 125 scoped
+  internal cases. The current mapping has 121 completed equivalents, 3 SDK
+  retirements and 1 pending postframe substitution with targeted evidence on
+  both platforms; 55 other internal cases remain outside Phase 1's scope.
+  Inventory and component coverage alone do not close production behavior rows.
 - The legacy MCP negotiation evidence from #540 is about its original pin;
   current and earlier protocol revisions require separate current-pin evidence.
 
-## Resume
+## Historical phase 1 evidence
 
-Phase 0 is complete, with all five gap implementations, measurement receipts,
-final appendix review and ten passing CI checks recorded at `9a62ed02` in
-PR #546. Subsequent PR updates require fresh review and current-merge-ref CI.
-Phase 1 parity rows stay deferred until phase 0b is merged.
+Phase 1 close-out uses Python 0.16.1/schema 54 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`
+and the stacked phase 0b branch above. PR #546 remains open and unmerged;
+PR #560 remains a draft. Broader production behavior rows remain deferred; named close-out decisions are recorded below.
+
+Frozen candidate `2e628b27226ac28344d3218f679ff2c2de99422e`
+(tree `6ee4ecde802fefa88f5bc64f3aeebe4c41289f91`) passes Rust 1.94
+fmt, all-target check, clippy and release build on both platforms. Windows
+nextest passes 280/280 and Linux 262/262, with no skipped tests. The combined
+harness/inventory selection passes 214 tests; the Phase 1 audit accounts for
+408 files, 13 routed process nodes and 26 CLI modes with no missing surfaces.
+Of the routed nodes, eight public stdio cases select Rust; five historical CLI
+nodes remain separately accounted for. All 125 scoped internal assertions name
+Rust targets with Windows/Linux evidence; 56 internal functions remain outside
+this phase. These overlapping selections are not summed into a coverage count.
+Existing files under `tests/`, including `tests/conftest.py`, remain unchanged
+relative to the merged master base.
+
+The strict frozen Rust judges pass eight public subprocess tests on each
+platform with zero retained-wire differences and verified cleanup:
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json`. Each covers both
+protocol eras on fresh guarded banks, EOF observations and fault cells.
+Real public-process identity passes; wrong-protocol and duplicate-key controls
+reject their named defects under `stdio-raw-compared`. The six stdio mutation
+controls and seven generic HTTP proxy controls reject their intended defects;
+the fresh-bank generic identity proxy passes with zero mutations/differences.
+Generic Python controls establish judge policy, not Rust daemon parity.
+The only wire allowances remain named source-newline spans and the observed
+final EOF error order set. Earlier receipts retain their original candidate
+and oracle identities and are not relabeled as current acceptance.
+
+The initial independent whole-branch review of `4d31fd56` found four blockers.
+A fresh independent review of `2e628b27` verified their fixes and approved the
+code conditional on the remaining acceptance gates. That historical candidate
+preserved the Python SDK preflight before daemon traffic, and its startup cost
+belongs in the historical measurements. Close-out item b below implements the
+subsequent authorized retirement and substitutions.
+
+The first hosted Rust workflow attempt at `2e628b27` failed in new fixtures:
+Linux ran 171/262 (169 passed, two Board retry failures); Windows ran 230/280
+(227 passed, three updater-fixture failures). Parity jobs were skipped.
+The original two-helper repairs have conditional independent code approval.
+The final fixture adjustment requires fresh review and completion evidence;
+final-head CI remains pending. The failed
+attempt remains evidence and is not replaced by the local passing counts.
+
+Candidate-routed committed
+full-suite receipts on the authorized WSL/box paths, green final-head CI,
+validation of any integrated fixture repairs
+remain open. The close-out brief permits #546 to remain open and stacked. No Phase 1 parity row flips on inventory, component coverage or
+these frozen judge receipts alone. Subsequent substantive PR updates require
+fresh review of changed source and current-merge-ref CI.
+
+The first two-helper validation passed Windows but failed one Linux case:
+`board_retry_cancelled_attach_waits_out_attachment_busy` observed one attach
+call instead of three. A controlled startup-before-attach schedule reproduced
+that failure with the old 90 ms reply. Changing only that NEW fixture reply to
+350 ms, beyond the existing 300 ms retry-attempt deadline, produced the required
+one register, three attach and one detach while preserving the assertions.
+The final Windows PATH-only target passes 23/23 with fmt/check/clippy exit 0.
+Final Linux also passes 23/23 with fmt/check/clippy exit 0. Both final
+controllers completed; cleanup verified zero owned processes on both platforms
+at approximately 00:32:40Z (Windows) and 00:32:42Z (Linux). The earlier explicit absolute-selector updater
+selection passed three cases on each platform. Fresh review of the final
+fixture adjustment, committed full suites and final-head CI remain gates;
+no green hosted CI or Phase 1 acceptance is claimed.
+
+## Historical phase 1 paired measurement evidence
+
+Paired measurements at `2e628b27` completed three repeats of ten samples per
+arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
+That historical candidate includes the real Python SDK preflight inside Rust
+startup; its descendants contribute to sampled process-tree RSS. Receipts are
+`evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`.
+
+| Platform | Metric | Python p50 / p95 | Rust p50 / p95 | Python floor p50 / p95 | Rust floor p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| Windows | First stdout frame, ms | 811.794 / 852.468 | 871.665 / 903.501 | 8.382 / 26.310 | 12.934 / 15.408 |
+| Windows | Sampled peak tree RSS, bytes | 87,924,736 / 91,459,584 | 100,642,816 / 100,904,960 | 143,360 / 4,829,184 | 131,072 / 24,576 |
+| Windows | Executable file, bytes | 274,712 / 274,712 | 13,487,616 / 13,487,616 | 0 / 0 | 0 / 0 |
+| Linux | First stdout frame, ms | 704.398 / 724.289 | 686.487 / 699.918 | 2.012 / 113.563 | 6.224 / 33.229 |
+| Linux | Sampled peak tree RSS, bytes | 73,633,792 / 73,879,552 | 74,027,008 / 74,166,272 | 53,248 / 135,168 | 57,344 / 36,864 |
+| Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,644,008 / 16,644,008 | 0 / 0 | 0 / 0 |
+
+Floors are observed ranges of three identical-input repeat-block quantiles,
+not confidence intervals. Each arm retains its own source, runtime and
+descriptive floors. RSS is a sampled lower
+bound and can miss peaks between 5 ms polls. Size covers only the selected
+executable, excluding Python runtime/dependencies; it is not deployment footprint.
+The pair uses warm filesystem caches and an empty loopback fixture, with no
+PostgreSQL, models, daemon spawn or coordination. Desktop activity is uncontrolled.
+Historical r5 uses a different timing/RSS boundary and cannot substitute for
+this pair. These source-bound measurements establish no general speed claim
+or Phase 1 acceptance.
+
+## Phase 2 close-out item a
+
+Merged actual `origin/master` at `f709abb54f7912ae9cd767998d0926ca33df4bcd` forward;
+only `CHANGELOG.md` conflicted and both entries were preserved. PR #546
+remains open and stacked, as the close-out brief permits; no upstream branch
+from phase 0b was merged or rewritten. The current inventory audit accounts for 419 test
+files (68 oracle, 2 candidate, 349 internal), 189 function mappings and 13
+routed process nodes. Its 28 CLI modes include upstream `maintainer` and
+`test-login`, deferred outside the original 26-mode phase 2 scope. Historical
+phase 0b manifests and all historical receipts retain their pins.
+
+Item a is complete: both inventory audits pass with no missing surfaces;
+the inventory/provenance selection passes 56 tests, including unknown-reference
+negative controls. Validation: `python rust/contract_inventory.py --phase1`,
+`python rust/contract_inventory.py` and the targeted inventory/provenance files.
+Item b implementation evidence follows; current close-out status is recorded
+in the final section. Item a alone establishes no full suite or receipt replay.
+
+## Phase 2 close-out item b
+
+The authorized SDK preflight and wake-reason table retirements and explicit
+daemon-spawn and postframe-update substitutions are implemented over integrated
+HEAD `7d0ee5997acb4c74196a0d46fa9f2fc20aa3e860`. Exactly three SDK mapping rows
+are retired-by-decision. The update-scheduling row stays pending with its
+proposed Rust target and current Windows/Linux targeted evidence; the other
+121 completed equivalents retain their recorded component evidence.
+The harness and external adapter explicitly bind the selected Python runtime,
+and the Parity workflow selects its prepared oracle interpreter.
+
+Frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f` passed Windows and Linux
+all-target check/clippy and 71 affected Rust cases (66 integration, 5 wire).
+Windows evidence is `closeout-check-windows.log`, `closeout-clippy-windows.log`,
+`closeout-targeted-green-windows.log`, `closeout-final-assertions-green-windows.log`
+and `closeout-wire-windows.log`. The aggregate Windows run retained a transient
+ConnectionReset; its exact rerun and the full nine-test final-assertions file
+passed, so no clean aggregate-run claim is made. Linux evidence is
+`closeout-check-linux.log`, `closeout-clippy-linux.log`, `closeout-targeted-linux.log`
+and `closeout-wire-linux.log`, each with a saved exit 0. These private logs bind
+to the frozen tree; they do not validate later changes. Both platforms reported
+zero owned candidates after cleanup.
+
+The two interim review findings were repaired in the interpreter bindings and
+evidence descriptions. This intermediate component validation did not close
+items c-g. The current final section records later CI, receipts, measurements
+and remaining acceptance gates; no acceptance follows from these logs alone.
+
+## Current close-out evidence at `690bb8ac`
+
+The candidate and committed instrument were frozen at `690bb8acd855250c29145d623a039ddcd4dee6cb`,
+tree `9116cc4c98e79e947322fe2772476e255b73f033`, over the Python
+0.16.1/schema-54 oracle `f709abb54f7912ae9cd767998d0926ca33df4bcd`.
+The Windows and native Linux Python self-replays and Rust judges each pass
+all eight actual stdio subprocess nodes with zero retained-wire differences.
+Actual JUnit per-node outcomes and its digest are recorded; exit zero alone
+is insufficient. Each replay binds 32 candidate cells: two real-bank, seven
+EOF, ten fault, seven startup and six concurrent non-EOF cells. All sections,
+controls, owned processes, disposable banks and outer PostgreSQL cleanup were
+checked. The executable/source hashes identify the actual bytes; they are
+not a build attestation. Windows and Linux retain their actual raw checkout
+hashes, including platform line endings.
+
+Current combined receipts are
+`evals/results/rust-port-phase1-python-windows-690bb8ac.json`,
+`evals/results/rust-port-phase1-python-linux-690bb8ac.json`,
+`evals/results/rust-port-phase1-rust-windows-690bb8ac.json` and
+`evals/results/rust-port-phase1-rust-linux-690bb8ac.json`.
+The separate five dispatcher nodes execute the Python public CLI on each OS,
+as recorded in `rust-port-phase1-cli-python-windows-690bb8ac.json` and
+`rust-port-phase1-cli-python-linux-690bb8ac.json` under `evals/results/`.
+Those five passes are not Rust CLI coverage and are not added to the eight
+stdio passes. Runtime metadata is CPython 3.11.9 on Windows and 3.11.15 on Linux,
+MCP 2.1.1, with actual package and distribution version 0.16.1.
+
+[The Rust workflow run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056)
+completed successfully at `690bb8ac`; both Parity jobs executed.
+
+| Job | Platform | Wall time |
+| --- | --- | --- |
+| [Rust](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111528841770) | Ubuntu | 2m 11s |
+| [Rust](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111528841590) | Windows | 4m 34s |
+| [Parity](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111529715899) | Ubuntu | 6m 54s |
+| [Parity](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111529715959) | Windows | 15m 12s |
+
+The brief's 2.1 close-out status is:
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| a: Master integration and inventory | Complete | Python oracle f709abb5/schema 54; both inventory audits; 419 test files, 189 function mappings, 13 routed nodes |
+| b: Named retirements and substitutions | Implemented and validated; scoped decisions recorded | SDK preflight retired; explicit daemon spawn, postframe update scheduling and Rust wake-reason predicates named in PARITY.md and PORTING.md; both-platform targeted checks and executing CI |
+| c: Executing Rust and Parity CI | Complete at 690bb8ac | Run 37233810056, all four jobs successful; wall times above |
+| d: Actual outcomes, source/binary bindings, self-replay and pruning | Complete at 690bb8ac | Four schema-2 combined receipts; eight actual nodes each, 32 bound cells each, all sections and cleanup checked; one current replay kind/platform; two named historical strict-judge receipts retained |
+| e: Post-retirement paired measurement | Complete at 690bb8ac | Both platform receipts below, three repeats of ten samples per arm; all normal and separate RSS launches clean; canonical historical LF artifact binding |
+| f: Small review items | Implemented and validated at 690bb8ac | Close-race built-empty assertion; doctor oracle subprocess classification; local unsafe allowances; lazy launcher scan; Python-first observed concurrent-order contract; seven exact startup stderr cells and executing CI |
+| g: Final acceptance | Implementation evidence complete at 8b7a6c95; current documentation PR-head gates pending | Both candidate-routed committed full suites, executing green integrated CI and the reviewed production-equivalent source chain are recorded in the separate close-out ledger below; current PR-head suites, CI and final independent review remain required before #560 is marked ready |
+
+## Current post-retirement paired measurements
+
+The two current receipts are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`.
+Each contains three identical-input repeats of ten samples per arm, with
+alternating Python/Rust timed launches and separate RSS launches: 60 timed
+and 60 RSS launches per platform. Every normal and RSS cleanup has exit zero,
+no forced termination and confirmed subtree cleanup. The source, instrument,
+executable and actual Python runtime bindings were checked for each platform.
+
+| Platform | Metric | Python p50 / p95 | Rust p50 / p95 | Python floor p50 / p95 | Rust floor p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| Windows | First stdout frame, ms | 812.083 / 860.987 | 25.992 / 27.217 | 16.399 / 38.308 | 0.755 / 1.414 |
+| Windows | Sampled peak tree RSS, bytes | 87,785,472 / 91,738,112 | 17,547,264 / 22,208,512 | 282,624 / 4,599,808 | 1,724,416 / 749,568 |
+| Windows | Executable file, bytes | 274,712 / 274,712 | 13,293,056 / 13,293,056 | 0 / 0 | 0 / 0 |
+| Linux | First stdout frame, ms | 668.437 / 695.709 | 5.888 / 6.548 | 12.771 / 16.679 | 0.132 / 0.456 |
+| Linux | Sampled peak tree RSS, bytes | 73,904,128 / 74,223,616 | 11,649,024 / 11,845,632 | 221,184 / 172,032 | 196,608 / 65,536 |
+| Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,742,560 / 16,742,560 | 0 / 0 | 0 / 0 |
+
+The reported quantiles pool 30 samples per arm and use nearest rank.
+Each arm's floor is the range of its three repeat-block quantiles, computed
+separately for p50 and p95; these are descriptive ranges, not confidence
+intervals. With ten samples, each repeat-block p95 is its maximum. First-frame
+latency observes the first complete stdout line before JSON parsing. RSS is a
+sampled lower bound from a separate launch at 5 ms polls; executable size
+excludes Python runtime and dependencies. The fixture uses warm filesystem
+cache, an empty authenticated loopback server, no daemon spawn and disabled
+coordination; ambient desktop activity and cache evolution are uncontrolled.
+
+The before-retirement numeric table above retains its original source/runtime
+bindings. The Python source/schema/runtime and other Rust close-out behavior
+changed between captures; their difference is not an isolated estimate of SDK
+retirement. Historical r5 remains noncomparable: its Windows Python
+initialize-return p50 is 644.687 ms, versus 811.841 ms in the earlier paired
+capture, whose first-frame p50 is 811.794 ms. Source pins, versions,
+dependencies, instrumentation and process ownership differ, and no matched
+crossover isolates the cause. The canonical LF r5 Git blob
+`a7ddf073f0e8102cecdc2947bffc0b2f546151cd` has SHA256
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
+The historical artifact is unchanged; checkout CRLF bytes do not replace this
+canonical reference. No general performance claim or completed Phase 1
+acceptance follows from these tables.
+
+## Phase 1 implementation acceptance at `8b7a6c95`
+
+The [separate acceptance ledger](../evals/results/rust-phase1-closeout-8b7a6c95.json)
+records the tested implementation tree, source chain, artifact digests, actual
+suite routing/outcomes, cleanup and current ready-status gates. The
+`phase1-test-buckets.json` acceptance fields remain the frozen pre-acceptance
+inventory mapping; this ledger records final implementation acceptance.
+MCP-TIER acceptance covers the client boundary only; daemon tier enforcement
+remains Phase 3 deferred. The four exact channel remainder nodes stay deferred
+to Phase 2 in the ledger; the named SDK retirement and three substitutions remain.
+
+| Suite host label | Tested checkout | Passed / skipped | Pytest seconds | Mapped nodes passed once |
+| --- | --- | --- | --- | --- |
+| linux-wsl | 8b7a6c95 | 17,950 / 81 | 1,681.36 | 8 Rust stdio; 5 Python dispatcher |
+| linux-box | 8b7a6c95 | 17,955 / 76 | 1,689.51 | 8 Rust stdio; 5 Python dispatcher |
+
+Both suites execute the native ELF built at `690bb8ac`, with its original hash
+and build-source identity. `d3022bcc` only promotes documentation/data;
+`8b7a6c95` changes one independently reviewed Windows `cfg(test)` assertion.
+No production or executable instrument bytes changed in that source chain.
+Both exact owned process/database censuses are empty; staged copies are removed
+and native locks are free. Lease board verification was unavailable.
+
+[Integrated Rust workflow 37238403052](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052)
+passed all four executing jobs at `8b7a6c95`: Rust Ubuntu 2m12s, Rust Windows
+4m41s, Parity Ubuntu 4m05s and Parity Windows 9m56s. All fourteen PR checks
+passed at that implementation head. The whole-closeout draft review approved
+`d3022bcc`; the sole subsequent fixture assertion has independent bounded
+approval. Final review of this acceptance record and evidence followup remains
+required. Current documentation PR-head suites and integrated CI must pass
+before #560 is marked ready; these earlier results do not claim the dirty
+documentation head has been tested. Measurements and all four local judges
+retain their executed `690bb8ac` identities.
+
+## Phase 2b item b: truthful startup and nonfatal command configuration
+
+The lifecycle fix and startup regressions are integrated from frozen tree
+`a83878bfa389c0e009d18a3c6d28387267fb1fb5`. Missing configuration no longer claims
+that the caller set `PSEUDOLIFE_MCP_NO_SPAWN`; malformed explicit serve argv emits
+one named note before health and follows the no-spawn path. Healthy unconfigured
+daemons retain silent startup, and the dead `spawn_daemon` helper is removed.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds the original source/test
+blobs and retained watched-RED logs `fixes-red-b.log` (two failures) and
+`fixes-red-b-healthy-silence.log` (the caught healthy-startup regression). Final
+isolated Windows startup checks passed 12/12. This closes implementation item b;
+final integrated-head CI, suites and review remain pending. No later head is
+claimed tested by those isolated runs.
+
+## Phase 2b item c: restored Unicode 14 wake reasons
+
+The committed Python generator and Rust full-range contract hash two predicate
+bytes per code point from U+0000 through U+10FFFF, including surrogates, to
+`f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe`. The
+CPython 3.11 / Unicode 14 table preserves L* and N* alphanumeric categories and
+Python whitespace, including U+001C–001F. Existing claim tables remain intact;
+`reason14.rs` stays deleted.
+
+[Local proof summary](phase2b-fixes-evidence.json) retains watched RED
+`fixes-red-bcd.log`: the separator and full-range hash both failed before the
+fix. Both restored contract tests passed in the isolated Windows targeted run.
+Implementation item c is closed; the row's earlier Rust-predicate substitution
+is withdrawn, with final integrated-head acceptance still pending before a
+`ported` status.
+
+## Phase 2b item d: invalid OS arguments
+
+`main.rs` now reads `args_os`; an invalid-Unicode mode uses Python-compatible
+unknown-mode repr and exit 2 instead of panicking. Valid shim/channel argument
+behavior is unchanged. One corpus case is defined for each OS: invalid UTF-8
+with Unix surrogateescape, and an unpaired UTF-16 surrogate on Windows.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds watched RED
+`fixes-red-d.log` (Windows exit 101 instead of 2) and the isolated Windows
+GREEN case. Implementation item d is closed. The Unix corpus is implemented
+but unexecuted locally; current-head both-platform validation remains pending.
+The broader Phase 2 CLI dispatcher is not part of this item.
+
+## Phase 2b item e: bounded fixtures and updater callback proof
+
+The two update-health accept/join paths now share a cancellable nonblocking
+fixture with a five-second accept deadline, bounded header reads/writes and an
+8 KiB header cap. The Windows doorbell test preserves unsuccessful descendant
+status and restores its `!status.success()` assertion. Nextest uses 60-second
+slow periods and terminates after two; Parity install/build/judge steps are
+bounded at 10/10/15 minutes within the unchanged 25-minute job.
+
+The built binary sends its first flushed client frame before a disposable
+explicit-interpreter updater writes its sentinel. The test observes no update
+at upstream startup, then pins callback argv and result after the client frame.
+It makes no latency assertion and performs no client installation.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds watched RED
+`fixes-red-e-bounds.log` and `fixes-red-e-doorbell.log`, plus the static baseline
+configuration RED `fixes-red-e-timeouts.log` (not a runtime timeout trial). The
+isolated Windows targeted run passed the updater sentinel and cancellation
+checks; the native doorbell group passed 10/10. The callback proof is positive
+only: production callback wiring was already correct and is unchanged.
+Implementation item e is closed; final integrated-head validation is pending.
+
+## Phase 2b first retention-only CI read
+
+[Run 37281778651](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37281778651),
+attempt 1, passed all four Rust/Parity jobs on exact head
+`d3f0022bc1b74a4fd8ab5649b39e7dc2abde3fb8` (tree
+`1f327c52f07105e94fba765e91c7452619b7a1d5`). Both retained receipts have
+complete 32-cell binding coverage, all eight selected process nodes passing
+once, zero actual Rust-candidate differences, and complete expected rejection
+evidence. The stderr control retained the empty oracle arm and all 38 candidate
+bytes untruncated on both OSes; the frame-rejection control also retained both
+stderr arms. Raw bytes remain in the run artifacts, not this register.
+
+[Diagnostic summary](phase2b-retention-first-ci.json) binds the artifact IDs,
+receipt hashes, exact head, job outcomes and limits. The read verifies the
+retention control rather than assuming coverage from green jobs. No daemon
+emitter mismatch was reproduced; the earlier intermittent stderr mismatch
+remains unexplained. No readiness capture condition is justified by this run,
+and no allowlist or stderr policy changed. The first-commit/CI-read barrier was
+released after this read; the diagnostic does not validate the b–f fixes or a master-integrated
+final head.
+
+## Phase 2b item f and resume point
+
+The lifecycle register separates explicit spawn substitution from installer
+client updates deferred to the Phase 5 install-path decision. The wake-reason
+row describes restored Unicode 14 behavior, with final parity acceptance still
+pending. PORTING records schema 54 at the historical close-out pin; historical
+receipts retain their original source/schema identities. Implementation items
+b–f are integrated as separate local commits with the original isolated proof
+[summary](phase2b-fixes-evidence.json); these runs keep tree
+`a83878bfa389c0e009d18a3c6d28387267fb1fb5` and do not become final-head proof.
+
+A follow-up corrects the old Rust-only doorbell reason assertion to the pinned
+Python 3.11 Unicode 14 expression: U+001C becomes a space and U+0345 is removed.
+The unchanged input now passes its targeted Windows check with delivery enabled
+and disabled; this assertion correction does not establish final-head parity.
+
+Next: after #546 lands, merge current master forward and re-pin the oracle; run
+Rust and both Parity CI jobs plus candidate-routed committed suites on both
+machines at the final head, then obtain a fresh independent review of the diff
+since `7f890590`. Only after those gates may #560 be marked ready for the
+maintainer. The current local commits have not been pushed or accepted as the
+final head; #560 remains draft.
+
+## Phase 2b dependency fallback
+
+The default-on `codex-delivery` feature makes the `tokio-tungstenite` dependency
+and its transitive `webpki-roots` optional. The disabled dependency graph excludes
+both crates; Cargo.lock retains their entries for the default build. Windows
+and Linux check and Clippy pass for both profiles, with 9 default delivery/bridge
+tests and 43 disabled-feature pull, channel and doorbell tests passing on each
+platform. The [Linux receipt](../evals/results/rust-phase2b-codex-delivery-4173ef98/linux.json)
+binds these results to `4173ef98` and retains the initial zero-test library
+filters as unaccepted setup history. Current-master integration and the final
+integrated-head review remain pending; no parity status changes.
+
+## Current-master integration (2026-10-06)
+
+Merged master `3c01bb31` forward while preserving all nine close-out commits
+through `ccc2f890`. The only textual conflict was CHANGELOG.md; both the
+experimental Unreleased candidate entry and upstream release entries remain.
+Python production, existing tests, ops, plugin and docs match upstream.
+The genuine selected oracle is Python 0.17.0/schema 55; the crate, lockfile
+member and lifecycle version now match it. Both inventory generations remain
+separate: Phase 0b retains 406 files at its historical pin; Phase 1 names
+423 files, 191 function rows and the existing 13 routed nodes. The two new
+upstream shim refusal cases remain oracle-only pending candidate evidence.
+Historical startup contracts and captures keep their original identities;
+their selected startup source blobs match current master. Current-head
+Rust/Parity CI, candidate-routed suites and independent review remain pending.
+
+The closed phase 0b worktree is clean at master `3c01bb31`; its remote
+branch is deleted after #546 merged. SHIM-WAKE-REASON is `ported` under
+the maintainer's phase 2c decision and retained full-range Unicode proof;
+this does not complete current integrated-head runtime acceptance.

@@ -1,0 +1,435 @@
+{
+  "schema": "rust-codex-delivery-validation-v1",
+  "status": "passed-bounded-linux-codex-delivery-gate",
+  "platform": "linux",
+  "provenance": {
+    "head": "4173ef983a41ab8691651506bcb8d80cb7ea46b6",
+    "tree": "72c1c9888ab4c0c7052ca01da5970f76e4e0bcb0",
+    "toolchain": [
+      "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "cargo 1.94.0 (85eff7c80 2026-01-15)",
+      "clippy 0.1.94 (4a4ef493e3 2026-03-02)"
+    ],
+    "raw_manifest": {
+      "sha256": "5a17d59ae23eedac1dd983ed051aed788cdd2f7469bd2ee422f28dbc16928919",
+      "bytes": 8325
+    },
+    "source_bundle_sha256": "5203c73ff56284d37db5af0517abf75341e1467b10f1c9fd248e966b1132ba1b"
+  },
+  "execution": {
+    "working_directory": "rust",
+    "nice": 10,
+    "cargo_jobs": 2,
+    "started_at_utc": "2026-10-05T13:18:44Z",
+    "finished_at_utc": "2026-10-05T13:21:28Z",
+    "first_workload_output_within_two_minutes": true,
+    "first_selected_output_within_two_minutes": true,
+    "locked_offline": true,
+    "nextest_installed": false
+  },
+  "commands": [
+    {
+      "name": "default-check",
+      "argv": [
+        "cargo",
+        "check",
+        "--locked",
+        "--offline",
+        "--all-targets",
+        "-j2"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "6aea837765ffdd552d8ccec42f704cd3b47dd05907fa10a7306e291baf49e5e3",
+        "bytes": 5235
+      }
+    },
+    {
+      "name": "disabled-check",
+      "argv": [
+        "cargo",
+        "check",
+        "--locked",
+        "--offline",
+        "--all-targets",
+        "-j2",
+        "--no-default-features"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "5cb7c80aec7bb33de9226f0a9e1c02de6559d4561533cb1ccd46e7a300062f78",
+        "bytes": 169
+      }
+    },
+    {
+      "name": "default-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--all-targets",
+        "-j2",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "ae302bbb1f15d0c8c94e7d08925e5f5abbf90318d7c94df561118f1cc1fc736d",
+        "bytes": 169
+      }
+    },
+    {
+      "name": "disabled-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "--all-targets",
+        "-j2",
+        "--no-default-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "669532c46c8a0eddeeee8e9a000a04014127bf319072c894c8fa29833d35d76c",
+        "bytes": 169
+      }
+    },
+    {
+      "name": "default-selected",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--test",
+        "board_delivery",
+        "--test",
+        "board_bridge_contract"
+      ],
+      "exit_code": 0,
+      "test_summaries": [
+        {
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ],
+      "tests_passed": 9,
+      "raw_log": {
+        "sha256": "46289c88592632042d90c93053e1f149b0474cf0718bd7b93461035f74e7a5aa",
+        "bytes": 1852
+      }
+    },
+    {
+      "name": "disabled-selected",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--no-default-features",
+        "--test",
+        "board_without_delivery",
+        "--test",
+        "board_channel_contract",
+        "--test",
+        "board_doorbell",
+        "--test",
+        "board_doorbell_completion"
+      ],
+      "exit_code": 0,
+      "test_summaries": [
+        {
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 27,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered_out": 0
+        }
+      ],
+      "tests_passed": 43,
+      "raw_log": {
+        "sha256": "22eaccdb8abc605544f387c64b2a36920df4c6d873320ef7f5753fcee7735c22",
+        "bytes": 6066
+      }
+    },
+    {
+      "name": "fmt",
+      "argv": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "name": "default-graph",
+      "argv": [
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "-e",
+        "normal"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "cd9562e913ccb9c52b446419175e9fa44e1af0225a1d4774caddfc26e792aa43",
+        "bytes": 18402
+      }
+    },
+    {
+      "name": "disabled-graph",
+      "argv": [
+        "cargo",
+        "tree",
+        "--locked",
+        "--offline",
+        "-e",
+        "normal",
+        "--no-default-features"
+      ],
+      "exit_code": 0,
+      "test_summaries": [],
+      "tests_passed": 0,
+      "raw_log": {
+        "sha256": "8fdc9a97f330ffca782b7bc08054db5c68b0eeac1f030e6084d9762016fdc7e8",
+        "bytes": 17114
+      }
+    }
+  ],
+  "selected_tests_passed": 52,
+  "dependency_graph": {
+    "default_includes": [
+      "tokio-tungstenite v0.28.0",
+      "webpki-roots v0.26.11",
+      "webpki-roots v1.0.9"
+    ],
+    "disabled_excludes": [
+      "tokio-tungstenite v0.28.0",
+      "webpki-roots v0.26.11",
+      "webpki-roots v1.0.9"
+    ],
+    "lockfile_reduction_claimed": false
+  },
+  "resource_admission": {
+    "local_full_suite_lock_free": true,
+    "pre_selection_recheck_free": true,
+    "cli_board_available": false,
+    "coordination_board_checked": true
+  },
+  "source_clean_before_after": true,
+  "cleanup": {
+    "owned_cargo_rustc_test_children_alive": 0,
+    "remaining_board_fixture_homes": 0,
+    "checkout_target_retained": true,
+    "services_or_pg_launched": false,
+    "checked_at_utc": "2026-10-05T13:24:20Z"
+  },
+  "unaccepted_setup_history": {
+    "commands": [
+      {
+        "name": "default-delivery",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-j2",
+          "--lib",
+          "board_delivery"
+        ],
+        "exit_code": 0,
+        "test_summaries": [
+          {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 29
+          }
+        ],
+        "tests_passed": 0,
+        "raw_log": {
+          "sha256": "09747170f2523b601a2413039c4869570dbb72b2ff2906beb14d523f7ca1fb92",
+          "bytes": 4477
+        }
+      },
+      {
+        "name": "default-bridge",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-j2",
+          "--lib",
+          "board_bridge_contract"
+        ],
+        "exit_code": 0,
+        "test_summaries": [
+          {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 29
+          }
+        ],
+        "tests_passed": 0,
+        "raw_log": {
+          "sha256": "238c2ba7c307457e155bf241c48ff83a2671b915e52a8970c6502c53aa829bbd",
+          "bytes": 275
+        }
+      },
+      {
+        "name": "disabled-pull",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-j2",
+          "--no-default-features",
+          "--lib",
+          "board_without_delivery"
+        ],
+        "exit_code": 0,
+        "test_summaries": [
+          {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 29
+          }
+        ],
+        "tests_passed": 0,
+        "raw_log": {
+          "sha256": "d1308c7c278b8068c5b49072da4240f842e2ea2c2a8b6abecfef48351e8b9383",
+          "bytes": 372
+        }
+      },
+      {
+        "name": "disabled-channel",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-j2",
+          "--no-default-features",
+          "--lib",
+          "board_channel_contract"
+        ],
+        "exit_code": 0,
+        "test_summaries": [
+          {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 29
+          }
+        ],
+        "tests_passed": 0,
+        "raw_log": {
+          "sha256": "fe428912739663fca14a25e65d1166873e986ce6dbb658faeb444a8488bf7994",
+          "bytes": 275
+        }
+      },
+      {
+        "name": "disabled-doorbell",
+        "argv": [
+          "cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-j2",
+          "--no-default-features",
+          "--lib",
+          "board_doorbell"
+        ],
+        "exit_code": 0,
+        "test_summaries": [
+          {
+            "passed": 0,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered_out": 29
+          }
+        ],
+        "tests_passed": 0,
+        "raw_log": {
+          "sha256": "fe428912739663fca14a25e65d1166873e986ce6dbb658faeb444a8488bf7994",
+          "bytes": 275
+        }
+      }
+    ],
+    "tests_executed": 0,
+    "accepted_as_runtime_coverage": false,
+    "reason": "Library filters selected no tests; the subsequent named integration targets provide the 9+43 runtime results."
+  },
+  "limits": [
+    "Old-branch feature-gate validation only; current-master integration and final independent review remain pending.",
+    "Standalone loopback delivery, bridge and doorbell fixtures; no daemon or PostgreSQL service.",
+    "No full suite, GPU or timing measurements. No parity status change; #546/#560 gates remain unchanged."
+  ]
+}

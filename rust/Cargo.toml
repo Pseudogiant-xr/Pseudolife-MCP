@@ -1,0 +1,38 @@
+[workspace]
+members = ["shim"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Pin the SDK used by the prototype so wire differences remain attributable
+# to this port. Compatibility adjustments are checked against the Python oracle.
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "client", "transport-io", "transport-streamable-http-client-reqwest", "reqwest"] }
+tokio = { version = "1", features = ["macros", "rt", "io-std", "time", "sync", "process"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "stream"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
+futures = "0.3.34"
+http = "1.5.0"
+sse-stream = "0.2.6"
+tokio-util = { version = "0.7.19", features = ["rt"] }
+
+serde = { version = "1", features = ["derive"] }
+fs2 = "0.4.3"
+sha1 = "0.10.7"
+sha2 = "0.10.9"
+hmac = "=0.12.1"
+dirs = "6.0.0"
+uuid = { version = "1.27.0", features = ["v4"] }
+rustix = { version = "1.1.5", features = ["fs", "process"] }
+libc = "=0.2.190"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
+unicode-normalization = "0.1.25"
+which = "8.0.6"
+chrono = "0.4.45"
+users = { version = "=0.11.0", default-features = false }
+unicode-casefold = "=0.2.0"
+tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+process-wrap = { version = "=10.0.0", features = ["tokio1"] }

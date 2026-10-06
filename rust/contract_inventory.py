@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter, defaultdict
-from functools import cache
+from functools import cache, partial
 import json
 from pathlib import Path
 import re
@@ -11,6 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
+PHASE1_ORACLE = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
 
 
 def source(path: str) -> str:
@@ -18,14 +19,15 @@ def source(path: str) -> str:
 
 
 @cache
-def pinned_source(path: str) -> str:
+def pinned_source(path: str, *, oracle: str = ORACLE) -> str:
     """Read immutable oracle blobs; register and manifest reads stay live."""
-    return subprocess.check_output(["git", "show", f"{ORACLE}:{path}"],
+    return subprocess.check_output(["git", "show", f"{oracle}:{path}"],
                                    cwd=ROOT, text=True, encoding="utf-8-sig")
 
 
-def snapshot() -> dict:
-    config = ast.parse(pinned_source("pseudolife_memory/utils/config.py"))
+def snapshot(*, oracle: str = ORACLE) -> dict:
+    read = partial(pinned_source, oracle=oracle)
+    config = ast.parse(read("pseudolife_memory/utils/config.py"))
     sections = {
         node.name: [field.target.id for field in node.body
                     if isinstance(field, ast.AnnAssign) and isinstance(field.target, ast.Name)]
@@ -37,14 +39,14 @@ def snapshot() -> dict:
     # as well as direct reads, so dynamically selected env keys are not omitted.
     # Documentation and generated Console assets are not executable readers.
     extensions = {".py", ".sh", ".ps1", ".json", ".yml", ".yaml", ".toml", ".bat", ".cmd"}
-    tracked = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", ORACLE, "pseudolife_memory", "ops", "plugin"],
+    tracked = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", oracle, "pseudolife_memory", "ops", "plugin"],
                                       cwd=ROOT, text=True).splitlines()
     python_trees = {}
     env_symbols = {}
     for path in tracked:
         if Path(path).suffix not in extensions and not Path(path).name.startswith("Dockerfile"):
             continue
-        text = pinned_source(path)
+        text = read(path)
         for name in set(re.findall(r"(?<![A-Z0-9])_?PSEUDOLIFE_[A-Z][A-Z0-9_]*\b", text)):
             if name.endswith("_"):
                 continue  # A prefix/family is not a concrete variable.
@@ -77,7 +79,7 @@ def snapshot() -> dict:
         for key in kind["keys"]:
             variables[kind["prefix"] + key.upper()].add("ops/shim_autostart.py")
     tools = []
-    for node in ast.parse(pinned_source("pseudolife_memory/mcp_server.py")).body:
+    for node in ast.parse(read("pseudolife_memory/mcp_server.py")).body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for dec in node.decorator_list:
@@ -85,47 +87,52 @@ def snapshot() -> dict:
                 tier = next((ast.literal_eval(k.value) for k in dec.keywords if k.arg == "tier"), "full")
                 tools.append({"name": node.name, "tier": tier})
     # Async tier switching is registered manually so it can emit listChanged.
-    mcp_source = pinned_source("pseudolife_memory/mcp_server.py")
+    mcp_source = read("pseudolife_memory/mcp_server.py")
     for name, tier in re.findall(r'_TOOL_TIERS\["([^"]+)"\] = "([^"]+)"', mcp_source):
         if re.search(r'\)\(' + re.escape(name) + r'\)', mcp_source):
             tools.append({"name": name, "tier": tier})
     routes = [{"method": "GET" if m == "g" else "POST", "path": path}
-              for m, path in re.findall(r'\b([gp])\("(/api/[^"\n]+)"', pinned_source("pseudolife_memory/web/routes.py"))]
-    cli = ast.parse(pinned_source("pseudolife_memory/cli.py"))
+              for m, path in re.findall(r'\b([gp])\("(/api/[^"\n]+)"', read("pseudolife_memory/web/routes.py"))]
+    cli = ast.parse(read("pseudolife_memory/cli.py"))
     modes = set()
     for node in ast.walk(cli):
         if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "mode":
             for value in ast.walk(node.comparators[0]):
                 if isinstance(value, ast.Constant) and isinstance(value.value, str) and not value.value.startswith("-"):
                     modes.add(value.value)
-    api = pinned_source("pseudolife_memory/web/api.py")
+    api = read("pseudolife_memory/web/api.py")
     hooks = [{"path": path, "method": method} for path, method in re.findall(
         r'if path == "(/api/hook/[^"]+)":.*?if method != "([A-Z]+)"', api, re.S)]
     actions = next([key.value for key in node.value.keys]
-                   for node in ast.parse(pinned_source("pseudolife_memory/coordination.py")).body
+                   for node in ast.parse(read("pseudolife_memory/coordination.py")).body
                    if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
                    and node.targets[0].id == "_PARAMETERS")
-    return {"schema": 1, "oracle_commit": ORACLE, "database_schema": 53,
+    schema = next(ast.literal_eval(node.value)
+                  for node in ast.parse(read("pseudolife_memory/storage/schema.py")).body
+                  if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name) and target.id == "SCHEMA_META_VERSION"
+                          for target in node.targets))
+    return {"schema": 1, "oracle_commit": oracle, "database_schema": schema,
             "config_sections": sections,
             "environment_variables": {key: sorted(value) for key, value in sorted(variables.items())},
             "tools": tools, "console_routes": routes, "cli_modes": sorted(modes),
             "hook_endpoints": hooks, "coordination_actions": actions}
 
 
-def test_files_at_pin() -> list[str]:
-    paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", ORACLE, "tests"],
+def test_files_at_pin(*, oracle: str = ORACLE) -> list[str]:
+    paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", oracle, "tests"],
                                     cwd=ROOT, text=True).splitlines()
     return sorted(path for path in paths if re.fullmatch(r"tests/test_[^/]+\.py", path))
 
 
-def literal_node_ids(path: str, *, pinned: bool = False) -> set[str]:
+def literal_node_ids(path: str, *, pinned: bool = False, oracle: str = ORACLE) -> set[str]:
     """Resolve concrete IDs for the adapter's literal, single-axis CLI cases.
 
     Fail closed for any unsupported parameterization, rather than pretending
     a function name proves a concrete pytest node exists.
     """
     result = set()
-    for node in ast.parse(pinned_source(path) if pinned else source(path)).body:
+    for node in ast.parse(pinned_source(path, oracle=oracle) if pinned else source(path)).body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
             continue
         params = [dec for dec in node.decorator_list if isinstance(dec, ast.Call)
@@ -139,17 +146,23 @@ def literal_node_ids(path: str, *, pinned: bool = False) -> set[str]:
     return result
 
 
-def validate() -> dict:
-    inventory = json.loads(source("rust/contract-inventory.json"))
-    assert inventory == snapshot(), "contract snapshot differs from pinned source inventory"
-    manifest = json.loads(source("rust/test-buckets.json"))
-    assert manifest["oracle_commit"] == ORACLE
+def validate(*, phase1: bool = False) -> dict:
+    """Audit Phase 0b by default; Phase 1 has separate pinned manifests."""
+    oracle = PHASE1_ORACLE if phase1 else ORACLE
+    inventory_path = "rust/phase1-contract-inventory.json" if phase1 else "rust/contract-inventory.json"
+    buckets_path = "rust/phase1-test-buckets.json" if phase1 else "rust/test-buckets.json"
+    mapping_path = "evals/rust_port/oracle_tests.json" if phase1 else "rust/phase0b-oracle-tests.json"
+    inventory = json.loads(source(inventory_path))
+    expected = snapshot(oracle=oracle) if phase1 else snapshot()
+    assert inventory == expected, "contract snapshot differs from pinned source inventory"
+    manifest = json.loads(source(buckets_path))
+    assert manifest["oracle_commit"] == oracle
     files = manifest["files"]
     paths = [item["path"] for item in files]
     assert len(paths) == len(set(paths)), "duplicate test-file bucket"
-    pinned_files = test_files_at_pin()
+    pinned_files = test_files_at_pin(oracle=oracle)
     assert sorted(paths) == pinned_files, "missing or extra test-file bucket"
-    mapped = json.loads(source("evals/rust_port/oracle_tests.json"))["mapped"]
+    mapped = json.loads(source(mapping_path))["mapped"]
     selected = []
     for item in files:
         assert item["bucket"] in {"oracle", "candidate", "internal"}
@@ -157,7 +170,7 @@ def validate() -> dict:
             assert item["candidate_nodes"]
             assert item["remaining_nodes"] == "oracle"
             existing = literal_node_ids(item["path"])
-            pinned_nodes = literal_node_ids(item["path"], pinned=True)
+            pinned_nodes = literal_node_ids(item["path"], pinned=True, oracle=oracle)
             for node in item["candidate_nodes"]:
                 assert node in existing, f"candidate node does not exist: {node}"
                 assert node in pinned_nodes, f"candidate node does not exist at oracle pin: {node}"
@@ -171,6 +184,52 @@ def validate() -> dict:
     counts = dict(Counter(item["bucket"] for item in files))
     assert manifest["counts"] == counts
     assert manifest["candidate_node_count"] == len(selected)
+    if phase1:
+        functions = manifest.get("phase1_functions", [])
+        assert len(functions) == 191, "missing per-function Phase 1 ownership"
+        assert len({item["nodeid"] for item in functions}) == len(functions)
+        scoped_internal = [item for item in functions
+                           if item["bucket"] == "internal" and item["scope"] == "phase1"]
+        assert len(scoped_internal) == 125, "missing scoped internal ownership"
+        for item in functions:
+            path, function = item["nodeid"].split("::", 1)
+            names = {node.name for node in ast.parse(pinned_source(path, oracle=oracle)).body
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            assert function in names, "function absent from oracle"
+            retired_sdk_nodes = {
+                "tests/test_shim.py::test_sdk_guard_passes_on_a_v2_environment",
+                "tests/test_shim.py::test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic",
+                "tests/test_shim.py::test_sdk_guard_survives_a_fully_absent_mcp",
+            }
+            if item["nodeid"] in retired_sdk_nodes:
+                evidence = item.get("equivalence_evidence", {})
+                assert (item["acceptance"] == "retired-by-decision"
+                        and item["equivalent"] == "retired-by-decision"
+                        and item["required_equivalent"] is None
+                        and evidence.get("status") == "retired-by-decision"
+                        and evidence.get("decision") == "Maintainer 2026-10-05 phase 2 brief, section 1; PORTING.md no-python-before-first-frame"
+                        and evidence.get("rust_tests") == []), "SDK retirement differs from the maintainer decision"
+                continue
+            assert item["acceptance"] == "pending", "Phase 1 acceptance requires execution evidence"
+            if item["required_equivalent"]:
+                assert item["equivalent"] == "pending", "proposed target is not a passed equivalent"
+            elif item in scoped_internal:
+                evidence = item.get("equivalence_evidence", {})
+                targets = evidence.get("rust_tests", [])
+                assert (evidence.get("status") == "validated-targeted" and targets
+                        and evidence.get("assertions")
+                        and all(evidence.get("validation", {}).get(platform)
+                                for platform in ("windows", "linux"))), "missing targeted equivalence evidence"
+                assert item["equivalent"] == f"rust-unit:{targets[0]}", "equivalent target disagrees with evidence"
+                for target in targets:
+                    rust_path, *rust_names = target.split("::")
+                    assert rust_names, "equivalent Rust function is absent"
+                    rust_function = rust_names[-1]
+                    assert (rust_path.startswith("rust/") and rust_path.endswith(".rs")
+                            and ".." not in Path(rust_path).parts
+                            and (ROOT / rust_path).is_file()
+                            and re.search(rf"\bfn\s+{re.escape(rust_function)}\s*\(", source(rust_path))), "equivalent Rust function is absent"
+        assert manifest["phase1_function_counts"] == dict(Counter(item["bucket"] for item in functions))
     register = source("rust/PARITY.md")
     assert (f"{len(files)} `tests/test_*.py` files: {counts['oracle']} oracle, "
             f"{counts['candidate']} candidate and {counts['internal']} internal") in register, "stale bucket counts"
@@ -211,7 +270,7 @@ def validate() -> dict:
             mode_index = cells.index("Mode") if "Mode" in cells else None
             surface_index = cells.index("Row") if "Row" in cells else None
         elif status_index is not None:
-            assert cells[status_index] in {"ported", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
+            assert cells[status_index] in {"ported", "ported-with-substitution", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
             if mode_index is not None:
                 checked_cli_modes.add(cells[mode_index])
             if surface_index is not None:
@@ -220,8 +279,13 @@ def validate() -> dict:
         assert row in checked_surface_rows, f"surface row outside status table: {row}"
     for mode in inventory["cli_modes"]:
         assert mode in checked_cli_modes, f"CLI mode outside status table: {mode}"
+    # The shared register names both documented oracle snapshots. Candidate
+    # and function ownership above remains checked against its own exact pin.
+    register_files = set(pinned_files)
+    if not phase1:
+        register_files.update(test_files_at_pin(oracle=PHASE1_ORACLE))
     for name in set(re.findall(r'`(?:tests/)?(test_[A-Za-z0-9_]+\.py)`', register)):
-        assert f"tests/{name}" in pinned_files, f"obsolete test reference: {name}"
+        assert f"tests/{name}" in register_files, f"obsolete test reference: {name}"
     return {"test_files": len(files), "buckets": counts, "candidate_nodes": len(selected),
             "config_sections": len(inventory["config_sections"]),
             "environment_variables": len(inventory["environment_variables"]),
@@ -231,5 +295,13 @@ def validate() -> dict:
             "coordination_actions": len(inventory["coordination_actions"]), "missing_surfaces": []}
 
 
+def validate_phase1() -> dict:
+    """Validate the current Phase 1 inventory at its explicit oracle pin."""
+    return validate(phase1=True)
+
+
 if __name__ == "__main__":
-    print(json.dumps(validate(), sort_keys=True))
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--phase1", action="store_true", help="audit the separate Phase 1 inventory")
+    print(json.dumps(validate(phase1=parser.parse_args().phase1), sort_keys=True))

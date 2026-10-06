@@ -1,0 +1,174 @@
+name: Rust shim
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 4
+
+jobs:
+  rust:
+    name: Rust / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Bind the selected Python interpreter for Rust fixtures
+        shell: pwsh
+        run: |
+          $selectedPython = python -c 'import sys; print(sys.executable)'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install the Python SDK fixture dependency
+        run: python -m pip install "mcp==2.1.1"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Install pinned nextest in the runner temporary directory
+        shell: pwsh
+        run: |
+          $nextestRoot = Join-Path $env:RUNNER_TEMP 'nextest-0.9.146'
+          New-Item -ItemType Directory -Force -Path $nextestRoot | Out-Null
+          if ($IsWindows) {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.zip'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/windows' -OutFile $nextestArchive
+            Expand-Archive -LiteralPath $nextestArchive -DestinationPath $nextestRoot
+          } else {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.tar.gz'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/linux' -OutFile $nextestArchive
+            tar -xzf $nextestArchive -C $nextestRoot
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $nextestRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check all targets
+        run: cargo check --locked --all-targets -j 4
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -j 4 -- -D warnings
+      - name: Nextest
+        run: cargo nextest run --locked --all-targets -j 4
+      - name: Check all targets without default features
+        run: cargo check --locked --all-targets --no-default-features -j 4
+      - name: Clippy without default features
+        run: cargo clippy --locked --all-targets --no-default-features -j 4 -- -D warnings
+      - name: Nextest without default features
+        run: cargo nextest run --locked --all-targets --no-default-features -j 4
+      - name: Build candidate
+        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-shim-${{ runner.os }}
+          path: |
+            rust/target/release/pseudolife-stdio
+            rust/target/release/pseudolife-stdio.exe
+          if-no-files-found: error
+
+  parity:
+    name: Parity / ${{ matrix.os }}
+    needs: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Install checkout and test dependencies
+        timeout-minutes: 10
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools>=68" wheel
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+      - name: Build candidate
+        timeout-minutes: 10
+        working-directory: rust
+        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Run every eval harness test
+        run: python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard
+      - name: Run unchanged candidates and differential judges
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $checkoutRoot = (Get-Location).Path
+          $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
+          python -m evals.rust_port.phase1_oracle --destination $oracleRoot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pseudolife_memory.cli lease check full-suite
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $resourceCheckedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidatePath = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $candidateCommand = ConvertTo-Json -InputObject @($candidatePath) -Compress
+          $privateReceipt = Join-Path $env:RUNNER_TEMP 'rust-parity.json'
+          $publicReceipt = Join-Path $checkoutRoot "evals/results/rust-phase1-ci-$env:RUNNER_OS.json"
+          $oraclePython = if ($IsWindows) {
+            Join-Path $oracleRoot 'runtime/Scripts/python.exe'
+          } else {
+            Join-Path $oracleRoot 'runtime/bin/python'
+          }
+          $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
+          $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
+          $oracleSource = Join-Path $oracleRoot 'source'
+          $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
+          $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
+          & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $judgeBootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.phase1_ci", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
+          exit $LASTEXITCODE
+      - name: Retain comparison summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-parity-${{ runner.os }}
+          path: |
+            evals/results/rust-phase1-ci-*.json
+            evals/results/rust-cli-argv-*.json
+          if-no-files-found: warn

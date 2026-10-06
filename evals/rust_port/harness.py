@@ -31,6 +31,17 @@ class DuplicateJSONKey(ValueError):
     """A JSON object repeated a member name before parsing could discard it."""
 
 
+def observe_boundary(operation, client=None):
+    try:
+        return operation()
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        result = {"boundary_error": type(error).__name__}
+        raw = getattr(client, "last_wire_body", None)
+        if raw is not None:
+            result["boundary_raw_b64"] = base64.b64encode(raw).decode("ascii")
+        return result
+
+
 def strict_json_loads(raw):
     def object_pairs(pairs):
         result = {}
@@ -96,8 +107,8 @@ def compare(expected: Any, actual: Any, policy: Policy, path="") -> list[dict]:
             value.pop("content_length", None)
             value["framing"] = "<fixed-or-chunked>"
 
-    if isinstance(actual, dict) and actual.get("boundary_error") == "DuplicateJSONKey":
-        return error("duplicate_json_key")
+    if isinstance(actual, dict) and "boundary_error" in actual:
+        return error("duplicate_json_key" if actual["boundary_error"] == "DuplicateJSONKey" else "boundary_error")
     if path.endswith("/isError") and expected is True and actual is False:
         return error("tool_error_envelope")
     if _matches(path, policy.source_text_paths) and isinstance(expected, str) and isinstance(actual, str):
@@ -229,6 +240,7 @@ class HttpClient:
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def execute(self, request: dict, surface: str, *, runtime_headers=None) -> dict:
+        self.last_wire_body = None
         path = request["path"]
         if not path.startswith("/") or path.startswith("//") or urllib.parse.urlsplit(path).netloc:
             raise ValueError("request path must be relative to the disposable origin")
@@ -256,6 +268,7 @@ class HttpClient:
             response = exc
         with response:
             raw = response.read()
+            self.last_wire_body = raw
             ctype = response.headers.get("Content-Type", "")
             if surface == "mcp":
                 observed_session = response.headers.get("Mcp-Session-Id", self.session)
@@ -304,17 +317,14 @@ def execute(cases, *, cli_prefix, base_url, cwd, home, timeout=10):
     records = []
     for case in cases:
         surface, request = case["surface"], case["request"]
-        try:
+        def operation():
             if surface == "cli":
-                response = run_cli(cli_prefix, request["argv"], cwd=cwd, env=env, timeout=timeout)
+                return run_cli(cli_prefix, request["argv"], cwd=cwd, env=env, timeout=timeout)
             elif surface in {"http", "mcp"} and client:
-                response = client.execute(request, surface)
+                return client.execute(request, surface)
             else:
                 raise ValueError("surface requires an explicit configured target")
-        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
-            # Keep negative evidence without recording exception text, which may
-            # carry filesystem paths, credentials or private response values.
-            response = {"boundary_error": type(exc).__name__}
+        response = observe_boundary(operation, client if surface in {"http", "mcp"} else None)
         records.append({**case, "response": response})
     return records
 
@@ -330,10 +340,6 @@ def replay(transcript, *, cli_prefix, base_url, cwd, home, timeout=10):
                      cli_prefix=cli_prefix, base_url=base_url, cwd=cwd, home=home, timeout=timeout)
     differences = []
     for oracle, candidate in zip(records, actual):
-        if "boundary_error" in candidate["response"]:
-            reason = "duplicate_json_key" if candidate["response"]["boundary_error"] == "DuplicateJSONKey" else "boundary_error"
-            differences.append({"case": oracle["id"], "path": "/", "reason": reason})
-            continue
         policy = Policy(**oracle.get("policy", {}))
         for item in compare(oracle["response"], candidate["response"], policy):
             differences.append({"case": oracle["id"], **item})

@@ -7,7 +7,7 @@ import threading
 import urllib.error
 import urllib.request
 
-from .harness import HttpClient, Policy, DuplicateJSONKey, _base_url, _NoRedirect, compare, strict_json_loads
+from .harness import HttpClient, Policy, DuplicateJSONKey, _base_url, _NoRedirect, compare, strict_json_loads, observe_boundary
 
 CONTROL_CASES = {
     "missing-key": "search-http", "ranking-order": "search-http",
@@ -21,6 +21,8 @@ EXPECTED_REASONS = dict(zip(CONTROL_CASES, (
 
 
 def mutate(control, raw, content_type, case):
+    if control == "identity":
+        return raw, False
     if control not in CONTROL_CASES:
         raise ValueError("unknown graded control")
     if case != CONTROL_CASES[control] or not raw:
@@ -53,17 +55,18 @@ def mutate(control, raw, content_type, case):
     return json.dumps(body, separators=(",", ":")).encode(), True
 
 
-def control_difference(original, mutated, case):
+def control_difference(original, mutated, case, policy=None):
     from .full_bank import Normalizer, normalize_payload
     expected, actual = copy.deepcopy(original), copy.deepcopy(original)
     try:
         actual["body"] = strict_json_loads(mutated)
     except DuplicateJSONKey:
-        return [{"path": "/body", "reason": "duplicate_json_key"}]
+        actual = {"boundary_error": "DuplicateJSONKey"}
+        return compare(expected, actual, policy or Policy(ranking_paths=("/body/entries",)))
     if case == "search-http":
         expected["body"] = normalize_payload(Normalizer(), expected["body"], "search")
         actual["body"] = normalize_payload(Normalizer(), actual["body"], "search")
-    return compare(expected, actual, Policy(ranking_paths=("/body/entries",)))
+    return compare(expected, actual, policy or Policy(ranking_paths=("/body/entries",)))
 
 
 def request_case(path, body):
@@ -118,7 +121,7 @@ def mutation_proxy(upstream, control):
                 self.wfile.write(changed)
                 self.close_connection = True
 
-        do_GET = do_POST = handle_request
+        do_GET = do_POST = do_DELETE = handle_request
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = False
@@ -135,10 +138,12 @@ def mutation_proxy(upstream, control):
         state["server_stopped"] = True
 
 
-def capture_controls(corpus, baseline, url, token):
+def capture_controls(corpus, baseline, url, token, *, policies=None):
     from .full_bank import Normalizer, normalize_payload
+    from .full_bank import case_policy
     from .wire import normalize_content_length
     records = {r["id"]: r for r in baseline}
+    policies = policies if policies is not None else {c["id"]: case_policy(c) for c in corpus["cases"]}
     initialization = [c for c in corpus["cases"] if c["id"] in {"initialize", "initialized"}]
     results = {}
     for control, case_id in CONTROL_CASES.items():
@@ -149,20 +154,19 @@ def capture_controls(corpus, baseline, url, token):
             if case["surface"] == "mcp":
                 for start in initialization:
                     client.execute(start["request"], "mcp", runtime_headers=headers)
-            try:
-                actual = client.execute(case["request"], case["surface"], runtime_headers=headers)
+            actual = observe_boundary(lambda: client.execute(case["request"], case["surface"], runtime_headers=headers), client)
+            if "boundary_error" not in actual:
                 raw = actual.pop("_wire_body")
                 original_body = copy.deepcopy(actual["body"])
                 if case_id == "search-http":
                     actual["body"] = normalize_payload(Normalizer(), actual["body"], "search")
                 normalize_content_length(actual, raw, original_body)
-                differences = compare(case["response"], actual, Policy(ranking_paths=("/body/entries",)))
-            except DuplicateJSONKey:
-                differences = [{"path": "/body", "reason": "duplicate_json_key"}]
+            differences = compare(case["response"], actual, policies[case_id])
         reason = EXPECTED_REASONS[control]
         results[control] = {"expected_difference": reason, "differences": differences,
             "rejected": reason in {d["reason"] for d in differences}, "case": case_id,
             "correct_status": cleanup.get("candidate_status") == cleanup.get("upstream_status") == case["response"]["status"],
+            "boundary_observation": actual if "boundary_error" in actual else None,
             "cleanup": cleanup}
         if not results[control]["rejected"] or not results[control]["correct_status"] or cleanup["mutations"] != 1:
             raise RuntimeError("graded control did not produce expected named difference: " + control)
