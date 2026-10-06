@@ -1,7 +1,7 @@
 # Porting contract
 
 The current version-branch behavioural oracle target is Python 0.17.0 at
-`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
@@ -10,9 +10,9 @@ Installed-version parity covers manifests written by the runtime installer. Non-
 The [local version evidence at `62e4f590`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md)
 records both-platform release corpora and bare/installed paired measurements.
 It preserves the Windows installed median/p95 regression and distinct runtime
-versions, with no aggregate speedup or causal claim. CLI-VERSION remains deferred
-until required hosted CI and the evidence/documentation successor review/checks
-pass; local evidence does not certify a later head.
+versions, with no aggregate speedup or causal claim. Those receipts remain
+historical and do not certify a later head; current scoped CLI-VERSION
+acceptance is bound to the final `df2dbf8a` proof above.
 
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
@@ -468,17 +468,20 @@ argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing 
 existing pinned table. Locale/default and other output encodings and
 non-UTF-8/surrogate argv remain deferred. Recognized modes
 without an implementation emit a candidate-only deferred diagnostic, never the
-Python unknown-mode contract. The prepared version implementation derives the
+Python unknown-mode contract. The scoped ported version implementation derives the
 runtime root from its own executable under a six-digit `runtimes` entry's
 `Scripts` or `bin` directory, matching Python's `sys.prefix` identity. It checks
 its own executable, also requires the canonical Python console path to be a file
 (`Scripts/pseudolife-mcp.exe` or `bin/pseudolife-mcp`), and matches the runtime
 path as written or canonicalized. The marker follows Python's dictionary shape.
 Manifest NaN, Infinity, lone surrogates and integers beyond u64 remain deferred.
-The three version nodes are routed. Frozen `5220b5ee` Windows/Linux CLI cells
-cover canonical-console admission, missing-console fallback and actual non-ASCII
-homes with UTF-8 streams; counts and warm measurements are in PORT-STATE.md.
-Required successor hosted checks and independent review remain pending.
+The three original version nodes are routed among eight unchanged CLI nodes per
+arm. Final `df2dbf8a` Windows/Linux CLI cells cover named-console admission,
+missing-console fallback and actual non-ASCII homes with UTF-8 streams; all four
+3x10 warm pairs retain exact output/state and warmed file identity. Counts,
+per-arm floors and limits are in PORT-STATE.md and the final packet. The
+candidate is not installed; this evidence carrier requires independent review
+and hosted checks, with no recapture of the unchanged executed tree.
 The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
 normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
 and initialize-return timing, using the same paired ordering and repeat floors.
