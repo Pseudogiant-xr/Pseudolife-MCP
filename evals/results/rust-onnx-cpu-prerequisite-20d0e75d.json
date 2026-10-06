@@ -1,0 +1,1181 @@
+{
+  "status": "direct-ORT-CPU-numerical-comparison",
+  "query_status": "PROPOSED deterministic 25-query corpus; maintainer decision pending",
+  "source_commit": "20d0e75d907b4025b3901f9def7fdf63af44e4eb",
+  "instrument_sha256": "e65e89dc042b46bde6e168ec0d2164d7165955815f44ccadf48a5bb5351e3771",
+  "committed_instrument_sha256": "e65e89dc042b46bde6e168ec0d2164d7165955815f44ccadf48a5bb5351e3771",
+  "manifest_sha256": "5568bf8b9275df1e6268b05e7c72670c72d5c8417b2ca3074ef648edca89faf1",
+  "seed": 61003,
+  "versions": {
+    "torch": "2.13.0+cpu",
+    "sentence-transformers": "5.6.0",
+    "transformers": "4.57.6",
+    "tokenizers": "0.22.2",
+    "optimum": "2.1.0",
+    "optimum-onnx": "0.1.0",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.27.0"
+  },
+  "model_revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
+  "shape": [
+    1025,
+    1024
+  ],
+  "max_absolute_difference": 5.401670932769775e-07,
+  "minimum_cosine": 0.9999999999933409,
+  "identical_full_rankings": 5,
+  "identical_top8_rankings": 25,
+  "bank_float32_le_sha256": "d565b0d68b757890837573da84d8accf8b0311777839195263dfd3cc28cb916c",
+  "torch_default_explicit_position_delta": 0.0,
+  "provider": [
+    "CPUExecutionProvider"
+  ],
+  "torch_parameter_dtypes": [
+    "torch.float32"
+  ],
+  "torch_threads": 4,
+  "ort_intra_threads": 4,
+  "ort_inter_threads": 1,
+  "max_seq_length": 512,
+  "graph_input_names": [
+    "input_ids",
+    "attention_mask",
+    "position_ids"
+  ],
+  "graph_output_names": [
+    "last_hidden_state"
+  ],
+  "model_files": [
+    {
+      "file": "1_Pooling/config.json",
+      "bytes": 313,
+      "sha256": "37bf193fa101f19101bfad9c31d3eb0f786e247b7b1e5cb7f007d730eed1ddbd"
+    },
+    {
+      "file": "config.json",
+      "bytes": 727,
+      "sha256": "b5bf1f51fc45be473a54718cef92448d90a1be001bf9b9a44b8c7f10a19feaa9"
+    },
+    {
+      "file": "config_sentence_transformers.json",
+      "bytes": 215,
+      "sha256": "10667c72ddb772627bf1780cb7f86af8e2ae0032b8c243c731172064105c6961"
+    },
+    {
+      "file": "merges.txt",
+      "bytes": 1671853,
+      "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+    },
+    {
+      "file": "model.safetensors",
+      "bytes": 1191586416,
+      "sha256": "0437e45c94563b09e13cb7a64478fc406947a93cb34a7e05870fc8dcd48e23fd"
+    },
+    {
+      "file": "modules.json",
+      "bytes": 349,
+      "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf"
+    },
+    {
+      "file": "onnx/added_tokens.json",
+      "bytes": 735,
+      "sha256": "79f6ec6fcc423d3a82bfac8b9033b1daac7b7bce06a5f5f441637b480cc605de"
+    },
+    {
+      "file": "onnx/chat_template.jinja",
+      "bytes": 4200,
+      "sha256": "bfbcd7bf3f08041bdcff4afb09f83677fe4f7e5b8b9c07e6be43651d88696aab"
+    },
+    {
+      "file": "onnx/config.json",
+      "bytes": 1420,
+      "sha256": "b711b874b8f33c01f05f0a0943d3d48c9d9505469165fa77676ab6f6428b3f2f"
+    },
+    {
+      "file": "onnx/merges.txt",
+      "bytes": 1671853,
+      "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+    },
+    {
+      "file": "onnx/model.onnx",
+      "bytes": 1265182,
+      "sha256": "f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b"
+    },
+    {
+      "file": "onnx/model.onnx_data",
+      "bytes": 2383106304,
+      "sha256": "a585477de21c0a89e021dd64f4d3be34483eb4aaed7ae93fc047e3edf74545da"
+    },
+    {
+      "file": "onnx/special_tokens_map.json",
+      "bytes": 644,
+      "sha256": "57255613bbe23c9497211ca68561ff429a51e871dbaf5a59998fa4c8f7fe168a"
+    },
+    {
+      "file": "onnx/tokenizer.json",
+      "bytes": 11423705,
+      "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+    },
+    {
+      "file": "onnx/tokenizer_config.json",
+      "bytes": 5643,
+      "sha256": "b2a0d89cf5c89d5d844c56d82e9c3731f862d720a6ce221c31955b628960cde7"
+    },
+    {
+      "file": "onnx/vocab.json",
+      "bytes": 2776833,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    {
+      "file": "README.md",
+      "bytes": 17237,
+      "sha256": "c34d9b7e5a267ad3fdd13227a253686bc90844ff4744a2a6a86c7c905e3d06f3"
+    },
+    {
+      "file": "tokenizer.json",
+      "bytes": 11423705,
+      "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+    },
+    {
+      "file": "tokenizer_config.json",
+      "bytes": 9706,
+      "sha256": "253153d0738ceb4c668d2eff957714dd2bea0b56de772a9fdccd96cbf517e6a0"
+    },
+    {
+      "file": "vocab.json",
+      "bytes": 2776833,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    }
+  ],
+  "elapsed_seconds": {
+    "torch_load_encode": 96.47316460000002,
+    "ort_load_encode": 44.27334429998882
+  },
+  "limitations": [
+    "stock pinned ST ONNX wrapper omits required position_ids; this uses direct ORT",
+    "exporter hidden-state warning: max difference 6.67572021484375e-5 exceeded 1e-5",
+    "proposed query corpus is not the historical 25-case corpus",
+    "stored-vector ranking in memory is not daemon search parity",
+    "ONNX prerequisite remains deferred"
+  ],
+  "raw_receipt_sha256": "2a7f92871860c78515f7468f53300c7b76763afe01cad41cf513bc2cadef197c",
+  "query_rankings": [
+    {
+      "query": "Project apricot calibration probe 00000",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 2.5331974029541016e-07,
+      "torch_min_adjacent_margin": 6.984919309616089e-09,
+      "ort_min_adjacent_margin": 1.234002411365509e-08,
+      "disagreements": [
+        {
+          "rank": 331,
+          "torch_id": 1370,
+          "ort_id": 1897,
+          "torch_adjacent_margin": 0.00014011748135089874,
+          "ort_adjacent_margin": 0.00013999082148075104
+        },
+        {
+          "rank": 332,
+          "torch_id": 1897,
+          "ort_id": 1370,
+          "torch_adjacent_margin": 3.725290298461914e-08,
+          "ort_adjacent_margin": 9.12696123123169e-08
+        },
+        {
+          "rank": 864,
+          "torch_id": 1749,
+          "ort_id": 469,
+          "torch_adjacent_margin": 0.00022811256349086761,
+          "ort_adjacent_margin": 0.00022806599736213684
+        },
+        {
+          "rank": 865,
+          "torch_id": 469,
+          "ort_id": 1749,
+          "torch_adjacent_margin": 5.4016709327697754e-08,
+          "ort_adjacent_margin": 4.936009645462036e-08
+        },
+        {
+          "rank": 1072,
+          "torch_id": 1490,
+          "ort_id": 1851,
+          "torch_adjacent_margin": 0.00017103226855397224,
+          "ort_adjacent_margin": 0.0001711284276098013
+        },
+        {
+          "rank": 1073,
+          "torch_id": 1851,
+          "ort_id": 1490,
+          "torch_adjacent_margin": 8.218921720981598e-08,
+          "ort_adjacent_margin": 1.234002411365509e-08
+        },
+        {
+          "rank": 1396,
+          "torch_id": 1225,
+          "ort_id": 1810,
+          "torch_adjacent_margin": 2.7418136596679688e-05,
+          "ort_adjacent_margin": 2.73827463388443e-05
+        },
+        {
+          "rank": 1397,
+          "torch_id": 1810,
+          "ort_id": 1225,
+          "torch_adjacent_margin": 9.499490261077881e-08,
+          "ort_adjacent_margin": 5.029141902923584e-08
+        }
+      ],
+      "torch_ranking_sha256": "f56052b49593805e21e27f5a0798a7951e6e450da0e075b27413a9842cc22845",
+      "ort_ranking_sha256": "6ccb278fcac31f666baa784024e0722ab085938b695ef8b0a59736cc41f07053",
+      "disagreements_count": 8
+    },
+    {
+      "query": "Project birch calibration probe 00001",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.203749656677246e-07,
+      "torch_min_adjacent_margin": 3.3527612686157227e-08,
+      "ort_min_adjacent_margin": 4.660250851884484e-09,
+      "disagreements": [
+        {
+          "rank": 826,
+          "torch_id": 1223,
+          "ort_id": 1812,
+          "torch_adjacent_margin": 8.143950253725052e-06,
+          "ort_adjacent_margin": 8.307397365570068e-06
+        },
+        {
+          "rank": 827,
+          "torch_id": 1812,
+          "ort_id": 1223,
+          "torch_adjacent_margin": 5.168840289115906e-08,
+          "ort_adjacent_margin": 4.377216100692749e-08
+        }
+      ],
+      "torch_ranking_sha256": "7242404d959b1660c54c3bc6116f1a0f3811e3603906e2b290501d54a56be880",
+      "ort_ranking_sha256": "e291b2925d27b80614a4ed84667fa6efe3f0aba1652c0750fa9275fe3decd2c0",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project cobalt calibration probe 00002",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.501772880554199e-07,
+      "torch_min_adjacent_margin": 1.1175870895385742e-08,
+      "ort_min_adjacent_margin": 2.0489096641540527e-08,
+      "disagreements": [
+        {
+          "rank": 1666,
+          "torch_id": 1301,
+          "ort_id": 250,
+          "torch_adjacent_margin": 4.575774073600769e-05,
+          "ort_adjacent_margin": 4.558451473712921e-05
+        },
+        {
+          "rank": 1667,
+          "torch_id": 250,
+          "ort_id": 1301,
+          "torch_adjacent_margin": 2.9802322387695312e-08,
+          "ort_adjacent_margin": 1.434236764907837e-07
+        },
+        {
+          "rank": 1779,
+          "torch_id": 207,
+          "ort_id": 860,
+          "torch_adjacent_margin": 1.934543251991272e-05,
+          "ort_adjacent_margin": 1.9390136003494263e-05
+        },
+        {
+          "rank": 1780,
+          "torch_id": 860,
+          "ort_id": 207,
+          "torch_adjacent_margin": 1.1175870895385742e-07,
+          "ort_adjacent_margin": 2.086162567138672e-07
+        }
+      ],
+      "torch_ranking_sha256": "b4af710d3fb04f34549aac21c10fdadee9eb8bcd29b93bf1cbddc9076bdc48d4",
+      "ort_ranking_sha256": "13fd85789c7b92652b2927154ac930200673c46f459c349fbae48b977a87a0ea",
+      "disagreements_count": 4
+    },
+    {
+      "query": "Project dahlia calibration probe 00003",
+      "exact_equal": true,
+      "top8_equal": true,
+      "max_score_difference": 3.2782554626464844e-07,
+      "torch_min_adjacent_margin": 7.82310962677002e-08,
+      "ort_min_adjacent_margin": 4.0046870708465576e-08,
+      "disagreements": [],
+      "torch_ranking_sha256": "6689d9feaacb1a7f8ce70e4e787eb693a96c9c9b9322a5c05c63e79d24f37b97",
+      "ort_ranking_sha256": "6689d9feaacb1a7f8ce70e4e787eb693a96c9c9b9322a5c05c63e79d24f37b97",
+      "disagreements_count": 0
+    },
+    {
+      "query": "Project elm calibration probe 00004",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.03611159324646e-07,
+      "torch_min_adjacent_margin": 2.421438694000244e-08,
+      "ort_min_adjacent_margin": 3.818422555923462e-08,
+      "disagreements": [
+        {
+          "rank": 998,
+          "torch_id": 728,
+          "ort_id": 1634,
+          "torch_adjacent_margin": 2.6785768568515778e-05,
+          "ort_adjacent_margin": 2.6574358344078064e-05
+        },
+        {
+          "rank": 999,
+          "torch_id": 1634,
+          "ort_id": 728,
+          "torch_adjacent_margin": 2.421438694000244e-08,
+          "ort_adjacent_margin": 2.1047890186309814e-07
+        }
+      ],
+      "torch_ranking_sha256": "eaadcec94365b8bf3b18440ec16b2b2f95297dd879d9ea701d5964a806fc8686",
+      "ort_ranking_sha256": "998d4ecab77733d03c5f72905fcfd74e10d830127f31859dcf3aa18fb5efb185",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project fern calibration probe 00005",
+      "exact_equal": true,
+      "top8_equal": true,
+      "max_score_difference": 3.594905138015747e-07,
+      "torch_min_adjacent_margin": 3.166496753692627e-08,
+      "ort_min_adjacent_margin": 4.6566128730773926e-08,
+      "disagreements": [],
+      "torch_ranking_sha256": "42ebb7dc5f212c96d95fa25f09c11a3dfd95116977701e8f00bf4eca05745495",
+      "ort_ranking_sha256": "42ebb7dc5f212c96d95fa25f09c11a3dfd95116977701e8f00bf4eca05745495",
+      "disagreements_count": 0
+    },
+    {
+      "query": "Project granite calibration probe 00006",
+      "exact_equal": true,
+      "top8_equal": true,
+      "max_score_difference": 3.03611159324646e-07,
+      "torch_min_adjacent_margin": 2.7939677238464355e-09,
+      "ort_min_adjacent_margin": 3.166496753692627e-08,
+      "disagreements": [],
+      "torch_ranking_sha256": "19dfe4c9ccff34dfa06a0eb4884524b9ef2ac36e7775748f97355efbd177be35",
+      "ort_ranking_sha256": "19dfe4c9ccff34dfa06a0eb4884524b9ef2ac36e7775748f97355efbd177be35",
+      "disagreements_count": 0
+    },
+    {
+      "query": "Project hazel calibration probe 00007",
+      "exact_equal": true,
+      "top8_equal": true,
+      "max_score_difference": 2.775341272354126e-07,
+      "torch_min_adjacent_margin": 8.66129994392395e-08,
+      "ort_min_adjacent_margin": 2.2351741790771484e-08,
+      "disagreements": [],
+      "torch_ranking_sha256": "71485f8a544241406bdd6984ecdcde1b68567fb45e8384b78c6d6d09dfef933c",
+      "ort_ranking_sha256": "71485f8a544241406bdd6984ecdcde1b68567fb45e8384b78c6d6d09dfef933c",
+      "disagreements_count": 0
+    },
+    {
+      "query": "Project apricot calibration probe 00008",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.0919909477233887e-07,
+      "torch_min_adjacent_margin": 7.450580596923828e-09,
+      "ort_min_adjacent_margin": 7.450580596923828e-09,
+      "disagreements": [
+        {
+          "rank": 1059,
+          "torch_id": 168,
+          "ort_id": 355,
+          "torch_adjacent_margin": 4.7334469854831696e-07,
+          "ort_adjacent_margin": 4.973262548446655e-07
+        },
+        {
+          "rank": 1060,
+          "torch_id": 355,
+          "ort_id": 168,
+          "torch_adjacent_margin": 4.819594323635101e-08,
+          "ort_adjacent_margin": 2.9802322387695312e-08
+        },
+        {
+          "rank": 1085,
+          "torch_id": 306,
+          "ort_id": 1523,
+          "torch_adjacent_margin": 1.07642263174057e-05,
+          "ort_adjacent_margin": 1.1041760444641113e-05
+        },
+        {
+          "rank": 1086,
+          "torch_id": 1523,
+          "ort_id": 306,
+          "torch_adjacent_margin": 2.086162567138672e-07,
+          "ort_adjacent_margin": 5.960464477539063e-08
+        },
+        {
+          "rank": 1419,
+          "torch_id": 780,
+          "ort_id": 194,
+          "torch_adjacent_margin": 0.00016313232481479645,
+          "ort_adjacent_margin": 0.00016297027468681335
+        },
+        {
+          "rank": 1420,
+          "torch_id": 194,
+          "ort_id": 780,
+          "torch_adjacent_margin": 2.60770320892334e-08,
+          "ort_adjacent_margin": 2.1047890186309814e-07
+        }
+      ],
+      "torch_ranking_sha256": "f8657525d3a6a1d95bb4f0b270f1d96ea4bbf5bff436e005a6bc32bfdfde3998",
+      "ort_ranking_sha256": "207327bf5a11c01e598030e1db919a52f7e72a684133ed9b557f13a3a65ce461",
+      "disagreements_count": 6
+    },
+    {
+      "query": "Project birch calibration probe 00009",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 2.8312206268310547e-07,
+      "torch_min_adjacent_margin": 1.862645149230957e-09,
+      "ort_min_adjacent_margin": 3.725290298461914e-09,
+      "disagreements": [
+        {
+          "rank": 1288,
+          "torch_id": 1728,
+          "ort_id": 791,
+          "torch_adjacent_margin": 1.51805579662323e-07,
+          "ort_adjacent_margin": 2.2351741790771484e-07
+        },
+        {
+          "rank": 1289,
+          "torch_id": 791,
+          "ort_id": 1728,
+          "torch_adjacent_margin": 1.0803341865539551e-07,
+          "ort_adjacent_margin": 2.514570951461792e-08
+        }
+      ],
+      "torch_ranking_sha256": "a07ff423eb2b1936c8316b25757e8148cf4d7f619839fc4dd143156203894cd2",
+      "ort_ranking_sha256": "dd42e37278fef7e7e9bca6078cc26fa61983ea99ca69ca154c9985a1162bbc28",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project cobalt calibration probe 00010",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.5762786865234375e-07,
+      "torch_min_adjacent_margin": 7.450580596923828e-09,
+      "ort_min_adjacent_margin": 4.563480615615845e-08,
+      "disagreements": [
+        {
+          "rank": 672,
+          "torch_id": 1497,
+          "ort_id": 195,
+          "torch_adjacent_margin": 2.1159648895263672e-05,
+          "ort_adjacent_margin": 2.1134503185749054e-05
+        },
+        {
+          "rank": 673,
+          "torch_id": 195,
+          "ort_id": 1497,
+          "torch_adjacent_margin": 1.4528632164001465e-07,
+          "ort_adjacent_margin": 1.5925616025924683e-07
+        },
+        {
+          "rank": 692,
+          "torch_id": 1444,
+          "ort_id": 1508,
+          "torch_adjacent_margin": 3.360863775014877e-05,
+          "ort_adjacent_margin": 3.3535994589328766e-05
+        },
+        {
+          "rank": 693,
+          "torch_id": 1508,
+          "ort_id": 1444,
+          "torch_adjacent_margin": 9.872019290924072e-08,
+          "ort_adjacent_margin": 9.406358003616333e-08
+        },
+        {
+          "rank": 1500,
+          "torch_id": 525,
+          "ort_id": 550,
+          "torch_adjacent_margin": 2.3461878299713135e-05,
+          "ort_adjacent_margin": 2.3618340492248535e-05
+        },
+        {
+          "rank": 1501,
+          "torch_id": 550,
+          "ort_id": 525,
+          "torch_adjacent_margin": 7.450580596923828e-09,
+          "ort_adjacent_margin": 2.4028122425079346e-07
+        }
+      ],
+      "torch_ranking_sha256": "9102682035cf8dcc6aff992f280ba1ddaccd8b67e6808f16b1dcf27f4e46b7fc",
+      "ort_ranking_sha256": "c60b7f75c9b6dc682ebe9c373bdab63018b30653d52c838d8a710b84e83aa9b5",
+      "disagreements_count": 6
+    },
+    {
+      "query": "Project dahlia calibration probe 00011",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.91155481338501e-07,
+      "torch_min_adjacent_margin": 2.0489096641540527e-08,
+      "ort_min_adjacent_margin": 1.862645149230957e-08,
+      "disagreements": [
+        {
+          "rank": 391,
+          "torch_id": 85,
+          "ort_id": 660,
+          "torch_adjacent_margin": 4.919618368148804e-05,
+          "ort_adjacent_margin": 4.908628761768341e-05
+        },
+        {
+          "rank": 392,
+          "torch_id": 660,
+          "ort_id": 85,
+          "torch_adjacent_margin": 3.166496753692627e-08,
+          "ort_adjacent_margin": 3.91155481338501e-08
+        },
+        {
+          "rank": 1665,
+          "torch_id": 848,
+          "ort_id": 1837,
+          "torch_adjacent_margin": 0.00020328722894191742,
+          "ort_adjacent_margin": 0.0002032741904258728
+        },
+        {
+          "rank": 1666,
+          "torch_id": 1837,
+          "ort_id": 848,
+          "torch_adjacent_margin": 7.636845111846924e-08,
+          "ort_adjacent_margin": 4.842877388000488e-08
+        }
+      ],
+      "torch_ranking_sha256": "a6fe2dd85333ce2eac3c308ba6ff4e96d2d7ad280d1416660760873c200c5bc4",
+      "ort_ranking_sha256": "aafae739b0068e546ef36de4f0af3350adaf8cca354dd8e610806080d19287f5",
+      "disagreements_count": 4
+    },
+    {
+      "query": "Project elm calibration probe 00012",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.7532299757003784e-07,
+      "torch_min_adjacent_margin": 1.862645149230957e-08,
+      "ort_min_adjacent_margin": 8.568167686462402e-08,
+      "disagreements": [
+        {
+          "rank": 1638,
+          "torch_id": 1601,
+          "ort_id": 1510,
+          "torch_adjacent_margin": 1.5716999769210815e-05,
+          "ort_adjacent_margin": 1.5458092093467712e-05
+        },
+        {
+          "rank": 1639,
+          "torch_id": 1510,
+          "ort_id": 1601,
+          "torch_adjacent_margin": 1.862645149230957e-08,
+          "ort_adjacent_margin": 1.7881393432617188e-07
+        },
+        {
+          "rank": 1858,
+          "torch_id": 855,
+          "ort_id": 1827,
+          "torch_adjacent_margin": 1.1276453733444214e-05,
+          "ort_adjacent_margin": 1.1421740055084229e-05
+        },
+        {
+          "rank": 1859,
+          "torch_id": 1827,
+          "ort_id": 855,
+          "torch_adjacent_margin": 1.862645149230957e-08,
+          "ort_adjacent_margin": 1.6763806343078613e-07
+        }
+      ],
+      "torch_ranking_sha256": "76014019de8eb9194c1e9c908d098fd4189b7dc6e907d742f08e7c7c78f02773",
+      "ort_ranking_sha256": "da3904b19d29f9b2624c99a8af8a5de7b4754e36304808ab8f4fce662125e147",
+      "disagreements_count": 4
+    },
+    {
+      "query": "Project fern calibration probe 00013",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 2.868473529815674e-07,
+      "torch_min_adjacent_margin": 1.30385160446167e-08,
+      "ort_min_adjacent_margin": 5.634501576423645e-08,
+      "disagreements": [
+        {
+          "rank": 833,
+          "torch_id": 1437,
+          "ort_id": 592,
+          "torch_adjacent_margin": 0.0001142062246799469,
+          "ort_adjacent_margin": 0.00011437572538852692
+        },
+        {
+          "rank": 834,
+          "torch_id": 592,
+          "ort_id": 1437,
+          "torch_adjacent_margin": 1.30385160446167e-08,
+          "ort_adjacent_margin": 1.4901161193847656e-07
+        }
+      ],
+      "torch_ranking_sha256": "bdfcfea9c90e55f2818a48dd8b6e2c9bb416918bdd5e326b2edc2e371e1da64d",
+      "ort_ranking_sha256": "645b28eb00eaed0761b195e103b0014bc024d9dff81e762cdb5e14401a3545cc",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project granite calibration probe 00014",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.5297125577926636e-07,
+      "torch_min_adjacent_margin": 4.842877388000488e-08,
+      "ort_min_adjacent_margin": 5.587935447692871e-09,
+      "disagreements": [
+        {
+          "rank": 147,
+          "torch_id": 1983,
+          "ort_id": 1266,
+          "torch_adjacent_margin": 5.9720128774642944e-05,
+          "ort_adjacent_margin": 5.980953574180603e-05
+        },
+        {
+          "rank": 148,
+          "torch_id": 1266,
+          "ort_id": 1983,
+          "torch_adjacent_margin": 1.862645149230957e-07,
+          "ort_adjacent_margin": 2.9802322387695312e-08
+        },
+        {
+          "rank": 422,
+          "torch_id": 49,
+          "ort_id": 538,
+          "torch_adjacent_margin": 3.44105064868927e-05,
+          "ort_adjacent_margin": 3.433600068092346e-05
+        },
+        {
+          "rank": 423,
+          "torch_id": 538,
+          "ort_id": 49,
+          "torch_adjacent_margin": 7.636845111846924e-08,
+          "ort_adjacent_margin": 5.587935447692871e-09
+        },
+        {
+          "rank": 1064,
+          "torch_id": 1586,
+          "ort_id": 783,
+          "torch_adjacent_margin": 2.704467624425888e-05,
+          "ort_adjacent_margin": 2.715364098548889e-05
+        },
+        {
+          "rank": 1065,
+          "torch_id": 783,
+          "ort_id": 1586,
+          "torch_adjacent_margin": 8.242204785346985e-08,
+          "ort_adjacent_margin": 2.1886080503463745e-08
+        }
+      ],
+      "torch_ranking_sha256": "466b19b703bbd105bc586583ee48c301134d1ea0e589540f47f9188de2fc8fc3",
+      "ort_ranking_sha256": "dc89732155c7d0e495791cb917a5fd42641e5a12d49a0e0bf3e483502b4069b6",
+      "disagreements_count": 6
+    },
+    {
+      "query": "Project hazel calibration probe 00015",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 4.0046870708465576e-07,
+      "torch_min_adjacent_margin": 7.450580596923828e-09,
+      "ort_min_adjacent_margin": 7.450580596923828e-09,
+      "disagreements": [
+        {
+          "rank": 887,
+          "torch_id": 1761,
+          "ort_id": 83,
+          "torch_adjacent_margin": 3.676023334264755e-05,
+          "ort_adjacent_margin": 3.679515793919563e-05
+        },
+        {
+          "rank": 888,
+          "torch_id": 83,
+          "ort_id": 1761,
+          "torch_adjacent_margin": 1.0384246706962585e-07,
+          "ort_adjacent_margin": 1.1688098311424255e-07
+        },
+        {
+          "rank": 1467,
+          "torch_id": 783,
+          "ort_id": 1160,
+          "torch_adjacent_margin": 2.1385028958320618e-05,
+          "ort_adjacent_margin": 2.1364539861679077e-05
+        },
+        {
+          "rank": 1468,
+          "torch_id": 1160,
+          "ort_id": 783,
+          "torch_adjacent_margin": 1.0058283805847168e-07,
+          "ort_adjacent_margin": 1.30385160446167e-07
+        },
+        {
+          "rank": 1738,
+          "torch_id": 1411,
+          "ort_id": 1456,
+          "torch_adjacent_margin": 1.280754804611206e-05,
+          "ort_adjacent_margin": 1.2654811143875122e-05
+        },
+        {
+          "rank": 1739,
+          "torch_id": 1456,
+          "ort_id": 1411,
+          "torch_adjacent_margin": 7.450580596923828e-09,
+          "ort_adjacent_margin": 2.0116567611694336e-07
+        }
+      ],
+      "torch_ranking_sha256": "e35fc60e7cccf875808a6855ad1ec00537784acd25b89034413768f3995b02a2",
+      "ort_ranking_sha256": "28a0f2a30e0e0655a11af2c1e1d6b9640a7191f188d1371a950c45a0d2c95e55",
+      "disagreements_count": 6
+    },
+    {
+      "query": "Project apricot calibration probe 00016",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 2.505257725715637e-07,
+      "torch_min_adjacent_margin": 1.30385160446167e-08,
+      "ort_min_adjacent_margin": 7.927883416414261e-08,
+      "disagreements": [
+        {
+          "rank": 820,
+          "torch_id": 489,
+          "ort_id": 1015,
+          "torch_adjacent_margin": 1.8065329641103745e-05,
+          "ort_adjacent_margin": 1.8077902495861053e-05
+        },
+        {
+          "rank": 821,
+          "torch_id": 1015,
+          "ort_id": 489,
+          "torch_adjacent_margin": 5.029141902923584e-08,
+          "ort_adjacent_margin": 1.0058283805847168e-07
+        }
+      ],
+      "torch_ranking_sha256": "d73ebaea01e4267e17e218d7611ee529f707b6c0f3bc12c0816516f835a10c73",
+      "ort_ranking_sha256": "4e63aa9784ed81a8cc4e107d86c5c304d6b1ef9d781ca60f649a27df00b3b878",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project birch calibration probe 00017",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.427267074584961e-07,
+      "torch_min_adjacent_margin": 1.1175870895385742e-08,
+      "ort_min_adjacent_margin": 1.862645149230957e-08,
+      "disagreements": [
+        {
+          "rank": 278,
+          "torch_id": 991,
+          "ort_id": 1382,
+          "torch_adjacent_margin": 0.00013304129242897034,
+          "ort_adjacent_margin": 0.00013313442468643188
+        },
+        {
+          "rank": 279,
+          "torch_id": 1382,
+          "ort_id": 991,
+          "torch_adjacent_margin": 1.4901161193847656e-08,
+          "ort_adjacent_margin": 4.470348358154297e-08
+        },
+        {
+          "rank": 294,
+          "torch_id": 1255,
+          "ort_id": 901,
+          "torch_adjacent_margin": 1.9416213035583496e-05,
+          "ort_adjacent_margin": 1.934915781021118e-05
+        },
+        {
+          "rank": 295,
+          "torch_id": 901,
+          "ort_id": 1255,
+          "torch_adjacent_margin": 2.9802322387695312e-08,
+          "ort_adjacent_margin": 1.862645149230957e-08
+        },
+        {
+          "rank": 779,
+          "torch_id": 1141,
+          "ort_id": 1890,
+          "torch_adjacent_margin": 5.180947482585907e-06,
+          "ort_adjacent_margin": 5.022622644901276e-06
+        },
+        {
+          "rank": 780,
+          "torch_id": 1890,
+          "ort_id": 1141,
+          "torch_adjacent_margin": 1.1175870895385742e-08,
+          "ort_adjacent_margin": 9.96515154838562e-08
+        },
+        {
+          "rank": 1651,
+          "torch_id": 955,
+          "ort_id": 451,
+          "torch_adjacent_margin": 3.682449460029602e-06,
+          "ort_adjacent_margin": 3.7830322980880737e-06
+        },
+        {
+          "rank": 1652,
+          "torch_id": 451,
+          "ort_id": 955,
+          "torch_adjacent_margin": 1.0989606380462646e-07,
+          "ort_adjacent_margin": 2.7939677238464355e-08
+        }
+      ],
+      "torch_ranking_sha256": "558d79be71df50e954a4aaea60169261cd0a2a1014f2d2a5c926e3883882b80e",
+      "ort_ranking_sha256": "f6b6dcf81cba597c873aa84c0e34330e03bad5de3a7f7c7232ed79071de187dd",
+      "disagreements_count": 8
+    },
+    {
+      "query": "Project cobalt calibration probe 00018",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.9907172322273254e-07,
+      "torch_min_adjacent_margin": 4.190951585769653e-08,
+      "ort_min_adjacent_margin": 4.190951585769653e-08,
+      "disagreements": [
+        {
+          "rank": 703,
+          "torch_id": 1667,
+          "ort_id": 610,
+          "torch_adjacent_margin": 9.825825691223145e-05,
+          "ort_adjacent_margin": 9.85199585556984e-05
+        },
+        {
+          "rank": 704,
+          "torch_id": 610,
+          "ort_id": 1667,
+          "torch_adjacent_margin": 9.592622518539429e-08,
+          "ort_adjacent_margin": 5.587935447692871e-08
+        },
+        {
+          "rank": 851,
+          "torch_id": 1972,
+          "ort_id": 1372,
+          "torch_adjacent_margin": 7.18953087925911e-05,
+          "ort_adjacent_margin": 7.19856470823288e-05
+        },
+        {
+          "rank": 852,
+          "torch_id": 1372,
+          "ort_id": 1972,
+          "torch_adjacent_margin": 4.7497451305389404e-08,
+          "ort_adjacent_margin": 4.190951585769653e-08
+        }
+      ],
+      "torch_ranking_sha256": "1546fcb7c405b24dade778ac76a633b526b4779834b427975a6666074f02e9f3",
+      "ort_ranking_sha256": "ee611717e88960f0e8937f9c501ad68a687793816859800115c37c218ea9b55c",
+      "disagreements_count": 4
+    },
+    {
+      "query": "Project dahlia calibration probe 00019",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 4.6193599700927734e-07,
+      "torch_min_adjacent_margin": 0.0,
+      "ort_min_adjacent_margin": 1.7695128917694092e-08,
+      "disagreements": [
+        {
+          "rank": 754,
+          "torch_id": 980,
+          "ort_id": 381,
+          "torch_adjacent_margin": 8.894689381122589e-05,
+          "ort_adjacent_margin": 8.9205801486969e-05
+        },
+        {
+          "rank": 755,
+          "torch_id": 381,
+          "ort_id": 980,
+          "torch_adjacent_margin": 3.380700945854187e-07,
+          "ort_adjacent_margin": 3.073364496231079e-08
+        },
+        {
+          "rank": 1200,
+          "torch_id": 1415,
+          "ort_id": 1387,
+          "torch_adjacent_margin": 2.2922642529010773e-05,
+          "ort_adjacent_margin": 2.2903084754943848e-05
+        },
+        {
+          "rank": 1201,
+          "torch_id": 1387,
+          "ort_id": 1415,
+          "torch_adjacent_margin": 1.0989606380462646e-07,
+          "ort_adjacent_margin": 5.587935447692871e-08
+        },
+        {
+          "rank": 1208,
+          "torch_id": 168,
+          "ort_id": 529,
+          "torch_adjacent_margin": 5.225371569395065e-05,
+          "ort_adjacent_margin": 5.248561501502991e-05
+        },
+        {
+          "rank": 1209,
+          "torch_id": 529,
+          "ort_id": 168,
+          "torch_adjacent_margin": 0.0,
+          "ort_adjacent_margin": 1.7695128917694092e-08
+        }
+      ],
+      "torch_ranking_sha256": "c8ca230fa14dde1b3a0b041b08e58ed0acb3d4737e9025dbb4627324e11ac986",
+      "ort_ranking_sha256": "ff910a5b58ceb5101bb3077e27f962ffde712ff7c2fe7f0cfa3418242c32d3da",
+      "disagreements_count": 6
+    },
+    {
+      "query": "Project elm calibration probe 00020",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.557652235031128e-07,
+      "torch_min_adjacent_margin": 6.05359673500061e-08,
+      "ort_min_adjacent_margin": 2.7939677238464355e-09,
+      "disagreements": [
+        {
+          "rank": 840,
+          "torch_id": 1019,
+          "ort_id": 756,
+          "torch_adjacent_margin": 1.7663463950157166e-05,
+          "ort_adjacent_margin": 1.7505604773759842e-05
+        },
+        {
+          "rank": 841,
+          "torch_id": 756,
+          "ort_id": 1019,
+          "torch_adjacent_margin": 1.1362135410308838e-07,
+          "ort_adjacent_margin": 1.019798219203949e-07
+        },
+        {
+          "rank": 893,
+          "torch_id": 1297,
+          "ort_id": 562,
+          "torch_adjacent_margin": 9.258277714252472e-06,
+          "ort_adjacent_margin": 9.243376553058624e-06
+        },
+        {
+          "rank": 894,
+          "torch_id": 562,
+          "ort_id": 1297,
+          "torch_adjacent_margin": 8.568167686462402e-08,
+          "ort_adjacent_margin": 1.6763806343078613e-08
+        },
+        {
+          "rank": 1561,
+          "torch_id": 1919,
+          "ort_id": 1378,
+          "torch_adjacent_margin": 3.540702164173126e-05,
+          "ort_adjacent_margin": 3.5740435123443604e-05
+        },
+        {
+          "rank": 1562,
+          "torch_id": 1378,
+          "ort_id": 1919,
+          "torch_adjacent_margin": 3.110617399215698e-07,
+          "ort_adjacent_margin": 5.21540641784668e-08
+        },
+        {
+          "rank": 1648,
+          "torch_id": 149,
+          "ort_id": 1974,
+          "torch_adjacent_margin": 0.00012755393981933594,
+          "ort_adjacent_margin": 0.00012762844562530518
+        },
+        {
+          "rank": 1649,
+          "torch_id": 1974,
+          "ort_id": 149,
+          "torch_adjacent_margin": 2.4959444999694824e-07,
+          "ort_adjacent_margin": 3.166496753692627e-08
+        }
+      ],
+      "torch_ranking_sha256": "01adcb5016e3608ede6110dd528644296f3ab06eca7f1f903534372771726ac9",
+      "ort_ranking_sha256": "5a7e5ae500daa84ff3d4ae20cf8f81d406d8e03770586888bf7376afba392050",
+      "disagreements_count": 8
+    },
+    {
+      "query": "Project fern calibration probe 00021",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.781169652938843e-07,
+      "torch_min_adjacent_margin": 2.1420419216156006e-08,
+      "ort_min_adjacent_margin": 5.587935447692871e-09,
+      "disagreements": [
+        {
+          "rank": 683,
+          "torch_id": 132,
+          "ort_id": 1093,
+          "torch_adjacent_margin": 4.130322486162186e-05,
+          "ort_adjacent_margin": 4.137028008699417e-05
+        },
+        {
+          "rank": 684,
+          "torch_id": 1093,
+          "ort_id": 132,
+          "torch_adjacent_margin": 9.778887033462524e-08,
+          "ort_adjacent_margin": 5.587935447692871e-09
+        },
+        {
+          "rank": 981,
+          "torch_id": 1736,
+          "ort_id": 765,
+          "torch_adjacent_margin": 6.689690053462982e-06,
+          "ort_adjacent_margin": 6.528571248054504e-06
+        },
+        {
+          "rank": 982,
+          "torch_id": 765,
+          "ort_id": 1736,
+          "torch_adjacent_margin": 2.1420419216156006e-08,
+          "ort_adjacent_margin": 7.450580596923828e-08
+        },
+        {
+          "rank": 1057,
+          "torch_id": 1541,
+          "ort_id": 1622,
+          "torch_adjacent_margin": 2.532266080379486e-05,
+          "ort_adjacent_margin": 2.539297565817833e-05
+        },
+        {
+          "rank": 1058,
+          "torch_id": 1622,
+          "ort_id": 1541,
+          "torch_adjacent_margin": 2.491287887096405e-08,
+          "ort_adjacent_margin": 1.4016404747962952e-07
+        },
+        {
+          "rank": 1355,
+          "torch_id": 1176,
+          "ort_id": 61,
+          "torch_adjacent_margin": 6.918050348758698e-05,
+          "ort_adjacent_margin": 6.909295916557312e-05
+        },
+        {
+          "rank": 1356,
+          "torch_id": 61,
+          "ort_id": 1176,
+          "torch_adjacent_margin": 4.377216100692749e-08,
+          "ort_adjacent_margin": 5.587935447692871e-09
+        },
+        {
+          "rank": 1475,
+          "torch_id": 1164,
+          "ort_id": 670,
+          "torch_adjacent_margin": 1.8559396266937256e-05,
+          "ort_adjacent_margin": 1.8365681171417236e-05
+        },
+        {
+          "rank": 1476,
+          "torch_id": 670,
+          "ort_id": 1164,
+          "torch_adjacent_margin": 1.7695128917694092e-07,
+          "ort_adjacent_margin": 2.1792948246002197e-07
+        },
+        {
+          "rank": 1874,
+          "torch_id": 752,
+          "ort_id": 254,
+          "torch_adjacent_margin": 9.989365935325623e-05,
+          "ort_adjacent_margin": 9.990856051445007e-05
+        },
+        {
+          "rank": 1875,
+          "torch_id": 254,
+          "ort_id": 752,
+          "torch_adjacent_margin": 9.685754776000977e-08,
+          "ort_adjacent_margin": 1.601874828338623e-07
+        }
+      ],
+      "torch_ranking_sha256": "869984b736d8f9d8fbae42f3f0b09059fdf22a862eb0e5795f91b0b82ada0532",
+      "ort_ranking_sha256": "910590eee5f4120bf7c3f1ea8f32449eb30ae64a1b461074179155d5a1e6e3fb",
+      "disagreements_count": 12
+    },
+    {
+      "query": "Project granite calibration probe 00022",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 3.110617399215698e-07,
+      "torch_min_adjacent_margin": 2.9802322387695312e-08,
+      "ort_min_adjacent_margin": 1.955777406692505e-08,
+      "disagreements": [
+        {
+          "rank": 766,
+          "torch_id": 375,
+          "ort_id": 679,
+          "torch_adjacent_margin": 0.0001104455441236496,
+          "ort_adjacent_margin": 0.00011042319238185883
+        },
+        {
+          "rank": 767,
+          "torch_id": 679,
+          "ort_id": 375,
+          "torch_adjacent_margin": 1.1548399925231934e-07,
+          "ort_adjacent_margin": 1.0710209608078003e-07
+        }
+      ],
+      "torch_ranking_sha256": "b4e6fa3f596e02fc0175c076d41c86182d00e85961869f4ab43b427ee916c45c",
+      "ort_ranking_sha256": "5b72ec4636ba10ac88721f2de9332194680d6e01ec0ba5fa41e493059d2d8eb2",
+      "disagreements_count": 2
+    },
+    {
+      "query": "Project hazel calibration probe 00023",
+      "exact_equal": false,
+      "top8_equal": true,
+      "max_score_difference": 2.942979335784912e-07,
+      "torch_min_adjacent_margin": 9.313225746154785e-09,
+      "ort_min_adjacent_margin": 5.587935447692871e-09,
+      "disagreements": [
+        {
+          "rank": 1775,
+          "torch_id": 491,
+          "ort_id": 1795,
+          "torch_adjacent_margin": 3.614649176597595e-05,
+          "ort_adjacent_margin": 3.629550337791443e-05
+        },
+        {
+          "rank": 1776,
+          "torch_id": 1795,
+          "ort_id": 491,
+          "torch_adjacent_margin": 1.564621925354004e-07,
+          "ort_adjacent_margin": 6.332993507385254e-08
+        },
+        {
+          "rank": 1960,
+          "torch_id": 902,
+          "ort_id": 392,
+          "torch_adjacent_margin": 0.00024002045392990112,
+          "ort_adjacent_margin": 0.00023996829986572266
+        },
+        {
+          "rank": 1961,
+          "torch_id": 392,
+          "ort_id": 902,
+          "torch_adjacent_margin": 5.21540641784668e-08,
+          "ort_adjacent_margin": 2.086162567138672e-07
+        }
+      ],
+      "torch_ranking_sha256": "5175a5d4d43623aba1a83fb03a3850ea6c44e926ed44e5f487d9ad3e1bd13d2e",
+      "ort_ranking_sha256": "9880b6cccc2c40cd47747ad3aace6452108226e6a5c943b8d61755e36ece5a2c",
+      "disagreements_count": 4
+    },
+    {
+      "query": "Project apricot calibration probe 00024",
+      "exact_equal": true,
+      "top8_equal": true,
+      "max_score_difference": 3.6135315895080566e-07,
+      "torch_min_adjacent_margin": 8.381903171539307e-09,
+      "ort_min_adjacent_margin": 7.078051567077637e-08,
+      "disagreements": [],
+      "torch_ranking_sha256": "afeba89a4da8218ce993b1716fdd668f510f1021643a0f88d479a570a774520d",
+      "ort_ranking_sha256": "afeba89a4da8218ce993b1716fdd668f510f1021643a0f88d479a570a774520d",
+      "disagreements_count": 0
+    }
+  ],
+  "documents_count": 1000,
+  "proposed_queries_count": 25,
+  "self_check": "all counts, pin/provenance, sorted unique complete IDs, reported disagreements and extrema verified",
+  "proposed_tolerance": {
+    "status": "PROPOSED only; not adopted and no acceptance waiver",
+    "maximum_absolute_embedding_difference": 6e-07,
+    "minimum_embedding_cosine": 0.999999999993,
+    "derivation": "Round measured maximum absolute difference upward to the next 1e-7; round measured maximum cosine loss upward to the next 1e-12.",
+    "scope": "Recorded graph, tokenizer, pinned CPU runtime and proposed corpus only; direct ORT feed.",
+    "ranking_policy": "No tolerance for IDs or ranking order; 20 of 25 full rankings differ."
+  }
+}
