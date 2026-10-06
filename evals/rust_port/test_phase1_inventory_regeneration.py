@@ -48,7 +48,7 @@ def test_current_pin_regeneration_matches_canonical_artifacts_and_preserves_raw_
                    "rust/phase0b-oracle-tests.json"]
     before = raw_hashes(root, historical)
     first = phase1_inventory.regenerate(exploration, root)
-    assert first == {"candidate_functions": 8, "classified_functions": 191,
+    assert first == {"candidate_functions": 10, "classified_functions": 191,
                      "source_checks": "passed", "oracle_commit": phase1_inventory.ORACLE_HEAD}
     assert {path: json.loads((root / path).read_text(encoding="utf-8")) for path in OUTPUTS} == expected
     after_first = raw_hashes(root, OUTPUTS)

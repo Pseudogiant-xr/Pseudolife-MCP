@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from collections import Counter, defaultdict
 from functools import cache, partial
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -12,6 +13,13 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
 PHASE1_ORACLE = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
+PHASE1_FUNCTION_FILES = (
+    "tests/test_shim.py", "tests/test_shim_transport_recovery.py",
+    "tests/test_shim_board_retry.py", "tests/test_version_handshake.py",
+    "tests/test_update_offer.py", "tests/test_mcp_client_neutrality.py",
+    "tests/test_mcp_stdio_errlog.py", "tests/test_connection_loss_recovery.py",
+    "tests/test_shim_channel.py",
+)
 
 
 def source(path: str) -> str:
@@ -146,6 +154,31 @@ def literal_node_ids(path: str, *, pinned: bool = False, oracle: str = ORACLE) -
     return result
 
 
+@cache
+def phase1_function_sources(*, oracle: str = PHASE1_ORACLE, root: Path = ROOT) -> dict:
+    """Enumerate every scoped test function from exact pinned Git bytes."""
+    result = {}
+    for path in PHASE1_FUNCTION_FILES:
+        raw = subprocess.check_output(["git", "show", f"{oracle}:{path}"], cwd=root)
+        digest = hashlib.sha256(raw).hexdigest()
+        for node in ast.parse(raw).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                result[f"{path}::{node.name}"] = {"line": node.lineno, "source_sha256": digest}
+    return result
+
+
+def validate_phase1_functions(functions: list[dict], *, oracle: str = PHASE1_ORACLE,
+                              root: Path = ROOT) -> None:
+    expected = phase1_function_sources(oracle=oracle, root=root)
+    nodes = [item["nodeid"] for item in functions]
+    assert len(nodes) == len(set(nodes)), "duplicate per-function Phase 1 ownership"
+    assert set(nodes) == set(expected), "missing or extra per-function Phase 1 ownership"
+    for item in functions:
+        identity = expected[item["nodeid"]]
+        assert item["source_sha256"] == identity["source_sha256"], f"stale per-function source hash: {item['nodeid']}"
+        assert item["line"] == identity["line"], f"stale per-function source line: {item['nodeid']}"
+
+
 def validate(*, phase1: bool = False) -> dict:
     """Audit Phase 0b by default; Phase 1 has separate pinned manifests."""
     oracle = PHASE1_ORACLE if phase1 else ORACLE
@@ -162,7 +195,10 @@ def validate(*, phase1: bool = False) -> dict:
     assert len(paths) == len(set(paths)), "duplicate test-file bucket"
     pinned_files = test_files_at_pin(oracle=oracle)
     assert sorted(paths) == pinned_files, "missing or extra test-file bucket"
-    mapped = json.loads(source(mapping_path))["mapped"]
+    mapping = json.loads(source(mapping_path))
+    if phase1:
+        assert mapping["oracle_commit"] == oracle, "adapter mapping differs from Phase 1 oracle pin"
+    mapped = mapping["mapped"]
     selected = []
     for item in files:
         assert item["bucket"] in {"oracle", "candidate", "internal"}
@@ -186,16 +222,14 @@ def validate(*, phase1: bool = False) -> dict:
     assert manifest["candidate_node_count"] == len(selected)
     if phase1:
         functions = manifest.get("phase1_functions", [])
-        assert len(functions) == 191, "missing per-function Phase 1 ownership"
-        assert len({item["nodeid"] for item in functions}) == len(functions)
+        validate_phase1_functions(functions, oracle=oracle)
+        candidates = {item["nodeid"] for item in functions if item["bucket"] == "candidate"}
+        scoped_candidates = {node for node in selected if node.split("::", 1)[0] in PHASE1_FUNCTION_FILES}
+        assert candidates == scoped_candidates, "candidate function ownership and adapter mapping disagree"
         scoped_internal = [item for item in functions
                            if item["bucket"] == "internal" and item["scope"] == "phase1"]
         assert len(scoped_internal) == 125, "missing scoped internal ownership"
         for item in functions:
-            path, function = item["nodeid"].split("::", 1)
-            names = {node.name for node in ast.parse(pinned_source(path, oracle=oracle)).body
-                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-            assert function in names, "function absent from oracle"
             retired_sdk_nodes = {
                 "tests/test_shim.py::test_sdk_guard_passes_on_a_v2_environment",
                 "tests/test_shim.py::test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic",

@@ -226,7 +226,6 @@ async fn test_spawn_floor_and_alive_ceiling_preserve_child_liveness_contract() {
 }
 #[tokio::test]
 async fn test_spawn_lock_is_released_after_the_daemon_is_up() {
-    use fs2::FileExt;
     let home = DisposableHome::new();
     let opts = options(&home, false);
     let mut control = Control {
@@ -246,8 +245,8 @@ async fn test_spawn_lock_is_released_after_the_daemon_is_up() {
         .write(true)
         .open(&opts.lock_path)
         .unwrap();
-    FileExt::try_lock_exclusive(&lock).unwrap();
-    FileExt::unlock(&lock).unwrap();
+    lock.try_lock().unwrap();
+    lock.unlock().unwrap();
 }
 #[tokio::test]
 async fn test_concurrent_shims_spawn_exactly_one_daemon() {
@@ -327,7 +326,6 @@ async fn test_concurrent_shims_spawn_exactly_one_daemon() {
 }
 #[tokio::test]
 async fn test_failed_spawn_releases_its_lock_and_open_failure_is_best_effort() {
-    use fs2::FileExt;
     let home = DisposableHome::new();
     let mut opts = options(&home, false);
     opts.spawn_floor = Duration::ZERO;
@@ -345,8 +343,8 @@ async fn test_failed_spawn_releases_its_lock_and_open_failure_is_best_effort() {
         .write(true)
         .open(&opts.lock_path)
         .unwrap();
-    FileExt::try_lock_exclusive(&lock).unwrap();
-    FileExt::unlock(&lock).unwrap();
+    lock.try_lock().unwrap();
+    lock.unlock().unwrap();
     opts.lock_path = home.path("missing-parent/spawn.lock");
     let mut control = Control {
         healthy_at_probe: Some(2),

@@ -153,6 +153,48 @@ async fn board_retry_transient_startup_matrix() {
     }
 }
 #[tokio::test]
+async fn board_retry_fixture_serves_context_while_an_accepted_connection_is_empty() {
+    use std::{io::Read, net::TcpStream};
+
+    let mut fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+    registered(&board).await;
+    let before = fixture.count("/context");
+    let (call, mut empty) = tokio::time::timeout(Duration::from_secs(2), async {
+        let empty = TcpStream::connect(fixture.url.trim_start_matches("http://")).unwrap();
+        fixture.wait_connection(&empty).await;
+        (forward(&board, true).await, empty)
+    })
+    .await
+    .expect("accepted empty connection blocked context validation");
+    assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
+    assert!(fixture.count("/context") > before);
+    empty.set_nonblocking(true).unwrap();
+    assert!(
+        matches!(empty.peek(&mut [0]), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+        "fixture closed the held socket before context validation completed"
+    );
+    empty.set_nonblocking(false).unwrap();
+    board.close().await;
+    let accepted = fixture.accepted_connections();
+    assert_eq!(
+        fixture.close(),
+        accepted,
+        "fixture did not join every handler"
+    );
+    empty
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    assert_eq!(
+        empty.read(&mut [0]).unwrap(),
+        0,
+        "fixture kept its socket open"
+    );
+}
+
+#[tokio::test]
 async fn board_retry_registered_note_once_after_validated_call() {
     if capture(
         "board_retry_registered_note_once_after_validated_call",

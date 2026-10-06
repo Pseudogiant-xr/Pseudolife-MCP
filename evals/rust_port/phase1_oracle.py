@@ -11,6 +11,16 @@ from .provenance import ROOT
 from .stdio_capture import ORACLE_HEAD, require_phase1_source
 
 
+def prepare_metadata(destination):
+    """Export exact pinned package metadata without installing a runtime."""
+    destination = Path(destination).resolve()
+    metadata = subprocess.check_output(["git", "show", ORACLE_HEAD + ":pyproject.toml"], cwd=ROOT)
+    version = tomllib.loads(metadata.decode("utf-8"))["project"]["version"]
+    destination.mkdir(parents=True, exist_ok=False)
+    (destination / "pyproject.toml").write_bytes(metadata)
+    return {"source": str(destination), "oracle_head": ORACLE_HEAD, "version": version}
+
+
 def prepare(destination):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=False)
@@ -19,6 +29,7 @@ def prepare(destination):
     subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(source)], check=True)
     subprocess.run(["git", "checkout", "--quiet", "--detach", ORACLE_HEAD], cwd=source, check=True)
     checked = require_phase1_source(source)
+    version = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     # Only instruments are overlaid. Production and immutable oracle tests stay
     # at the pin, while the candidate remains an absolute caller-supplied path.
     for name in ("rust_port", "rust_baseline"):
@@ -40,7 +51,6 @@ def prepare(destination):
         "import json; from evals.rust_port.provenance import runtime_metadata; "
         "from pathlib import Path; print(json.dumps(runtime_metadata(Path.cwd())))"], cwd=source, text=True)
     metadata = json.loads(probe)
-    version = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != version \
             or metadata["distribution_versions"]["pseudolife-mcp"] != version:
         raise RuntimeError("prepared oracle runtime does not import the pinned checkout/version")
@@ -50,8 +60,9 @@ def prepare(destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", type=Path, required=True, help="new private directory")
+    parser.add_argument("--metadata-only", action="store_true", help="export pinned pyproject.toml only")
     args = parser.parse_args()
-    print(json.dumps(prepare(args.destination)))
+    print(json.dumps((prepare_metadata if args.metadata_only else prepare)(args.destination)))
 
 
 if __name__ == "__main__":

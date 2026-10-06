@@ -16,6 +16,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 4
+  CUDA_VISIBLE_DEVICES: '-1'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
 
 jobs:
   rust:
@@ -31,6 +34,8 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -42,6 +47,14 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
+      - name: Prepare pinned package metadata for the Rust identity contract
+        shell: pwsh
+        working-directory: .
+        run: |
+          $oracleMetadata = Join-Path $env:RUNNER_TEMP 'phase1-oracle-metadata'
+          python -m evals.rust_port.phase1_oracle --metadata-only --destination $oracleMetadata
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_PORT_ORACLE_ROOT=$oracleMetadata" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
@@ -162,6 +175,41 @@ jobs:
           raise SystemExit(subprocess.run(command, cwd=root).returncode)
           '@
           & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $phase2Bootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.cli_dispatch", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          $phase2Evidence = Join-Path $env:RUNNER_TEMP 'phase2-cli-tests'
+          $phase2Receipt = Join-Path $checkoutRoot "evals/results/rust-phase2-ci-$env:RUNNER_OS.json"
+          & $oraclePython -c $phase2Bootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --evidence-directory $phase2Evidence --out $phase2Receipt --offline-resource-checked-at $resourceCheckedAt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $processBootstrap = @'
+          import os, pathlib, subprocess, sys, tempfile
+          from psycopg.conninfo import conninfo_to_dict, make_conninfo
+          from pseudolife_memory.storage.embedded_pg import attach_or_start
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          with tempfile.TemporaryDirectory(prefix="cli-corpus-postgres-") as directory:
+              dsn, owned = attach_or_start(pathlib.Path(directory))
+              if owned is None:
+                  raise RuntimeError("fresh corpus PostgreSQL unexpectedly attached")
+              try:
+                  options = conninfo_to_dict(dsn)
+                  options["dbname"] = "postgres"
+                  env = dict(os.environ, PSEUDOLIFE_BENCH_ADMIN_URL=make_conninfo(**options))
+                  command = module_command("evals.rust_port.cli_process", root, sys.argv[2:])
+                  result = subprocess.run(command, cwd=root, env=env)
+              finally:
+                  owned.stop()
+          raise SystemExit(result.returncode)
+          '@
+          $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
+          $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
+          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()
@@ -170,5 +218,7 @@ jobs:
           name: rust-parity-${{ runner.os }}
           path: |
             evals/results/rust-phase1-ci-*.json
+            evals/results/rust-phase2-ci-*.json
             evals/results/rust-cli-argv-*.json
+            ${{ runner.temp }}/phase2b-cli-process-public.json
           if-no-files-found: warn

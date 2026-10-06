@@ -297,3 +297,57 @@ RSS launches exited cleanly. The two 2e628b27 pairs remain named historical
 before-retirement references with their original source/runtime bindings.
 The oracle and other candidate behavior changed between captures, so their
 difference is not an isolated causal estimate of retiring the SDK preflight.
+
+`cli_measurement.py` measures help cold-start-to-exit separately from shim
+first-frame and initialize-return timing. It uses the same alternating paired
+order and repeat-block p50/p95 floors from `shim_measurement.py`: three repeats
+of ten samples per arm, with an untimed exact-byte control before timing and
+unchanged bytes in every cell. Use the genuine prepared pinned Python runtime,
+a committed clean candidate root, and a quiet authorized CPU window. Required
+stream scope is UTF-8 stdout/stderr and valid Unicode scalar argv, with Windows
+CRLF preserved and LF elsewhere; receipts record this boundary. Locale/default
+and other output encodings and non-UTF-8 or surrogate argv remain deferred. Required
+arguments are `--oracle-root`, `--candidate-root`, `--candidate`, `--out` and
+the existing resource-check option; optional `--candidate-sha256` binds a frozen
+binary. `--smoke` permits smaller positive counts and marks the output as plumbing
+evidence. Lease check and doctor measurements remain deferred until their
+mode contracts are implemented. Historical help pairs at committed `6e936887` are
+[`rust-phase2-help-measurement-windows-6e936887.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2-help-measurement-windows-6e936887.json)
+and [`rust-phase2-help-measurement-linux-6e936887.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2-help-measurement-linux-6e936887.json).
+Each has 30 rows per arm; PORT-STATE.md links the matching accepted CLI receipts
+and reports pooled nearest-rank p50/p95 and repeat-block floors. The later
+Phase 1 docs/data merge leaves source/instruments unchanged; executed artifact
+identities remain `6e936887`. Both-OS executing CI passed in workflow
+37242071017 for that head's exact tree; current documentation-head gates
+remain pending.
+
+Version timing now defaults to one untimed invocation per arm before each of
+the three ten-sample blocks. Installed layouts are prepared for the two byte
+controls, then retained: timed starts reuse the same path, file identity and
+executable bytes that were warmed. Input files and environment are restored to
+the exact byte-control state without rewriting unchanged images; every warm
+and timed invocation must reproduce its arm's control output and poststate.
+Receipts retain the historical `cold_start_to_exit_ms` metric name, record six
+warmups separately, and identify this as fresh-process timing after explicit
+image warmup. Other modes retain their existing fixture-reset protocol unless
+`--warm-images` is explicitly selected. `--mode version --layout installed`
+selects the minimal installer-schema fixture; `--layout bare` is also available.
+Final combined-head measurements at `5220b5ee` cover both OSes. Earlier
+copied-image timing remains historical evidence.
+
+## Version image warmup protocol
+
+Version uses two untimed exact-byte controls, then one untimed start per arm
+before each of three blocks of ten alternating pairs. Warm and timed starts
+reuse exact executable file identities and identical restored input state:
+six warm starts and sixty timed starts per OS/layout. Bytes, environment,
+state and image/source identity remain checked. Preparation/restoration/file
+checks are untimed; owned-process setup, output collection and exit remain
+timed. The existing `cold_start_to_exit_ms` key means a fresh process after
+this warmup. Version enables it by default; `--warm-images` opts help in,
+without changing other CLI benchmark reset semantics. The `5220b5ee` bare
+and installed captures retain per-arm floors and recorded desktop load,
+without claiming controlled-idle conditions. PORT-STATE.md retains current
+numbers and historical cold-copy Windows results, with no established
+security-provider cause. CPU CLI timings claim no full-suite or shim-timing
+acceptance; executable sizes exclude interpreter dependencies.

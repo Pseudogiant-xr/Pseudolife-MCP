@@ -11,6 +11,11 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if let Some(code) =
+        pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
+    {
+        return code;
+    }
     let channel = match arguments.as_slice() {
         [] => false,
         [mode] if mode.to_str() == Some("shim") => false,

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
+import inspect
 import importlib.metadata
 import importlib.util
 from pathlib import Path
@@ -18,7 +20,8 @@ HISTORICAL_SCHEMA = 52
 ORACLE_HEAD = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
 ORACLE_SCHEMA = 53
 SOURCE_PATHS = ("pseudolife_memory", "pyproject.toml", "tests/pg_defaults.py",
-                "tests/test_cli_dispatch.py", "tests/conftest.py")
+                "tests/test_cli_dispatch.py", "tests/conftest.py", "tests/fake_embedder.py")
+PARENT_ISOLATION_HELPERS = ("evals/memory_policy_bench.py", "evals/memory_policy_daemon.py")
 
 
 def schema_version(path):
@@ -35,6 +38,48 @@ def _git(root, *arguments):
     return subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True, timeout=10)
 
 
+def require_instrument_binding(root, helpers):
+    """Bind actual loaded helpers to clean committed files in the selected tree."""
+    root = Path(root).resolve()
+
+    def git(*arguments):
+        result = _git(root, *arguments)
+        if result.returncode:
+            raise RuntimeError("CLI instrument committed helper identity unavailable")
+        return result.stdout.strip()
+
+    if not helpers or git("status", "--porcelain", "--untracked-files=all", "--", *helpers):
+        raise RuntimeError("CLI instrument helpers must be committed and clean")
+    hashes, blobs = {}, {}
+    for relative, loaded in helpers.items():
+        expected = root / relative
+        try:
+            expected = expected.resolve(strict=True)
+            if not expected.is_relative_to(root) or not loaded:
+                raise RuntimeError("CLI instrument helper path unavailable")
+            for helper in loaded:
+                if callable(helper):
+                    # contextmanager's standard wrapper lives in contextlib;
+                    # its actual generator is the ownership implementation.
+                    if inspect.getsourcefile(helper) == contextlib.__file__:
+                        helper = helper.__wrapped__
+                    helper = inspect.getsourcefile(helper)
+                if helper is None or Path(helper).resolve(strict=True) != expected:
+                    raise RuntimeError("CLI instrument loaded a helper from another tree")
+            blob = git("rev-parse", "HEAD:" + relative)
+            # Git applies this checkout's text attributes; raw file hashes are
+            # also retained, including the actual Windows checkout newlines.
+            if git("hash-object", "--path=" + relative, str(expected)) != blob:
+                raise RuntimeError("CLI instrument helper differs from committed bytes")
+            hashes[relative] = hashlib.sha256(expected.read_bytes()).hexdigest()
+            blobs[relative] = blob
+        except (OSError, TypeError) as error:
+            raise RuntimeError("CLI instrument loaded helper unavailable") from error
+    return {"source_root": str(root), "source_head": git("rev-parse", "HEAD"),
+            "source_tree": git("rev-parse", "HEAD^{tree}"), "source_dirty": False,
+            "source_files_sha256": hashes, "source_files_git_blob": blobs}
+
+
 def source_metadata(root=ROOT, *, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_SCHEMA):
     head = _git(root, "rev-parse", "HEAD")
     difference = _git(root, "diff", "--quiet", HISTORICAL_HEAD, "--", *SOURCE_PATHS)
@@ -43,14 +88,16 @@ def source_metadata(root=ROOT, *, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_
     if head.returncode or current_difference.returncode not in (0, 1) or untracked.returncode:
         raise RuntimeError("historical oracle source comparison unavailable")
     instrument = _git(ROOT, "rev-parse", "HEAD")
-    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline")
+    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline",
+                             *PARENT_ISOLATION_HELPERS)
     if instrument.returncode or instrument_status.returncode:
         raise RuntimeError("instrument source provenance unavailable")
     return {"source_head": head.stdout.strip(), "instrument_head": instrument.stdout.strip(),
             "instrument_dirty": bool(instrument_status.stdout.strip()),
             "instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted([*Path(__file__).parent.glob("*.py"),
-                                                      *Path(__file__).parent.glob("*.json")])},
+                                                      *Path(__file__).parent.glob("*.json"),
+                                                      *(ROOT / name for name in PARENT_ISOLATION_HELPERS)])},
             "process_helper_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                       for path in execution_sources()},
             "source_schema": schema_version(Path(root) / "pseudolife_memory/storage/schema.py"),

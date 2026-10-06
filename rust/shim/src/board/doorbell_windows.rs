@@ -596,9 +596,9 @@ mod tests {
                 .read(true)
                 .open(path)
                 .unwrap();
-            fs2::FileExt::lock_exclusive(&file).unwrap();
+            std::fs::File::lock(&file).unwrap();
             file.write_all(format!("{value}\n").as_bytes()).unwrap();
-            fs2::FileExt::unlock(&file).unwrap();
+            std::fs::File::unlock(&file).unwrap();
         }
     }
     // This executable supplies a real, connected tree for taskkill fallback.

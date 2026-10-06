@@ -1,9 +1,19 @@
 # Porting contract
 
-The current phase 1 behavioural oracle is Python 0.17.0 at
-`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55.
+The current version-branch behavioural oracle target is Python 0.17.0 at
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
-`f709abb54f7912ae9cd767998d0926ca33df4bcd` and schema 54.
+`f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
+
+Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
+
+The [local version evidence at `62e4f590`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md)
+records both-platform release corpora and bare/installed paired measurements.
+It preserves the Windows installed median/p95 regression and distinct runtime
+versions, with no aggregate speedup or causal claim. CLI-VERSION remains deferred
+until required hosted CI and the evidence/documentation successor review/checks
+pass; local evidence does not certify a later head.
+
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
 Historical phase 0b evidence remains bound to Python 0.15.0 at
@@ -281,10 +291,21 @@ small. Reject unlisted normalization and non-finite values.
 
 The same-ONNX-graph embedding tolerance is **not yet established**. The current
 configuration guide documents torch fallback for the default Qwen model because
-it lacks a supplied ONNX artifact. Phase 3 must first produce and identify the
-same graph and tokenizer inputs, compare it with the Python oracle, and record
-the observed error before accepting a tolerance. No bit-identical or embedding
-equivalence claim follows from comparator support alone.
+it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/13dbe0b032527bf110acbaf4f1ea1ae00ca20cef/evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
+identifies a disposable fp32 graph and compares Torch fp32 with direct ORT CPU
+over 1,000 seeded documents and 25 **PROPOSED** topic queries: maximum absolute
+embedding difference `5.401670932769775e-7`, minimum cosine
+`0.9999999999933409`, identical full stored-vector rankings for 5/25 queries and
+identical top-eight rankings for 25/25. Proposed, unaccepted numerical bounds
+for this recorded graph/runtime/corpus are max absolute `6e-7` and minimum
+cosine `0.999999999993`, rounding the observed absolute error upward to the
+next `1e-7` and cosine loss upward to the next `1e-12`; no ID or ranking tolerance
+is proposed. The stock SentenceTransformers ONNX wrapper fails on missing
+`position_ids`, so this direct-input proof does not establish shipped-backend
+parity. Optimum's hidden-state validation warned that `6.67572021484375e-5`
+exceeded `1e-5`. The query proposal and packaging/docs decision require the
+maintainer before any tolerance is accepted; no bit identity or speed claim
+follows from this receipt.
 
 ## Phase 1 stdio comparison
 
@@ -295,6 +316,8 @@ pinned by `rust-toolchain.toml`. The initial targets are
 selects this candidate. The dependency choices and build commands are recorded
 in `rust/README.md`.
 
+File locks use Rust 1.94's standard `File` methods instead of `fs2`, preserving exclusive contention and release behavior while removing the redundant dependency.
+
 The named `stdio-raw-compared` policy retains and compares stdout bytes on the
 capture platform. It applies `source-text-lf` only to escaped newline token
 spans at `/body/result/tools/*/description` and `/body/result/instructions`.
@@ -303,6 +326,16 @@ comparator does not reserialize a parsed object to manufacture byte equality.
 The stderr message allowlist is currently empty, so every stderr byte is
 compared. Exit codes are exact. This policy does not change the phase 0b
 daemon HTTP/MCP `raw-mcp-retained-not-compared` policy.
+
+The named `cli-state-compared` policy compares ordinary exit status, raw UTF-8
+stdout/stderr and the presence and bytes of every post-state file under the
+isolated CLI home. Both arms reuse the same home path after a reset; paths and
+newlines remain exact. The initial corpus admits no normalizations. Future
+PID, timestamp or port normalization requires a named rule at specific file
+and byte spans here before a case may opt in. Locale output including cp1252
+remains deferred. Candidate-output controls mutate the captured candidate
+exit, each stream and a post-state file; oracle self-record mutations are
+reported separately as judge-sensitivity controls.
 
 The named `eof-observed-final-pair-orders` rule admits only the final two connection-closed error
 frames in orders actually observed in the frozen Python capture set. Both
@@ -424,6 +457,32 @@ Phase completion is governed by `PORT-STATE.md` and `PARITY.md`. No deferred row
 counts as complete. Maintainer decisions are required to retire behaviour,
 change a public wire format, merge, deploy or mutate a live bank.
 
+## Phase 2 CLI contract
+
+Phase 2 CLI dispatch reads only the first argument and keeps the binary named
+`pseudolife-stdio`; the current proof and help measurement select UTF-8 stdout/stderr.
+Help bytes are the literal pinned `cli.py::_USAGE`, kept LF by the Rust-local
+checkout attribute, with Python's Windows CRLF translation preserved and LF
+elsewhere. Unknown valid Unicode scalar
+argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing the
+existing pinned table. Locale/default and other output encodings and
+non-UTF-8/surrogate argv remain deferred. Recognized modes
+without an implementation emit a candidate-only deferred diagnostic, never the
+Python unknown-mode contract. The prepared version implementation derives the
+runtime root from its own executable under a six-digit `runtimes` entry's
+`Scripts` or `bin` directory, matching Python's `sys.prefix` identity. It checks
+its own executable, also requires the canonical Python console path to be a file
+(`Scripts/pseudolife-mcp.exe` or `bin/pseudolife-mcp`), and matches the runtime
+path as written or canonicalized. The marker follows Python's dictionary shape.
+Manifest NaN, Infinity, lone surrogates and integers beyond u64 remain deferred.
+The three version nodes are routed. Frozen `5220b5ee` Windows/Linux CLI cells
+cover canonical-console admission, missing-console fallback and actual non-ASCII
+homes with UTF-8 streams; counts and warm measurements are in PORT-STATE.md.
+Required successor hosted checks and independent review remain pending.
+The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
+normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
+and initialize-return timing, using the same paired ordering and repeat floors.
+
 ## Disposable trial corrections
 
 The private trial covered deterministic HLC transitions, tool-tier normalization
@@ -452,7 +511,7 @@ establishes no production parity.
   locking nor atomic updates; the trial also excludes object subclasses, byte
   text, deep recursion and tier warning logs. None is retired by implication.
 
-## Current close-out evidence
+## Historical Phase 1 close-out evidence
 
 Frozen candidate `690bb8ac` has current Windows/Linux schema-2 Python self-replay
 and Rust receipts, each with eight actual stdio outcomes and 32 executable-bound
@@ -463,3 +522,16 @@ identity, not a build attestation. The paired measurements use three repeats
 of ten samples per arm, with separately sampled RSS and per-arm quantile floors.
 Current numeric tables and remaining acceptance gates are in PORT-STATE.md;
 full suites, final integrated-head CI and whole-change review remain pending.
+
+## Version warm measurement condition
+
+Frozen `5220b5ee` captures retain 28 exact cases and 112 mutation controls on
+each OS. UTF-8 output is selected; locale/default encoding remains deferred.
+Version measurement makes one untimed start per arm before each of three
+ten-pair blocks, then reuses exact executable file identities and restored
+state. Each layout retains two byte controls, six warm starts and sixty timed
+starts with per-arm floors. Help can explicitly opt in with `--warm-images`;
+other CLI benchmark reset semantics are unchanged. Cold-copy Windows results
+remain historical, with no security-provider cause established. Current
+numbers, identities and remaining hosted/review gates are in PORT-STATE.md;
+these CPU CLI cells establish no full-suite acceptance.

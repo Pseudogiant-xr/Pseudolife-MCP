@@ -16,7 +16,7 @@ def regenerate(exploration, root=ROOT):
     expected = {
         "3c01bb31abd60178e15dea99adda369b4bbf92fc": {
             "schema": 55, "functions": 191, "test_files": 423,
-            "buckets": {"candidate": 8, "oracle": 3, "internal": 180},
+            "buckets": {"candidate": 10, "oracle": 1, "internal": 180},
         },
     }.get(ORACLE_HEAD)
     if expected is None:
@@ -83,7 +83,7 @@ def regenerate(exploration, root=ROOT):
     for file in buckets["files"]:
         if file["path"] == "tests/test_shim.py":
             file.update(bucket="candidate", candidate_nodes=candidate_nodes, remaining_nodes="oracle",
-                        reason="Eight public shim launch functions; each other function classified separately.")
+                        reason="Ten public shim launch functions; each other function classified separately. Runtime acceptance remains pending.")
     buckets["counts"] = dict(Counter(file["bucket"] for file in buckets["files"]))
     buckets["candidate_node_count"] = len(manifest["mapped"])
     spec = importlib.util.spec_from_file_location("phase1_pinned_inventory", root / "rust/contract_inventory.py")
@@ -92,6 +92,7 @@ def regenerate(exploration, root=ROOT):
     snapshot = inventory.snapshot(oracle=ORACLE_HEAD)
     if snapshot["database_schema"] != expected["schema"]:
         raise RuntimeError("Phase 1 inventory schema differs from selected pin")
+    inventory.validate_phase1_functions(functions, oracle=ORACLE_HEAD, root=root)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     buckets_path.write_text(json.dumps(buckets, indent=2) + "\n", encoding="utf-8")
     (root / "rust/phase1-contract-inventory.json").write_text(

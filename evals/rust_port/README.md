@@ -330,3 +330,69 @@ Implementation-head suites and integrated CI passed at `8b7a6c95`; the separate
 close-out ledger preserves their source chain and actual routing. Current
 documentation PR-head suites, CI and final independent review remain required
 before #560 is marked ready.
+
+Phase 2 adds `cli_corpus.py` and `cli_dispatch.py` without changing the historical
+Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown valid
+Unicode scalar arguments, including Python quote/control/separator spelling, with
+UTF-8 stdout/stderr explicitly selected. Windows CRLF is preserved; other platforms
+use LF. The Rust-local attribute keeps the compiled help asset canonical LF in a
+fresh `core.autocrlf=true` checkout. The cases capture ordinary exit status and
+raw stdout/stderr from the genuine pinned Python 3.11
+runtime, self-replay on the same platform, then compare the candidate with no
+newline normalization. Three mutations per case prove that both streams and the
+exit code are compared. Five immutable dispatcher tests route through the external
+plugin via `PSEUDOLIFE_PORT_CLI_JSON`; explicit `--port-cli-json` takes precedence,
+and the default remains Python. JUnit outcomes, executable/source hashes and
+unchanged dispatcher/conftest hashes bind the receipt. Logs and JUnit stay in the
+private `--evidence-directory`; `--out` is a new public-safe receipt path.
+
+Run `evals.rust_port.cli_dispatch` under the prepared pinned interpreter with
+`--oracle-root`, `--candidate-root`, `--candidate-json`, `--evidence-directory`,
+`--out` and the existing resource-check option. Candidate Rust source must be
+committed and clean. The existing Parity job runs this additive lane on both OS.
+Receipts record the UTF-8 stream, scalar argv and platform newline boundary.
+Locale/default and other output encodings, non-UTF-8 or surrogate argv,
+version/runtime identity and all other mode contracts stay deferred;
+Acceptance closes only help and the scoped CLI-DISPATCH cases; other modes
+remain deferred.
+
+Current local CLI receipts at `779c588c` are
+[`rust-port-phase2-cli-windows-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-779c588c.json)
+and [`rust-port-phase2-cli-linux-native-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-779c588c.json).
+Each has 15 passing self/candidate cases, 45 rejected mutations and five passing
+original outcomes for Python and Rust. Native Linux temporary/evidence storage
+is used. Both help measurement pairs, numerical repeat floors and exact
+source/tree/binary/runtime identities are linked in `rust/PORT-STATE.md`.
+The lock implementation uses Rust 1.94 standard file locks; only `fs2` and its
+three unused `winapi` packages were pruned, with `libc` retained. Source validation
+passed 277 Linux and 296 Windows Rust tests without skips.
+[Run 37245992895](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37245992895)
+passed all four Rust/Parity jobs for PR head `779c588c`. Both retained CI CLI
+receipts verify the same 15 cases, 45 controls and five Python/five Rust outcomes
+at actual PR merge checkout `b5f485c9`, whose tree matches the local head.
+All nine reported PR checks passed at `779c588c`.
+Only the UTF-8/scalar help/unknown-dispatch slice is accepted; current
+documentation-head review/checks remain separate.
+
+Historical local CLI receipts at `6e936887` remain unchanged:
+[`Windows`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-6e936887.json) and
+[`native Linux`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-6e936887.json).
+Their help pairs and executing
+[CI run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017)
+retain their original identities in `rust/PORT-STATE.md`. The earlier mounted-home
+Linux collection failure remains private and is excluded from acceptance.
+
+## Combined version capture scope
+
+Frozen `5220b5ee` Windows/Linux CLI cells cover 28 exact byte/state cases and
+112 rejected mutations per OS. Thirteen version cases include a Python-
+shaped marker and native image with canonical console missing, plus a valid
+installed fixture using an actual non-ASCII home. UTF-8 streams and platform
+newlines are explicit; locale/default encoding remains deferred. Eight
+immutable original CLI nodes pass once/non-skipped per arm, and each OS
+retains one native invalid-argv control. These storage-free cells start no
+daemon or database and do not establish a real-bank transcript. Exact source,
+runtime, helper and image bindings remain attached to `5220b5ee`; a docs/results
+carrier does not change the executed head. PORT-STATE.md records counts,
+source ratio, numeric tables and remaining hosted/review gates. Version
+remains deferred.

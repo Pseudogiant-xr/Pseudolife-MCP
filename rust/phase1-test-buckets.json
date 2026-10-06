@@ -8,7 +8,7 @@
     "oracle": 68,
     "candidate": 2
   },
-  "candidate_node_count": 13,
+  "candidate_node_count": 18,
   "files": [
     {
       "path": "tests/test_abstain.py",
@@ -250,11 +250,14 @@
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
-        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help"
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]"
       ],
       "adapter": "evals.rust_port.pytest_plugin:cli-main-process",
       "remaining_nodes": "oracle",
-      "reason": "Only the listed dispatcher nodes replace main through the external process adapter; all remaining nodes run unchanged on Python."
+      "reason": "The listed help and version dispatcher nodes replace main through the external process adapter; all remaining nodes run unchanged on Python. Runtime acceptance remains pending."
     },
     {
       "path": "tests/test_client_credentials_setup.py",
@@ -2114,13 +2117,15 @@
       "path": "tests/test_shim.py",
       "bucket": "candidate",
       "equivalent": "pending",
-      "reason": "Eight public shim launch functions; each other function classified separately.",
+      "reason": "Ten public shim launch functions; each other function classified separately. Runtime acceptance remains pending.",
       "candidate_nodes": [
         "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations",
         "tests/test_shim.py::test_shim_survives_idle_gap",
         "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
         "tests/test_shim.py::test_shim_forwards_stringified_list_param",
         "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
+        "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+        "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
         "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
         "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
         "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself"
@@ -2596,9 +2601,9 @@
     {
       "nodeid": "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
       "line": 436,
-      "bucket": "oracle",
+      "bucket": "candidate",
       "scope": "phase1",
-      "reason": "New upstream public shim process case; candidate routing and execution evidence remain pending at the current pin.",
+      "reason": "Public no-mode Python module launch checks unchanged daemon tool-body and argument-binding refusals over stdio. Candidate routing is covered by adapter unit tests; the real public test has not executed against this candidate, and runtime acceptance remains pending.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
@@ -2607,9 +2612,9 @@
     {
       "nodeid": "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
       "line": 487,
-      "bucket": "oracle",
+      "bucket": "candidate",
       "scope": "phase1",
-      "reason": "New upstream public shim process case; candidate routing and execution evidence remain pending at the current pin.",
+      "reason": "Public no-mode Python module launch checks additionalProperties false and forwards the unknown-parameter refusal with its suggestion over stdio. Candidate routing is covered by adapter unit tests; the real public test has not executed against this candidate, and runtime acceptance remains pending.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
@@ -6319,8 +6324,8 @@
     }
   ],
   "phase1_function_counts": {
-    "internal": 180,
-    "candidate": 8,
-    "oracle": 3
+    "candidate": 10,
+    "oracle": 1,
+    "internal": 180
   }
 }
