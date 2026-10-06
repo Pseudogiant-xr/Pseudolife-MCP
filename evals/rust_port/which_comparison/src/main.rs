@@ -242,7 +242,7 @@ fn child(group: &str, home: &Home) -> Vec<Value> {
                 let output = Command::new(command)
                     .args(["/D", "/S", "/C"])
                     .raw_arg(format!(
-                        "mklink /J \"{}\" \"{}\"",
+                        "\"mklink /J \"{}\" \"{}\"\"",
                         junction.display(),
                         target.display()
                     ))
@@ -346,7 +346,7 @@ fn run(smoke: bool, selected: Option<&str>) -> Value {
         drop(home);
         assert!(!owned_path.exists(), "owned fixture was not removed");
     }
-    json!({"schema": 1, "oracle_crate": "which", "oracle_version": "8.0.6", "platform": std::env::consts::OS, "smoke_only": smoke, "owned_fixture_cleanup": true, "rows": rows})
+    json!({"schema": 1, "oracle_crate": "which", "oracle_version": "8.0.6", "platform": std::env::consts::OS, "smoke_only": smoke, "selected_group": selected, "owned_fixture_cleanup": true, "rows": rows})
 }
 
 fn main() {
