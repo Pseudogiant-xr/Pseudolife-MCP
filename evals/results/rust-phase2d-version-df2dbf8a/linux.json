@@ -1,0 +1,342 @@
+{
+  "schema": 1,
+  "platform": "linux",
+  "executed_head": "df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff",
+  "executed_tree": "288237846a3923ad49dfb6cf11d099935461a4d8",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "package_version": "0.17.0",
+  "schema_meta_version": 55,
+  "python_version": "3.11.15",
+  "capture_runtime": {
+    "python": "3.11.15",
+    "executable_basename": "python",
+    "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+    "environment_kind": "virtualenv",
+    "distribution_versions": {
+      "pseudolife-mcp": "0.17.0",
+      "mcp": "2.1.1",
+      "httpx": "0.28.1",
+      "torch": "2.14.1+cpu",
+      "psycopg": "3.3.6",
+      "sentence-transformers": "6.1.0"
+    },
+    "package_runtime_version": "0.17.0",
+    "source_origin_matches_selected_root": true,
+    "source_file": "pseudolife_memory/__init__.py",
+    "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+  },
+  "candidate_executable": {
+    "sha256": "7d52b80c56c13b3b4865e3080a7503df74a96a1be35ae1b7b84620b42ce89d37",
+    "bytes": 16816456
+  },
+  "scoped_cli_version_status": "ported",
+  "scope": "Installer-shaped manifests; named-console file admission in the executable own Scripts/bin runtime; UTF-8 streams/platform newlines; candidate not installed.",
+  "corpus": {
+    "cases": 28,
+    "version_cases": 13,
+    "rejecting_sensitivity_controls": 112,
+    "case_ids": [
+      "help-long",
+      "help-short",
+      "help-mode",
+      "help-trailing",
+      "help-invalid-trailing",
+      "unknown-basic",
+      "unknown-trailing",
+      "unknown-empty",
+      "unknown-apostrophe",
+      "unknown-quotes",
+      "unknown-backslash",
+      "unknown-controls",
+      "unknown-unicode",
+      "unknown-separators",
+      "unknown-category-c",
+      "version-bare-version",
+      "version-bare-flag",
+      "version-default-commit",
+      "version-default-commit-flag-tail",
+      "version-default-requirement",
+      "version-default-checkout-no-git",
+      "version-missing-console",
+      "version-non-ascii-home",
+      "version-override-commit",
+      "version-override-requirement",
+      "version-half-root",
+      "version-half-launcher",
+      "version-wrong-platform-suffix"
+    ],
+    "exact_output_environment_exit_pre_post_state": true,
+    "missing_console_fallback": true,
+    "actual_non_ascii_home": true
+  },
+  "original_cli_routes": {
+    "oracle": {
+      "nodes": [
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_help_lists_version",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit"
+      ],
+      "passed_once_non_skipped": 8,
+      "junit_sha256": "d55d2f06af7138cf0a7c2af2bd444a3f4b930c7b61280a0a3a7c263569e0ebd7"
+    },
+    "candidate": {
+      "nodes": [
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_help_lists_version",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit"
+      ],
+      "passed_once_non_skipped": 8,
+      "junit_sha256": "dfc8d9c38caa999b49229daafcf6122b364a4709e4476bb10f767757ee9186c9"
+    }
+  },
+  "native_argv": {
+    "cases": 1,
+    "passed": true
+  },
+  "serial_version_contracts": {
+    "default_passed": 8,
+    "no_default_passed": 8
+  },
+  "build": {
+    "exit": 0,
+    "head": "df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff",
+    "tree": "288237846a3923ad49dfb6cf11d099935461a4d8",
+    "rust_version": "1.94.0",
+    "profile": "release",
+    "features": "default",
+    "jobs": 2,
+    "cargo_incremental": "0",
+    "compiled_source_archive_sha256": "74a6d797f6b6f09ea91b3657919ea69696d1ef3f580ea8cec3dd2de83a8e6c8c",
+    "compiled_source_files": 91
+  },
+  "focused_source_binding": {
+    "rust/shim/src/cli.rs": {
+      "git_blob": "81023c9b279a55c1c2e7bdf244d19a8f9ce25837",
+      "canonical_sha256": "59e989f0506b928b24d5de11c99b455812313cbdfe91eaeed3cbffcb76c589d2",
+      "captured_checkout_sha256": "3ee0d0e2ec7ce481b7308d1644d2bfaa3b90b220f0409ecd4a4afa6959481286"
+    },
+    "rust/shim/src/cli/version.rs": {
+      "git_blob": "b77b3d2f3ad68e0209fb512e71062c0ba91edf72",
+      "canonical_sha256": "5f00a71907f720e486016abb2d43c0ff2ea32c99d69854bb5f82377199867bcc",
+      "captured_checkout_sha256": "5f00a71907f720e486016abb2d43c0ff2ea32c99d69854bb5f82377199867bcc"
+    },
+    "rust/shim/tests/cli_version_contract.rs": {
+      "git_blob": "3898bf46264ffc8817e7eaabf2357a5d5ff3b4c3",
+      "canonical_sha256": "918d2397df136bb34d1bcee83f0420afa1da5d1ae5bde14914c494d70f976e61",
+      "captured_checkout_sha256": "918d2397df136bb34d1bcee83f0420afa1da5d1ae5bde14914c494d70f976e61"
+    },
+    "rust/shim/tests/cli_invalid_argv.rs": {
+      "git_blob": "1b155a39ef4d210e85e01f8cc364f409214b0f0e",
+      "canonical_sha256": "c208655a2dcc522475ef34f839bac45ae135d1f1458cd8cc6c4d5cce45fd1762",
+      "captured_checkout_sha256": "bfc162c407f582a2ed3d77cdb9b5e3ab9ff6c3693b0c1161c67f5f5eae2dacd8"
+    },
+    "evals/rust_port/cli_process.py": {
+      "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+      "canonical_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+      "captured_checkout_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c"
+    },
+    "evals/rust_port/cli_version.py": {
+      "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+      "canonical_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+      "captured_checkout_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f"
+    },
+    "evals/rust_port/cli_dispatch.py": {
+      "git_blob": "8710b81844bc42cdd4b1c145719fa0eb65eddd52",
+      "canonical_sha256": "ec186905cfccb037992545c4d983827546c7ac83fd053034641111681940d53b",
+      "captured_checkout_sha256": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe"
+    },
+    "evals/rust_port/cli_argv.py": {
+      "git_blob": "16ad534223e56b0c1ce62d2e16b501d723d52f24",
+      "canonical_sha256": "3430e802459663ecf5c4b2a6994a895fa24214cad9a2a31f19bc5e40c8adac40",
+      "captured_checkout_sha256": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d"
+    },
+    "evals/rust_port/pytest_plugin.py": {
+      "git_blob": "2a380308ca9b4c8f48144da00857a400c8009313",
+      "canonical_sha256": "3bf723757ed89fec3b56ea367cd93f478d3f26a1d55af9c8c64bfd7ae98b93da",
+      "captured_checkout_sha256": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0"
+    },
+    "evals/rust_port/oracle_tests.json": {
+      "git_blob": "f913150368bd224df3b044e65c4b568f025c7773",
+      "canonical_sha256": "5db2ecfb248f351317986092650371866c83c2c072163e818a5d9d0f6bf8641d",
+      "captured_checkout_sha256": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43"
+    },
+    "evals/rust_port/processes.py": {
+      "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+      "canonical_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+      "captured_checkout_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b"
+    },
+    "evals/rust_port/provenance.py": {
+      "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+      "canonical_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+      "captured_checkout_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7"
+    },
+    "evals/rust_baseline/cli_measurement.py": {
+      "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+      "canonical_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+      "captured_checkout_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f"
+    },
+    "evals/rust_baseline/shim_measurement.py": {
+      "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+      "canonical_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+      "captured_checkout_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7"
+    },
+    "tests/test_cli_dispatch.py": {
+      "git_blob": "9cd0362f7767c5c909de0b6cb7ed90fd4e074d13",
+      "canonical_sha256": "b560d92804114038a6cc415af2d0bb1bdbeacc736ad7a6f4e3267da771da204f",
+      "captured_checkout_sha256": "fea0b87a3466fb2845c0669b97a1921b1f295bd8130ca7b3f57d4aef6eda5d52"
+    },
+    "tests/conftest.py": {
+      "git_blob": "216b692cd5dd1a58ad8f7734a32c600e8c6efd72",
+      "canonical_sha256": "9d96eb1d3a708edf9d8696204526fde96b88cf6842e0552bfd93e59ebe1e5635",
+      "captured_checkout_sha256": "0807356c443bb4252bbf4ab30a0fa4a8981107ffa7c442fb51a2c8c7822c2c23"
+    }
+  },
+  "instrument_binding": {
+    "instrument": {
+      "head": "df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff",
+      "tree": "288237846a3923ad49dfb6cf11d099935461a4d8",
+      "clean": true,
+      "files": {
+        "evals/rust_port/cli_process.py": {
+          "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+          "canonical_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+          "captured_checkout_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c"
+        },
+        "evals/rust_port/cli_corpus.py": {
+          "git_blob": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+          "canonical_sha256": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+          "captured_checkout_sha256": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1"
+        },
+        "evals/rust_port/cli_public.py": {
+          "git_blob": "afa29f49ceeea317a628d876afda402a82f7939f",
+          "canonical_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+          "captured_checkout_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927"
+        },
+        "evals/rust_port/cli_version.py": {
+          "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+          "canonical_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+          "captured_checkout_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f"
+        },
+        "evals/rust_port/harness.py": {
+          "git_blob": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+          "canonical_sha256": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+          "captured_checkout_sha256": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541"
+        },
+        "evals/rust_port/phase1_receipts.py": {
+          "git_blob": "261cce5f78f2cda2f3c11b9d8dd641dd61499063",
+          "canonical_sha256": "6aec6ad75ac1653e90037ba2c4c0814e5dd6fb8c2f6a0900bfc4083d8803b55b",
+          "captured_checkout_sha256": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58"
+        },
+        "evals/rust_port/provenance.py": {
+          "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+          "canonical_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+          "captured_checkout_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7"
+        },
+        "evals/rust_port/stdio_capture.py": {
+          "git_blob": "be68131c84c3d577a00abd61d9fc2b93a2ba03b1",
+          "canonical_sha256": "aa034c80aca07f2d81a02506a3e878081523f38ac9568ca70c8c6949d28caf4a",
+          "captured_checkout_sha256": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef"
+        },
+        "evals/rust_port/processes.py": {
+          "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+          "canonical_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+          "captured_checkout_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b"
+        },
+        "evals/rust_baseline/common.py": {
+          "git_blob": "f255588f5088cd7d8b98b850db4b775f60b35569",
+          "canonical_sha256": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+          "captured_checkout_sha256": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82"
+        },
+        "evals/memory_policy_bench.py": {
+          "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+          "canonical_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+          "captured_checkout_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c"
+        },
+        "evals/memory_policy_daemon.py": {
+          "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+          "canonical_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+          "captured_checkout_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72"
+        },
+        "evals/rust_baseline/daemon_child.py": {
+          "git_blob": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+          "canonical_sha256": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+          "captured_checkout_sha256": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98"
+        },
+        "evals/rust_port/stdio_daemon.py": {
+          "git_blob": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+          "canonical_sha256": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+          "captured_checkout_sha256": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e"
+        },
+        "evals/rust_baseline/cli_measurement.py": {
+          "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+          "canonical_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+          "captured_checkout_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f"
+        },
+        "evals/rust_baseline/shim_measurement.py": {
+          "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+          "canonical_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+          "captured_checkout_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7"
+        }
+      }
+    },
+    "production_ownership": {
+      "head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "clean": true,
+      "files": {
+        "pseudolife_memory/storage/schema.py": {
+          "git_blob": "67485994544895878e5c88e3a2702ed4eb6a6db8",
+          "canonical_sha256": "45290101c176157f64af8eba5b2ca406300478068d41f17e08a3b55f9c05dc78",
+          "captured_checkout_sha256": "86b14ae4a712c5095c4bda99a5e519aeadcffc8a35e576b31db5eeb6cc2aa3a0"
+        },
+        "tests/pg_defaults.py": {
+          "git_blob": "0d099e0b021a1a2b70b3aed578511ab4a108231a",
+          "canonical_sha256": "59cbc86125af57b1491a0fdb1a3a28f4230c30c43b2aacf425ac6578a0eae677",
+          "captured_checkout_sha256": "f5426849bb0ca0f0b2da5118c876be27370569b1ac85a999f205c24442e51c01"
+        },
+        "tests/fake_embedder.py": {
+          "git_blob": "852fcb8cffdc9d1d923918f78462010c776e082d",
+          "canonical_sha256": "0143f87137082c380b560b7e75920ac62028220d222abefdc8915e2939cdff86",
+          "captured_checkout_sha256": "4cce7779e5cb378d213df023dfa024f4b6cf0543abf4433f7b44a21d53113f3b"
+        }
+      }
+    }
+  },
+  "authoritative_capture_wrapper_sha256": "0b3978cfdd6d669d8e73c2e7f07e688ae363fd6cd7d7e2f5fbc7298e518c47e2",
+  "private_proof_audit_sha256": "7d16652a67a15953002c28fb68cff66f4912ae1b272b7c9ec9f6a14ebaaef4c0",
+  "private_complete_manifest_sha256": "c679ab067cf803dd020e23a1c3d4f7ca2ef5f7d7293b1986480db7152d2266f2",
+  "provenance_interpretation": "Canonical Git bytes and captured checkout bytes are separately bound. Broad fingerprints do not imply every file was imported. The oracle copied eval overlay is globally dirty; pinned production and original-test guards are clean. Build/image/source receipts are provenance, not reproducible-build attestation.",
+  "cleanup": {
+    "fixture_homes_removed": true,
+    "owned_workloads_remaining": 0,
+    "physical_lease_free": true
+  },
+  "deferred": [
+    "Manifest NaN, Infinity, lone Unicode surrogates and integers beyond u64.",
+    "Locale/default or other output encodings and non-UTF-8/surrogate argv.",
+    "Other CLI modes retain their own acceptance gates."
+  ],
+  "historical_limitations": [
+    "Cold-copy timing cause remains unknown; no Defender attribution.",
+    "Linux parallel ETXTBSY remains unresolved; serial success does not imply parallel success.",
+    "Historical 5220b5ee and earlier captures retain their identities and failures."
+  ],
+  "canonical_output_restoration": {
+    "copied": true,
+    "source_sha256": "7d52b80c56c13b3b4865e3080a7503df74a96a1be35ae1b7b84620b42ce89d37",
+    "canonical_before_sha256": "85971dba7d565402a82d99121704d6232d620cc5e9dda88033df6ee4692a9ca9",
+    "canonical_after_sha256": "7d52b80c56c13b3b4865e3080a7503df74a96a1be35ae1b7b84620b42ce89d37",
+    "exact_original_hash_equality": true,
+    "not_byte_reproducible_rebuild_claim": true
+  }
+}

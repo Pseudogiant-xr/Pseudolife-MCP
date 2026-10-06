@@ -1,0 +1,224 @@
+{
+  "schema": 1,
+  "platform": "linux",
+  "layout": "bare",
+  "executed_head": "df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff",
+  "executed_tree": "288237846a3923ad49dfb6cf11d099935461a4d8",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "mode": "version",
+  "argv": [
+    "version"
+  ],
+  "stream_contract": {
+    "stdout_stderr_encoding": "utf-8",
+    "argv_domain": "valid Unicode scalar strings",
+    "newlines": "Windows CRLF; LF on other platforms",
+    "deferred": [
+      "locale/default and other output encodings",
+      "non-UTF-8 or surrogate argv"
+    ]
+  },
+  "capture_platform": {
+    "os": "Linux",
+    "architecture": "x86_64"
+  },
+  "hardware": {
+    "os": "Linux",
+    "os_release": "6.6.114.1-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "logical_cpus": 8,
+    "physical_cpus": 4,
+    "ram_bytes": 42060558336
+  },
+  "candidate_executable": {
+    "sha256": "7d52b80c56c13b3b4865e3080a7503df74a96a1be35ae1b7b84620b42ce89d37",
+    "bytes": 16816456
+  },
+  "captured_at_utc": "2026-10-06T21:00:20Z",
+  "raw_receipt": {
+    "sha256": "7d0c6e1059e4fdc550261669f358a544cceb2e3e451b922559686bd64b4946b1",
+    "bytes": 76417
+  },
+  "raw_status_preserved": "quiet-cli-pair-final",
+  "raw_limitations_preserved": [
+    "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models.",
+    "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+    "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+    "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+    "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
+    "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+    "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+    "Final samples require the caller's quiet CPU window."
+  ],
+  "interpretation": "Warmed fresh-process observations under concurrent desktop load; raw quiet labels do not establish controlled idle. Floors are descriptive repeat-block ranges, not confidence intervals.",
+  "protocol": {
+    "repeats": 3,
+    "samples_per_arm_per_repeat": 10,
+    "untimed_byte_controls": 2,
+    "untimed_warm_starts": 6,
+    "timed_starts": 60,
+    "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+    "paired_order": "Even pair index Python then Rust; odd index Rust then Python. Images and restored input state unchanged across warm/timed starts."
+  },
+  "byte_controls": {
+    "python": {
+      "exit_code": 0,
+      "stdout_sha256": "b08a6d9e00ccf842bf5c47eed055b1c65fd431aba5ae136a8bb7dd354afc46c9",
+      "stdout_bytes": 22,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    },
+    "rust": {
+      "exit_code": 0,
+      "stdout_sha256": "b08a6d9e00ccf842bf5c47eed055b1c65fd431aba5ae136a8bb7dd354afc46c9",
+      "stdout_bytes": 22,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    }
+  },
+  "runs": {
+    "python": [
+      {"repeat": 0,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 112.02370095998049,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 116.31704698083922,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 115.0320449960418,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 114.08979498082772,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 115.64213200472295,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 118.06626699399203,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 114.71031798282638,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 116.86169099994004,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 117.06180503824726,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 114.63279195595533,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 117.46985500212759,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 117.02887498540804,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 115.63678400125355,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 114.77356200339273,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 116.97932798415422,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 115.01246102852747,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 113.35072002839297,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 115.16070901416242,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 113.4570770082064,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 117.39844898693264,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 112.05824697390199,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 116.15313001675531,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 116.45102105103433,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 113.28445503022522,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 119.6203589788638,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 96.9555769697763,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 113.42776601668447,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 115.2154830051586,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 112.96678497456014,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 118.99018299300224,"warmed_file_identity_matches": true}
+    ],
+    "rust": [
+      {"repeat": 0,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.1297720377333462,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.0152140059508383,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.3978009703569114,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.304244029801339,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.486881974618882,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.213681989815086,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.365166030358523,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.050226030405611,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.564263006206602,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.3993219947442412,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.614556986372918,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.4258740013465285,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.2412699763663113,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.063757972791791,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.5530820130370557,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.3989900364540517,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.1096310229040682,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 1.9065070082433522,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.173235989175737,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.942851046100259,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.306144975591451,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.150553045794368,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.4352340260520577,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.0599479903467,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.5550959981046617,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.157305949367583,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.6713559636846185,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.3207059712149203,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 2.6241070008836687,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 2.312814991455525,"warmed_file_identity_matches": true}
+    ]
+  },
+  "warmups": [
+    {"repeat": 0,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 0,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 1,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 1,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 2,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 2,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true}
+  ],
+  "metrics": {
+    "python": {
+      "median_ms": 115.18809600966051,
+      "p95_ms": 118.99018299300224,
+      "median_floor_ms": 1.0771219967864454,
+      "p95_floor_ms": 2.1505039767362177,
+      "samples": 30,
+      "repeat_medians_ms": [
+        115.33708850038238,
+        115.39874650770798,
+        114.32162451092154
+      ],
+      "repeat_p95_ms": [
+        118.06626699399203,
+        117.46985500212759,
+        119.6203589788638
+      ]
+    },
+    "rust": {
+      "median_ms": 2.3167604813352227,
+      "p95_ms": 2.6713559636846185,
+      "median_floor_ms": 0.0179445487447083,
+      "p95_floor_ms": 0.37858803989365697,
+      "samples": 30,
+      "repeat_medians_ms": [
+        2.334705030079931,
+        2.3201300064101815,
+        2.3167604813352227
+      ],
+      "repeat_p95_ms": [
+        2.564263006206602,
+        2.942851046100259,
+        2.6713559636846185
+      ]
+    }
+  },
+  "comparison": {
+    "median": {
+      "rust_minus_python_ms": -112.87133552832529,
+      "larger_both_arms_floor_ms": 1.0771219967864454
+    },
+    "p95": {
+      "rust_minus_python_ms": -116.31882702931762,
+      "larger_both_arms_floor_ms": 2.1505039767362177
+    }
+  },
+  "resource_context": {
+    "recorded_desktop_cpu_percent": {
+      "before": {
+        "utc": "2026-10-06T20:57:52.1503192Z",
+        "cpu_percent_samples": [
+          47.0
+        ]
+      },
+      "during-installed": {
+        "utc": "2026-10-06T21:00:55.8602082Z",
+        "cpu_percent_samples": [
+          29.0
+        ]
+      },
+      "after": {
+        "utc": "2026-10-06T21:03:03.4734897Z",
+        "cpu_percent_samples": [
+          20.0
+        ]
+      }
+    },
+    "no_controlled_idle_claim": true,
+    "oracle_overlay_global_dirty": true,
+    "production_and_original_test_guard_clean": true
+  }
+}
