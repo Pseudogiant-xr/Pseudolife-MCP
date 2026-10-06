@@ -77,3 +77,35 @@ fn test_nul_name_is_rejected_before_account_lookup() {
     assert!(home.is_none());
     assert!(home_by_name("fixture\0account").is_none());
 }
+
+#[test]
+#[allow(unsafe_code)]
+fn test_lookup_error_rejects_a_populated_result() {
+    // SAFETY: storage stays live and NUL-terminated even though the callback
+    // reports an error; no libc implementation is replaced by this fixture.
+    let home = unsafe {
+        home_with_lookup("fixture-account", |_, entry, buffer, result| {
+            buffer[..2].copy_from_slice(&[b'/' as libc::c_char, 0]);
+            entry.pw_dir = buffer.as_mut_ptr();
+            *result = entry;
+            libc::EIO
+        })
+    };
+    assert!(home.is_none());
+}
+
+#[test]
+#[cfg(not(target_os = "android"))]
+#[allow(unsafe_code)]
+fn test_successful_lookup_with_null_home_is_missing() {
+    // SAFETY: the live entry is returned, but its null home must be refused
+    // before constructing a CStr; no borrowed account field escapes.
+    let home = unsafe {
+        home_with_lookup("fixture-account", |_, entry, _, result| {
+            entry.pw_dir = std::ptr::null_mut();
+            *result = entry;
+            0
+        })
+    };
+    assert!(home.is_none());
+}

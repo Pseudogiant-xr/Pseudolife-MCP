@@ -1,4 +1,4 @@
-//! Reentrant account-database lookup, retaining the former users 0.11 behavior.
+//! Reentrant account-database lookup with validated libc results.
 use std::{ffi::CString, path::PathBuf};
 
 #[allow(unsafe_code)]
@@ -18,10 +18,10 @@ pub(super) fn home_by_name(name: &str) -> Option<PathBuf> {
     }
 }
 
-/// The lookup must obey getpwnam_r's contract: a successful result points to
-/// `entry`, with valid NUL-terminated fields alive until the buffer is dropped.
-/// Error results must be null or a different pointer, except ERANGE, which is
-/// retried without reading the entry. The caller cannot retain borrowed storage.
+/// When status is zero and result identifies `entry`, each non-null field must
+/// be NUL-terminated and alive until the buffer is dropped. Other results and
+/// null home fields are rejected without reading them. The caller cannot retain
+/// borrowed storage.
 #[allow(unsafe_code)]
 unsafe fn home_with_lookup(
     name: &str,
@@ -38,11 +38,15 @@ unsafe fn home_with_lookup(
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut buffer = vec![0; 2048];
     let mut result = std::ptr::null_mut();
-    while lookup(&name, &mut entry, &mut buffer, &mut result) == libc::ERANGE {
+    let status = loop {
+        let status = lookup(&name, &mut entry, &mut buffer, &mut result);
+        if status != libc::ERANGE {
+            break status;
+        }
         let size = buffer.len().checked_mul(2)?;
         buffer.resize(size, 0);
-    }
-    if !std::ptr::eq(result, &entry) {
+    };
+    if status != 0 || !std::ptr::eq(result, &entry) {
         return None;
     }
     #[cfg(target_os = "android")]
@@ -53,8 +57,12 @@ unsafe fn home_with_lookup(
     #[cfg(not(target_os = "android"))]
     {
         use std::{ffi::CStr, os::unix::ffi::OsStrExt};
-        // SAFETY: result identifies the initialized entry; the lookup contract
-        // guarantees a live NUL-terminated home field. Copy before buffer drop.
+        if entry.pw_dir.is_null() {
+            return None;
+        }
+        // SAFETY: status is zero, result identifies the initialized entry, and
+        // pw_dir is non-null. The lookup contract guarantees its live NUL-
+        // terminated storage. Copy before buffer drop.
         let home = unsafe { CStr::from_ptr(entry.pw_dir) };
         Some(PathBuf::from(std::ffi::OsStr::from_bytes(home.to_bytes())))
     }

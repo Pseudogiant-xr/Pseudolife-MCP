@@ -132,15 +132,24 @@ and independent review before acceptance.
 
 `credentials::unix_accounts::{home_by_name, home_with_lookup}` are local
 exceptions for reentrant `libc::getpwnam_r` account-database lookup after removing
-`users` 0.11. The caller owns the initialized passwd structure and lookup buffer;
-only a result pointing to that structure is read, and the NUL-terminated home
-bytes are copied before the buffer is dropped. Lookup starts with 2048 bytes and
-doubles on ERANGE with checked size overflow, retaining the prior allocation and
-missing-account behavior without an added cap. Android retains the prior
-`/var/empty` home default after successful lookup. Board ownership uses
-`rustix::process::getuid` to preserve real-UID checks. These are OS primitives;
-the standard library has no account-database or UID API. Targeted platform
-validation and independent review remain required before acceptance.
+`users` 0.11. The caller owns the initialized passwd structure and lookup buffer.
+Only zero status with a result identifying that structure is admitted; outside
+Android, a null home field is rejected before reading its NUL-terminated bytes.
+The home bytes are copied before the buffer is dropped, preserving non-UTF8
+paths. Lookup starts with 2048 bytes and doubles on ERANGE with checked size
+overflow and no added cap. Missing names, interior-NUL names and lookup errors
+return `None`. Android retains the prior `/var/empty` home default after an
+admitted lookup. Board ownership uses `rustix::process::getuid` for real-UID
+checks. These are OS primitives, not a pure-standard-library replacement.
+
+The [isolated comparison](../evals/rust_port/users_comparison/README.md) uses the
+actual locked `users` 0.11.0 crate and imports the production resolver. Four
+original seam tests remain unchanged; two additive tests reject a populated
+error result and a null home field. These defensive rejections are explicit
+and are not evidence of former-crate behavior on malformed results. Historical
+validation at `43e05ac1` predates this repair. Targeted platform validation and
+independent review remain required; Android, other Unix targets, unusual NSS
+backends and real/effective-UID divergence are not established by Linux proofs.
 
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
