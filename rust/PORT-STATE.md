@@ -14,7 +14,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The prepared version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The current ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors from missing offline model files; it does not isolate a Rust failure. Current final-head hosted Parity remains required; historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
+The prepared version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The historical `74b5998c` ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors; it does not isolate a Rust failure. Only an unchanged Python idle-gap diagnostic established missing offline model files; the other four shared failures were not independently diagnosed. Current final-head hosted Parity remains required; historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
 
 The native version candidate and shared CLI fixture have fresh independent code approval at `62e4f590` and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](../evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
@@ -65,7 +65,7 @@ the outstanding hosted CI or CLI-VERSION acceptance gates.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | implementation accepted; current CI blocked | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current documentation head 7f890590 has two hosted 2025-11-25 real-bank `/stderr` mismatches; raw bytes and cause remain unresolved. #560 stays draft; current PR-head suites, integrated CI and final review must pass before it is marked ready. |
+| 1: Stdio shim | merged; final checks passed | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), merged | Merge `465d75d9` retains validated `a3e95642`, all 14 passing checks and its two-machine eight-route suite/source/ELF bindings. Implementation acceptance at `8b7a6c95` and measurements/judges at `690bb8ac` retain their original identities. The historical documentation head `7f890590` had two hosted real-bank `/stderr` mismatches; those failures and their unresolved cause remain retained. Phase 1 acceptance does not verify the version branch's 18 admissions. |
 | 2: Client CLI leaves | Help/scoped unknown dispatch ported; remaining leaves deferred | — | All 28 modes classified; 19 requested leaves plus carried help/version/channel accounted for. Current native Windows/Linux receipts at 779c588c each pass 15 cases, 45 controls and five Python/five Rust nodes; both help 3x10 pairs and floors are below. Standard file locks replace fs2 with precise unused dependency pruning; source validation passes 277 Linux/296 Windows Rust tests. All four Rust/Parity jobs passed in run 37245992895 with actual CLI outcomes at same-tree merge checkout b5f485c9. Historical 6e936887 evidence retained. Scope is UTF-8 streams, valid Unicode scalar argv and platform newlines; version, other encodings and other modes stay deferred. Final documentation-head review/checks remain required. |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -597,14 +597,16 @@ documentation-head review, suites and current CI/checks remain separate;
 implementation-head CI does not establish that the docs successor was tested.
 
 
-## Prepared version integration at the current Python pin
+## Historical prepared version integration at the current Python pin
 
 The version identity checkpoint `9e7ba302` is integrated with the Phase 1
 source at `a3e95642`. The current Python oracle is `3c01bb31`, package 0.17.0,
 schema 55. Mapping retains 18 routes: ten stdio and eight CLI, including the
 three version admissions. The 191 scoped functions remain classified as ten
-candidate, one oracle and 180 internal. The two refusal routes are still
-pending and have not executed against this candidate.
+candidate, one oracle and 180 internal. In the historical prepared state, the
+two refusal routes had not executed. At `74b5998c` both ran once/non-skipped
+per arm on native Linux: tool refusal failed in both arms; unknown-parameter
+refusal passed in both. Their final-head stdio acceptance remains pending.
 
 The prepared native identity checks its own executable beneath a six-digit
 runtime entry's `Scripts` or `bin`, derives the runtime root and matches the
@@ -618,14 +620,16 @@ the original compiled contracts with both feature settings, 26 exact CLI cases,
 104 rejected controls and all eight routed CLI nodes. The admitted Python
 runtime is genuine 3.11.9 at the current pin. The Linux release corpus passes
 26 cases and 104 controls; its eight CLI nodes pass once/non-skipped in both
-arms. Final paired measurements were not launched and remain required after
-the documentation freeze. The current ten-stdio attempt passes five and fails
+arms. At that prepared checkpoint, final paired measurements had not launched and
+were required after the documentation freeze. The historical ten-stdio attempt passes five and fails
 five in both arms with shared HTTP 500 fixture errors. An unchanged Python
 idle-gap diagnostic found missing offline model files. These provisional
 captures do not support a ported row. The implementation, instrument and documentation freeze with this
 packet; subsequent captured-result additions cite that frozen validation head.
-Version remains deferred until actual final-head invocations on both OSes,
-paired measurements, hosted validation and independent review are complete.
+At that checkpoint, actual final-head invocations and paired measurements on
+both OSes, hosted validation and independent review remained required. The
+bee4 capture below completes the CLI invocations and measurements; hosted
+validation and independent review remain pending, so version stays deferred.
 
 The provisional Windows paired installed median at `74b5998c` is 288.004 ms against Python
 178.390 ms, a 109.614 ms regression beyond the 14.118 ms observed median floor;
@@ -644,3 +648,22 @@ Counts include comments/blanks and exclude tests, assets and shared runtime
 support, preserving the historical denominator definition. The provisional
 [Windows/Linux packet](../evals/results/rust-phase2c-version-74b5998c/README.md)
 retains the actual capture identities and final-head limitations.
+
+
+## Frozen-head version capture at bee4fe02
+
+The [final CLI capture packet](../evals/results/rust-phase2c-version-bee4fe02/README.md)
+records actual invocations at `bee4fe0269fe31069f24cf8ddcf122a908e0ead8`
+on Windows and Linux, with genuine Python 3.11/package 0.17.0 at `3c01bb31`.
+Both pass the installed smoke, 26 exact CLI cases, 104 rejected controls,
+native invalid argv and all eight CLI nodes once/non-skipped per arm.
+Both original 3x10 bare and installed measurements are complete. Windows
+installed Rust/Python medians are 286.480/176.449 ms: the 110.030 ms regression
+exceeds the 11.695 ms larger observed floor. Linux bare and installed Rust
+medians are 2.581/3.110 ms against Python 126.947/599.200 ms; descriptive
+floors and p95 values are retained in the packet. The source ratio remains
+176/125 = 1.408. Historical captures, raw failures and fresh-copy diagnostics
+remain intact. Final-head stdio/current both-feature hosted CI and independent
+review remain pending, so version remains deferred. This result/status
+successor carries the executed `bee4fe02` receipts without relabelling their
+head or transferring them to different `808c`/`8a4c` image bytes.
