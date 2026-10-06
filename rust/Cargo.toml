@@ -32,7 +32,6 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Secur
 unicode-normalization = "0.1.25"
 which = "8.0.6"
 chrono = "0.4.45"
-users = { version = "=0.11.0", default-features = false }
 unicode-casefold = "=0.2.0"
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 process-wrap = { version = "=10.0.0", features = ["tokio1"] }
