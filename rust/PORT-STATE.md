@@ -80,11 +80,92 @@ establish equality across minute transitions. No clock normalization is adopted.
 
 The independent diagnostic captures confirm invalid/cold-origin behavior and
 same- and cross-origin redirect boundaries without changing fixture admission.
-Clean committed-source real-daemon proof, registry and workflow integration,
-measurements and current CI remain pending. HTTPS/proxy/trust behavior,
-locale-default stdin and socket inactivity across headers/chunk framing remain
+The bounded committed-source closure proof and measurements below are now
+recorded; registry and workflow integration and current CI remain pending.
+HTTPS/proxy/trust behavior, locale-default stdin and socket inactivity across
+headers/chunk framing remain
 unresolved. The body-stall controls above do not establish those boundaries. No
 exclusion is adopted, and both episode modes remain deferred in the register.
+
+### Current bounded episode evidence
+
+The ordinary 83-row corpus was rerun against committed body-inactivity repair
+`ca9898cedc455508c3dfaab2f55b27e5656224da`, tree
+`9d62c97c7f325cc512f25a584ef6bdba0ed5f3dd`, using the retained final binaries.
+Windows matches all 83 declared comparisons; Linux matches 82 and retains the
+`episode-key-11-episode-start` title-body mismatch across a local-minute boundary.
+All 332 candidate-output controls are rejected per host. The unchanged comparator
+checks declared argv/stdin/environment, complete home bytes, exit and streams,
+HTTP method/path/body bytes and Content-Type/Authorization values. Its existing
+required-header projection lowercases header names. Both hosts retain 57 cases
+with other raw header differences outside that comparator, including implicit
+headers and casing; complete framing equality is not compared.
+`episode-current-committed-result.md` and
+`episode-current-committed-manifest.json` retain those exact observations; the
+Linux clock failure remains unmatched, without normalization or exclusion.
+
+The authenticated nonblank input case `episode-key-7-episode-end` also passes one
+owned-daemon pair and four candidate controls on each host. Its exact argv is
+`episode-end --help ignored`, and stdin is `{"session_id": 42}` without a newline,
+with the existing synthetic bearer recorded as an explicit input. Before each
+arm, the supported API seeds session 42 with one empty root titled
+`fixture-episode`. After each public CLI invocation, API and storage readback
+independently show zero episodes, a non-null session `ended_at`,
+`end_reason="end"` and the corresponding root membership retained. Generated
+IDs and timestamps remain raw observations for independent state assertions;
+database bytes are not compared across arms. The original one-pair receipts are
+`episode-owned-nonblank-manifest.json` and
+`episode-owned-nonblank-linux-manifest.json`.
+
+The reviewed measurement instrument is committed at
+`e21afa4ae8319824037b546f917705fa4eae8789`, tree
+`0c4b6f5b1ac20d1c867c385a1be8d73252dacfd4`, with current Rust source unchanged
+from the repair above. Both hosts bind the genuine lexical virtualenv parent and
+actual CLI children to Python oracle
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55), and preserve
+source/helper/runtime/executable identities before and after capture. The
+retained Windows debug executable SHA256 is
+`19f223282e9a1c5a55b53f939c36f570548309b2e86ad85b8a795fe5d43b321d`; the
+retained Linux ELF SHA256 is
+`79a8393d257c1a4df4a4b74a3ef9424c3406a6a3c5b1b789760587d9c0399b10`.
+These bindings do not attest the compiler or profile-producing build invocation.
+
+Windows and Linux plumbing smokes and final measurements exit zero. Each final
+uses two untimed controls and three repeats of ten alternating pairs, with
+30 timed observations per arm and 62 independently verified root closures per
+host. Every invocation must produce exit zero, empty stdout/stderr and unchanged
+complete home bytes as well as the accepted closure state; equal wrong outcomes
+are rejected. Preparation, reopening and state probes remain outside timing.
+Fresh per-instance database authentication, rejection of the exposed default,
+factory restoration and cleanup of owned databases, daemons, children, PostgreSQL
+processes and private parents are verified, with no new home residue. The first
+Linux smoke stopped before service startup because its lease command was absent
+from PATH; its failure is retained, and the private PATH repair's distinct
+attempt2 smoke passes without changing the committed instrument.
+
+The following are instrument-reported descriptive debug measurements against an
+already running owned daemon with warm filesystem caches. Timing includes owned
+process setup, complete output collection and clean exit. The observed median
+floor is the range of repeat-block medians, not a confidence interval or a causal
+speedup claim; these results do not establish release-profile performance.
+
+| Host | Python median ms / floor ms | Rust median ms / floor ms |
+| --- | --- | --- |
+| Windows | 211.7635 / 21.8746 | 57.6518 / 8.3546 |
+| Linux | 256.0708 / 4.5309 | 70.1477 / 1.4285 |
+
+Local untracked receipt `episode-measurement-windows-3x10.json` has SHA256
+`6802b8b2eb8b40b652819177db80c51d0c9a21c122e53d4a9ce3378b35c3a909`;
+`episode-measurement-linux-3x10.json` has SHA256
+`9e827467b9d3603f81855bcd4770d2a9f949c7b5835b8c42b7dc4e8e2c7a1f60`.
+Raw captures and failed attempts remain retained. This evidence covers an
+authenticated nonblank request closing an empty root, not closure of stored
+entries, complete episode-mode acceptance or full HTTP header/framing equality.
+The 440 dedicated Rust lines plus 733 JSON wrapper/parser lines remain 1,173,
+against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
+excluding tests/assets and dispatch. The broader title denominator caveat above
+still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
+the future full PR's independent review remain open; both modes stay deferred.
 
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
