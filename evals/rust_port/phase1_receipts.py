@@ -11,7 +11,7 @@ from .stdio_judge import stderr_evidence_complete
 def receipt_status(receipt):
     # Judge-sensitivity mutations are diagnostics with a source capture, not
     # process observations that can satisfy the genuine capture evidence gate.
-    groups = [receipt["differences"],
+    groups = [receipt["differences"], receipt.get("normalizations_applied", []),
               *(control["differences"] for control in receipt.get("process_controls", {}).get("controls", {}).values())]
     if not all(stderr_evidence_complete(differences) for differences in groups):
         return "incomplete"

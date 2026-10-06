@@ -223,6 +223,15 @@ The `stdio-raw-compared` policy retains and compares stdout bytes, including
 member order, spacing, integer spelling and line framing. It changes only named
 source newline spans at `/body/result/tools/*/description` and
 `/body/result/instructions`. Stderr's allowlist is empty and exit codes are exact.
+Only the real-bank corpus opts into `completed-readiness-wait-notice`: after
+stdout matches under the existing comparison and both processes exit 0, stderr
+may differ between empty bytes and the sole exact no-spawn, five-second wait
+notice for `http://127.0.0.1:<port>` (1–65535). One terminating LF or CRLF is
+required; extra lines, logs or altered text fail. Both arms must retain genuine
+process provenance. Applied events include both raw stderr captures in
+`normalizations_applied`, including in the public summary; missing evidence makes
+the receipt incomplete. The capture streams remain unchanged. Startup, fault,
+EOF and concurrent-call policies do not enable this rule.
 `eof-observed-final-pair-orders` permits only the observed final two connection
 errors to swap; their bytes, multiplicity and all preceding frames stay exact.
 Each platform supplies its own byte oracle. Frozen Windows observations authorize

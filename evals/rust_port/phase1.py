@@ -12,7 +12,7 @@ from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
 from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_sensitivity_controls,
-                          retain_stderr, verifies_frozen_capture)
+                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
 from .phase1_receipts import reusable_python_process_receipt
@@ -71,11 +71,14 @@ def corpus(root, command, clearance):
             cleanup["database_dropped"] = True
             print(json.dumps({"arm": name, "era": era, "frames": len(result["stdout"]),
                               "exit": result["exit_code"], "database_dropped": True}), flush=True)
-    policy = StdioPolicy()
+    policy = StdioPolicy(readiness_wait_notice=True)
     differences = [{"era": expected["era"], **difference}
         for expected, actual in zip(arms[:2], arms[2:]) for difference in judge_with_evidence(expected, actual, policy)]
     return {"arms": arms, "differences": differences, "resource_check": resource,
-            "policy": policy.name, "named_normalizations": ["source-text-lf"],
+            "policy": policy.name, "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE],
+            "normalizations_applied": [{"era": expected["era"], **event}
+                for expected, actual in zip(arms[:2], arms[2:])
+                for event in readiness_wait_evidence(expected, actual, policy)],
             "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
 
 
