@@ -813,3 +813,74 @@ header type refuses it before transport, changing requests, exit and lock state.
 Raw counterexamples from both platforms remain retained. A proposed DEL-case
 deferral is unapproved; no unchecked header construction or comparison exception
 is adopted. This candidate remains local pending repair and fresh review.
+
+The version dependency is subsequently integrated through `db0d59cb`, retaining
+its reviewed fifteen-row Linux receipt and independent environment-snapshot
+repair. The fixture merge preserves lease process contexts and all original and
+selected executable checks, and checks the admitted environment immediately
+after context exit as well as after capture and poststate collection. Combined
+compatibility checks pass 186 tests on Linux and 174 on Windows, with twelve
+Unix-only skips; one actual disposable-child cell also passes on each platform.
+These fixture checks do not close the remaining native clock/header findings or
+the mode's acceptance gates.
+
+The remaining C-int-year repair now propagates the host formatting error through
+check and queued-run callers: check returns its exact exit-70 error before any
+report, JSON bypasses formatting, and queued run takes the Python-compatible
+local fallback. A new public corpus matches all seventeen Windows pairs and
+fifteen of seventeen Linux pairs. The two Linux list rows match exit 1, empty
+stdout, the terminal OverflowError, file state and captured request projections;
+their full Python tracebacks remain unmatched and their proposed presentation
+exclusion is unapproved. The DEL-header and earlier surrogate-name traceback
+boundaries also remain unresolved. Seventeen focused native tests and locked
+all-target shim clippy pass on each host; earlier compiler/lint failures remain
+recorded. These uncommitted-source repair checks do not substitute for committed
+successor acceptance. Fresh review and the broader mode gates remain pending.
+
+At `c4fc33593d55983b127ccf537307ff9c838e75ee`, tree
+`88446f4bb2e3638ef2c4b693cbf7fc5795caeecd`, the bounded committed TOKEN_FILE
+path passes four real-daemon Python/native pairs and rejects all 16 output/file
+controls on each OS. Genuine Python 0.17.0/schema 55 at the oracle above is used;
+the check/list observations show available board, no holder and zero queued
+waiters, and the run preserves its exact child streams and exit 3. Post-release
+check is free again, with owned PostgreSQL, daemon, children, database and homes
+cleaned up. Local untracked evidence is `lease-c4fc-committed-proof-result.json`
+and `lease-c4fc-{windows,linux}-proof.json`. This bounded path does not establish
+the remaining host/storage/concurrency/recovery/signal gates.
+
+The existing CLI instrument at
+`127e04ed1c7e5902c77e8b0f83873825a2822b81`, tree
+`381a8c5a230ab5a75cea715dcf7b040d1942584d`, measures only the retained positive
+empty/free `lease check sample --json` TOKEN_FILE case. Each OS completes three
+repeats of ten cold-start-to-exit samples per arm, alternating arms and retaining
+the existing repeat floors; 1x1 plumbing smokes remain separate. Independent
+expected controls retain 286 Windows bytes and 269 Linux bytes, exit 0, empty
+stderr and exact unchanged token/instance home bytes. Four field mutations are
+rejected, independent endpoint state is unchanged and owned cleanup is verified.
+Timed rows omit raw stdout/stderr/exit and post-file payloads: exact recorded
+arm-level controls are distinct from the instrument's programmatic per-invocation
+output/environment/home comparisons before a timing row is appended.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `lease-measurement-windows-3x10.json` | `5652af321e77cbca9b31a9b3e837eb124f763c14fc9943e97d04e161a5596317` |
+| Linux | `lease-measurement-linux-3x10.json` | `4aecc3583c684e69dadb742452cf8219ab6fa9b6673cb0c55c410bc823a6dac1` |
+
+Native executable SHA256 is
+`072490df14742c80f9aa597c4511649e40dd686d236cd189747841eba97e0020` on Windows
+and `368e7b120ac92a5a52e8f4fa24a411ca14af72c245428895c08d701bb94e08bd` on Linux.
+Retained raw Rust/Cargo hashes match the prior per-OS source maps, and native
+executable hashes are unchanged; the Linux successor preserves the original
+cache and ELF.
+These are debug measurements with incomplete producing-invocation/profile
+attestation, not release-profile evidence or a general speed claim. Local
+`lease-measurement-results.md` and `lease-measurement-audit.json` record the
+descriptive distributions, helper/runtime bindings and retained-row limitations.
+
+Full CLI-LEASE acceptance remains deferred. Pending groups 1 (ten surrogate-name
+list traceback cells), 3 (D3 ASCII DEL registration-reply headers) and 4 (two
+Linux C-int-year list traceback cells) remain unapproved, preserving all twelve
+traceback cells. No unchecked header construction, normalization or new traceback
+exclusion is adopted. Next action is the DEL compatibility/scope decision and
+the remaining traceback and broader acceptance gates, including hosted CI;
+this check-only timing does not close `lease list` or `lease run` acceptance.
