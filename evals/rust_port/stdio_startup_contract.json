@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
   "package_version": "0.17.0",
   "template_rule": "Only exact owned fixture URL and credential-file parameters replaced; expected newline generated for capture platform. Actual streams remain raw.",
   "oracle_schema": 55,
@@ -156,5 +156,7 @@
       "arm_cell_count": 14,
       "cleanup_verified": true
     }
-  }
+  },
+  "proof_oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "proof_status": "Historical startup captures at the recorded proof oracle; selected startup source blobs equal current master. Current candidate-head runtime acceptance remains pending."
 }

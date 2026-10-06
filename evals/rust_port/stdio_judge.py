@@ -2,10 +2,65 @@
 import base64
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import re
 
 from .harness import DuplicateJSONKey, Policy, compare, strict_json_loads
 from .wire import replacements
+
+STDERR_EVIDENCE_LIMIT = 64 * 1024
+
+
+def needs_stderr_evidence(difference, *, include_boundaries=True):
+    path = difference.get("path", "")
+    prefixes = ("/stderr", "/frames", "/exit_code") + (("/json",) if include_boundaries else ())
+    return (include_boundaries and path == "/") or any(
+        path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
+def retain_stderr(differences, expected, actual, *, include_boundaries=True):
+    evidence = {}
+    for arm, transcript in (("oracle", expected), ("candidate", actual)):
+        record = {"arm": arm, "era": transcript.get("era"), "pid": transcript.get("pid"),
+                  "captured_at_utc": transcript.get("captured_at_utc"),
+                  "capture_kind": transcript.get("capture_kind")}
+        try:
+            raw = base64.b64decode(transcript["stderr_b64"], validate=True)
+        except (KeyError, TypeError, ValueError):
+            # Never turn absent bytes into an apparently empty capture.
+            record["missing_stderr_bytes"] = True
+        else:
+            record.update(stderr_b64=base64.b64encode(raw[:STDERR_EVIDENCE_LIMIT]).decode("ascii"),
+                          byte_count=len(raw), truncated=len(raw) > STDERR_EVIDENCE_LIMIT)
+        evidence[arm] = record
+    return [{**difference, "stderr_evidence": evidence} if needs_stderr_evidence(
+                difference, include_boundaries=include_boundaries)
+            else difference for difference in differences]
+
+
+def stderr_evidence_complete(differences):
+    for difference in differences:
+        if not needs_stderr_evidence(difference):
+            continue
+        evidence = difference.get("stderr_evidence", {})
+        for arm in ("oracle", "candidate"):
+            try:
+                record = evidence[arm]
+                raw = base64.b64decode(record["stderr_b64"], validate=True)
+                count = record["byte_count"]
+                stamp = record["captured_at_utc"]
+                captured = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if (record["capture_kind"] != "process" or record["arm"] != arm or
+                        not isinstance(record["era"], str) or not record["era"] or
+                        type(record["pid"]) is not int or record["pid"] <= 0 or
+                        not stamp.endswith("Z") or captured.utcoffset() != timezone.utc.utcoffset(captured) or
+                        type(count) is not int or count < 0 or len(raw) != min(count, STDERR_EVIDENCE_LIMIT) or
+                        type(record["truncated"]) is not bool or
+                        record["truncated"] != (count > STDERR_EVIDENCE_LIMIT)):
+                    return False
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -47,7 +102,7 @@ def observation(transcript, policy):
             "stderr": b"".join(retained), "exit_code": transcript["exit_code"]}
 
 
-def judge(expected, actual, policy):
+def _judge(expected, actual, policy):
     left, right = observation(expected, policy), observation(actual, policy)
     if "boundary_error" in left:
         raise ValueError("oracle stdio transcript is malformed")
@@ -74,6 +129,26 @@ def judge(expected, actual, policy):
     return compare(left, right, Policy(ignored_values=(), source_text_paths=()))
 
 
+def judge(expected, actual, policy):
+    """Keep the original comparator result schema for existing harness callers."""
+    for transcript in (expected, actual):
+        try:
+            base64.b64decode(transcript["stderr_b64"], validate=True)
+        except (KeyError, TypeError, ValueError):
+            return retain_stderr([{"path": "/stderr", "reason": "missing_stderr_bytes"}], expected, actual)
+    return retain_stderr(_judge(expected, actual, policy), expected, actual, include_boundaries=False)
+
+
+def judge_with_evidence(expected, actual, policy):
+    """Retained receipts require both arms' evidence for every stdio boundary."""
+    return retain_stderr(judge(expected, actual, policy), expected, actual)
+
+
+def verifies_frozen_capture(frozen, live, policy):
+    """A live process supplies provenance only after its frozen bytes match."""
+    return frozen.get("stderr_b64") == live.get("stderr_b64") and not _judge(frozen, live, policy)
+
+
 def eof_policy(evidence, era, case):
     groups = [group for group in evidence["groups"] if group["era"] == era and group["case"] == case]
     if len(groups) != 1:
@@ -82,7 +157,8 @@ def eof_policy(evidence, era, case):
     return StdioPolicy(eof_orders=orders if case == "two" else ())
 
 
-def graded_controls(transcript, policy):
+def judge_sensitivity_controls(transcript, policy):
+    """In-memory mutations exercise the comparator, not a candidate process."""
     import copy
     import json
     controls = {}
@@ -97,6 +173,9 @@ def graded_controls(transcript, policy):
                                 ("wrong-exit", source, "value"),
                                 ("unexpected-stderr", source, "value")):
         candidate = copy.deepcopy(transcript)
+        candidate["capture_kind"] = "judge-sensitivity"
+        candidate.pop("pid", None)
+        candidate.pop("captured_at_utc", None)
         raw = base64.b64decode(candidate["stdout_frames_b64"][index])
         value = strict_json_loads(raw)
         if name == "tool-description":
@@ -114,12 +193,15 @@ def graded_controls(transcript, policy):
         else:
             candidate["stderr_b64"] = base64.b64encode(b"unexpected stderr\n").decode()
         candidate["stdout_frames_b64"][index] = base64.b64encode(raw).decode()
-        differences = judge(transcript, candidate, policy)
+        differences = _judge(transcript, candidate, policy)
         rejected = reason in {difference["reason"] for difference in differences}
-        controls[name] = {"expected_difference": reason, "rejected": rejected,
+        controls[name] = {"kind": "judge-sensitivity",
+                          "source_capture": {key: transcript.get(key) for key in
+                                             ("arm", "era", "capture_kind", "pid", "captured_at_utc")},
+                          "expected_difference": reason, "rejected": rejected,
                           "differences": differences, "policy": policy.name}
         if not rejected:
-            raise RuntimeError("stdio graded control was accepted: " + name)
+            raise RuntimeError("stdio judge-sensitivity control was accepted: " + name)
     return controls
 
 

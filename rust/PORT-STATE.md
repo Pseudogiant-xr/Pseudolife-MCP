@@ -1,7 +1,7 @@
 # Rust port state
 
 The version branch targets the current Python oracle at master
-`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
+`3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
@@ -70,6 +70,24 @@ the outstanding hosted CI or CLI-VERSION acceptance gates.
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
+
+## Phase 2c publication snapshot
+
+Snapshot: 2026-10-06 08:57 UTC. These are the published heads and observed workflow results, not acceptance of later local changes. The current local Linux cleanup repair still requires its own hosted CI and candidate-routed full suites. A run validates only its recorded head.
+
+| Branch | PR | Published head | Base | Rust workflow run / status | Next action |
+|---|---|---|---|---|---|
+| `codex/rust-phase1` | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560), draft | `5ff045b0` | `master` @ `3c01bb31` | #37434566225: Rust and Parity green on both OSes; general CI #37434566230 green | Review and publish the Linux cleanup deadline repair; require its own CI, one routed full suite per machine, and final readiness review. |
+| `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` | `codex/rust-phase1` | No run on this head; #37315503446 belongs to historical `ac0c64a1` | Complete the installed-layout identity correction and source-bound checks, then align with the final phase 1 base and rebind evidence. |
+| `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
+| `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), draft | `7171d6cc` | `codex/rust-phase2b-version` | #37429570773: Rust green, Parity red on both OSes | Carry shared repairs after version is ported; investigate the additional unretained normal-transcript stderr difference with final-head raw evidence. |
+| `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), draft | `2c026331` | `codex/rust-phase2b-version` | #37429996211: Rust green, Parity red on both OSes | Apply traceback, clock and temporary-name rules; carry shared repairs after version is ported, then rebind mode evidence. |
+| `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881: Rust and Parity green on both OSes | Preserve #589 until its dependent fixture and evidence split is complete. |
+| `codex/rust-phase2b-fixes` | Folded into #560; redundant worktree archived | `7f890590` (local ref) | `master` | Historical #37242617729 failed before folding | Validate the surviving fixes through #560; no redundant PR. |
+| `codex/rust-phase2` | [#589](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/589), draft | `c9705e88` | `codex/rust-phase1` | Historical #37253327797 succeeded | Preserve until the dependent fixture and evidence split is complete. |
+| `codex/rust-phase2c-users` | [#607](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/607), draft | `43e05ac1` | `codex/rust-phase1` | #37438008142 in progress | Complete hosted checks for the independently reviewed users-only removal. |
 
 ## Decisions and constraints
 
@@ -577,3 +595,27 @@ Help and CLI-DISPATCH are ported only for the UTF-8/scalar/platform-newline
 slice described above. Version and every other mode remain deferred. Final
 documentation-head review, suites and current CI/checks remain separate;
 implementation-head CI does not establish that the docs successor was tested.
+
+
+## Prepared version integration at the current Python pin
+
+The version identity checkpoint `9e7ba302` is integrated with the Phase 1
+source at `a3e95642`. The current Python oracle is `3c01bb31`, package 0.17.0,
+schema 55. Mapping retains 18 routes: ten stdio and eight CLI, including the
+three version admissions. The 191 scoped functions remain classified as ten
+candidate, one oracle and 180 internal. The two refusal routes are still
+pending and have not executed against this candidate.
+
+The prepared native identity checks its own executable beneath a six-digit
+runtime entry's `Scripts` or `bin`, derives the runtime root and matches the
+runtime path as written or canonicalized. Strict manifest limitations include
+NaN, Infinity, lone surrogates and integers beyond u64. The fixture admission
+preserves canonical containment, existence and symlink checks, including
+Windows short/long spellings of the same owned file.
+
+These source changes do not rebind historical receipts. Version remains
+deferred pending compiled identity contracts and final-head paired receipts
+on both platforms, hosted routed/additive validation, and the Windows
+installed-layout timing diagnosis with committed measurement floors. The
+recorded 278 ms candidate versus 156 ms Python and 5 ms floor is unresolved;
+no final-head performance or ported claim follows from this integration.

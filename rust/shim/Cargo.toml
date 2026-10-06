@@ -7,6 +7,10 @@ license.workspace = true
 publish = false
 default-run = "pseudolife-stdio"
 
+[features]
+default = ["codex-delivery"]
+codex-delivery = ["dep:tokio-tungstenite"]
+
 [dependencies]
 rmcp.workspace = true
 tokio.workspace = true
@@ -28,7 +32,7 @@ unicode-normalization.workspace = true
 which.workspace = true
 chrono.workspace = true
 unicode-casefold.workspace = true
-tokio-tungstenite.workspace = true
+tokio-tungstenite = { workspace = true, optional = true }
 process-wrap.workspace = true
 
 [target.'cfg(unix)'.dependencies]

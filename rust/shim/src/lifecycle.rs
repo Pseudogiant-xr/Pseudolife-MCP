@@ -273,6 +273,7 @@ impl DaemonLaunch {
     }
 }
 pub const NO_CONFIGURED_SPAWN_NOTE: &str = "[shim] fallback spawning is disabled: set PSEUDOLIFE_MCP_PYTHON to an explicit interpreter or PSEUDOLIFE_MCP_SERVE_COMMAND to a JSON argv array; using the PSEUDOLIFE_MCP_NO_SPAWN waiting path.";
+pub const INVALID_SERVE_COMMAND_NOTE: &str = "[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable; fallback spawning is disabled, using the PSEUDOLIFE_MCP_NO_SPAWN waiting path.";
 pub struct HttpDaemonControl {
     launch: Option<DaemonLaunch>,
     epoch: Instant,
@@ -336,6 +337,10 @@ pub async fn ensure_daemon<C: DaemonControl>(
     let url = daemon_url::validate(url).map_err(StartupError::fatal)?;
     let remote = !daemon_url::is_loopback(&url);
     let started = control.now();
+    let invalid_command = options.no_spawn_reason == Some(INVALID_SERVE_COMMAND_NOTE);
+    if invalid_command {
+        control.note(INVALID_SERVE_COMMAND_NOTE);
+    }
     if let Some(health) = control
         .probe(
             &url,
@@ -368,10 +373,15 @@ pub async fn ensure_daemon<C: DaemonControl>(
         return Ok(None);
     }
     if options.no_spawn {
-        if let Some(reason) = options.no_spawn_reason {
+        if !invalid_command && let Some(reason) = options.no_spawn_reason {
             control.note(reason);
         }
-        control.note(&format!("[shim] no daemon at {url} and PSEUDOLIFE_MCP_NO_SPAWN is set — waiting up to {:.0}s for it instead of spawning a fallback (Docker may still be starting)...", options.external_wait.as_secs_f64()));
+        let reason = if options.no_spawn_reason.is_some() {
+            "fallback spawning is disabled"
+        } else {
+            "PSEUDOLIFE_MCP_NO_SPAWN is set"
+        };
+        control.note(&format!("[shim] no daemon at {url} and {reason} — waiting up to {:.0}s for it instead of spawning a fallback (Docker may still be starting)...", options.external_wait.as_secs_f64()));
         let start = control.now();
         while control.now().saturating_sub(start) < options.external_wait {
             control.sleep(Duration::from_millis(500)).await;
@@ -379,7 +389,7 @@ pub async fn ensure_daemon<C: DaemonControl>(
                 return vet_health(&url, health, control).map(Some);
             }
         }
-        control.note(&format!("[shim] no answer from the memory daemon at {url}.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n{LOCAL_REMEDY}\n{STARTING_WITHOUT_DAEMON}"));
+        control.note(&format!("[shim] no answer from the memory daemon at {url}.\n  ({reason}, so no fallback daemon was spawned.)\n{LOCAL_REMEDY}\n{STARTING_WITHOUT_DAEMON}"));
         return Ok(None);
     }
     let mut lock = SpawnLock::open(&options.lock_path);
@@ -506,16 +516,6 @@ mod posix_session {
         }
     }
 }
-pub fn spawn_daemon(python: &Path) -> io::Result<Child> {
-    let mut command = Command::new(python);
-    command
-        .args(["-m", "pseudolife_memory.cli", "serve"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    detached(&mut command);
-    command.spawn()
-}
 fn spawn_detached(python: &Path, args: &[String], log: &Path) -> io::Result<u32> {
     if let Some(parent) = log.parent() {
         fs::create_dir_all(parent)?;
@@ -605,21 +605,35 @@ impl Runtime {
     pub async fn from_environment() -> Result<Self, StartupError> {
         let url = daemon_url::from_environment().map_err(StartupError::fatal)?;
         let no_spawn = spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref());
+        let mut no_spawn_reason = None;
         let launch = if no_spawn || !daemon_url::is_loopback(&url) {
             None
         } else {
             let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON");
-            let serve_command = std::env::var("PSEUDOLIFE_MCP_SERVE_COMMAND").map(Some).or_else(|error| {
-                if matches!(error, std::env::VarError::NotPresent) { Ok(None) }
-                else { Err(StartupError::fatal("[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable")) }
-            })?;
-            DaemonLaunch::from_settings(python.as_deref(), serve_command.as_deref())?
+            let launch = match std::env::var("PSEUDOLIFE_MCP_SERVE_COMMAND") {
+                Ok(command) => DaemonLaunch::from_settings(python.as_deref(), Some(&command)),
+                Err(std::env::VarError::NotPresent) => {
+                    DaemonLaunch::from_settings(python.as_deref(), None)
+                }
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    Err(StartupError::fatal(INVALID_SERVE_COMMAND_NOTE))
+                }
+            };
+            match launch {
+                Ok(Some(launch)) => Some(launch),
+                Ok(None) => {
+                    no_spawn_reason = Some(NO_CONFIGURED_SPAWN_NOTE);
+                    None
+                }
+                Err(_) => {
+                    no_spawn_reason = Some(INVALID_SERVE_COMMAND_NOTE);
+                    None
+                }
+            }
         };
         let mut options =
             EnsureOptions::new(&url, no_spawn || launch.is_none(), &std::env::temp_dir());
-        if !no_spawn && launch.is_none() && daemon_url::is_loopback(&url) {
-            options.no_spawn_reason = Some(NO_CONFIGURED_SPAWN_NOTE);
-        }
+        options.no_spawn_reason = no_spawn_reason;
         let mut control = HttpDaemonControl::new(launch);
         let health = ensure_daemon(&url, &mut control, &options).await?;
         let mut instructions_note = String::new();

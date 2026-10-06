@@ -94,7 +94,7 @@ def test_regeneration_rejects_omitted_current_functions_before_writing(inventory
         for path in SCOPED_FILES]}), encoding="utf-8")
     monkeypatch.setattr(phase1_inventory, "require_phase1_source", lambda root: None)
     monkeypatch.setattr(Path, "write_text", lambda *args, **kwargs: pytest.fail("incomplete input wrote a manifest"))
-    with pytest.raises(AssertionError, match="missing or extra per-function Phase 1 ownership"):
+    with pytest.raises(RuntimeError, match="function coverage"):
         phase1_inventory.regenerate(exploration, root=inventory.ROOT)
 
 
@@ -112,7 +112,7 @@ def test_candidate_function_classification_cannot_drift_from_adapter_mapping(inv
 def test_current_mapping_pin_and_counts_match_pending_candidate_ownership(inventory):
     mapping = pytest_plugin.MANIFEST
     assert mapping["oracle_commit"] == inventory.PHASE1_ORACLE
-    assert len(mapping["mapped"]) == 15
+    assert len(mapping["mapped"]) == 18
     assert sum(boundary == "stdio-shim-process" for boundary in mapping["mapped"].values()) == 10
     manifest = json.loads(inventory.source("rust/phase1-test-buckets.json"))
     functions = {item["nodeid"]: item for item in manifest["phase1_functions"]}

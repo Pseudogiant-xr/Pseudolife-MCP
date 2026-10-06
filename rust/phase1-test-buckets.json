@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "oracle_commit": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "oracle_commit": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
   "database_schema": 55,
   "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
   "counts": {
@@ -8,7 +8,7 @@
     "oracle": 68,
     "candidate": 2
   },
-  "candidate_node_count": 15,
+  "candidate_node_count": 18,
   "files": [
     {
       "path": "tests/test_abstain.py",
@@ -250,11 +250,14 @@
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
         "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
-        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help"
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]"
       ],
       "adapter": "evals.rust_port.pytest_plugin:cli-main-process",
       "remaining_nodes": "oracle",
-      "reason": "Only the listed dispatcher nodes replace main through the external process adapter; all remaining nodes run unchanged on Python."
+      "reason": "The listed help and version dispatcher nodes replace main through the external process adapter; all remaining nodes run unchanged on Python. Runtime acceptance remains pending."
     },
     {
       "path": "tests/test_client_credentials_setup.py",

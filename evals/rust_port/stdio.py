@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import hashlib
 import queue
 import subprocess
@@ -17,6 +18,7 @@ from .processes import owned_process
 class Wire:
     def __init__(self, process):
         self.process = process
+        self.captured_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self.incoming = queue.Queue()
         self.frames = []
         self.stderr = bytearray()
@@ -80,6 +82,8 @@ class Wire:
                 "stdout_frames_b64": [base64.b64encode(line).decode("ascii") for line in self.frames],
                 "stdout": frames,
                 "stderr_b64": base64.b64encode(self.stderr).decode("ascii"),
+                "capture_kind": "process", "pid": self.process.pid,
+                "captured_at_utc": self.captured_at_utc,
                 "exit_code": self.process.returncode}
 
 

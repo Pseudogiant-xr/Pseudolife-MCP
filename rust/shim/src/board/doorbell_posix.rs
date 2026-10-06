@@ -2,6 +2,12 @@ use process_wrap::tokio::{CommandWrap, CommandWrapper};
 use std::{collections::BTreeMap, ffi::CString, io, os::unix::ffi::OsStrExt, ptr};
 use tokio::process::Command;
 
+#[cfg(target_os = "linux")]
+#[path = "doorbell_linux_cleanup.rs"]
+mod linux_cleanup;
+#[cfg(target_os = "linux")]
+pub(super) use linux_cleanup::kill_cancelled_group;
+
 /// Runs the resolved doorbell CLI after ProcessSession's setsid hook, without execvp's shell fallback.
 #[derive(Debug)]
 pub(super) struct ExecveOnly;

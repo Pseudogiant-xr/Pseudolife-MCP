@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "invalid-mode-posix-bad-ff",
+      "platform": "posix",
+      "argv_bytes_hex": ["626164ff"],
+      "mode_repr": "'bad\\udcff'"
+    },
+    {
+      "id": "invalid-mode-windows-lone-surrogate",
+      "platform": "nt",
+      "argv_utf16_units": [[98, 97, 100, 55296]],
+      "mode_repr": "'bad\\ud800'"
+    }
+  ]
+}

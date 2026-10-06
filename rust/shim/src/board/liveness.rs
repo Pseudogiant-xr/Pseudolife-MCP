@@ -76,10 +76,13 @@ pub fn armed_until_at(digest: Option<&Path>, now: f64) -> f64 {
     latest
 }
 pub fn alphanumeric(value: char) -> bool {
-    value.is_alphanumeric()
+    let point = value as u32;
+    let ranges = super::unicode14::ALPHANUMERIC;
+    let index = ranges.partition_point(|(start, _)| *start <= point);
+    index > 0 && point <= ranges[index - 1].1
 }
 pub fn whitespace(value: char) -> bool {
-    value.is_whitespace()
+    matches!(value as u32, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0 | 0x1680 | 0x2000..=0x200a | 0x2028..=0x2029 | 0x202f | 0x205f | 0x3000)
 }
 pub fn reason(value: &str) -> String {
     let compact = value

@@ -6,7 +6,7 @@ from .stdio import capture
 from .stdio_capture import initialize, modern_meta
 from .stdio_corpus import ERAS
 from .stdio_fixture import HangingFixture
-from .stdio_judge import StdioPolicy, judge
+from .stdio_judge import StdioPolicy, judge_with_evidence
 
 
 def run(root, command):
@@ -51,7 +51,7 @@ def run(root, command):
                         result.update(arm=arm, era=era, case=fault)
                         pair.append(result)
                 differences.extend({"era": era, "case": fault, **difference}
-                                   for difference in judge(*pair, StdioPolicy()))
+                                   for difference in judge_with_evidence(*pair, StdioPolicy()))
             finally:
                 cleanup = fixture.close()
                 for result in pair:

@@ -1,7 +1,7 @@
 # Porting contract
 
 The current version-branch behavioural oracle target is Python 0.17.0 at
-`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
@@ -54,6 +54,10 @@ both are set). Without either, the candidate takes the existing no-spawn wait
 and prints the named explanation `NO_CONFIGURED_SPAWN_NOTE`; it never invents
 `python` from PATH. This is `ported-with-substitution` for the Python oracle's
 `sys.executable` spawn. A configured command is passed as argv, without a shell.
+Malformed explicit serve commands print `INVALID_SERVE_COMMAND_NOTE` before
+the health probe and use the no-spawn waiting path, even when an interpreter
+is also configured. The waiting notes name disabled fallback spawning rather
+than claiming the caller set `PSEUDOLIFE_MCP_NO_SPAWN`.
 
 Unattended client updates retain their loopback/no-spawn/newer-version gates
 and require the explicit interpreter setting. The writer schedules them once,
@@ -63,7 +67,10 @@ initialize instructions, plus all authentication checks. An update launch
 diagnostic appears only after that launch succeeds. An explicit serve command
 alone does not identify a Python interpreter for client updates. This changes
 the scheduling and initialize version note by the same maintainer decision;
-the candidate remains uninstalled by the port.
+the candidate remains uninstalled by the port. Installer-backed client update
+parity is deferred to Phase 5: this candidate proves the explicit-interpreter
+launch and scheduling seam against a disposable sentinel module, not a client
+installation or an implicit interpreter lookup.
 
 ## Types and serialization
 
@@ -80,6 +87,16 @@ the candidate remains uninstalled by the port.
 Do not rely on a serializer's defaults to reproduce Python coercion or missing
 field behaviour. Test unknown fields, wrong types, nulls, empty inputs and
 boundary values against the oracle. Error text may be user-visible contract.
+
+### `nondeterministic-bytes-semantic`: generated registration name
+
+Fields governed: `/body/name` in `register-sender` and `register-recipient` only; `/body/name_source`, `/body/label` and the raw `/body/agent_id` gate the rule. First case: `register-sender`.
+
+Before normalization, require `name_source == ""`, a nonempty string `label`, canonical lowercase hexadecimal `agent_id` matching `[0-9a-f]{32}`, and `name == label + " " + raw_agent_id[:8]`. Replace only those eight generated characters with the actor's named prefix token; label, separator, name source and every surrounding field stay exact. Explicit names and other operations receive no name normalization. Earlier response shapes without both naming fields remain exact; partial naming shapes fail.
+
+Wire-length adjustment touches only the original escaped span of those eight decoded characters, preserving the prefix's Unicode escapes, quoting, whitespace and all surrounding JSON bytes. Per-arm `policy_instances` retain case, arm, policy, raw name, raw label, raw name source, raw ID prefix and normalized name; no credential body is retained. The Phase 1 public CI receipt exports these instances under `generic_controls`.
+
+Instances: `register-sender /body/name`; `register-recipient /body/name`, across each fresh generic arm. Historical hosted runs 37428908416 (#602) and 37429259333 (#603) each show these two cases in arms 1 and 2; their downloaded public receipts contain no raw names, so they prove failure locations, not the raw semantic relation. Source `_board_name` / `_public` and synthetic rejection controls establish the rule; next execution must supply retained raw instances.
 
 ## Errors and recovery
 
@@ -103,6 +120,10 @@ review before acceptance. Do not replace OS lock semantics with an in-memory
 mutex or a PID-file existence check. Use bounded build parallelism and respect
 the shared full-suite queue. Dependency choices remain provisional until their
 supported protocol versions and platform behaviour are demonstrated.
+
+`tokio-tungstenite` and its transitive `webpki-roots` are optional behind the
+default-on `codex-delivery` feature; disabling it retains pull coordination and
+native doorbell paths. The existing TLS feature selection is unchanged.
 
 The Phase 1 shim uses `#![deny(unsafe_code)]` with narrow module-local exceptions:
 `credentials::windows_security` validates opened credential and coordination
@@ -165,13 +186,20 @@ behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
 casefold differences. `shim/src/board/unicode14.rs` records those corrections
 and the 701 category-C ranges, with dedicated normalization assertions.
-This compatibility table pins CPython 3.11's Unicode 14 for repository claims;
-it does not pin every Rust text operation to Python. Wake-reason sanitization
-uses Rust `char::is_alphanumeric` and `char::is_whitespace` by the maintainer's
-2026-10-05 phase 2 decision (`ported-with-substitution`); it still compacts,
-limits to 60 characters, filters punctuation and falls back to `unknown`.
-Unicode 14's U+001C separator is therefore filtered rather than split in a wake
-reason. Claim casefold/category-C/NFC behavior keeps `unicode14.rs` unchanged.
+Wake-reason sanitization also uses the pinned Unicode 14 predicates: categories
+L* or N* for `str.isalnum`, and the Python whitespace set including U+001C–001F
+for `str.isspace`. The same file retains 733 alphanumeric ranges; the existing
+casefold and category-C tables stay intact. The full-range SHA256 contract hashes
+one alphanumeric byte followed by one whitespace byte for every code point,
+including surrogates. `evals/rust_port/unicode14_reason.py` computes it with the
+pinned CPython 3.11 runtime. Sanitization still compacts, limits to 60 characters,
+filters punctuation and falls back to `unknown`; the separate `reason14.rs`
+asset remains deleted.
+
+The original shim/channel CLI keeps its valid-argument dispatch. OS arguments
+are read without Unicode conversion panics; an invalid-Unicode mode follows
+Python's unknown-mode repr and exit 2, using surrogateescape on Unix and unpaired
+UTF-16 surrogate escapes on Windows.
 
 ## HTTP and authentication
 
@@ -195,7 +223,8 @@ credential defaults from the caller's installed client configuration.
 
 ## SQL and durable state
 
-Read and write the recorded phase-start schema (53 for phases 0b and 1) without
+Read and write the recorded phase-start schema (55 at the current Phase 1
+pin; historical close-out evidence keeps schema 54) without
 DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
 each phase start; any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
@@ -391,9 +420,13 @@ argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing 
 existing pinned table. Locale/default and other output encodings and
 non-UTF-8/surrogate argv remain deferred. Recognized modes
 without an implementation emit a candidate-only deferred diagnostic, never the
-Python unknown-mode contract. No runtime identity is invented for version:
-`runtimes.running_runtime` depends on Python `sys.prefix`, so its three named
-oracle nodes remain deferred pending an explicit candidate identity decision.
+Python unknown-mode contract. The prepared version implementation derives the
+runtime root from its own executable under a six-digit `runtimes` entry's
+`Scripts` or `bin` directory, matching Python's `sys.prefix` identity. It checks
+its own executable and matches the runtime path as written or canonicalized.
+Manifest NaN, Infinity, lone surrogates and integers beyond u64 remain deferred.
+The three version nodes are routed; final-head runtime execution, both-platform
+receipts and the Windows installed-layout timing diagnosis remain pending.
 The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
 normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
 and initialize-return timing, using the same paired ordering and repeat floors.
