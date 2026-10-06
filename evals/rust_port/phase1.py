@@ -11,10 +11,12 @@ from .harness import capture_platform, write_new
 from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
-from .stdio_judge import StdioPolicy, judge, eof_policy, graded_controls
+from .stdio_judge import (StdioPolicy, judge_with_evidence, eof_policy, judge_sensitivity_controls,
+                          retain_stderr, verifies_frozen_capture, READINESS_WAIT_RULE, readiness_wait_evidence)
 from .processes import owned_process
 from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
 from .phase1_receipts import reusable_python_process_receipt
+from .phase1_receipts import receipt_status
 
 
 def selected_nodes():
@@ -69,33 +71,52 @@ def corpus(root, command, clearance):
             cleanup["database_dropped"] = True
             print(json.dumps({"arm": name, "era": era, "frames": len(result["stdout"]),
                               "exit": result["exit_code"], "database_dropped": True}), flush=True)
-    policy = StdioPolicy()
+    policy = StdioPolicy(readiness_wait_notice=True)
     differences = [{"era": expected["era"], **difference}
-        for expected, actual in zip(arms[:2], arms[2:]) for difference in judge(expected, actual, policy)]
+        for expected, actual in zip(arms[:2], arms[2:]) for difference in judge_with_evidence(expected, actual, policy)]
     return {"arms": arms, "differences": differences, "resource_check": resource,
-            "policy": policy.name, "named_normalizations": ["source-text-lf"],
-            "graded_controls": graded_controls(arms[0], policy)}
+            "policy": policy.name, "named_normalizations": ["source-text-lf", READINESS_WAIT_RULE],
+            "normalizations_applied": [{"era": expected["era"], **event}
+                for expected, actual in zip(arms[:2], arms[2:])
+                for event in readiness_wait_evidence(expected, actual, policy)],
+            "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
 
 
 def eof(root, command):
     from evals.rust_baseline.daemon import private_directory
     from .stdio_eof import observe as eof_observe
     evidence = json.loads(Path(__file__).with_name("stdio_eof_orders.json").read_text())
-    cells, differences = [], []
-    for expected in evidence["cells"]:
-        # Windows framing cannot be used as Linux's byte oracle. The frozen
-        # repeats authorize ID orders only; capture local oracle bytes first.
-        if capture_platform() != evidence.get("capture_platform"):
+    cells, differences, oracle_captures, frozen_verifications = [], [], {}, []
+    same_platform = capture_platform() == evidence.get("capture_platform")
+    for historical in evidence["cells"]:
+        key = historical["era"], historical["case"]
+        # Keep same-platform frozen bytes authoritative. A matching live
+        # process can supply provenance; an unchecked one cannot rebaseline it.
+        if key not in oracle_captures:
             with private_directory() as private:
-                expected = eof_observe(root, Path(private) / "oracle", expected["era"], expected["case"])
+                expected = eof_observe(root, Path(private) / "oracle", *key)
+            expected["arm"] = "oracle"
+            oracle_captures[key] = expected
+        live = oracle_captures[key]
+        expected = historical if same_platform else live
         with private_directory() as private:
             actual = eof_observe(root, Path(private) / "shim", expected["era"], expected["case"],
                                  command=command, validate_oracle=False)
+        actual["arm"] = "candidate"
         cells.append(actual)
         policy = eof_policy(evidence, expected["era"], expected["case"])
+        compared = judge_with_evidence(expected, actual, policy)
+        verified = same_platform and verifies_frozen_capture(historical, live, policy)
+        if verified:
+            compared = retain_stderr(compared, live, actual)
+        if same_platform:
+            frozen_verifications.append({"era": expected["era"], "case": expected["case"],
+                                         "live_matches_frozen": verified})
         differences.extend({"era": expected["era"], "case": expected["case"], **difference}
-                           for difference in judge(expected, actual, policy))
-    return {"cells": cells, "differences": differences, "frozen_oracle_observations": evidence["observations"],
+                           for difference in compared)
+    return {"cells": cells, "live_oracle_captures": list(oracle_captures.values()),
+            "frozen_verifications": frozen_verifications,
+            "differences": differences, "frozen_oracle_observations": evidence["observations"],
             "evidence_sha256": evidence["evidence_sha256"],
             "normalization_rule": "eof-observed-final-pair-orders",
             "byte_oracle": "same-platform; frozen order evidence does not normalize line framing"}
@@ -161,6 +182,9 @@ def main():
     receipt["differences"].extend(receipt["scenarios"]["differences"])
     from .stdio_process_controls import run as process_controls
     receipt["process_controls"] = process_controls(root)
+    for control in receipt["process_controls"]["controls"].values():
+        control["differences"] = retain_stderr(control["differences"],
+            receipt["process_controls"]["oracle_observed"], control["observed"])
     if not args.skip_generic_controls:
         from .full_bank import full_corpus, run as generic_run
         _, generic = generic_run(full_corpus(), oracle_root=root,
@@ -172,13 +196,13 @@ def main():
         raise RuntimeError("candidate source or executable changed during the judge")
     receipt["candidate_bindings"] = candidate_bindings(receipt, identity)
     receipt["coverage_complete"] = all(key in receipt for key in ("process_tests", "faults", "scenarios", "generic_controls"))
-    receipt["status"] = ("failed" if receipt["differences"] or not receipt.get("process_tests", {"passed": True})["passed"]
-                         else "passed" if receipt["coverage_complete"] else "incomplete")
+    receipt["status"] = receipt_status(receipt)
     write_new(args.out, receipt)
     if args.public_out:
         safe = {key: value for key, value in receipt.items() if key not in {
             "arms", "eof", "faults", "scenarios", "capture_runtime", "process_controls", "generic_controls"}}
-        safe["eof"] = {key: value for key, value in receipt["eof"].items() if key != "cells"}
+        safe["eof"] = {key: value for key, value in receipt["eof"].items()
+                       if key not in {"cells", "live_oracle_captures"}}
         if "faults" in receipt:
             safe["faults"] = {key: value for key, value in receipt["faults"].items() if key != "cells"}
         safe["scenarios"] = {key: value for key, value in receipt["scenarios"].items()
@@ -191,6 +215,7 @@ def main():
             generic = receipt["generic_controls"]
             safe["generic_controls"] = {key: generic[key] for key in (
                 "status", "cases", "differences", "identity_proxy_validation", "oracle_source_check")}
+            safe["generic_controls"]["policy_instances"] = generic.get("policy_instances", [])
             safe["generic_controls"]["graded_controls"] = {name: {key: result[key] for key in (
                 "rejected", "differences", "expected_difference", "correct_status")} for name, result in generic["graded_controls"].items()}
         write_new(args.public_out, safe)

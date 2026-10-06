@@ -115,20 +115,34 @@ fn python_text(value: &Value, nested: bool) -> String {
 }
 
 fn runtime_line() -> Option<String> {
-    let directory = fs::canonicalize(std::env::current_exe().ok()?.parent()?).ok()?;
+    let executable = std::env::current_exe().ok()?;
+    if !executable.is_file()
+        || executable.parent()?.file_name()? != if cfg!(windows) { "Scripts" } else { "bin" }
+    {
+        return None;
+    }
+    let directory = fs::canonicalize(executable.parent()?.parent()?).ok()?;
     for entry in fs::read_dir(runtime_root()?).ok()?.flatten() {
         let path = entry.path();
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
         if !runtime_name(name)
             || !path.is_dir()
-            || fs::canonicalize(&path).ok().as_ref() != Some(&directory)
+            || (path != directory && fs::canonicalize(&path).ok().as_ref() != Some(&directory))
         {
             continue;
         }
         let marker: Value =
             serde_json::from_slice(&fs::read(path.join("runtime.json")).ok()?).ok()?;
         let marker = marker.as_object()?;
+        let console = path.join(if cfg!(windows) {
+            "Scripts/pseudolife-mcp.exe"
+        } else {
+            "bin/pseudolife-mcp"
+        });
+        if !console.is_file() {
+            continue;
+        }
         let origin = if let Some(commit) = marker.get("source_commit").filter(|value| truthy(value))
         {
             format!("source commit {}", python_text(commit, false))

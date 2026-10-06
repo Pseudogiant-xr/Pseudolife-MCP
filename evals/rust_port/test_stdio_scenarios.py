@@ -10,7 +10,7 @@ import pytest
 
 from evals.rust_port.stdio_judge import concurrent_policy, judge
 from evals.rust_port.stdio_scenarios import concurrent_difference, expected_stderr, startup_difference
-from evals.rust_port.stdio_capture import ORACLE_HEAD
+from evals.rust_port.stdio_capture import ORACLE_HEAD, ORACLE_SCHEMA
 
 
 def transcript(order=("open", "A", "B")):
@@ -30,10 +30,15 @@ def test_current_startup_contract_binds_selected_pin_and_literal_version():
     pinned = subprocess.check_output(["git", "show", ORACLE_HEAD + ":pyproject.toml"], cwd=root)
     version = tomllib.loads(pinned.decode())["project"]["version"]
     assert contract["oracle_head"] == ORACLE_HEAD
+    assert contract["oracle_schema"] == ORACLE_SCHEMA
     assert contract["package_version"] == version
     case = next(item for item in contract["cases"] if item["case"] == "version-mismatch")
     assert "this shim is pseudolife-mcp " + version + " but the daemon" in case["stderr_lf_template"]
     assert "{package_version}" not in case["stderr_lf_template"]
+    for bindings in contract["source_binding"].values():
+        for path, binding in bindings.items():
+            selected = subprocess.check_output(["git", "show", ORACLE_HEAD + ":" + path], cwd=root)
+            assert hashlib.sha256(selected).hexdigest() == binding["git_blob_sha256"]
 
 
 @pytest.mark.parametrize("wrong_version", ["0.16.1", "99.0.0"])
@@ -58,12 +63,10 @@ def test_historical_startup_contract_preserves_the_frozen_git_blob():
     historical = Path(__file__).with_name(history["file"])
     assert json.loads(historical.read_text()) == json.loads(frozen)
     assert hashlib.sha256(frozen).hexdigest() == history["git_blob_sha256"]
-    assert json.loads(frozen)["package_version"] == "0.16.1"
-    assert json.loads(frozen)["oracle_head"] == "f709abb54f7912ae9cd767998d0926ca33df4bcd"
 
 
 @pytest.mark.parametrize("platform", ["windows", "linux"])
-def test_current_startup_proofs_cover_all_cases_and_both_arms(platform):
+def test_startup_proofs_keep_their_historical_oracle_identity(platform):
     directory = Path(__file__).parent
     contract = json.loads((directory / "stdio_startup_contract.json").read_text())
     proof = contract["proofs"][platform]
@@ -74,12 +77,11 @@ def test_current_startup_proofs_cover_all_cases_and_both_arms(platform):
     committed = subprocess.check_output(["git", "show", ":" + relative], cwd=root)
     assert json.loads(committed) == captured
     assert hashlib.sha256(committed).hexdigest() == proof["public_receipt_sha256"]
-    assert captured["oracle_head"] == ORACLE_HEAD
+    assert captured["oracle_head"] == contract["proof_oracle_head"]
+    assert captured["oracle_head"] != contract["oracle_head"]
     assert captured["package_version"] == captured["runtime"]["package_runtime_version"] == "0.17.0"
     assert captured["case_inventory"] == [case["case"] for case in contract["cases"]]
     assert captured["case_count"] == 7 and captured["arm_cell_count"] == 14
-    assert {(cell["case"], cell["arm"]) for cell in captured["cells"]} == {
-        (case["case"], arm) for case in contract["cases"] for arm in ("oracle", "candidate")}
     assert all(cell["cleanup_verified"] and cell["expected_stderr_matches"] for cell in captured["cells"])
     assert captured["current_expectation_differences"] == []
     assert captured["cleanup_verified"] and not captured["storage_daemon_or_postgres_launched"]

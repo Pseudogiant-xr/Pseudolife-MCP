@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "kind": "targeted-proof-summary",
+  "original_base_commit": "7f890590dcc634cc8ff531f6452676f5e8e10873",
+  "original_frozen_tree": "a83878bfa389c0e009d18a3c6d28387267fb1fb5",
+  "platform": "windows-native",
+  "scope": "Local isolated preparation; these runs do not validate any later integrated head.",
+  "raw_logs": "Retained privately; the hashes below bind their original bytes. No raw process stderr is published here.",
+  "items": {
+    "b": {
+      "implemented_source_blobs": {
+        "rust/shim/src/lifecycle.rs": "02a4e40fe5244544293b4aa9c9bb14b849ff6bd0",
+        "rust/shim/tests/nonboard_startup.rs": "6e98cfa7a1c9ea1aeb736637d70fa963589ef45f"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-b.log",
+          "sha256": "6dd1167f030bd3555a82db649b458fbb7ce8aff990cc70346592bc4737d57074",
+          "observed": "Two failures: malformed healthy startup disconnects and missing configuration falsely says NO_SPAWN is set; exit 101."
+        },
+        {
+          "reference": "fixes-red-b-healthy-silence.log",
+          "sha256": "afffa8d2c96ad6b91d23f4ab68c5d9c339f14dac0382bd20ae55d78f6c800c21",
+          "observed": "Self-check caught an introduced healthy-startup note expansion; narrowed before final proof."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-startup-final.log",
+          "sha256": "a1786c83703a54e4829a97172a54fecc81db13925b3561e644d0b33d1af4fe95",
+          "observed": "Final isolated source: Windows nonboard_startup 12/12, zero ignored, 0.57 seconds."
+        },
+        {
+          "reference": "fixes-clippy-startup-final.log",
+          "sha256": "b7511d88b39772e1e01f522f38b9b6d4bd23e11b054b55492080662b519a93c8",
+          "observed": "Final isolated library and startup clippy passed with warnings denied at -j1."
+        }
+      ],
+      "limitations": [
+        "Original frozen-tree proof only; final integrated-head acceptance pending."
+      ]
+    },
+    "c": {
+      "implemented_source_blobs": {
+        "rust/shim/src/board/liveness.rs": "a2ea148bd54ae6fd6f033fdd910fe1d98344aa71",
+        "rust/shim/src/board/unicode14.rs": "70f1d81bf51e9fb5bd30b73f82c5e6e2eb058696",
+        "rust/shim/tests/board_ring_contract.rs": "b9fd5f43b074974fd41d8f1267d8e810c8db03a1",
+        "evals/rust_port/unicode14_reason.py": "a55293a64a8e1743f37dac25379397011907c786"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-bcd.log",
+          "sha256": "7b6b02e2f1c972fa54a1d18f38496f38c48c9899d0c97eb4e3d445c20cae6231",
+          "observed": "Two failures: U+001C whitespace and full-range digest mismatches; exit 101."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows board_ring_contract 8/8, including both restored Unicode 14 contracts; this batch preceded the final startup-only narrowing."
+        }
+      ],
+      "limitations": [
+        "The original isolated table and test blobs are unchanged by the later startup-only correction.",
+        "CPython 3.11.9 unicodedata version 14.0.0 was verified; expected digest is f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe.",
+        "Current integrated-head parity acceptance pending."
+      ]
+    },
+    "d": {
+      "implemented_source_blobs": {
+        "rust/shim/src/main.rs": "c2898ba371a9f3615163ba20c231344816db49ec",
+        "rust/shim/src/argv.rs": "c8d8f9c9f01a9e0b57b63f302a00672704748711",
+        "rust/shim/tests/cli_invalid_argv.rs": "1b155a39ef4d210e85e01f8cc364f409214b0f0e"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-d.log",
+          "sha256": "5fdb4c2c02624bec04934dd11427b6d4cb64c33ac53a9279a3d3b09bf543eeab",
+          "observed": "Invalid Windows UTF-16 mode exited 101 rather than 2; one failing corpus case."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows invalid_unicode_mode_matches_python_repr_and_exit passed; Python repr unit assertions passed. This batch preceded the final startup-only narrowing."
+        }
+      ],
+      "limitations": [
+        "The Unix invalid UTF-8 corpus is implemented but was not executed locally.",
+        "Valid shim/channel argument behavior is preserved; broader Phase 2 dispatcher integration remains separate.",
+        "Original argv production and test blobs are unchanged by the later startup-only correction; current integrated-head acceptance pending."
+      ]
+    },
+    "e": {
+      "implemented_source_blobs": {
+        "rust/shim/tests/nonboard_final_assertions.rs": "5b465578406a96d0799f3337ca18f0032a507553",
+        "rust/shim/tests/common/mod.rs": "2a405dc266725f4662686ea3156b5e1db62f7a90",
+        "rust/shim/src/board/doorbell_windows.rs": "9e5298832581e06825e5d3d001b41a85f6f9db9e",
+        "rust/.config/nextest.toml": "3ca534675bf850c1ac781f51c12ac9e2045b90b2",
+        ".github/workflows/rust.yml": "de0c2194062b66cafac0de6443720ec4a8a5e92f"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-e-bounds.log",
+          "sha256": "9532cf3d812ffb692dcbd1678d28a855611044ea5ad8c5f9eaf54393837f3e24",
+          "observed": "Blocking accept ignored cancellation; the old fixture was released before the assertion failed, exit 101."
+        },
+        {
+          "reference": "fixes-red-e-doorbell.log",
+          "sha256": "ec2c0f040a914d2018aced769acaface28198d62074589d12d0813fec4778a17",
+          "observed": "Fixture leader returned 0 after a descendant exited 2; one failing propagation case, exit 101."
+        },
+        {
+          "reference": "fixes-red-e-timeouts.log",
+          "sha256": "d58d3a56ecf5f93a28a42369a3679f2e46dc84ce0aa4e6ccf3468f0a9262bc2d",
+          "observed": "Static contract against unchanged baseline Git blobs found no nextest config or Parity judge step timeout; exit 1. Performed after implementation, not a runtime timeout trial."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows targeted integration proof passed the built-binary updater sentinel and bounded cancellation checks; this batch preceded the final startup-only narrowing."
+        },
+        {
+          "reference": "fixes-green-doorbell.log",
+          "sha256": "3353b32ae0c380391f07066ea0b34a3954b9a7f8571b5490fb799bc5127c3403",
+          "observed": "Native Windows doorbell group 10/10, with 36 unrelated unit tests filtered, 5.93 seconds."
+        },
+        {
+          "reference": "fixes-green-nextest.log",
+          "sha256": "082a9cd1d9416ac3a54a0818710a1a9a29a00bd8dd4c0409a2b2ba9c83280532",
+          "observed": "Targeted Windows nextest 36/36, zero skips, 0.626 seconds; parsed the new timeout config before the final startup-only narrowing."
+        },
+        {
+          "reference": "fixes-green-e-timeouts.log",
+          "sha256": "2f47254191ca1f6ae7d73a92bfb7d4739e5960a32490d4254b709827f77ef7ec",
+          "observed": "Static candidate timeout contract passed, exit 0."
+        }
+      ],
+      "limitations": [
+        "Updater callback coverage is a positive proof; no callback-omission RED is claimed.",
+        "Production callback wiring is unchanged; the sentinel module is disposable and performs no installation.",
+        "The e source/test/config blobs are unchanged by the later startup-only correction; current integrated-head acceptance pending."
+      ]
+    }
+  },
+  "remaining_gates": [
+    "merge current master after PR 546 lands and re-pin oracle",
+    "both-platform Rust and Parity CI on the final head",
+    "candidate-routed committed suites on both machines",
+    "fresh independent review since 7f890590",
+    "maintainer ready/merge decision"
+  ]
+}

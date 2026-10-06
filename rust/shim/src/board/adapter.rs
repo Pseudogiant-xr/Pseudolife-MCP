@@ -101,6 +101,7 @@ pub struct Adapter {
     ring_liveness: AtomicBool,
     ring_attach: AtomicBool,
     ring_listener: std::sync::RwLock<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
+    #[cfg(feature = "codex-delivery")]
     inbox_active: AtomicBool,
 }
 
@@ -518,6 +519,7 @@ impl Adapter {
             ring_liveness: AtomicBool::new(ring_liveness),
             ring_attach: AtomicBool::new(ring_attach),
             ring_listener: std::sync::RwLock::new(None),
+            #[cfg(feature = "codex-delivery")]
             inbox_active: AtomicBool::new(false),
         });
         adapter.update_mailbox(&attached).await;
@@ -1186,6 +1188,7 @@ impl Adapter {
             }
         }
     }
+    #[cfg(feature = "codex-delivery")]
     pub async fn pump(self: Arc<Self>, delivery: Arc<super::delivery::Delivery>) -> bool {
         struct ReceiverGuard<'a>(&'a AtomicBool);
         impl Drop for ReceiverGuard<'_> {
@@ -1345,6 +1348,7 @@ impl Adapter {
         delivery.close().await;
         false
     }
+    #[cfg(feature = "codex-delivery")]
     async fn page_current(&self, generation: i64, snapshot: &CredentialSnapshot) -> bool {
         !self.closing.load(Ordering::Acquire)
             && self.mailbox.lock().await.generation == generation

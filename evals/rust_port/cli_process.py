@@ -231,9 +231,19 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
         raise ValueError("prepared command must retain the original arm prefix and executable bytes")
     if original_path.resolve(strict=True) != original_resolved:
         raise ValueError("CLI preparation changed the original executable target")
-    if invoked != original_path and (not invoked.is_relative_to(home.resolve())
-                                     or not resolved.is_relative_to(home.resolve())):
-        raise ValueError("CLI relocated executable must remain inside the home")
+    if invoked != original_path:
+        checked_metadata(home)
+        canonical_home = home.resolve(strict=True)
+        if not resolved.is_relative_to(canonical_home):
+            raise ValueError("CLI relocated executable must remain inside the home")
+        checked_metadata(invoked)
+        # Short names can spell the same directory; links cannot supply ownership.
+        for parent in invoked.parents:
+            checked_metadata(parent)
+            if parent.resolve(strict=True) == canonical_home:
+                break
+        else:
+            raise ValueError("CLI relocated executable must remain inside the home")
     return selected, identity, original_identity
 
 
@@ -241,6 +251,11 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
     # Both arms occupy the same disposable path, reset before each launch. Path
     # text remains contractual; no broad home/path replacement is permitted.
     reset_home(home)
+    if "home_suffix" in case:
+        suffix = Path(case["home_suffix"])
+        if len(suffix.parts) != 1 or suffix.anchor or suffix.name in {".", ".."} or "\\" in str(suffix):
+            raise ValueError("CLI home suffix must be one relative path component")
+        home = home / suffix
     env = fixture_env(home, commands, url)
     if case.get("normalizations"):
         raise ValueError("no cli-state normalizations are authorized in this corpus yet")
@@ -291,6 +306,14 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
         response = run_cli(selected, arguments, cwd=root, env=env,
                            timeout=case.get("timeout_seconds", 10),
                            stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
+        if "expected_stdout" in case:
+            version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+            expected = case["expected_stdout"].format(version=version)
+            if os.name == "nt":
+                expected = expected.replace("\n", "\r\n")
+            if response != {"exit_code": 0, "stdout_b64": base64.b64encode(expected.encode("utf-8")).decode("ascii"),
+                            "stderr_b64": ""}:
+                raise RuntimeError("CLI response does not match the case's exact expected fallback")
         if env != launch_env:
             raise ValueError("CLI effective environment changed during capture")
         response["post_files_b64"] = snapshot(home)

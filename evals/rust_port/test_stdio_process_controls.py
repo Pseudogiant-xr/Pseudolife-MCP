@@ -93,6 +93,8 @@ def test_named_defects_are_required_through_the_actual_stdio_judge(control_runne
     result = control_runner()
     controls = result["controls"]
     assert controls["identity"]["differences"] == []
+    assert any(row["path"] == "/stderr" for row in controls["stderr"]["differences"])
+    assert controls["stderr"]["differences"][0]["stderr_evidence"]["candidate"]["stderr_b64"] == changed(transcript(), "stderr")["stderr_b64"]
     assert {"path": "/json/0/result/protocolVersion", "reason": "value"} in controls["wrong-protocol"]["differences"]
     assert controls["duplicate-key"]["differences"] == [{"path": "/", "reason": "duplicate_json_key"}]
     assert all(item["passed"] and item["policy"] == "stdio-raw-compared" for item in controls.values())

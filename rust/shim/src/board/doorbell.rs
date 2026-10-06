@@ -536,7 +536,19 @@ impl Doorbell {
                 status.code().unwrap_or(-1)
             )),
             _ => {
-                #[cfg(unix)]
+                #[cfg(target_os = "linux")]
+                if !matches!(
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        posix_process::kill_cancelled_group(child.as_mut())
+                    )
+                    .await,
+                    Ok(Ok(()))
+                ) {
+                    self.disable("could not confirm Codex CLI cleanup");
+                    crate::stderrln!("pseudolife-mcp: Codex queue cleanup completion unknown.");
+                }
+                #[cfg(all(unix, not(target_os = "linux")))]
                 let _ =
                     tokio::time::timeout(Duration::from_secs(5), Box::into_pin(child.kill())).await;
                 #[cfg(windows)]
