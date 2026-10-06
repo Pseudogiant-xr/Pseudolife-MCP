@@ -473,11 +473,53 @@ full suites, final integrated-head CI and whole-change review remain pending.
 
 ## Lease diagnostic boundaries
 
-Exact Python traceback presentation is deferred for two lease cases: timeout
-conversion overflowing the monotonic-clock float, and large `lease list` output
-written to a closed pipe. Both retain the Python exit code and terminal error
-line; timeout overflow starts no child and creates no lease state. Raw Python
-and native counterexamples remain separate from byte-identical acceptance
-cells. This exception excludes only the interpreter stack, source paths and
-line framing in those two cases. Other stderr, nested-run precedence, output
-buffering boundaries and Python-accepted JSON values remain in scope.
+The phase 2c decisions replace the earlier two-case traceback limitation with
+these three named policies. The lease instances are listed individually in
+PARITY.md and `lease-policy-cases.json`; retained captures remain historical.
+CLI-LEASE stays deferred until the version base is ported, the candidate has
+its final-head proof on both platforms, and its remaining acceptance gates pass.
+
+**`python-traceback-not-contract`** governs only the Python traceback header
+and frames when an uncaught exception exits the oracle. Exit status, stdout,
+the terminal `ExceptionType: message` line including its platform newline,
+all other stderr and every post-state byte remain exact. Its first lease case
+is `approved-timeout-overflow-traceback`; the same rule admits the retained
+closed-list, surrogate-name list and C-int-year list instances. An earlier
+candidate refusal with different terminal bytes fails. The preparation checker
+requires one validated header/frame span and retains diagnostics outside it.
+
+**`nondeterministic-bytes-semantic`** governs only explicitly named fields
+whose Python bytes differ between two retained oracle invocations. Its first
+lease case is `lease-run-existing-successful-child`, governing only `ran.json`
+field `/t`: a finite unsigned decimal float in the exact byte layout
+`{"held": "suite,gpu", "t": <decimal>, "credential": false}`. Each captured
+timestamp must satisfy its own inclusive `start_unix <= t <= end_unix` window,
+including the second oracle invocation; every surrounding byte, response field
+and other file remains exact. Raw captures are retained. Missing windows or a
+missing oracle repeat make evidence incomplete and require recapture; aggregate
+receipt timestamps cannot supply those bounds retroactively. This lease ledger
+admits no random suffix or derived-name field.
+
+**`http-forbidden-input-refused`** governs forbidden header bytes only in
+`agent_id`, `credential` or configured `bearer`: C0 U+0000–U+001F, U+007F and
+folded values. Its first lease case is `D3-DEL-agent_id`. The intentional
+candidate substitution returns exit 1, empty stdout and exactly one stderr line,
+`lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid <field> header`, using the platform
+newline and one of those three field names. The diagnostic never includes the
+value. The candidate preserves pre-state and starts no child, lease or release
+request; a registration needed to obtain the offending reply may already have
+occurred. Candidate-arm expected bytes are labelled as substitution evidence;
+the Python arm stays raw. Non-ASCII/surrogate inputs keep their existing exact
+oracle contracts; this policy does not authorize other fields or transports.
+
+`evals/rust_port/lease_policy_preparation.py` is an offline preparation checker,
+with additive static tests. It is not wired into the existing judge, corpus or
+measurement instrument and does not establish native executable coverage.
+
+Lease Unix-second display follows the scoped Chrono local-zone substitution in
+PARITY.md: supported daemon timestamps retain ordinary local time and date
+formatting, fractional seconds floor, and unsupported calendar values display
+`?`. JSON numeric values remain unchanged. POSIX supported `TZ` settings belong
+to the platform local-zone contract; Windows CRT-only overrides do not. This
+supersedes the two historical C-int-year list exception expectations without
+discarding their raw failure evidence or changing the other named policies.

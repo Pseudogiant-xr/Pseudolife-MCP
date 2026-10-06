@@ -209,7 +209,7 @@ jobs:
           '@
           $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
           $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
-          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version --offline-resource-checked-at $resourceCheckedAt
+          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()

@@ -1,6 +1,6 @@
 use super::json::{Text, Value, json};
 use super::{args::Args, board, lock};
-use chrono::Datelike;
+use chrono::{Datelike, Local, Offset, TimeZone};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 pub fn truth(value: &Value) -> bool {
@@ -74,74 +74,31 @@ pub fn span(seconds: f64) -> String {
 fn number(value: &Value) -> Option<f64> {
     value.as_f64().filter(|n| n.is_finite())
 }
-// CPython 3.11 uses the host CRT's localtime and strftime, whose timestamp
-// domains, time-zone rules and year formatting differ from Chrono's.
-#[allow(unsafe_code)]
-fn clock(stamp: f64) -> String {
+// Daemon timestamps are Unix seconds, displayed in the platform's local zone.
+// Unsupported calendar values display '?' rather than interpreter exceptions.
+fn clock(stamp: f64) -> Result<String, &'static str> {
+    clock_in_zone(stamp, &Local, Local::now().date_naive())
+}
+fn clock_in_zone<Tz: TimeZone>(
+    stamp: f64,
+    zone: &Tz,
+    today: chrono::NaiveDate,
+) -> Result<String, &'static str> {
     if !stamp.is_finite() || stamp < i64::MIN as f64 || stamp >= -(i64::MIN as f64) {
-        return "?".into();
+        return Ok("?".into());
     }
-    #[cfg(unix)]
-    use libc::{strftime, tm as Tm};
-    #[cfg(windows)]
-    #[repr(C)]
-    // UCRT <corecrt_wtime.h>: struct tm has nine C ints; __time64_t is i64.
-    struct Tm {
-        tm_sec: i32,
-        tm_min: i32,
-        tm_hour: i32,
-        tm_mday: i32,
-        tm_mon: i32,
-        tm_year: i32,
-        tm_wday: i32,
-        tm_yday: i32,
-        tm_isdst: i32,
-    }
-    #[cfg(windows)]
-    unsafe extern "C" {
-        fn _localtime64_s(local: *mut Tm, stamp: *const i64) -> i32;
-        fn strftime(
-            out: *mut std::ffi::c_char,
-            size: usize,
-            format: *const std::ffi::c_char,
-            local: *const Tm,
-        ) -> usize;
-    }
-    let convert = |stamp: i64| {
-        // SAFETY: both CRT tm layouts permit zero initialization. The source
-        // and output pointers stay valid for the call; only success is read.
-        let mut local: Tm = unsafe { std::mem::zeroed() };
-        #[cfg(windows)]
-        let success = unsafe { _localtime64_s(&mut local, &stamp) == 0 };
-        #[cfg(unix)]
-        let success = {
-            let stamp: libc::time_t = stamp.try_into().ok()?;
-            unsafe { !libc::localtime_r(&stamp, &mut local).is_null() }
-        };
-        success.then_some(local)
+    let Some(local) = zone.timestamp_opt(stamp.floor() as i64, 0).single() else {
+        return Ok("?".into());
     };
-    let Some(local) = convert(stamp.floor() as i64) else {
-        return "?".into();
+    let Some(local) = local.naive_utc().checked_add_offset(local.offset().fix()) else {
+        return Ok("?".into());
     };
-    let today = convert(now().floor() as i64).is_some_and(|today| {
-        (local.tm_year, local.tm_mon, local.tm_mday) == (today.tm_year, today.tm_mon, today.tm_mday)
-    });
-    let format = if today { c"%H:%M" } else { c"%Y-%m-%d %H:%M" };
-    let mut output = [0u8; 64];
-    // SAFETY: the CRT receives a valid tm, a NUL-terminated static format,
-    // and the writable buffer's exact length. Its count excludes the NUL.
-    let count = unsafe {
-        strftime(
-            output.as_mut_ptr().cast(),
-            output.len(),
-            format.as_ptr(),
-            &local,
-        )
+    let format = if local.date() == today {
+        "%H:%M"
+    } else {
+        "%Y-%m-%d %H:%M"
     };
-    if count == 0 || count >= output.len() {
-        return "?".into();
-    }
-    String::from_utf8(output[..count].to_vec()).unwrap_or_else(|_| "?".into())
+    Ok(local.format(format).to_string())
 }
 pub fn now() -> f64 {
     std::time::SystemTime::now()
@@ -179,31 +136,31 @@ pub fn holder(holder: &Value, now: f64) -> String {
     }
     text
 }
-pub fn expected(stamp: &Value, now: f64, stale: bool) -> String {
+pub fn expected(stamp: &Value, now: f64, stale: bool) -> Result<String, &'static str> {
     let Some(stamp) = number(stamp) else {
-        return String::new();
+        return Ok(String::new());
     };
-    format!(
+    Ok(format!(
         ", expected end {}{}",
-        clock(stamp),
+        clock(stamp)?,
         if stale || stamp < now {
             " (stale: past it)"
         } else {
             ""
         }
-    )
+    ))
 }
-fn waiter(entry: &Value) -> String {
+fn waiter(entry: &Value) -> Result<String, &'static str> {
     let mut text = who(entry);
     if let Some(since) = number(&entry["enqueued_at"]) {
-        text += &format!(" since {}", clock(since));
+        text += &format!(" since {}", clock(since)?);
     }
     if truth(&entry["purpose"]) {
         text += &format!(", purpose \"{}\"", clean(&entry["purpose"], 240));
     }
-    text
+    Ok(text)
 }
-pub fn queued_notice(name: &str, reply: &Value) -> String {
+pub fn queued_notice(name: &str, reply: &Value) -> Result<String, &'static str> {
     let position = &reply["position"];
     let queued = &reply["queued"];
     let place = if position.is_integer() && queued.is_integer() {
@@ -212,11 +169,11 @@ pub fn queued_notice(name: &str, reply: &Value) -> String {
         "queued".into()
     };
     let situation = if reply["holder"].is_object() {
-        holder(&reply["holder"], now()) + &expected(&reply["holder"]["expected_end"], now(), false)
+        holder(&reply["holder"], now()) + &expected(&reply["holder"]["expected_end"], now(), false)?
     } else {
         "no holder right now; the board is passing it down the queue".into()
     };
-    format!(
+    Ok(format!(
         "lease: waiting for {} on the board ({place}); {}",
         super::repr(name),
         if reply["holder"].is_object() {
@@ -224,7 +181,7 @@ pub fn queued_notice(name: &str, reply: &Value) -> String {
         } else {
             situation
         }
-    )
+    ))
 }
 
 pub fn json_text(value: &Value) -> String {
@@ -597,7 +554,12 @@ pub async fn check(args: &Args) -> i32 {
         ];
         if report["available"] == true {
             if !report["holder"].is_null() {
-                lines.push(format!("  board: held by {}{}{}",holder(&report["holder"],now()),expected(&report["expected_end"],now(),report["stale"]==true),if stale{"; stale: the local lock is free, so this record outlived its holder and lapses at its ttl"}else{""}));
+                let expected =
+                    match expected(&report["expected_end"], now(), report["stale"] == true) {
+                        Ok(text) => text,
+                        Err(error) => return failed_check(name, error),
+                    };
+                lines.push(format!("  board: held by {}{}{}",holder(&report["holder"],now()),expected,if stale{"; stale: the local lock is free, so this record outlived its holder and lapses at its ttl"}else{""}));
                 if truth(&report["queued"]) {
                     let kind = match &report["queue"] {
                         Value::Bool(_) => Some("bool"),
@@ -618,15 +580,23 @@ pub async fn check(args: &Args) -> i32 {
                             &format!("TypeError: '{kind}' object is not iterable"),
                         );
                     }
+                    let waiting = report["queue"].as_array().map_or_else(
+                        || Ok(Vec::new()),
+                        |q| {
+                            q.iter()
+                                .filter(|e| e.is_object())
+                                .map(waiter)
+                                .collect::<Result<Vec<_>, _>>()
+                        },
+                    );
+                    let waiting = match waiting {
+                        Ok(text) => text.join("; "),
+                        Err(error) => return failed_check(name, error),
+                    };
                     lines.push(format!(
                         "  board queue ({}): {}",
                         pystr(&report["queued"]),
-                        report["queue"].as_array().map_or_else(String::new, |q| q
-                            .iter()
-                            .filter(|e| e.is_object())
-                            .map(waiter)
-                            .collect::<Vec<_>>()
-                            .join("; "))
+                        waiting
                     ));
                 }
             } else {
@@ -744,11 +714,24 @@ pub async fn list(args: &Args) -> i32 {
         }
         for lease in &leases {
             let name = clean(&lease["name"], 120);
+            let expected = if lease["holder"].is_object() {
+                match expected(&lease["expected_end"], now(), lease["stale"] == true) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        // Python raises outside list's board error boundary.
+                        // Retain its terminal error; the full traceback remains unmatched.
+                        super::say(error);
+                        return 1;
+                    }
+                }
+            } else {
+                String::new()
+            };
             lines.push(if lease["holder"].is_object() {
                 format!(
                     "lease {name}: held by {}{}",
                     holder(&lease["holder"], now()),
-                    expected(&lease["expected_end"], now(), lease["stale"] == true)
+                    expected
                 )
             } else {
                 format!("lease {name}: free")
@@ -763,7 +746,13 @@ pub async fn list(args: &Args) -> i32 {
             };
             if truth(&queued) {
                 let queued = pystr(&queued);
-                let waiting = queue.into_iter().map(waiter).collect::<Vec<_>>().join("; ");
+                let waiting = match queue.into_iter().map(waiter).collect::<Result<Vec<_>, _>>() {
+                    Ok(text) => text.join("; "),
+                    Err(error) => {
+                        super::say(error);
+                        return 1;
+                    }
+                };
                 lines.push(if waiting.is_empty() {
                     format!("  queue ({queued})")
                 } else {
@@ -814,6 +803,34 @@ pub async fn list(args: &Args) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn timestamp_clock_formats_injected_local_zone_and_today() {
+        use chrono::{FixedOffset, NaiveDate, TimeZone, Utc};
+
+        let zone = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        for (day, expected) in [(7, "12:34"), (6, "2026-10-06 12:34")] {
+            let stamp = Utc
+                .with_ymd_and_hms(2026, 10, day, 7, 4, 59)
+                .unwrap()
+                .timestamp();
+            for fraction in [0.0, 0.999] {
+                assert_eq!(
+                    super::clock_in_zone(stamp as f64 + fraction, &zone, today),
+                    Ok(expected.into())
+                );
+            }
+        }
+        for stamp in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            67767976233532800.0,
+        ] {
+            assert_eq!(super::clock_in_zone(stamp, &zone, today), Ok("?".into()));
+        }
+    }
+
     #[test]
     fn holder_iso_clock_matches_cpython_311_grammar_grid() {
         // Expectations captured with datetime.fromisoformat, including its

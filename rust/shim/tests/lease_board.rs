@@ -134,16 +134,76 @@ fn has_header(header: &str, key: &str, value: &str) -> bool {
 }
 
 #[test]
-fn timestamp_clocks_match_host_cpython_boundaries() {
-    let grid: Value = serde_json::from_str(include_str!(
-        "fixtures/lease_timestamp_clock_cpython311.json"
-    ))
-    .unwrap();
-    for case in grid["cases"].as_array().unwrap() {
-        let stamp = case["stamp"].clone();
-        let expected = case[if cfg!(windows) { "windows" } else { "linux" }]
-            .as_str()
+fn unsupported_clock_dates_render_unknown_and_preserve_json() {
+    for waiter in [false, true] {
+        for json_output in [false, true] {
+            let home = Home::new();
+            let (url, peer) = server(1, move |_, header, body| {
+                assert!(header.starts_with("POST /api/coordination/leases "));
+                assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
+                assert_eq!(body, &json!({"name":"resource"}));
+                (
+                    200,
+                    json!({"leases":[{"name":"resource","holder":{"label":"holder"},
+                    "expected_end":if waiter { Value::Null } else { json!(67767976233532800.0) },
+                    "queued":if waiter {1} else {0},
+                    "queue":if waiter {json!([{"label":"waiter","enqueued_at":67767976233532800.0}])} else {json!([])}}]}),
+                )
+            });
+            let mut command = home.command(&url);
+            command.args(["lease", "check", "resource"]);
+            if json_output {
+                command.arg("--json");
+            }
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stderr.is_empty());
+            if json_output {
+                let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+                let stamp = if waiter {
+                    &reply["board"]["queue"][0]["enqueued_at"]
+                } else {
+                    &reply["board"]["expected_end"]
+                };
+                assert_eq!(stamp, &json!(67767976233532800.0));
+            } else {
+                assert!(
+                    String::from_utf8(output.stdout)
+                        .unwrap()
+                        .contains(if waiter {
+                            "waiter since ?"
+                        } else {
+                            ", expected end ?"
+                        })
+                );
+            }
+            assert_eq!(
+                fs::read(home.0.join("instance.id")).unwrap(),
+                b"0123456789ab\n"
+            );
+            assert!(!home.0.join("lease-resource.lock").exists());
+            assert_eq!(peer.join().unwrap().len(), 1);
+        }
+    }
+}
+
+#[test]
+fn timestamp_clocks_use_local_dates_and_floor_fractional_seconds() {
+    use chrono::{Local, TimeZone};
+
+    let today = Local::now().date_naive();
+    for date in [today, today.pred_opt().unwrap()] {
+        let local = Local
+            .from_local_datetime(&date.and_hms_opt(12, 34, 59).unwrap())
+            .earliest()
             .unwrap();
+        let expected = if date == today {
+            "12:34".to_owned()
+        } else {
+            format!("{} 12:34", date.format("%Y-%m-%d"))
+        };
+        // Rounding this producer's fractional second would cross into 12:35.
+        let stamp = json!(local.timestamp() as f64 + 0.999);
         let home = Home::new();
         let (url, peer) = server(1, move |_, header, _| {
             assert!(header.starts_with("POST /api/coordination/leases "));
@@ -155,9 +215,8 @@ fn timestamp_clocks_match_host_cpython_boundaries() {
                     "queue":[{"label":"waiter","enqueued_at":stamp}]}]}),
             )
         });
-        let output = home
-            .command(&url)
-            .env("TZ", "UTC0")
+        let mut command = home.command(&url);
+        let output = command
             .args(["lease", "check", "resource"])
             .output()
             .unwrap();
@@ -166,8 +225,7 @@ fn timestamp_clocks_match_host_cpython_boundaries() {
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(
             text.contains(&format!(", expected end {expected}")),
-            "timestamp {}: {text:?}",
-            case["stamp"]
+            "local date {date}: {text:?}"
         );
         assert!(text.contains(&format!("waiter since {expected}")));
         assert!(!home.0.join("lease-resource.lock").exists());

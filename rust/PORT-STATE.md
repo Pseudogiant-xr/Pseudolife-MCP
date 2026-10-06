@@ -934,3 +934,34 @@ or normalization is adopted. Earlier exit-3 proof bytes remain unchanged.
 Full CLI-LEASE acceptance, groups 1/3/4 (all twelve retained traceback cells and
 DEL headers), broader acceptance gates and hosted CI remain outstanding; this
 bounded empty-board list timing does not close them.
+
+### Lease phase 2c preparation at a6cdf024
+
+Draft #602 remains deferred. PORTING.md names the three approved policies and
+PARITY.md lists all 23 retained instances: 14 historical traceback-contract
+matches, eight forbidden-header cases requiring fatal refusal implementation,
+one successful-child clock case incomplete without own invocation windows and
+a second oracle run. `rust/lease-policy-cases.json` binds the retained receipt
+basenames/hashes and exact terminal/diagnostic contracts. These decisions
+supersede the preceding historical notes that called groups 1/3/4/13 unapproved.
+New static preparation tests establish only the offline checker. No captures,
+measurements, rebases, builds or current-head CI proof were performed. Next:
+wait for the version branch to become ported, implement fatal refusal, wire
+named comparison scopes, and rebind final-head Windows/Linux receipts before
+any row promotion. Existing tests and eval instruments remain unchanged.
+
+### Lease phase 2d integration scope
+
+The lease candidate is integrated onto corrected version base `5220b5ee`.
+Its Parity job now selects the lease corpus as well as help and version. The
+Chrono timestamp substitution in PARITY.md preserves ordinary local producer
+output and JSON values, displays `?` for unsupported dates, and excludes
+Windows CRT-only timezone overrides. Original clock failures and the phase 2c
+policy ledger remain historical evidence; no CLI-LEASE row is promoted.
+
+Still deferred are fatal forbidden-header refusal and its executable corpus,
+successful-child invocation-window comparison, shared lease fixture/help drift
+guards, explicit Windows unlock and Ctrl-C coverage, and the disposition of
+`hold`, `break` and `delegate`. Those three actions currently return a deferred
+error rather than dispatching to Python. Full mode, final-head hosted,
+measurement and independent-review gates require separate closure.

@@ -100,10 +100,15 @@ async fn wait_board(
                     return Ok(());
                 }
                 if Instant::now() >= notice {
-                    say(&view::queued_notice(
-                        args.name.as_deref().unwrap_or(""),
-                        &reply,
-                    ));
+                    say(
+                        &view::queued_notice(args.name.as_deref().unwrap_or(""), &reply).map_err(
+                            |_| board::Failure {
+                                text: "the board failed unexpectedly (OverflowError)".into(),
+                                transient: false,
+                                code: None,
+                            },
+                        )?,
+                    );
                     notice = Instant::now() + Duration::from_secs(60);
                 }
             }
