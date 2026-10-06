@@ -693,9 +693,11 @@ explicitly deferred presentation boundary in PORTING. Earlier receipts retain
 their original candidate identities, including the corrected distinction
 between authenticated peer observations and local no-board observations.
 
-The seven native lease files now contain 2951 lines against 1889 in the current
-Python lease module (1.56220); the Python denominator includes deferred operator
-modes. Current-master and shared-helper source integration uses Python
+The seven native lease files contain 2,884 physical production lines, including
+693 JSON compatibility-helper lines, against 1,889 in the pinned Python lease
+module (1.52673). Test modules, assets and dispatch are excluded; the earlier
+2,996-line count included 112 test lines. The Python denominator includes
+deferred operator modes. Current-master and shared-helper source integration uses Python
 0.17.0/schema55, and committed helper admission passes. The latest review repairs
 cover run-option ambiguity and ISO holder timestamps with 25 exact byte pairs
 and 100 rejected output controls. A subsequent CPython grammar comparison fixes
