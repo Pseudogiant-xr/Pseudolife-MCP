@@ -10,6 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Fixed (2026-10-07 — bound descendant exit observation in the baseline harness)
+
+- The baseline test helper waits up to two seconds before checking an owned
+  descendant's liveness. A surviving child still fails the assertion and is
+  cleaned up; the daemon's process cleanup is unchanged.
+
 ### Fixed (2026-10-07 — retain successful readiness wait notices in parity evidence)
 
 - The real-bank stdio judge normalizes only the sole exact no-spawn readiness
