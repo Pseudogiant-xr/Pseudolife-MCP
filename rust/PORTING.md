@@ -130,6 +130,18 @@ exceptions preserve the operating-system behavior of the Python oracle; their
 presence does not establish parity. Each requires targeted platform evidence
 and independent review before acceptance.
 
+`credentials::unix_accounts::{home_by_name, home_with_lookup}` are local
+exceptions for reentrant `libc::getpwnam_r` account-database lookup after removing
+`users` 0.11. The caller owns the initialized passwd structure and lookup buffer;
+only a result pointing to that structure is read, and the NUL-terminated home
+bytes are copied before the buffer is dropped. Lookup starts with 2048 bytes and
+doubles on ERANGE with checked size overflow, retaining the prior allocation and
+missing-account behavior without an added cap. Android retains the prior
+`/var/empty` home default after successful lookup. Board ownership uses
+`rustix::process::getuid` to preserve real-UID checks. These are OS primitives;
+the standard library has no account-database or UID API. Targeted platform
+validation and independent review remain required before acceptance.
+
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
 `adopt`, `kill`, `QueueProcess::drop`, `create_job` and `resume_threads`;
