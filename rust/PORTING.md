@@ -151,6 +151,18 @@ validation at `43e05ac1` predates this repair. Targeted platform validation and
 independent review remain required; Android, other Unix targets, unusual NSS
 backends and real/effective-UID divergence are not established by Linux proofs.
 
+`lifecycle::executable::is_executable` is a local Windows exception after removing
+`which` 8.0.6. Its owned NUL-terminated UTF-16 pathname and initialized output
+buffer remain live through `GetBinaryTypeW`; no native handle is created.
+Windows retains symlink metadata and extension-bearing file acceptance, while
+extensionless paths require that binary-type check. Unix uses `rustix::fs::access`
+with real IDs and ACLs after following metadata to a regular file. Ordered PATH
+search, captured cwd, Windows PATHEXT changes between calls and filename casing
+are retained.
+The maintainer authorized exactly the two fixture resolver-call substitutions;
+their assertions and error handling remain unchanged. Platform validation and
+independent review remain required before acceptance.
+
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
 `adopt`, `kill`, `QueueProcess::drop`, `create_job` and `resume_threads`;
