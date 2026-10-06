@@ -886,3 +886,51 @@ traceback cells. No unchecked header construction, normalization or new tracebac
 exclusion is adopted. Next action is the DEL compatibility/scope decision and
 the remaining traceback and broader acceptance gates, including hosted CI;
 this check-only timing does not close `lease list` or `lease run` acceptance.
+
+The independently reviewed list instrument at
+`073c975e18c1ce4922ca84d0e6293ab5c0a9bb5f`, tree
+`f1a7d2d93a69dac0a78a18a8542480266408f71e`, extends measurement to exactly
+`lease list --json` on an available empty owned board, using the retained
+TOKEN_FILE and instance bytes. Windows and Linux each complete a separate 1x1
+plumbing smoke and three repeats of ten alternating cold-start-to-exit samples
+per arm. Final arm-level controls retain 318 Windows bytes and 323 Linux bytes,
+exit 0, empty stderr, the actual owned URL/lock-directory path and unchanged
+home bytes. Four field mutations are rejected per receipt; independent endpoint
+bytes before/after agree and owned PostgreSQL, database, daemon, children and
+private-home cleanup is verified. Retained native binaries and per-OS raw
+Rust/Cargo source maps above remain unchanged; current instrument/helper/runtime
+bindings were checked against both native checkouts and the pinned oracle.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `lease-list-measurement-windows-3x10.json` | `52fefa6a010ba004abedacabcf93ee98fe3f1f6181b72fe9573602d448fe4619` |
+| Linux | `lease-list-measurement-linux-3x10.json` | `e37502bcb9eb12fbdb82bede34cb78834ca66dd4f4acb6a6f2bf2b59b88b3ed6` |
+
+Descriptive timings and observed repeat floors below are milliseconds. Median
+and nearest-rank p50 differ; these ranges are not confidence intervals.
+
+| OS / arm | Median | p50 | p95 | Median-control floor | Repeat-p50 floor | Repeat-p95 floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Windows / Python | 567.171 | 567.123 | 596.485 | 7.126 | 9.169 | 21.462 |
+| Windows / Rust | 22.453 | 22.343 | 38.967 | 0.888 | 0.101 | 66.529 |
+| Linux / Python | 347.021 | 346.634 | 355.962 | 4.007 | 3.853 | 6.414 |
+| Linux / Rust | 83.574 | 83.521 | 85.894 | 1.332 | 1.334 | 0.500 |
+
+The Windows Rust repeat-p95 floor is 66.529 ms; the observed dispersion is
+retained. Local untracked `lease-list-measurement-results.md` and
+`lease-list-measurement-selfcheck.json` retain receipt hashes and recomputed
+metrics. Timed rows omit raw stdout/stderr/exit and post-home payloads: exact
+recorded arm-level controls remain distinct from the instrument's programmatic
+per-invocation response/environment/home comparisons. These are debug-only
+measurements with incomplete producing-invocation/profile attestation; no
+release-profile evidence or general speed claim follows.
+
+Successful-run timing remains deferred under pending group 13. The unchanged
+existing exit-0 child writes `time.time()` into `ran.json`; the local untracked
+`lease-list-run-windows-first.json` preserves both exit-0 captures, exact empty
+streams, released leases and the sole raw post-home mismatch at that timestamp.
+The narrow comparison-policy question remains unanswered; no timestamp exception
+or normalization is adopted. Earlier exit-3 proof bytes remain unchanged.
+Full CLI-LEASE acceptance, groups 1/3/4 (all twelve retained traceback cells and
+DEL headers), broader acceptance gates and hosted CI remain outstanding; this
+bounded empty-board list timing does not close them.
