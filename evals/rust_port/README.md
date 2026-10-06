@@ -393,7 +393,8 @@ retains the eight DEL/CR/LF/NUL instance cases, all C0 bytes and folded values
 in the three approved fields, bearer-file inputs, and check/list propagation.
 Non-ASCII/surrogate and ordinary bearer-file cases compare raw bytes exactly.
 Six output/file/request mutation controls accompany each refusal. The Parity
-job runs this separate lane without a database or daemon; existing corpus
+job runs this separate lane without a database or daemon. Private credential
+fixtures use OS-native temporary storage; existing corpus
 normalizations and Python source are unchanged. This scoped lane does not
 promote CLI-LEASE or cover its deferred action, timing and lifecycle work.
 

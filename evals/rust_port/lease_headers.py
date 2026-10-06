@@ -165,7 +165,7 @@ def run(root, candidate, out, selected=None):
         "evals/rust_port/lease_policy_preparation.py": [forbidden_header, refusal_response],
         "evals/rust_port/provenance.py": [require_instrument_binding],
     })
-    directory = Path(tempfile.mkdtemp(prefix="lease-header-corpus-", dir=out.parent))
+    directory = Path(tempfile.mkdtemp(prefix="lease-header-corpus-"))
     package = directory / "oracle" / "pseudolife_memory"
     package.mkdir(parents=True)
     for name in (*ORACLE_SOURCES, "credentials.py"):
