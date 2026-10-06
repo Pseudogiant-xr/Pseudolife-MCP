@@ -158,7 +158,8 @@ def test_callbacks_cannot_mutate_any_admitted_environment(tmp_path, monkeypatch,
         yield
 
     monkeypatch.setattr(cli_process, "run_cli", lambda *a, **kw: pytest.fail("mutated environment launched"))
-    with pytest.raises(ValueError, match="environment"):
+    message = "owned daemon, isolation and CPU policies" if stage == "prepare" else "environment"
+    with pytest.raises(ValueError, match=message):
         cli_process.observe(lease_corpus.cases()[0], [sys.executable, "-c", "pass"], {"oracle": [sys.executable]},
                             root=tmp_path, home=tmp_path / "home", url="http://127.0.0.1:49152",
                             prepare=prepare, process_scope=scope)

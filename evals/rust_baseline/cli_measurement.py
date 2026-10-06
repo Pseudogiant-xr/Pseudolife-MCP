@@ -217,6 +217,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
                 if control:
                     state_controls[arm] = state
                 if binding is not None:
+                    if env != binding["environment"]:
+                        raise RuntimeError("CLI effective environment changed during measurement")
                     binding["post_files_b64"] = after
                 return response, elapsed, binding
             finally:
