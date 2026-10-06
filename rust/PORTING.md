@@ -170,8 +170,13 @@ file while the public API and replacement reject it. The replacement does not
 adopt that owned-configuration cache. This is an explicit lookup policy, not
 an assertion that every `which` API has identical behavior.
 The maintainer authorized exactly the two fixture resolver-call substitutions;
-their assertions and error handling remain unchanged. Platform validation and
-independent review remain required before acceptance.
+their assertions and error handling remain unchanged. The
+[actual-crate receipts](../evals/results/rust-which-8.0.6-comparison/README.md)
+record 23 equal public-API cases on Windows and 17 on Linux, plus the expected
+Windows owned-configuration difference. Windows file-symlink coverage remains
+unavailable (creation error 1314). These bounded comparisons do not establish
+equivalence for every platform, ACL or error message. Current hosted checks
+and independent review remain required before acceptance.
 
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
