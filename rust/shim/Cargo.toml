@@ -29,7 +29,6 @@ dirs.workspace = true
 uuid.workspace = true
 
 unicode-normalization.workspace = true
-which.workspace = true
 chrono.workspace = true
 unicode-casefold.workspace = true
 tokio-tungstenite = { workspace = true, optional = true }

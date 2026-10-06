@@ -161,6 +161,33 @@ validation at `43e05ac1` predates this repair. Targeted platform validation and
 independent review remain required; Android, other Unix targets, unusual NSS
 backends and real/effective-UID divergence are not established by Linux proofs.
 
+`lifecycle::executable::is_executable` is a local Windows exception after removing
+`which` 8.0.6. Its owned NUL-terminated UTF-16 pathname and initialized output
+buffer remain live through `GetBinaryTypeW`; no native handle is created.
+Windows retains symlink metadata and extension-bearing file acceptance, while
+extensionless paths require that binary-type check. Unix uses `rustix::fs::access`
+with real IDs and ACLs after following metadata to a regular file. Ordered PATH
+search, captured cwd and Windows filename casing are compared against the actual
+registry crate by `evals/rust_port/which_comparison.py`.
+
+Windows deliberately reads PATHEXT on each lookup. This matches the removed
+public `which::which` calls in 8.0.6: their borrowed `RealSys` uses the trait's
+default extension parser. It differs from an owned `WhichConfig<RealSys>`,
+whose `RealSys` implementation caches the first extension list in `OnceLock`.
+The comparison exercises both actual crate APIs after changing `.CMD` to
+`.EXE` in a disposable child; the owned configuration still accepts a `.CMD`
+file while the public API and replacement reject it. The replacement does not
+adopt that owned-configuration cache. This is an explicit lookup policy, not
+an assertion that every `which` API has identical behavior.
+The maintainer authorized exactly the two fixture resolver-call substitutions;
+their assertions and error handling remain unchanged. The
+[actual-crate receipts](../evals/results/rust-which-8.0.6-comparison/README.md)
+record 23 equal public-API cases on Windows and 17 on Linux, plus the expected
+Windows owned-configuration difference. Windows file-symlink coverage remains
+unavailable (creation error 1314). These bounded comparisons do not establish
+equivalence for every platform, ACL or error message. Current hosted checks
+and independent review remain required before acceptance.
+
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
 `adopt`, `kill`, `QueueProcess::drop`, `create_job` and `resume_threads`;
