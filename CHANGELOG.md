@@ -22,6 +22,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   [CLI-VERSION evidence and status](rust/PORT-STATE.md#frozen-combined-version-evidence-at-5220b5ee)
   remain separate from readiness.
 
+### Fixed (2026-10-07 — retain successful readiness wait notices in parity evidence)
+
+- The real-bank stdio judge normalizes only the sole exact no-spawn readiness
+  wait notice after matching stdout and exit 0, retaining both raw stderr
+  captures and process provenance in the receipt. Other stdio policies and
+  production behavior remain unchanged.
+
 ## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
 
 ### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)

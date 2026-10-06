@@ -21,7 +21,8 @@ fn python() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| "python".into());
     // Resolve before the disposable child clears PATH and changes directory.
-    which::which(selected).expect("selected Python runtime for the disposable fixture")
+    lifecycle::find_executable(selected)
+        .expect("selected Python runtime for the disposable fixture")
 }
 fn health() -> Value {
     json!({"status":"ok","auth":false,"version":"99.0.0","updates":{"unattended_clients":true}})

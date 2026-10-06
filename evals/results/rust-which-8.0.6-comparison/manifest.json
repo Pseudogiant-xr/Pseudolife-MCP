@@ -1,0 +1,198 @@
+{
+  "execution_source_head": "9dddf6fcc37fa329d7b2a5125b3725c09118b32e",
+  "integrated_users_base": "e7dc5a405e6920c6429025c8a8f6d4af7c7a2367",
+  "source_bindings": {
+    "evals/rust_port/which_comparison.py": {
+      "captured_byte_sha256": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+      "canonical_git_blob": "b8a72370bea69c52ccdaed06bc248c1ab70cc4d5",
+      "canonical_git_byte_sha256": "04fcb602654452b943d7d3ed7d7cea51d9ac32b8b82d016943ba3cf2ed85eceb"
+    },
+    "evals/rust_port/which_comparison/Cargo.toml": {
+      "captured_byte_sha256": "48f3c763b8f2534c9a552eb0a697d7d132796bdf1ee908ba382b0ad010857a48",
+      "canonical_git_blob": "06b6a1c1d75924ee523a879f9eed88353bf8c719",
+      "canonical_git_byte_sha256": "cb1dac5783e7fa06f7272b4159828485b9fee9a610fa73213e9ab8f0fcc1e190"
+    },
+    "evals/rust_port/which_comparison/Cargo.lock": {
+      "captured_byte_sha256": "642d911e835df088d3197e72c41f6eab33c223d29c09c7a31b800d908d182818",
+      "canonical_git_blob": "334afa183cbb45f32cd6ab8260d8e00600f99ce0",
+      "canonical_git_byte_sha256": "4ca3198ea4932bb8264bd69d9b4e689e89d6301b9fc7320f1a80920fb3e20aca"
+    },
+    "evals/rust_port/which_comparison/src/main.rs": {
+      "captured_byte_sha256": "7badcba555d3abf128e9867aab1c51c0156dd6ea60760eb08ada70d0d7f8489f",
+      "canonical_git_blob": "2269a884e0e4f7549de40ad6a4ac5629e2bc7c26",
+      "canonical_git_byte_sha256": "161eb859c9def46d62f54e3fe04768c16cba9d84dc4a07b5cdd04b0150025fd9"
+    },
+    "rust/shim/src/lifecycle_executable.rs": {
+      "captured_byte_sha256": "51fcba9905e02d37501d8afec61658df6a09b34042813a7aa87c6573e870ce20",
+      "canonical_git_blob": "c324a607742956a0656d3ba1f2fbb29c7a7352f2",
+      "canonical_git_byte_sha256": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995"
+    }
+  },
+  "focused_checks": {
+    "windows": [
+      {
+        "args": [
+          "+1.94.0",
+          "fmt",
+          "--manifest-path",
+          "evals/rust_port/which_comparison/Cargo.toml",
+          "--check"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "evals/rust_port/which_comparison/Cargo.toml",
+          "--offline",
+          "--locked",
+          "-j2"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "+1.94.0",
+          "clippy",
+          "--manifest-path",
+          "evals/rust_port/which_comparison/Cargo.toml",
+          "--offline",
+          "--locked",
+          "-j2",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "-p",
+          "pseudolife-stdio",
+          "--test",
+          "lifecycle_executable",
+          "--offline",
+          "--locked",
+          "-j2"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "-p",
+          "pseudolife-stdio",
+          "--test",
+          "lifecycle_executable",
+          "--offline",
+          "--locked",
+          "-j2",
+          "--no-default-features"
+        ],
+        "actual_exit": 0
+      }
+    ],
+    "linux": [
+      {
+        "args": [
+          "cargo",
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "evals/rust_port/which_comparison/Cargo.toml",
+          "--offline",
+          "--locked",
+          "-j2"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "cargo",
+          "+1.94.0",
+          "clippy",
+          "--manifest-path",
+          "evals/rust_port/which_comparison/Cargo.toml",
+          "--offline",
+          "--locked",
+          "-j2",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "cargo",
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "-p",
+          "pseudolife-stdio",
+          "--test",
+          "lifecycle_executable",
+          "--offline",
+          "--locked",
+          "-j2"
+        ],
+        "actual_exit": 0
+      },
+      {
+        "args": [
+          "cargo",
+          "+1.94.0",
+          "test",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "-p",
+          "pseudolife-stdio",
+          "--test",
+          "lifecycle_executable",
+          "--offline",
+          "--locked",
+          "-j2",
+          "--no-default-features"
+        ],
+        "actual_exit": 0
+      }
+    ]
+  },
+  "limits": [
+    "No full suite or new hosted matrix is claimed.",
+    "The standalone comparison is manually invoked; the existing Rust workflow covers workspace contracts in both feature configurations but does not run this separate crate.",
+    "Native Windows file-symlink creation returned1314; unavailable coverage is not a pass.",
+    "Error text/types, exhaustive ACLs and arbitrary concurrent environment mutation are outside the comparison."
+  ],
+  "inherited_users_test_change_from_original_which_candidate": [
+    "rust/shim/tests/unix_accounts_lookup/mod.rs"
+  ],
+  "inherited_users_test_matches_integrated_users_base": true,
+  "original_which_fixture_and_resolver_tests_unchanged_from_f883": true,
+  "captured_receipt_byte_sha256": {
+    "windows": "824f23635c5a4817fdcc395b77aa0d5e081d8b9216fb74cc999913b8ddc16e1e",
+    "linux": "5dcb8e05f8982862e451938c03e29a9515ab048c2b31ab8cc652bf3e441fd1d1"
+  },
+  "canonical_git_receipt_bindings": {
+    "windows": {
+      "blob": "594abf7c593975e9ed222b54e3bc5d6609186c27",
+      "byte_sha256": "9cb1ad18d66306d4361c7fb40a91b347a62d707f1fb9d8b547dad9c08f82caca"
+    },
+    "linux": {
+      "blob": "d3a366485332a1e0cde9603c2265ad95d5efb450",
+      "byte_sha256": "5dcb8e05f8982862e451938c03e29a9515ab048c2b31ab8cc652bf3e441fd1d1"
+    }
+  }
+}
