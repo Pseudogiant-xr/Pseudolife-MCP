@@ -28,6 +28,126 @@ boundaries. A compiling translation does not establish parity.
 
 ## Evidence and ownership
 
+### Episode hook producer grammar
+
+The legacy hook producer supplies an ordinary JSON object with STRING
+`session_id` and missing/null/string `cwd`. Typed serde_json validation replaces
+Python value coercion, non-finite numbers, integer interpreter options and
+pinned recursion-depth behavior. Keep the OS-path/string codec and exact
+request-body escaping; synthetic interpreter inputs remain retained historical
+diagnostics. The producer and each deliberate substitution are recorded in
+PARITY.md. Original oracle/eval tests remain unchanged; only the explicitly
+retired native interpreter-limit tests and string-key origin fixture change.
+The unused general `python_json*` additions and their module declaration are
+removed from the episode candidate; no lease production consumer exists in this
+tree. VERSION's helper visibility is restored to the accepted base. Earlier
+runtime receipts keep their original images and do not certify this removal.
+
+### Prepared episode policy instances
+
+The header-disposition statement from the original preparation at `758aa642`
+is historical; the narrow delegated disposition below supersedes that pending
+decision without changing raw receipts or promoting either episode mode.
+
+The episode branch integrates Python master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+Its named policies and additive executable nodes are preparation; final-head
+runtime receipts, hosted execution, measurements and independent review are
+pending. Episode mode rows remain deferred.
+
+- **`http-forbidden-input-refused`:** field `PSEUDOLIFE_MCP_TOKEN` configured
+  bearer; first case `token-del`. Reject DEL (U+007F), C0 U+0000–U+0008 and
+  U+000A–U+001F, including CR/LF folding, with exit 1 and named diagnostic
+  `HTTP_FORBIDDEN_INPUT_REFUSED`: `[shim] invalid PSEUDOLIFE_MCP_TOKEN: forbidden HTTP header bytes.`
+  Stdout stays empty, stderr retains platform newlines, home bytes stay exact
+  and no episode POST is sent. Validation stays after accepted stdin, origin,
+  successful health and title derivation; earlier silent gates remain earlier.
+  Instances: `token-del`, `token-control`, `token-fold`, `bearer-del`,
+  `bearer-control`, `bearer-fold`, `token-invalid-line`. The first six are
+  three aliased vectors. The seventh contains CRLF despite its historical
+  exact result. Expected refusal bytes are explicitly a candidate oracle,
+  `ported-with-substitution`, never Python bytes. HTAB, Latin-1/non-Latin-1,
+  token-file-only and empty-environment controls keep their existing behavior.
+- **`nondeterministic-bytes-semantic`:** decoded POST `/title` minute, first
+  case `episode-key-11-episode-start`; second `episode-repair-cwd-12`.
+  The exact prefix and ` - YYYY-MM-DD HH:MM` shape, calendar-valid local
+  minute and JSON escape spelling remain required. Two raw Python captures
+  must first show distinct minutes with exact surrounding observations.
+  Each arm needs its own finite ordered numeric invocation window shorter
+  than 60 seconds and per-endpoint UTC offsets/local minutes; the title
+  belongs to that arm's endpoint minute set. Missing bounds are incomplete.
+  Only the 16 minute bytes differ; every other body, header, input, stream,
+  exit and file byte stays exact. No random-field policy applies here.
+  `episode_policy.py` is an additive checker for this narrowly bound shape;
+  historical receipts are not upgraded by adding it. The retained cwd-12
+  receipts lack numeric windows and still require recapture.
+- **`python-traceback-not-contract`:** no retained episode instance. Any
+  future uncaught exception comparison preserves terminal exception text,
+  stdout, exit and poststate; only traceback header/frames are deferred.
+  Existing invalid-origin diagnostics remain exact.
+
+The separate direct group-12 decision permits `ported-with-substitution`
+only for `active-health-head` and `active-health-chunk-size`: reqwest's
+header/chunk-framing inactivity behavior remains, with a Phase 5 carryover.
+This is not a fourth parity policy. Active/stalled health and POST body
+controls remain exact; historical failed controls and private proxy failures
+remain failures. No new body-stall allowance is introduced.
+
+`episode_policy_cases.json` enumerates the 57 raw-header-difference case IDs
+per OS outside the three policies. At `758aa642`, implicit header presence,
+value and casing, including comparator exclusions, remained deferred pending
+the disposition below. HTTPS, proxy/trust and
+locale-default stdin behavior are also unproved; no broad transport parity
+claim follows from the additive loopback fixture nodes.
+
+### Narrow episode wire disposition
+
+Episode timeout capture may request `process_timing` from `observe`/`run_cli`.
+Its `communicate_completed_monotonic` value is a subprocess completion upper
+bound recorded before ownership cleanup and post-exit snapshots/image hashing.
+The existing stalled-body time bound is unchanged; new captures anchor that
+bound to this endpoint and retain the historical later capture endpoint as a
+diagnostic. This is an instrument correction, not a native body-stall policy.
+Equal-image warm episode measurements reopen the owned episode before every
+control, warmup and timed invocation, with setup and state readback untimed.
+
+The delegated 2026-10-07 decision permits two explicitly named comparisons
+in `episode_wire.py`; it requires Referer absence through implementation.
+Both modes remain deferred pending final-head executable proof.
+
+- **`http-field-name-case-insensitive`:** HTTP field-name association at
+  `/wire/*/headers`, first retained case `episode-key-6-episode-start`.
+  Names are ASCII HTTP tokens, associated by lowercase ASCII spelling;
+  every value and presence remains exact except the following named case.
+  Any duplicate name or case collision fails closed, even with equal values:
+  no overwrite, comma coalescing or whitespace normalization. Ordered-pair
+  captures retain raw order. The subsequent delegated disposition permits
+  ordering differences among distinct field names, through
+  `associated_wire_observations_match`; the existing ordered-pair comparator
+  remains a strict diagnostic. Same-name multiplicity and case collisions
+  are rejected before any mapping conversion. Request line, terminator,
+  body-read bytes, routing, auth, values and other presence remain exact.
+  Historical mapping receipts lost duplicate-line
+  information before comparison and cannot prove duplicate absence or raw
+  header ordering/framing equality.
+- **`episode-absent-accept-wildcard`:** only the exact 57 recorded IDs in
+  `episode_policy_cases.json`, first `episode-key-6-episode-start`; field
+  `/wire/*/headers/accept`. Oracle absence may compare with candidate exactly
+  `*/*`. Any other added Accept value, reversed presence difference, changed
+  existing value or other added header is rejected. Authentication, Host,
+  routing, bodies, framing and every other captured field remain exact.
+  This explicit server-visible substitution is not an additional general
+  parity policy and does not authorize other case IDs.
+
+Referer is never normalized. The episode health client uses `.referer(false)`
+to match urllib's absence on health redirects; the non-redirecting episode
+POST client is unchanged. Actual pinned reqwest 0.13.5 source was read:
+`async_impl/client.rs` defaults `referer` to true and passes the builder setting
+to `TowerRedirectPolicy`; `redirect.rs::on_request` conditionally inserts
+Referer. Python 3.11 `HTTPRedirectHandler.redirect_request` copies existing
+headers without generating that field. New additive redirect executable
+coverage awaits a compiled candidate; historical `health-redirect` still
+contains the extra field and remains a mismatch under this comparator.
+
 Tests decide where implementation and documentation disagree. Where tests are
 silent, record the Python behaviour and the coverage gap in `PARITY.md` before
 porting it. Existing tests remain unchanged. The maintainer selected an external

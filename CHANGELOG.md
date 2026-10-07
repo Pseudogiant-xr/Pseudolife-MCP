@@ -10,6 +10,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Fixed (2026-10-07 — native episode bearer refusal)
+
+- The experimental native episode hooks refuse configured bearers containing
+  forbidden HTTP header controls with a named diagnostic and exit 1. Additive
+  executable and title-clock policy controls are wired into the parity lane;
+  final-head runtime acceptance remains pending and the modes remain deferred.
+- The native episode health probe suppresses generated Referer on redirects,
+  matching Python's header absence. The comparison instrument records named
+  field-name association and the delegated 57-case absent-Accept versus exact
+  `*/*` substitution, rejecting other header changes and duplicate/case collisions.
+
 ### Added (2026-10-07 — native lease candidate and help drift guards)
 
 - Add a scoped native Rust `lease check`, `lease list` and `lease run`

@@ -3,6 +3,14 @@ mod argv;
 use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    // Episode hooks ignore every tail argument, including opaque OS strings.
+    let first = std::env::args_os().nth(1);
+    if let Some(code) =
+        pseudolife_stdio::cli::dispatch_episode(first.as_deref().and_then(std::ffi::OsStr::to_str))
+            .await
+    {
+        return code;
+    }
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some(mode) = arguments.first().filter(|mode| mode.to_str().is_none()) {
         pseudolife_stdio::stderrln!(

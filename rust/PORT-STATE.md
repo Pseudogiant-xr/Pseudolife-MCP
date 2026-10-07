@@ -1,5 +1,311 @@
 # Rust port state
 
+## Episode integration with accepted lease master
+
+Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged forward,
+retaining the native lease check/list/run dispatch and the accepted version
+routing. Episode leaf source (`cli/episode.rs` and `cli/episode_input.rs`) is
+byte-identical to `d2e8601095121a959154a6edf059714ac3010631`. The episode runtime
+change is limited to registering both CLI modules beside each other; `main.rs`
+retains episode routing before opaque-tail conversion and lease routing before
+ordinary dispatch. Master lease production source and version source are retained.
+No general interpreter parser is restored, and original production Python,
+original tests and the pinned oracle remain unchanged.
+
+The shared process adapter retains lease lock-scope/environment admission and
+episode process timing together. Measurement admission keeps separate exact
+lease check/list fixtures and episode-end callbacks/readback; neither fixture
+inherits the other's state checks. Both CHANGELOG histories and the workflow's
+lease corpus plus fresh episode executable selection are retained.
+
+Windows validation executed the exact source merge
+`77fec51ee7077c12c60f419ea0c478e8b8e84c9a`, tree
+`25713c6dc66f86022fc4cd00cd9f4c058ba0be8d`, on 2026-10-07. Formatting,
+locked/offline all-target check and warning-denied all-target Clippy passed in
+default/no-default configurations. Each configuration passed 13 CLI library tests
+and 54 integration tests across episode, lease, dispatch and version. The shared
+measurement/process-adapter selection passed 256 tests with 12 skips. Tests ran
+serially; build jobs were two with incremental compilation disabled.
+
+The initial `e170d674` Rust gates passed, but its instrument selection failed
+17 episode cases because lease file setup required a key absent from the exact
+admitted episode case. The corrected merge restores the optional-file default;
+all original assertions remain unchanged. That first failure is retained separately
+and is not relabelled as a pass. Default/no-default debug images at `77fec51e`
+are 20,398,080/19,231,232 bytes, with SHA256
+`ebdfe2444df9b3c3636bf6c3885987942cfdff518fbfacf176517a475cf901e7` and
+`8e81222823fd4c3e211eee991b4dee792d23d354ca3884dba8304507c9f11281`.
+
+The box full-suite result still belongs to `d2e86010`: 18,203 passed, 76 skipped,
+exit 0. Historical native `17459703`/capture `63922667` measurements retain their
+own image/source identities. No merge-head performance result is claimed. The
+`d2e86010` full suite is accepted for the unchanged episode leaf; fresh independent
+review and hosted merge-ref CI remain pending. The documentation
+successor records these results without changing runtime or instrument inputs;
+execution remains attributed to `77fec51e`. Both episode modes remain deferred.
+
+## Episode producer grammar reduction
+
+Episode now admits the audited hook ordinary-JSON object with string
+`session_id` and missing/null/string `cwd`. It uses typed serde_json fields,
+retains the minimal real-filesystem surrogate/string codec and observable
+path/title/body behavior. The unused general Python value wrapper/parser and
+their module declaration are removed; this tree has no lease parser consumer.
+The VERSION formatting helper returns to its accepted private visibility.
+The interpreter-depth/integer-env native assertions are retired under the
+explicit test exception; original Python/eval assertions are unchanged.
+Synthetic numeric/non-finite/deep inputs and native167/numeric42 measurements
+remain historical diagnostics. Native component `17459703` and capture component
+`63922667` now have both-OS local string42 closure and warm three-by-ten receipts,
+32 admitted corpus pairs with 128 rejected controls per OS, and 201 targeted
+tests per OS. The exact Linux path-minute repeat passed; original raw failure
+and outside-grammar diagnostics remain retained. Those receipts precede removal
+of the unused parser and retain their original image identities. Episode runtime
+source is unchanged. Successor `d2e86010` passed Windows compilation, formatting,
+both Clippy configurations, 22 CLI/integration tests per feature configuration
+and a disposable-daemon string42 smoke. Its committed-head Python full suite
+on the homelab box passed: 18,203 passed, 76 skipped, exit 0, recorded in
+`~/.pseudolife-mcp/suite-results/20261007-131037-remote-d2e86010.json`.
+The `7d20ceb8` successor changes only one PARITY documentation link; the suite
+receipt remains attributed to `d2e86010`. Independent follow-up review passed.
+Current hosted/exact-master and readiness gates remain open;
+both episode modes stay deferred. The `Python-urllib/3.11`
+User-Agent is an oracle-pinned substitution. Producer/substitution details
+and the 2.667-times production line ratio are in PARITY.md.
+
+## Episode distinct-field ordering disposition
+
+The additive associated-wire comparator permits order differences among
+distinct field names. The strict ordered-pair comparator and its original
+tests remain diagnostics; duplicates and case collisions reject before any
+mapping conversion. The 57-ID Accept boundary and exact request line,
+terminator, body-read bytes, auth/routing, values and other presence remain.
+Raw evidence is retained, and both episode modes remain deferred pending
+final functional, measurement, review and hosted gates.
+
+## Historical episode wire preparation after delegated disposition
+
+The new wire comparator applies named field-name association and the exact
+57-case absent-Accept versus candidate `*/*` disposition. The episode health
+client disables generated redirect Referer; that source change is uncompiled
+and both modes remain deferred.
+The accepted VERSION row and the original `758aa642` preparation remain below.
+
+Static header controls cover every admitted ID, all other added-header/value
+rejections and duplicate/case-collision failure. Historical raw header replay
+matches 56/57 per OS, retaining the old Referer mismatch; Linux full wire
+additionally retains the title-minute mismatch. Raw receipt hashes/status are
+unchanged, with no new runtime result. The comparator preserves pair order
+where lossless pairs exist; historical dictionary captures cannot establish
+duplicate absence or full framing. Application audit at exact master finds no
+field-specific Accept/Referer read in the 128 Python files; external observers
+are not covered by that result.
+
+The additive Referer executable node is collected but not run. Final-head
+both-OS compiled/raw proofs, body/header/chunk controls, measurements/floors,
+line ratio, independent review, publication checks and hosted CI remain
+required, as does the manual source-conflict local-full gate recorded below.
+
+## Historical episode preparation at 758aa642
+
+The episode branch integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+Configured forbidden bearer controls now have the agreed named exit-1 refusal;
+episode runtime acceptance remains unvalidated and both modes stay deferred.
+The accepted CLI-VERSION row and its final proof below are preserved.
+
+`PORTING.md` records the refusal/title-minute instances and direct group-12
+header/chunk-framing carryover. `evals/rust_port/episode_policy_cases.json`
+lists all 57 outside-policy raw-header IDs per OS. Title checking requires two
+distinct raw Python minutes and each arm's numeric/local window, without
+clearing any surrounding bytes. The retained cwd-12 windows remain incomplete.
+No HTTPS, proxy/trust, locale-default stdin or full wire claim is added.
+
+Additive `test_episode_executable.py` nodes use the shared isolated environment,
+owned subprocess and exact file snapshot helpers. Both-OS hosted parity is
+wired to provide the freshly built candidate explicitly. Only pure policy
+controls and the current-source help drift guard were run during preparation;
+no executable nodes, builds or services ran. Original oracle tests/conftest and
+existing eval assertions remain unchanged from the integrated master.
+
+The merge resolved source conflicts in `main.rs` (preserving master's opaque
+argv/unknown-mode dispatch plus episode routing) and `cli_measurement.py`
+(preserving master's warmed image/state protocol plus episode owned-state
+callbacks). The repository's manual-source-conflict local-full gate therefore
+remains outstanding, along with both-OS default/no-default Rust checks, final
+raw episode proofs, hosted outcomes, committed paired measurements/floors,
+fresh line-ratio accounting, independent review and publication checks.
+Historical measurements, failures and their source identities remain below;
+none certify this preparation.
+
+## Historical episode leaf candidate
+
+Native `episode-start` and `episode-end` are implemented before shim attachment
+on the reviewed version dependency `db0d59cb`. Earlier uncommitted-source diagnostics
+against Python `eb0c13e9` (0.17.0/schema 55) match 83 process pairs and reject 332
+candidate-output controls on each platform. Comparisons cover exact CLI
+invocation, environment, streams, exit and home-file bytes, plus HTTP method,
+target, application body and required credential/redirect behavior. Raw generic
+HTTP framing and implicit headers remain diagnostic; no identical-wire claim or
+CLI normalization is made. Actual local-minute title values are retained without
+clock injection or replacement. Owned peer and process cleanup is verified.
+
+The native process tests, shared helper tests, format checks and locked
+clippy pass on both hosts. Existing Python episode/title tests remain unchanged
+and in-process; no native-routing credit is assigned to them. The dedicated leaf
+has 440 production lines and the shared JSON wrapper/parser has 733, versus 192
+in the two Python reference modules (1173/192 = 6.10938, excluding tests and
+existing dispatch glue). That historical parser derived from a separate lease
+candidate; it had no production lease consumer in this tree. The configured
+integer-limit repair and parser itself have since been removed.
+The Python denominator contains title behavior outside these leaves; this is a
+size observation, not a coverage claim.
+
+Independent review blocked the first candidate after 37 additional paired Windows
+diagnostics and retained abnormal-termination captures. Nested JSON can overflow
+the main stack; accepted control/folded authorization values suppress the POST;
+relative-parent and non-ASCII drive titles differ; and a lone-surrogate cwd drops
+the start request. A subsequent repair preserves the measured public JSON depth
+boundary on an owned larger-stack thread and fixes the path/title handling. Both
+hosts retain all 83 original matches, 53 additional required-boundary matches
+and two nested-key matches. The three authorization-value mismatches remain;
+the corrected source has not received independent follow-up review.
+
+A later watched regression found that Unicode argv collection ran before episode
+selection: ignored opaque tails caused exit 101 on Linux and Windows. Episode
+selection now reads only the first OS argument before that collection; known
+episode modes ignore every tail, while other modes keep their existing argv
+handling. Eight no-network process pairs per host match the pinned public module
+and source-verified public main entry, covering both episode modes, opaque tails,
+absent keys and exact invalid-origin errors. The focused native regression and
+existing dispatcher tests pass on both hosts. The earlier 83-case receipts retain
+their original source and binary identities; they were not rerun for this repair.
+Independent follow-up review and the remaining authorization/clock decisions are
+still pending.
+
+The subsequent review found three further defects: configured integer limits
+changed whether requests were sent, the health JSON decoder admitted too much
+nesting, and lowercase extended UNC prefixes changed Windows titles. The current
+repair honors valid configured integer limits, applies the public caller's
+989-container bound to health text, and treats extended UNC prefixes without
+case sensitivity. Both hosts match 24 of 27 focused process pairs; the remaining
+three are the existing configured-bearer mismatches. All 18 additional health
+boundary pairs match on each host. Two native unit tests and five episode
+process tests pass per host; the existing three dispatcher tests also pass on
+Linux. Formatting and warning-denied clippy pass on both hosts. These current
+diagnostics preserve raw captures and do not upgrade historical corpus bindings
+or establish committed acceptance. Independent review verified these three
+repairs and found a further active-health-response timeout defect.
+
+The health and POST clients now use separate connect and read timeouts instead
+of total deadlines, retaining 250 ms and 5 s respectively. Current public-process
+diagnostics on Windows and Linux with Rust 1.94.0 match nine of eleven pairs:
+active health and POST bodies, stalled bodies, immediate success, health 503,
+health redirects, POST 503 and refused POST redirects. Two native unit tests,
+five episode process tests, three dispatch tests and formatting pass per host.
+The body change removes the demonstrated total-body cutoff; it does not provide
+socket inactivity semantics through the whole reply. Active partial headers and
+a valid partial chunk-size line still suppress the native POST while Python
+sends it, with every peer gap below 250 ms and completion after 250 ms. Both
+remaining mismatches are captured on both hosts, alongside the earlier RED
+body failure. The replacement-backend route was stopped on proxy compatibility;
+no dependency, HTTP parser or TLS implementation was added. Current independent
+review and the configured-bearer and minute-clock decisions remain pending.
+
+An earlier Linux repair capture crossed a local-minute boundary between arms:
+both titles match their own recorded invocation minutes, but their POST bodies
+differ. That raw mismatch remains unmatched; a later matching run does not
+establish equality across minute transitions. No clock normalization is adopted.
+
+The independent diagnostic captures confirm invalid/cold-origin behavior and
+same- and cross-origin redirect boundaries without changing fixture admission.
+The bounded committed-source closure proof and measurements below are now
+recorded; registry and workflow integration and current CI remain pending.
+HTTPS/proxy/trust behavior, locale-default stdin and socket inactivity across
+headers/chunk framing remain
+unresolved. The body-stall controls above do not establish those boundaries. No
+exclusion is adopted, and both episode modes remain deferred in the register.
+
+### Current bounded episode evidence
+
+The ordinary 83-row corpus was rerun against committed body-inactivity repair
+`ca9898cedc455508c3dfaab2f55b27e5656224da`, tree
+`9d62c97c7f325cc512f25a584ef6bdba0ed5f3dd`, using the retained final binaries.
+Windows matches all 83 declared comparisons; Linux matches 82 and retains the
+`episode-key-11-episode-start` title-body mismatch across a local-minute boundary.
+All 332 candidate-output controls are rejected per host. The unchanged comparator
+checks declared argv/stdin/environment, complete home bytes, exit and streams,
+HTTP method/path/body bytes and Content-Type/Authorization values. Its existing
+required-header projection lowercases header names. Both hosts retain 57 cases
+with other raw header differences outside that comparator, including implicit
+headers and casing; complete framing equality is not compared.
+`episode-current-committed-result.md` and
+`episode-current-committed-manifest.json` retain those exact observations; the
+Linux clock failure remains unmatched, without normalization or exclusion.
+
+The authenticated nonblank input case `episode-key-7-episode-end` also passes one
+owned-daemon pair and four candidate controls on each host. Its exact argv is
+`episode-end --help ignored`, and stdin is `{"session_id": 42}` without a newline,
+with the existing synthetic bearer recorded as an explicit input. Before each
+arm, the supported API seeds session 42 with one empty root titled
+`fixture-episode`. After each public CLI invocation, API and storage readback
+independently show zero episodes, a non-null session `ended_at`,
+`end_reason="end"` and the corresponding root membership retained. Generated
+IDs and timestamps remain raw observations for independent state assertions;
+database bytes are not compared across arms. The original one-pair receipts are
+`episode-owned-nonblank-manifest.json` and
+`episode-owned-nonblank-linux-manifest.json`.
+
+The reviewed measurement instrument is committed at
+`e21afa4ae8319824037b546f917705fa4eae8789`, tree
+`0c4b6f5b1ac20d1c867c385a1be8d73252dacfd4`, with current Rust source unchanged
+from the repair above. Both hosts bind the genuine lexical virtualenv parent and
+actual CLI children to Python oracle
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55), and preserve
+source/helper/runtime/executable identities before and after capture. The
+retained Windows debug executable SHA256 is
+`19f223282e9a1c5a55b53f939c36f570548309b2e86ad85b8a795fe5d43b321d`; the
+retained Linux ELF SHA256 is
+`79a8393d257c1a4df4a4b74a3ef9424c3406a6a3c5b1b789760587d9c0399b10`.
+These bindings do not attest the compiler or profile-producing build invocation.
+
+Windows and Linux plumbing smokes and final measurements exit zero. Each final
+uses two untimed controls and three repeats of ten alternating pairs, with
+30 timed observations per arm and 62 independently verified root closures per
+host. Every invocation must produce exit zero, empty stdout/stderr and unchanged
+complete home bytes as well as the accepted closure state; equal wrong outcomes
+are rejected. Preparation, reopening and state probes remain outside timing.
+Fresh per-instance database authentication, rejection of the exposed default,
+factory restoration and cleanup of owned databases, daemons, children, PostgreSQL
+processes and private parents are verified, with no new home residue. The first
+Linux smoke stopped before service startup because its lease command was absent
+from PATH; its failure is retained, and the private PATH repair's distinct
+attempt2 smoke passes without changing the committed instrument.
+
+The following are instrument-reported descriptive debug measurements against an
+already running owned daemon with warm filesystem caches. Timing includes owned
+process setup, complete output collection and clean exit. The observed median
+floor is the range of repeat-block medians, not a confidence interval or a causal
+speedup claim; these results do not establish release-profile performance.
+
+| Host | Python median ms / floor ms | Rust median ms / floor ms |
+| --- | --- | --- |
+| Windows | 211.7635 / 21.8746 | 57.6518 / 8.3546 |
+| Linux | 256.0708 / 4.5309 | 70.1477 / 1.4285 |
+
+Local untracked receipt `episode-measurement-windows-3x10.json` has SHA256
+`6802b8b2eb8b40b652819177db80c51d0c9a21c122e53d4a9ce3378b35c3a909`;
+`episode-measurement-linux-3x10.json` has SHA256
+`9e827467b9d3603f81855bcd4770d2a9f949c7b5835b8c42b7dc4e8e2c7a1f60`.
+Raw captures and failed attempts remain retained. This evidence covers an
+authenticated nonblank request closing an empty root, not closure of stored
+entries, complete episode-mode acceptance or full HTTP header/framing equality.
+That historical source had 440 dedicated Rust lines plus 733 JSON wrapper/parser
+lines, totaling 1,173,
+against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
+excluding tests/assets and dispatch. The broader title denominator caveat above
+still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
+the future full PR's independent review remain open; both modes stay deferred.
+
 The version branch targets the current Python oracle at master
 `3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
 Historical phase 1 close-out evidence retains
@@ -73,7 +379,7 @@ the outstanding hosted CI or CLI-VERSION acceptance gates.
 
 ## Historical Phase 2c publication snapshot
 
-Historical snapshot: 2026-10-06 08:57 UTC. These rows retain the observed state at that time, with subsequent #560 merge disposition already recorded. Its cleanup repair later passed hosted checks and both candidate-routed suites. Current version state is recorded below; a run validates only its recorded head.
+Historical snapshot: 2026-10-06 08:57 UTC, except the episode row updated on 2026-10-07. The other rows retain the observed state at that time, with subsequent #560 merge disposition already recorded. Its cleanup repair later passed hosted checks and both candidate-routed suites. Current version state is recorded below; a run validates only its recorded head.
 
 | Branch | PR | Published head | Base | Rust workflow run / status | Next action |
 |---|---|---|---|---|---|
@@ -81,7 +387,7 @@ Historical snapshot: 2026-10-06 08:57 UTC. These rows retain the observed state 
 | `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` published; `74b5998c` measured | `master` after #560 | No hosted run on `74b5998c`; historical #37315503446 failed at `ac0c64a1` | Freeze the documentation/evidence successor, repeat required final-head cells on both OSes, then require hosted validation and independent review. The current ten-stdio attempt fails five shared fixture nodes in both arms. |
 | `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
 | `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
-| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `7d20ceb8` documentation successor; runtime `d2e86010` | accepted `master` @ `0b46bb8e` | All 14 hosted checks passed at `7d20ceb8`. Committed `d2e86010` box Python suite: 18,203 passed, exit 0 | The subsequent documentation correction requires its own hosted checks and current-master readiness checks. Historical #37429259333 at `267ee9a2` remains a retained both-OS Parity failure. |
 | `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), draft | `7171d6cc` | `codex/rust-phase2b-version` | #37429570773: Rust green, Parity red on both OSes | Carry shared repairs after version is ported; investigate the additional unretained normal-transcript stderr difference with final-head raw evidence. |
 | `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), draft | `2c026331` | `codex/rust-phase2b-version` | #37429996211: Rust green, Parity red on both OSes | Apply traceback, clock and temporary-name rules; carry shared repairs after version is ported, then rebind mode evidence. |
 | `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881: Rust and Parity green on both OSes | Preserve #589 until its dependent fixture and evidence split is complete. |

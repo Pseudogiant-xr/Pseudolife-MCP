@@ -99,6 +99,103 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 
 ## Per-phase selection and acceptance gaps
 
+The delegated 2026-10-07 [episode wire disposition](PORTING.md#narrow-episode-wire-disposition)
+names `http-field-name-case-insensitive` and the 57-ID-only
+`episode-absent-accept-wildcard`. Referer must match absence through the health
+client implementation, with no normalization. Duplicate/case-colliding fields
+fail closed; raw receipts and their old status remain unchanged. Offline
+header-only replay of the historical 57 IDs matches 56 per OS; retained
+`health-redirect` still fails. Full captured wire replay also retains Linux's
+title-minute difference, so it matches 55/57 there and 56/57 on Windows.
+These projections establish comparator behavior, not current-head acceptance.
+
+The subsequent delegated header-order disposition admits distinct-field-name
+ordering differences through the additive associated-wire comparator. The
+strict ordered-pair comparator and its original rejecting assertions remain
+diagnostics. Duplicate names and case collisions still reject; request line,
+terminator, body-read bytes, routing/auth, all values and presence remain exact,
+apart from the already recorded 57-ID Accept instance. Raw receipt order is
+retained. This changes no native candidate output or application-observer claim.
+
+Independent bounded application audit at exact master
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75` inspected all 128 Python files under
+`pseudolife_memory/`: AST inventory found 17 explicit header-read sites and no
+field-specific Accept or Referer reader. A case-insensitive `git grep` for
+header/Accept/Referer and `HTTP_ACCEPT`/`HTTP_REFERER` associations also found
+none. The generic header dictionary copies at `coordination.py:565` and
+`service.py:8409` remain; their application consumers read authentication and
+identity fields. This is a bounded application-source result. Libraries,
+middleware, proxies and servers can still observe or distinguish field spelling,
+Accept presence and Referer; the receipt instrument's parsed dictionaries do
+not establish complete raw HTTP/TLS/proxy equality.
+
+Episode preparation integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+The [prepared episode policy entries](PORTING.md#prepared-episode-policy-instances)
+name the refusal, title-minute and separate direct group-12 instances;
+[the case ledger](../evals/rust_port/episode_policy_cases.json) retains all
+57 outside-policy raw-header case IDs per OS. Both episode modes remain
+deferred. Static checker tests do not rebind historical receipts or establish
+runtime acceptance. New [episode executable nodes](../evals/rust_port/test_episode_executable.py) launch the candidate
+when explicitly configured in the both-OS hosted lane; that wiring has not yet
+run on the prepared head. The original ten in-process episode/title nodes and
+all existing eval assertions remain unchanged.
+
+The episode hook input producer is `episode_cli.py::_read_stdin` (legacy
+external host JSON); its module contract names a string `session_id` and a
+filesystem `cwd`. The admitted grammar is an ordinary JSON object with a
+STRING `session_id` and missing/null/string `cwd`. Empty or missing session
+IDs and malformed/outside-grammar fields refuse silently before origin/network
+work. Other ordinary host fields are validated by serde_json and ignored;
+its library resource bounds replace CPython recursion accounting. The installers
+remove obsolete episode hooks; they do not produce arbitrary numeric or
+container session IDs. Manual stdin can reach the historical Python coercion,
+but that interpreter domain is deliberately outside this hook contract.
+
+| Episode site | Producer/input class | Substitution or retained reason |
+|---|---|---|
+| `episode_input.rs:78` map and `:61` parser | User stdin / legacy external hook ordinary JSON object and string fields | Narrow to typed serde_json fields; no general Python truthiness/repr, NaN/Infinity conversion, arbitrary numeric session coercion or PYTHONINTMAXSTRDIGITS setting. Duplicate string fields retain last-value semantics. |
+| `episode_input.rs:7` string decoder and `:107` quoting | User stdin / hook strings and actual OS cwd spelling | Keep serde_json byte-string decoding plus a minimal WTF-8 codepoint adapter for escaped host surrogate units; ordinary JSON forbids raw string controls. ASCII JSON escaping and request-body spacing remain exact. This is a filesystem/string codec, not a general interpreter value model. |
+| `episode.rs:305` run | User stdin / hook JSON text | Remove the pinned989-container scan and its8MiB thread/extra runtime in favor of the standard parser. Synthetic deep/numeric/non-finite cases are suite diagnostics; no passing admission claim is made for them. |
+| `episode.rs:281` health | Daemon `_build_health_payload`, `web/api.py:418` JSON response | Narrow to UTF-8 ordinary serde_json parsing/non-null health gate, with no Python non-finite, integer-env or UTF16/32 byte-sniffing emulation. Configured remote malformed responses still refuse. |
+| `episode.rs:54/72/85/95` OS string conversion | OS paths / user string cwd | Keep host UTF-16/surrogateescape conversion because actual filenames can contain those units and change filesystem lookup and body bytes. |
+| `episode.rs:21/42/121/129/153/196/204/248` path/title helpers | OS cwd, user string cwd, HOME/USERPROFILE, .git directories and local clock | Keep root/UNC/separator/basename rules, nearest git directory, home/system fallback and local-minute title because they change public body bytes for actual host paths. No broad title/time normalization is added. |
+
+The obsolete `python_json.rs` wrapper and `python_json_data.rs` parser are
+removed from this candidate, along with their CLI module declaration. Neither
+had a production caller in this tree; lease remains deferred. VERSION's numeric
+formatting helper returns to its accepted private visibility. Episode uses
+only its typed input/string codec. The specific native recursion/integer-limit
+assertions are retired; the origin
+assertion uses a real string key. Original Python tests and all existing eval
+assertions remain unchanged, including historical corpus-presence checks. The
+numeric42 native167/2a measurements are historical; reduced-successor closure
+and measurement fixtures use the string42 producer and must be freshly bound.
+Both modes remain deferred through runtime, review and hosted acceptance.
+
+Reduced native component `17459703` passed both-OS bounded functional proofs;
+capture component `63922667` adds the exact string42 measurement admission.
+Each OS executed 32 admitted corpus pairs, 128 rejecting controls, 201 targeted
+tests, both native feature configurations and 68 independently verified closures
+in a warm three-by-ten measurement. Strict header-order differences, historical
+outside-grammar captures and the original Linux minute-boundary failure remain
+raw diagnostics; its exact isolated repeat passed without a new normalization.
+Production episode code is 512 physical lines versus 192 Python episode/title
+lines (2.667 times). The unused general value implementation is removed from
+the outgoing diff, rather than retained as shared support. These local executions
+remain bound to native component `17459703`, before that removal; they establish
+no successor-image corpus or measurement execution or ported status. Successor
+`d2e86010` passed Windows compilation, formatting, both Clippy configurations,
+22 CLI/integration tests per feature configuration and a disposable-daemon
+string42 smoke. Its committed-head homelab-box Python full suite passed with
+18,203 passed, 76 skipped and exit 0; the receipt is
+`~/.pseudolife-mcp/suite-results/20261007-131037-remote-d2e86010.json`.
+The one-line documentation-link successor `7d20ceb8` leaves those runtime inputs
+unchanged and does not relabel that receipt. Independent follow-up review passed;
+current hosted/exact-master and readiness gates remain open.
+The fixed `Python-urllib/3.11` User-Agent is an oracle-pinned
+substitution, rather than a discovered host interpreter version.
+
+
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.
 
 Phase 1: selected real stdio/HTTP nodes in `test_shim.py` plus audited subprocess recovery cases; original entire shim/credential/tier/identity/recovery file pools remain Python. `test_shim_autostart.py`, `test_shim_python.py` and `test_shim_prompt.py` are extractor tooling, not MCP shim coverage; do not select them based on name alone. For `_proxy` private snippets add equivalent binary probes rather than claim they exercise Rust.
@@ -901,3 +998,26 @@ It preserves Linux raw exits 1/0 for only list-expected-extreme and
 list-waiter-extreme under the existing two-ID rule, with exact JSON companions
 and rejecting controls. The complete raw receipt SHA256 bindings are in
 functional-policy-evidence.json; no broader exit substitution is admitted.
+
+## Episode merge-forward validation boundary
+
+Accepted lease master `59a8624e` is a parent of episode source merge
+`77fec51ee7077c12c60f419ea0c478e8b8e84c9a`. Its Windows default/no-default
+fmt/check/all-target Clippy and affected CLI library/integration tests passed;
+67 Rust tests ran per configuration. The shared process/measurement selection
+passed 256 tests with 12 skips. The initial `e170d674` instrument failure and the
+one-line optional-file repair remain separately attributed in PORT-STATE.md.
+Episode leaf source remains byte-identical to `d2e86010`, and accepted master
+lease/version production inputs are retained. CLI modules are registered together
+at `shim/src/cli.rs:6–7`; `main.rs:7–13` retains episode routing before opaque-tail
+conversion, `:22–33` retains lease routing, and `:34–38` preserves ordinary
+help/version dispatch. Measurement callbacks/readback remain episode-only;
+lease check/list retain their own exact TOKEN_FILE fixture and post-state checks.
+
+The d2e box full suite and historical native174/capture639 measurements retain
+their original source/image identities. This merge has no new timing claim or
+Linux/full-suite result. The `d2e86010` full suite (18,203 passed, 76 skipped,
+exit 0) is accepted for the unchanged episode leaf. Fresh independent review
+and hosted merge-ref CI remain pending. No parity row is
+promoted; both episode modes remain deferred. This documentation successor changes
+no runtime/instrument input and does not relabel execution as a successor run.
