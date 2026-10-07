@@ -1023,6 +1023,28 @@ rollback, secret-boundary and container/refusal controls. Held-row comparisons
 use `fixed-clock-replay` with the same clock seam in both arms and exact audit
 hashes. No build, service or native action was executed for this source
 checkpoint; the old PG transport and Phase 2d receipts retain their identities.
-Delegate/designate implementation, hold/break lifecycle proof, both-OS corpus,
-real database/TLS state proof and fresh independent review remain pending.
+Delegate/designate transaction proof, broader hold/break lifecycle proof,
+both-OS corpus, real database/TLS state proof and fresh independent review remain pending.
 Every lease mode row remains deferred.
+
+## Phase 4 delegate source preparation
+
+Native `delegate` and its deprecated `designate` alias prepare the existing
+external-DSN role grant. Both role rows lock in name order before resolving a
+registered, unrevoked recipient. The transaction removes its coordinator
+queue entry, breaks its live coordinator role, settles that queue, drops
+reserved delegate waiters, replaces the delegate and appends the ordered audit
+chain with the recipient's project/task scope. The ordinary prefix grammar,
+60-second to seven-day grant, 24-hour default, reachability warning and JSON
+field order are retained. The shared PG/TLS policy and container transport are
+unchanged; embedded banks still refuse `phase4-embedded-pg-deferred`, naming
+the requested action. Generic failures use `native-pg-diagnostics`.
+
+This successor is source preparation only. Its additive project, prefix,
+listener and output controls have not run; neither compilation nor a whole
+delegate command has run. Mutation proof requires `fixed-clock-replay` and
+exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
+images retain their original source identities and do not validate this
+changed runtime. The former port-owned operator deferral assertion remains
+unchanged pending its explicit Phase 4 update; original Python and tests are
+unchanged. No lease mode is promoted.

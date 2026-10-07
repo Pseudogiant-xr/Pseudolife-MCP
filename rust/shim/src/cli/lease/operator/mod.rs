@@ -139,7 +139,10 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
     let dsn = match resolution() {
         Ok(resolution::Target::Direct(dsn)) => dsn,
         Ok(resolution::Target::ExistingEmbedded(_)) => {
-            say("lease: break refused: phase4-embedded-pg-deferred");
+            say(&format!(
+                "lease: {} refused: phase4-embedded-pg-deferred",
+                args.action
+            ));
             return 1;
         }
         Ok(resolution::Target::Container) => return container(arguments).await,
@@ -155,33 +158,56 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
             return 1;
         }
     };
-    let result = store::break_lease(
-        &mut session,
-        args.name.as_deref().expect("break name"),
-        || match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(time) => time.as_secs_f64(),
-            Err(before) => -before.duration().as_secs_f64(),
-        },
-    )
-    .await;
+    let clock = || match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(time) => time.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    };
+    let result = if args.action == "delegate" {
+        store::grant_delegate(
+            &mut session,
+            args.name.as_deref().expect("delegate project"),
+            args.agent.as_deref().expect("delegate agent"),
+            args.hold,
+            clock,
+        )
+        .await
+        .and_then(|grant| Ok((grant.json_line()?, grant.warning())))
+    } else {
+        store::break_lease(
+            &mut session,
+            args.name.as_deref().expect("break name"),
+            clock,
+        )
+        .await
+        .map(|broken| (broken.json_line(), None))
+    };
     // The dedicated connection is ours; the bank/embedded server is not.
     // Python's close is best effort after the mutation's observed commit.
     let _ = session.close().await;
     match result {
-        Ok(result) => {
-            out(&result.json_line(), false);
+        Ok((json, warning)) => {
+            out(&json, false);
+            if let Some(warning) = warning {
+                say(&warning);
+            }
             0
         }
         Err(store::Error::Refused(code)) => {
-            say(&format!("lease: break refused: {code}"));
+            say(&format!("lease: {} refused: {code}", args.action));
             1
         }
         Err(store::Error::Database) => {
-            say("lease: break failed (PostgreSQL transaction failed); nothing was changed");
+            say(&format!(
+                "lease: {} failed (PostgreSQL transaction failed); nothing was changed",
+                args.action
+            ));
             1
         }
         Err(store::Error::Clock) => {
-            say("lease: break failed (system clock unavailable); nothing was changed");
+            say(&format!(
+                "lease: {} failed (system clock unavailable); nothing was changed",
+                args.action
+            ));
             1
         }
     }

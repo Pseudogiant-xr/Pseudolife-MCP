@@ -4,6 +4,8 @@ use crate::{
     pg::{Session, Transaction},
 };
 use serde_json::{Value, json};
+mod delegate;
+pub use delegate::{Granted, grant_delegate};
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,6 +53,8 @@ struct Event {
     actor: &'static str,
     agent: String,
     payload: String,
+    project: String,
+    task: String,
 }
 impl Event {
     fn new(event: &'static str, actor: &'static str, agent: String, payload: Value) -> Self {
@@ -61,7 +65,14 @@ impl Event {
             actor,
             agent,
             payload: payload.to_string(),
+            project: String::new(),
+            task: String::new(),
         }
+    }
+    fn scoped(mut self, project: String, task: String) -> Self {
+        self.project = project;
+        self.task = task;
+        self
     }
 }
 async fn vacate(tx: &Transaction<'_>, name: &str, now: f64) -> Result<(), Error> {
@@ -202,8 +213,8 @@ async fn append(tx: &Transaction<'_>, events: Vec<Event>, now: f64) -> Result<()
             "",
             event.agent,
             Value::Null,
-            "",
-            "",
+            event.project,
+            event.task,
             Value::Null
         ]);
         let after = json!(["", event.payload]);
@@ -211,7 +222,7 @@ async fn append(tx: &Transaction<'_>, events: Vec<Event>, now: f64) -> Result<()
         let after = after.to_string();
         let material = format!("{},{},{}", &before[..before.len() - 1], stamp, &after[1..]);
         let hash = hex_hash(format!("{prev}{material}"));
-        tx.execute("INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,$2,$3,'',$4,NULL,'','',NULL,$5,$6,'',$7,$8)", &[&seq, &event.event, &event.actor, &event.agent, &event.payload, &now, &prev, &hash]).await?;
+        tx.execute("INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,$2,$3,'',$4,NULL,$5,$6,NULL,$7,$8,'',$9,$10)", &[&seq, &event.event, &event.actor, &event.agent, &event.project, &event.task, &event.payload, &now, &prev, &hash]).await?;
         prev = hash;
     }
     Ok(())

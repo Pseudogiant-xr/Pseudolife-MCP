@@ -14,6 +14,7 @@ pub struct Args {
     pub while_pid: Option<u32>,
     pub worktree: String,
     pub agent: Option<String>,
+    pub hold: u64,
 }
 
 fn asset(action: &str, help: bool) -> &'static str {
@@ -225,6 +226,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         while_pid: None,
         worktree: String::new(),
         agent: None,
+        hold: 86400,
         command: split.map_or_else(Vec::new, |p| argv[p + 1..].to_vec()),
     };
     let options: &[&str] = if action == "hold" {
@@ -368,7 +370,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                 match option {
                     "--ttl" => args.ttl = value,
                     "--expect" => args.expect = Some(value),
-                    "--for" => (),
+                    "--for" => args.hold = value,
                     _ => unreachable!("bounded duration option"),
                 }
             }
