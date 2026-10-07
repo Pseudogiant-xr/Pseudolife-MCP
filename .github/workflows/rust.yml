@@ -138,7 +138,21 @@ jobs:
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - name: Run every eval harness test
-        run: python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $episodeCandidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PSEUDOLIFE_PORT_EPISODE_JSON = ConvertTo-Json -InputObject @($episodeCandidate) -Compress
+          $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
+          python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
+          exit $LASTEXITCODE
+      - name: Retain additive executable node outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-eval-harness-${{ runner.os }}
+          path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         timeout-minutes: 15
         shell: pwsh
