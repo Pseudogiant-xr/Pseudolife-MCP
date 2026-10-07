@@ -10,6 +10,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Changed (2026-10-07 — native wait-mail producer scope)
+
+- The experimental native `wait-mail` reads unsigned decimal, LF-framed
+  coordination records without an interpreter digit limit. Corrupt records
+  refuse delivery with exit 2; numeric options use finite ASCII decimal values,
+  invalid terminal dimensions fall back to 80 columns, and stdout failures
+  leave mail unshown with exit 2. Temporary-file collision retries are bounded.
+  The mode remains deferred while its reduced candidate is validated.
+
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 
 - The experimental native `version` command reports an installed runtime only

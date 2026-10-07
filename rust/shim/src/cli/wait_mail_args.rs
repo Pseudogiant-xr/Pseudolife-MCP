@@ -1,150 +1,55 @@
-//! The pinned leaf uses stock Python 3.11 argparse, including abbreviations.
+//! Native CLI options and ASCII numeric inputs for wait-mail.
 use std::{ffi::OsString, path::PathBuf};
 
 pub fn columns() -> usize {
-    // shutil.get_terminal_size uses positive COLUMNS ahead of its pipe fallback.
     std::env::var("COLUMNS")
         .ok()
-        .and_then(|raw| {
-            let raw = raw.trim();
-            let raw = raw.strip_prefix('+').unwrap_or(raw);
-            let digits = raw
-                .chars()
-                .map(|c| decimal(c).map_or(c, |d| char::from(b'0' + d as u8)))
-                .collect::<String>();
-            if digits.as_bytes().iter().enumerate().any(|(i, c)| {
-                *c == b'_'
-                    && (i == 0
-                        || i + 1 == digits.len()
-                        || !digits.as_bytes()[i - 1].is_ascii_digit()
-                        || !digits.as_bytes()[i + 1].is_ascii_digit())
-            }) {
-                return None;
-            }
-            digits
-                .replace('_', "")
-                .parse::<usize>()
-                .ok()
-                .filter(|n| *n > 0)
-        })
+        .and_then(|raw| columns_value(&raw))
         .unwrap_or(80)
 }
-
-pub fn usage(columns: usize) -> String {
-    const PROG: &str = "pseudolife-mcp wait-mail";
-    let options = [
-        "[-h]",
-        "[--session-id SESSION_ID | --digest DIGEST]",
-        "[--timeout TIMEOUT]",
-        "[--interval INTERVAL]",
-    ];
-    let width = columns.saturating_sub(2);
-    let full = format!("usage: {PROG} {}", options.join(" "));
-    if full.len() <= width {
-        return full + "\n";
+fn columns_value(raw: &str) -> Option<usize> {
+    if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
-    let short_prog = 4 * (7 + PROG.len()) <= 3 * width;
-    let indent = if short_prog { 8 + PROG.len() } else { 7 };
-    let mut line = if short_prog {
-        format!("usage: {PROG}")
-    } else {
-        " ".repeat(indent)
-    };
-    let mut result = if short_prog {
-        String::new()
-    } else {
-        format!("usage: {PROG}\n")
-    };
-    let mut has_part = short_prog;
-    for part in options {
-        if has_part && line.len() + 1 + part.len() > width {
-            result.push_str(&line);
-            result.push('\n');
-            line = " ".repeat(indent);
-            has_part = false;
-        }
-        if has_part {
-            line.push(' ');
-        }
-        line.push_str(part);
-        has_part = true;
-    }
-    result + &line + "\n"
+    raw.parse().ok().filter(|value| *value > 0)
 }
-
 fn wrap(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut result = Vec::new();
+    let mut lines = Vec::new();
     let mut line = String::new();
-    for mut word in text.split_ascii_whitespace() {
-        if !line.is_empty() && line.len() + 1 + word.len() <= width {
+    for word in text.split_ascii_whitespace() {
+        if !line.is_empty() && line.len() + 1 + word.len() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
             line.push(' ');
-            line.push_str(word);
-            continue;
-        }
-        if word.len() <= width {
-            if !line.is_empty() {
-                result.push(std::mem::take(&mut line));
-            }
-            line.push_str(word);
-            continue;
-        }
-        if !line.is_empty() && line.len() < width {
-            line.push(' ');
-        }
-        while word.len() > width - line.len() {
-            let count = width - line.len();
-            line.push_str(&word[..count]);
-            word = &word[count..];
-            result.push(std::mem::take(&mut line));
         }
         line.push_str(word);
     }
     if !line.is_empty() {
-        result.push(line);
+        lines.push(line);
     }
-    result
+    lines
 }
-
-pub fn help(columns: usize) -> String {
-    let width = columns.saturating_sub(2);
-    let mut result = usage(columns) + "\n";
-    result.push_str(&wrap("Wait until the daemon rings this session for addressed mail (plain mail never wakes it), print the mail, exit. Exit 0: a ring (the mail on stdout); 3: timeout; 2: nothing to wait on.", width.max(11)).join("\n"));
-    result.push_str("\n\noptions:\n");
-    let position = 24.min(width.saturating_sub(20).max(4));
-    let action_width = position - 4;
-    let help_width = width.saturating_sub(position).max(11);
-    for (label, text) in [
-        ("-h, --help", "show this help message and exit"),
-        (
-            "--session-id SESSION_ID",
-            "host session id keying the digest, e.g. a Codex thread id (default: CLAUDE_CODE_SESSION_ID)",
-        ),
-        (
-            "--digest DIGEST",
-            "coordination digest file (<64 hex digits>.txt) to watch instead",
-        ),
-        (
-            "--timeout TIMEOUT",
-            "seconds to wait, at most 86400 (default 14400)",
-        ),
-        (
-            "--interval INTERVAL",
-            "seconds between checks, 0.01 to 60 (default 2)",
-        ),
-    ] {
-        result.push_str("  ");
-        result.push_str(label);
-        if label.len() <= action_width {
-            result.push_str(&" ".repeat(action_width - label.len() + 2));
-        } else {
-            result.push('\n');
-            result.push_str(&" ".repeat(position));
-        }
-        result.push_str(&wrap(text, help_width).join(&format!("\n{}", " ".repeat(position))));
-        result.push('\n');
+pub fn usage(columns: usize) -> String {
+    let text = super::HELP.split("\n\n").next().unwrap();
+    if columns == 80 {
+        text.to_owned() + "\n"
+    } else {
+        wrap(text, columns).join("\n") + "\n"
     }
-    result
+}
+pub fn help(columns: usize) -> String {
+    if columns == 80 {
+        return super::HELP.into();
+    }
+    // Other widths use a simple word wrapper, without argparse's layout
+    // thresholds, action groups or splitting words at extreme widths.
+    super::HELP
+        .lines()
+        .map(|line| wrap(line, columns).join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 pub struct Args {
     pub session: Option<OsString>,
@@ -168,13 +73,13 @@ fn negative_number(text: &str) -> bool {
     let Some(number) = text.strip_prefix('-') else {
         return false;
     };
-    if !number.is_empty() && number.chars().all(|c| decimal(c).is_some()) {
+    if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
         return true;
     }
     if let Some((left, right)) = number.split_once('.') {
-        return left.chars().all(|c| decimal(c).is_some())
+        return left.bytes().all(|b| b.is_ascii_digit())
             && !right.is_empty()
-            && right.chars().all(|c| decimal(c).is_some());
+            && right.bytes().all(|b| b.is_ascii_digit());
     }
     false
 }
@@ -353,54 +258,38 @@ pub fn parse(values: Vec<OsString>) -> Result<Parsed, String> {
     Ok(Parsed::Args(args))
 }
 
-fn decimal(c: char) -> Option<u32> {
-    // Unicode 14 decimal-zero table also used by the pinned runtime-name parser.
-    const ZEROS: &[u32] = &[
-        0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
-        0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
-        0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0,
-        0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0,
-        0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0,
-        0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0,
-    ];
-    ZEROS
-        .iter()
-        .find_map(|zero| (c as u32).checked_sub(*zero).filter(|n| *n < 10))
-}
 fn python_float(value: &str) -> Option<f64> {
-    let text = value.trim_matches(char::is_whitespace);
-    let text = text
-        .chars()
-        .map(|c| decimal(c).map_or(c, |n| char::from(b'0' + n as u8)))
-        .collect::<String>();
-    let bytes = text.as_bytes();
-    if bytes.iter().enumerate().any(|(i, b)| {
-        *b == b'_'
-            && (i == 0
-                || i + 1 == bytes.len()
-                || !bytes[i - 1].is_ascii_digit()
-                || !bytes[i + 1].is_ascii_digit())
-    }) {
-        return None;
-    }
-    let text = text.replace('_', "").to_ascii_lowercase();
-    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(&text);
-    if matches!(unsigned, "nan" | "inf" | "infinity") {
-        let value = if unsigned == "nan" {
-            f64::NAN
+    // CLI producers use finite ASCII decimal, optionally with an exponent.
+    let original = value;
+    let value = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (mantissa, exponent) = value
+        .split_once(['e', 'E'])
+        .map_or((value, None), |(left, right)| (left, Some(right)));
+    let mut dots = 0;
+    let mut digits = 0;
+    for byte in mantissa.bytes() {
+        if byte == b'.' {
+            dots += 1;
+        } else if byte.is_ascii_digit() {
+            digits += 1;
         } else {
-            f64::INFINITY
-        };
-        return Some(if text.starts_with('-') { -value } else { value });
+            return None;
+        }
     }
-    if unsigned.is_empty()
-        || !unsigned
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b".e+-".contains(&b))
-    {
+    if digits == 0 || dots > 1 {
         return None;
     }
-    text.parse().ok()
+    if let Some(exponent) = exponent {
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
+        if exponent.is_empty() || !exponent.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+    }
+    // Parse the original sign as well as the validated numeric spelling.
+    original
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite())
 }
 
 pub fn general(value: f64) -> String {
@@ -481,3 +370,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "wait_mail_args_reduction_tests.rs"]
+mod reduction_tests;

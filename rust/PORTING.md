@@ -107,8 +107,10 @@ The wait-mail candidate is integrated with accepted master
 that oracle pin. This preparation does not promote historical receipts.
 The adapter writes UTF-8 digest text with an ASCII decimal watermark, an
 ASCII ring decision/reason and decimal `.seen` content. The command's public
-argv, environment and explicitly selected digest path are user inputs;
-their existing parser, opaque-path and output-failure contracts stay exact.
+argv, environment and explicitly selected digest path are user inputs.
+The declared producer substitutions in [PARITY](PARITY.md#wait-mail-producer-substitutions)
+narrow marker and numeric grammar, help wrapping and stdout failure behavior;
+opaque identity/path bytes and every field outside those declarations stay exact.
 This local-file mode makes no HTTP requests, so it has no
 `http-forbidden-input-refused` or header/chunk inactivity instances.
 

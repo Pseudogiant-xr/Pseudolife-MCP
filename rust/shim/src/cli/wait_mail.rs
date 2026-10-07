@@ -1,4 +1,4 @@
-//! Local wait-mail contract at production oracle eb0c13e9 (0.17/schema55).
+//! Native wait-mail over the coordination adapter's LF-framed records.
 //! These markers have no lock or transaction in the oracle; preserve its races.
 #[path = "wait_mail_args.rs"]
 mod args;
@@ -12,92 +12,32 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(test)]
 const HELP: &str = include_str!("wait_mail_help.txt");
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Integer {
-    negative: bool,
-    digits: String,
-}
+struct Integer(String);
 impl Integer {
     fn parse(raw: &[u8]) -> Option<Self> {
-        let start = raw
-            .iter()
-            .position(|b| !byte_space(*b))
-            .unwrap_or(raw.len());
-        let end = raw
-            .iter()
-            .rposition(|b| !byte_space(*b))
-            .map_or(start, |i| i + 1);
-        let raw = &raw[start..end];
-        let negative = raw.first() == Some(&b'-');
-        let raw = if matches!(raw.first(), Some(b'-' | b'+')) {
-            &raw[1..]
-        } else {
-            raw
-        };
-        if raw.is_empty() || !raw[0].is_ascii_digit() || !raw[raw.len() - 1].is_ascii_digit() {
+        if raw.is_empty() || !raw.iter().all(u8::is_ascii_digit) || raw.len() > 1 && raw[0] == b'0'
+        {
             return None;
         }
-        if raw.iter().enumerate().any(|(i, b)| {
-            !b.is_ascii_digit()
-                && (*b != b'_'
-                    || i == 0
-                    || !raw[i - 1].is_ascii_digit()
-                    || i + 1 == raw.len()
-                    || !raw[i + 1].is_ascii_digit())
-        }) {
-            return None;
-        }
-        let digits = raw
-            .iter()
-            .filter(|b| b.is_ascii_digit())
-            .map(|b| char::from(*b))
-            .collect::<String>();
-        // CPython 3.11's default decimal conversion limit includes leading zeros.
-        if digits.len() > 4300 {
-            return None;
-        }
-        let digits = digits.trim_start_matches('0');
-        Some(Self {
-            negative: negative && !digits.is_empty(),
-            digits: if digits.is_empty() {
-                "0".into()
-            } else {
-                digits.into()
-            },
-        })
+        Some(Self(String::from_utf8(raw.to_vec()).unwrap()))
     }
     fn zero() -> Self {
-        Self {
-            negative: false,
-            digits: "0".into(),
-        }
+        Self("0".into())
     }
-    fn text(&self) -> String {
-        format!("{}{}", if self.negative { "-" } else { "" }, self.digits)
+    fn text(&self) -> &str {
+        &self.0
     }
 }
 impl Ord for Integer {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self.negative, other.negative) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => {
-                let order = self
-                    .digits
-                    .len()
-                    .cmp(&other.digits.len())
-                    .then_with(|| self.digits.cmp(&other.digits));
-                if self.negative {
-                    order.reverse()
-                } else {
-                    order
-                }
-            }
-        }
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.cmp(&other.0))
     }
 }
 impl PartialOrd for Integer {
@@ -131,41 +71,16 @@ fn stderr(text: &str) -> io::Result<()> {
         .write_all(&super::text_bytes(text))
         .and_then(|_| stream.flush())
 }
-fn stdout_shutdown_error(error: &io::Error) -> u8 {
-    let kind = if !cfg!(windows) && error.raw_os_error() == Some(32) {
-        "BrokenPipeError"
-    } else {
-        "OSError"
-    };
-    let _ = stderr(&format!(
-        "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n{kind}: {}\n",
-        error_text(error, None, false)
-    ));
-    120
+fn write_output(writer: &mut impl Write, raw: &[u8]) -> io::Result<()> {
+    writer.write_all(raw).and_then(|_| writer.flush())
 }
-fn unbuffered(value: &OsString) -> bool {
-    !value.is_empty()
-        && value.to_str().is_none_or(|text| {
-            text.trim_start_matches(|c: char| c.is_ascii_whitespace())
-                .parse::<i32>()
-                != Ok(0)
-        })
-}
-fn stdout_buffer_size() -> usize {
-    if std::env::var_os("PYTHONUNBUFFERED").is_some_and(|value| unbuffered(&value)) {
-        return 0;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsFd;
-        if let Ok(info) = rustix::fs::fstat(io::stdout().as_fd())
-            && let Ok(size) = usize::try_from(info.st_blksize)
-            && size > 1
-        {
-            return size;
-        }
-    }
-    8192
+fn corrupt_record(kind: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "corrupt coordination {kind} record; expected canonical unsigned ASCII decimal and LF framing"
+        ),
+    )
 }
 fn key_name(bytes: &[u8]) -> bool {
     bytes.len() == 64
@@ -228,15 +143,17 @@ fn digest_path(session: &OsString) -> Option<PathBuf> {
     Some(direct)
 }
 
-fn read_digest(path: &Path) -> io::Result<(Option<Integer>, Vec<u8>)> {
+fn read_digest(path: &Path) -> io::Result<(Integer, Vec<u8>)> {
     let raw = interruptible_read(path)?;
-    let split = raw.iter().position(|b| *b == b'\n').unwrap_or(raw.len());
-    let watermark = Integer::parse(&raw[..split]);
-    let body = if watermark.is_some() && split < raw.len() {
-        raw[split + 1..].to_vec()
-    } else {
-        Vec::new()
-    };
+    let split = raw
+        .iter()
+        .position(|b| *b == b'\n')
+        .ok_or_else(|| corrupt_record("digest"))?;
+    let watermark = Integer::parse(&raw[..split]).ok_or_else(|| corrupt_record("digest"))?;
+    let body = raw[split + 1..].to_vec();
+    if !body.is_empty() && !body.ends_with(b"\n") {
+        return Err(corrupt_record("digest"));
+    }
     Ok((watermark, body))
 }
 #[cfg(unix)]
@@ -277,19 +194,19 @@ fn read_ring(path: &Path) -> io::Result<Option<(Integer, String)>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let mut lines = raw.split(|b| *b == b'\n');
-    let head = lines
-        .next()
-        .unwrap_or_default()
+    let record = raw
+        .strip_suffix(b"\n")
+        .ok_or_else(|| corrupt_record("ring"))?;
+    let split = record
         .iter()
-        .filter(|b| !matches!(b, b'\r' | b' '))
-        .copied()
-        .collect::<Vec<_>>();
-    let reason = lines.next().unwrap_or_default();
-    let reason = reason.strip_suffix(b"\r").unwrap_or(reason);
-    if !(1..=12).contains(&head.len())
-        || !head.iter().all(u8::is_ascii_digit)
-        || !reason.starts_with(b"rung ")
+        .position(|b| *b == b'\n')
+        .ok_or_else(|| corrupt_record("ring"))?;
+    let watermark = Integer::parse(&record[..split]).ok_or_else(|| corrupt_record("ring"))?;
+    let reason = &record[split + 1..];
+    if reason.contains(&b'\n') || reason.contains(&b'\r') {
+        return Err(corrupt_record("ring"));
+    }
+    if !reason.starts_with(b"rung ")
         || !reason[5..]
             .iter()
             .all(|b| b.is_ascii_alphanumeric() || b"-_ ".contains(b))
@@ -297,15 +214,20 @@ fn read_ring(path: &Path) -> io::Result<Option<(Integer, String)>> {
         return Ok(None);
     }
     Ok(Some((
-        Integer::parse(&head).unwrap(),
+        watermark,
         String::from_utf8(reason.to_vec()).unwrap(),
     )))
 }
-fn read_seen(path: &Path) -> Integer {
-    interruptible_read(path)
-        .ok()
-        .and_then(|raw| Integer::parse(&raw))
-        .unwrap_or_else(Integer::zero)
+fn read_seen(path: &Path) -> io::Result<Integer> {
+    match interruptible_read(path) {
+        // An absent/unreadable marker has never established shown mail; in
+        // particular a directory still reaches the existing rename diagnostic.
+        Err(_) => Ok(Integer::zero()),
+        Ok(raw) => raw
+            .strip_suffix(b"\n")
+            .and_then(Integer::parse)
+            .ok_or_else(|| corrupt_record("seen")),
+    }
 }
 
 fn temporary_suffix() -> String {
@@ -346,10 +268,8 @@ fn temporary_with(
         use std::os::windows::fs::OpenOptionsExt;
         options.access_mode(0x0012019f | 0x000c0000);
     }
-    #[cfg(unix)]
-    let attempts = libc::TMP_MAX.max(10_000);
-    #[cfg(windows)]
-    let attempts = i32::MAX as u32;
+    // Native collision budget; preserve exclusive creation and owned cleanup.
+    let attempts = 16;
     for _ in 0..attempts {
         let name = format!(
             ".tmp-{}.{}",
@@ -390,7 +310,7 @@ fn temporary_with(
     }
     Err(io::Error::new(
         io::ErrorKind::AlreadyExists,
-        "No usable temporary file name found",
+        "temporary file creation exhausted after 16 collisions",
     ))
 }
 
@@ -530,7 +450,12 @@ fn write_seen(path: &Path, watermark: &Integer) -> Result<(), MarkerError> {
 }
 fn mark_seen(path: &Path, watermark: &Integer) -> Result<(), MarkerError> {
     for attempt in 0..3 {
-        if read_seen(path) >= *watermark {
+        let seen = read_seen(path).map_err(|error| MarkerError {
+            error,
+            from: None,
+            to: None,
+        })?;
+        if seen >= *watermark {
             return Ok(());
         }
         match write_seen(path, watermark) {
@@ -639,6 +564,7 @@ enum WaitResult {
     Timeout,
     Gone,
     Interrupted,
+    Corrupt(String),
 }
 fn byte_space(byte: u8) -> bool {
     byte.is_ascii_whitespace() || byte == 11
@@ -674,11 +600,17 @@ fn wait(digest: &Path, timeout: f64, interval: f64) -> WaitResult {
                         Err(error) if error.kind() == io::ErrorKind::NotFound => {
                             return WaitResult::Gone;
                         }
+                        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                            return WaitResult::Corrupt(error.to_string());
+                        }
                         Err(_) => last = None,
-                        Ok((Some(watermark), body, Some((ring_watermark, reason))))
+                        Ok((watermark, body, Some((ring_watermark, reason))))
                             if body.iter().any(|b| !byte_space(*b)) =>
                         {
-                            let shown = read_seen(&seen);
+                            let shown = match read_seen(&seen) {
+                                Ok(value) => value,
+                                Err(error) => return WaitResult::Corrupt(error.to_string()),
+                            };
                             if INTERRUPTED.load(AtomicOrdering::Relaxed) {
                                 return WaitResult::Interrupted;
                             }
@@ -795,6 +727,9 @@ impl Drop for InterruptGuard {
 }
 
 fn error_text(error: &io::Error, path: Option<&Path>, stat: bool) -> String {
+    if error.kind() == io::ErrorKind::AlreadyExists && error.raw_os_error().is_none() {
+        return error.to_string();
+    }
     #[cfg(unix)]
     {
         let _ = stat;
@@ -885,15 +820,15 @@ pub fn run(argv: Vec<OsString>) -> u8 {
             };
             #[cfg(windows)]
             let mut stdout = io::stdout().lock();
-            if let Err(error) = stdout
-                .write_all(&super::text_bytes(&args::help(args::columns())))
-                .and_then(|_| stdout.flush())
-            {
-                return if stdout_buffer_size() == 0 {
-                    0
-                } else {
-                    stdout_shutdown_error(&error)
-                };
+            if let Err(error) = write_output(
+                &mut stdout,
+                &super::text_bytes(&args::help(args::columns())),
+            ) {
+                let _ = stderr(&format!(
+                    "wait-mail: could not write help to stdout ({}).\n",
+                    error_text(&error, None, false)
+                ));
+                return 2;
             }
             return 0;
         }
@@ -952,6 +887,10 @@ pub fn run(argv: Vec<OsString>) -> u8 {
             return 2;
         }
         WaitResult::Interrupted => return 130,
+        WaitResult::Corrupt(error) => {
+            diagnostic!(&format!("wait-mail: {error}; left the mail unshown.\n"));
+            return 2;
+        }
         WaitResult::Timeout => {
             diagnostic!(&format!(
                 "wait-mail: no ring in {} s (plain mail does not end the wait); re-arm to keep waiting.\n",
@@ -976,30 +915,12 @@ pub fn run(argv: Vec<OsString>) -> u8 {
     };
     #[cfg(windows)]
     let mut stdout = io::stdout().lock();
-    // CPython 3.11 uses the raw stream's block size when available. Larger
-    // writes fail directly; failed buffered flushes are retried at shutdown.
-    let buffer_size = stdout_buffer_size();
-    let mut remaining = body.as_slice();
-    let written = stdout.flush().and_then(|_| {
-        while remaining.len() > buffer_size {
-            match stdout.write(remaining) {
-                Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
-                Ok(count) => remaining = &remaining[count..],
-                Err(error) => return Err(error),
-            }
-        }
-        stdout.write_all(remaining).and_then(|_| stdout.flush())
-    });
-    if let Err(error) = written {
-        diagnostic!(&format!(
+    if let Err(error) = write_output(&mut stdout, &body) {
+        let _ = stderr(&format!(
             "wait-mail: could not write the mail to stdout ({}); left it unshown.\n",
             error_text(&error, None, false)
         ));
-        return if buffer_size > 0 && remaining.len() <= buffer_size {
-            stdout_shutdown_error(&error)
-        } else {
-            2
-        };
+        return 2;
     }
     #[cfg(windows)]
     drop(stdout);
@@ -1084,7 +1005,7 @@ mod tests {
         assert_eq!(Integer::parse(b"-000").unwrap(), Integer::zero());
         assert!(Integer::parse(b"1__2").is_none());
         assert!(Integer::parse(b"\xc2\xa012").is_none());
-        assert!(Integer::parse("1".repeat(4301).as_bytes()).is_none());
+        assert!(Integer::parse("1".repeat(4301).as_bytes()).is_some());
         assert!(
             Integer::parse(b"123456789012345678901234567890").unwrap()
                 > Integer::parse(b"9999999999999999999").unwrap()
@@ -1161,3 +1082,7 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "wait_mail_reduction_tests.rs"]
+mod reduction_tests;

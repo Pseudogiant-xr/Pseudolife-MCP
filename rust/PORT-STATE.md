@@ -2,6 +2,16 @@
 
 ## Wait-mail preparation on accepted master (2026-10-07)
 
+The producer reduction now implements canonical unsigned ASCII watermarks
+without a digit limit, exact writer LF framing, finite ASCII numeric options,
+positive ASCII terminal dimensions with invalid input falling back to 80,
+simple help wrapping, direct stdout failure exit 2 and a native temporary-file
+collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
+each deliberate substitution. Only the 4,301-digit legacy assertion exception
+has been applied; other legacy assertions require their exact exception patches
+before candidate test acceptance. New Rust and candidate-only process nodes are
+prepared but have not run. The mode remains deferred.
+
 The wait-mail branch now includes accepted master `0b46bb8e` and its corrected
 Linux descendant cleanup. The Windows help-template checkout fix preserves
 the existing LF fixture and assertions. This is preparation; wait-mail remains

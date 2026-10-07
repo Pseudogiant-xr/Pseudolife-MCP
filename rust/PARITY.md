@@ -345,6 +345,28 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
 | test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
 
+## Wait-mail producer substitutions
+
+These are deliberate native input/output contracts, separate from the three
+named parity policies and from the immutable Python oracle. Earlier raw failures
+and receipts keep their original inputs and bindings. The reduced candidate is
+unvalidated and `wait-mail` remains deferred.
+
+| Input/output | Producer | Declared native substitution |
+|---|---|---|
+| Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal without leading zeros, followed by LF. | Arbitrary-width decimal ordering, with no CPython 4,300-digit ceiling. Signs, underscores, surrounding whitespace, non-ASCII digits and leading zeros are corrupt. The digest requires its header LF and a final LF when body bytes exist; the ring requires exactly two LF-terminated lines; a present readable seen file requires exactly one. Malformed admitted records exit 2 with `wait-mail: corrupt coordination <kind> record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.` No stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
+| Timeout and interval | Shell/CLI callers and existing launchers supply finite decimal seconds. | ASCII `[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`, finite after conversion; existing timeout `(0,86400]` and interval `[0.01,60]` bounds remain. Unicode digits, underscores, outer whitespace, NaN/Infinity and overflow refuse with argparse-shaped usage/error and exit 2. |
+| Terminal dimensions and help | Terminals/callers supply COLUMNS; the help drift guard runs at COLUMNS80. | Positive ASCII integers; invalid grammar, zero or machine-integer overflow falls back to 80. COLUMNS80 retains the exact help asset and usage. Other widths use simple word wrapping, retain whole words and omit argparse's extreme-width thresholds/action-group emulation. |
+| Failed stdout writes/flushes | Caller-owned pipes and redirected descriptors. | Direct failure exits 2 and leaves mail unshown, without seen/ledger advance. `PYTHONUNBUFFERED`, block size and CPython shutdown retries do not change this behavior. Delivery retains `wait-mail: could not write the mail to stdout (<error>); left it unshown.` Help failure uses `wait-mail: could not write help to stdout (<error>).` No synthetic `TextIOWrapper` shutdown exception is emitted. |
+| Temporary-file collisions | Native atomic marker/listener writes. | Keep `.tmp-[a-z0-9_]{8}.seen`, exclusive creation, private permissions and cleanup of owned files. Sixteen collisions exhaust the native budget with `temporary file creation exhausted after 16 collisions`, without overwriting a colliding file/directory. The copied CPython platform retry count and exhaustion exception are removed. |
+
+The native ring reason gate and symlink refusal stay exact. A canonical `plain`
+decision does not wake the wait. A ring watermark is no longer limited to twelve
+digits; actual writers use the same decimal counter representation as digests.
+An explicit user-authored `--digest` file is subject to the same declared record
+grammar. These substitutions need explicit legacy-test exceptions and final
+both-host candidate execution; a historical replay cannot certify them.
+
 ## Test-file buckets
 
 The real-bank stdio judge declares `completed-readiness-wait-notice` as a
