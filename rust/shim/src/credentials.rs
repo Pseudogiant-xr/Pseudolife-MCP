@@ -881,14 +881,9 @@ mod fable125_home_controls {
             ("~/token", "/token"),
             ("~/.pseudolife-mcp/token", "/.pseudolife-mcp/token"),
         ] {
-            let expanded = expand_user_with(
-                Path::new(input),
-                Some(Path::new("")),
-                None,
-                false,
-                |_| None,
-            )
-            .unwrap();
+            let expanded =
+                expand_user_with(Path::new(input), Some(Path::new("")), None, false, |_| None)
+                    .unwrap();
             assert_eq!(expanded, Path::new(expected));
         }
         let unchanged = expand_user_with(
