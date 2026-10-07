@@ -25,7 +25,8 @@ def delivery_case():
     ("txt", b"12\npeer"), ("txt", b"12"), ("txt", b" 12\npeer\n"),
     ("ring", b"+12\nrung anyone\n"), ("ring", b"12\nrung anyone"),
     ("ring", b"12\nrung anyone\r\n"), ("ring", b"12\nrung anyone\nextra\n"),
-    ("seen", b"12"), ("seen", b"12\r\n"), ("seen", b"1_2\n"), ("seen", b"\n"),
+    ("seen", b"+12\n"), ("seen", b"-12\n"), ("seen", b"1_2\n"),
+    ("seen", "١٢\n".encode("utf-8")),
 ])
 def test_native_corrupt_writer_record_exits_2_without_delivery_or_marker_change(tmp_path, extension, raw):
     root, commands = native_commands()

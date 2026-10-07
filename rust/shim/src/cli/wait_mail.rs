@@ -19,10 +19,13 @@ static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 struct Integer(String);
 impl Integer {
     fn parse(raw: &[u8]) -> Option<Self> {
-        if raw.is_empty() || !raw.iter().all(u8::is_ascii_digit) || raw.len() > 1 && raw[0] == b'0'
-        {
+        if raw.is_empty() || !raw.iter().all(u8::is_ascii_digit) {
             return None;
         }
+        let raw = &raw[raw
+            .iter()
+            .position(|byte| *byte != b'0')
+            .unwrap_or(raw.len() - 1)..];
         Some(Self(String::from_utf8(raw.to_vec()).unwrap()))
     }
     fn zero() -> Self {
@@ -223,10 +226,23 @@ fn read_seen(path: &Path) -> io::Result<Integer> {
         // An absent/unreadable marker has never established shown mail; in
         // particular a directory still reaches the existing rename diagnostic.
         Err(_) => Ok(Integer::zero()),
-        Ok(raw) => raw
-            .strip_suffix(b"\n")
-            .and_then(Integer::parse)
-            .ok_or_else(|| corrupt_record("seen")),
+        Ok(raw) => {
+            // Python bytes.strip() also includes vertical tab (unlike Rust's trim_ascii).
+            let start = raw
+                .iter()
+                .position(|byte| !byte_space(*byte))
+                .unwrap_or(raw.len());
+            let end = raw
+                .iter()
+                .rposition(|byte| !byte_space(*byte))
+                .map_or(start, |index| index + 1);
+            let raw = &raw[start..end];
+            if raw.is_empty() {
+                Ok(Integer::zero())
+            } else {
+                Integer::parse(raw).ok_or_else(|| corrupt_record("seen"))
+            }
+        }
     }
 }
 
@@ -1000,6 +1016,12 @@ mod tests {
     fn integer_bytes_match_decimal_grammar_without_machine_integer_truncation() {
         assert!(Integer::parse(b" \t+0_012\r\n").is_none());
         assert_eq!(Integer::parse(b"12").unwrap().text(), "12");
+        assert_eq!(
+            Integer::parse(b"00042").unwrap(),
+            Integer::parse(b"42").unwrap()
+        );
+        assert_eq!(Integer::parse(b"00000").unwrap(), Integer::zero());
+        assert!(Integer::parse(b"00042").unwrap() > Integer::parse(b"9").unwrap());
         assert!(Integer::parse(b"-000").is_none());
         assert!(Integer::parse(b"1__2").is_none());
         assert!(Integer::parse(b"\xc2\xa012").is_none());
@@ -1008,6 +1030,36 @@ mod tests {
             Integer::parse(b"123456789012345678901234567890").unwrap()
                 > Integer::parse(b"9999999999999999999").unwrap()
         );
+    }
+    #[test]
+    fn seen_reader_matches_hook_truncation_and_unsigned_decimal_values() {
+        let home =
+            std::env::temp_dir().join(format!("wait-mail-hook-seen-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let path = home.join("marker.seen");
+        for raw in [b"".as_slice(), b" \t\r\n\x0b\x0c"] {
+            fs::write(&path, raw).unwrap();
+            assert_eq!(read_seen(&path).unwrap(), Integer::zero());
+        }
+        for raw in [b"00042".as_slice(), b" \t00042\r\n"] {
+            fs::write(&path, raw).unwrap();
+            assert_eq!(read_seen(&path).unwrap(), Integer::parse(b"42").unwrap());
+        }
+        // The prompt hook's redirection truncates before printf writes its counter.
+        let mut writer = File::create(&path).unwrap();
+        assert_eq!(read_seen(&path).unwrap(), Integer::zero());
+        writer.write_all(b"00042\n").unwrap();
+        writer.flush().unwrap();
+        assert_eq!(read_seen(&path).unwrap(), Integer::parse(b"42").unwrap());
+        drop(writer);
+        for raw in [b"+42".as_slice(), b"-42", b"4_2", b"\xd9\xa4\xd9\xa2"] {
+            fs::write(&path, raw).unwrap();
+            assert_eq!(
+                read_seen(&path).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+        fs::remove_dir_all(home).unwrap();
     }
     #[test]
     fn seen_writer_keeps_a_higher_existing_marker() {

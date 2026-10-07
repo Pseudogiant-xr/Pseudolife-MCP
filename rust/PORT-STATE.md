@@ -307,8 +307,10 @@ still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
 the future full PR's independent review remain open; both modes stay deferred.
 ## Wait-mail preparation on accepted master (2026-10-07)
 
-The producer reduction now implements canonical unsigned ASCII watermarks
-without a digit limit, exact writer LF framing, finite ASCII numeric options,
+The producer reduction now implements unsigned ASCII watermarks by numeric
+value, including leading zeros and without a digit limit. Seen markers use
+ASCII byte stripping and empty-to-zero reads; digest/ring LF framing remains
+exact. Other substitutions include finite ASCII numeric options,
 positive ASCII terminal dimensions with invalid input falling back to 80,
 simple help wrapping, direct stdout failure exit 2 and a native temporary-file
 collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
@@ -326,8 +328,14 @@ the existing LF fixture and assertions. This is preparation; wait-mail remains
 
 Merge-forward conflict: `main.rs` now uses the accepted `args_os` dispatch and
 invalid-mode diagnostic, then passes native wait-mail its unchanged `OsString`
-arguments. This manually resolved source conflict requires one later WSL full
-suite on the committed final candidate; it has not run.
+arguments. The reviewed head `271e9ae0f9452680fcdab93fbcb3cf81501f32df`
+completed the remote box full suite: receipt
+`20261007-134344-remote-271e9ae0.json`, exit 0, 18,203 passed and 76 skipped.
+That receipt belongs to the reviewed head, not its `7d879147` forward or the
+combined batch successor. Failed checked stderr diagnostics exit 120; a
+post-stdout seen-failure diagnostic can fail after delivery and before ledger
+append. `error_text` retains Python-shaped OS diagnostics as declared native
+substitutions in PARITY.
 
 The new additive CI nodes check actual native Unicode delivery/stdout/`.seen`
 and bounded per-arm clocks, plus `COLUMNS=80` help against Python. The existing
