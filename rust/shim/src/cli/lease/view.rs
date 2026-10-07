@@ -79,7 +79,7 @@ fn number(value: &Value) -> Option<f64> {
 }
 // Daemon timestamps are Unix seconds, displayed in the platform's local zone.
 // Unsupported calendar values display '?' rather than interpreter exceptions.
-fn clock(stamp: f64) -> String {
+pub(super) fn clock(stamp: f64) -> String {
     clock_text_in_zone(stamp, &Local, Local::now().date_naive())
 }
 fn clock_text_in_zone<Tz: TimeZone>(stamp: f64, zone: &Tz, today: chrono::NaiveDate) -> String {

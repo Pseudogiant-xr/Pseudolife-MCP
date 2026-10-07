@@ -290,6 +290,14 @@ fn fixture_process() {
     let root = PathBuf::from(root);
     match std::env::var("DOORBELL_FIXTURE_ROLE").unwrap().as_str() {
         "launcher" => {
+            if std::env::var("DOORBELL_FIXTURE_MODE").unwrap() == "nonzero-gated" {
+                std::fs::write(root.join("started"), "started").unwrap();
+                let end = std::time::Instant::now() + Duration::from_secs(10);
+                while !root.join("release").exists() && std::time::Instant::now() < end {
+                    std::thread::sleep(Duration::from_millis(15));
+                }
+                std::process::exit(23);
+            }
             #[cfg(unix)]
             if std::env::var("DOORBELL_FIXTURE_MODE").unwrap() == "session" {
                 std::fs::write(
@@ -1075,37 +1083,59 @@ async fn restart_preserves_notice_and_exact_prompt_is_required_for_rearming() {
 
 #[tokio::test]
 async fn nonzero_native_exit_disables_queue_and_retains_unresolved_reservation() {
+    struct ReleaseQueue(PathBuf);
+    impl Drop for ReleaseQueue {
+        fn drop(&mut self) {
+            let _ = std::fs::write(self.0.join("release"), "release");
+        }
+    }
+    async fn queue_armed(adapter: &Adapter, fixture: &Fixture) -> bool {
+        adapter.heartbeat().await.unwrap();
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|request| request.path.ends_with("/heartbeat"))
+            .unwrap()
+            .body["ring_armed_until"]
+            .as_f64()
+            .unwrap()
+            > now()
+    }
     let fixture = Fixture::new(0);
     let home = Home::new();
-    let adapter = Adapter::enter(adapter_config(&fixture, &home))
-        .await
-        .unwrap();
-    let command = home
-        .0
-        .join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+    let _release = ReleaseQueue(home.0.clone());
+    let mut config = adapter_config(&fixture, &home);
+    config.ring = true;
+    let adapter = Adapter::enter(config).await.unwrap();
+    let command = wrapper(&home, "nonzero-gated");
     let exit = home.0.join("started");
-    executable(
-        &command,
-        &if cfg!(windows) {
-            format!(
-                "@echo off\r\n>\"{}\" echo started\r\nexit /b 23\r\n",
-                exit.display()
-            )
-        } else {
-            format!("#!/bin/sh\necho started > '{}'\nexit 23\n", exit.display())
-        },
-    );
     let directory = home.0.join("notices");
     let pending = PendingNotice::new(&directory, BANK).unwrap();
     let bell = Doorbell::with_timing(command, directory, Duration::ZERO, Duration::from_secs(2));
     bell.watch(BANK, adapter.clone(), true).await;
     bell.observe(BANK, &view(&[1, 2], 2, 2, 1.0)).await;
     wait_for(|| exit.exists()).await;
-    tokio::time::sleep(Duration::from_millis(60)).await;
+    // A started file cannot prove the leader exited or its status was handled.
+    assert!(queue_armed(&adapter, &fixture).await);
     let before = state::read(&pending.path, 8192).unwrap();
     assert_eq!(pending.resolution(now()), None);
     assert!(!pending.path.with_extension("bell-accepted").exists());
     bell.observe(BANK, &view(&[1, 2, 3], 3, 3, 2.0)).await;
+    assert_eq!(state::read(&pending.path, 8192).unwrap(), before);
+    std::fs::write(home.0.join("release"), "release").unwrap();
+    // Listener disarming is the externally reported result of disable().
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while queue_armed(&adapter, &fixture).await {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(state::read(&pending.path, 8192).unwrap(), before);
+    bell.observe(BANK, &view(&[1, 2, 3, 4], 4, 4, 2.5)).await;
     assert_eq!(state::read(&pending.path, 8192).unwrap(), before);
     // A disabled queue still lazily resolves an origin-expired reservation.
     let mut record: Value = serde_json::from_slice(&before).unwrap();

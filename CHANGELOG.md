@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-07 — Phase 4 lease action candidate)
+
+- Add a native Rust `lease hold` candidate with a read-only external-process
+  probe and asynchronous board mirror, plus hold/operator parser help guards.
+  Native PostgreSQL `break`, `delegate` and `designate` actions are implemented;
+  Phase 4 action and mode-row acceptance remain deferred. No installation path
+  installs the candidate.
+
 ### Added
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.

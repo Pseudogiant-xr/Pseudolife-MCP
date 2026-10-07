@@ -477,6 +477,7 @@ impl LeaseHome {
             .env("PSEUDOLIFE_LEASE_LOCK_DIR", &self.0)
             .env("PSEUDOLIFE_SUITE_LOCK_DIR", &self.0)
             .env("PSEUDOLIFE_MCP_DAEMON_URL", url)
+            .env("PSEUDOLIFE_DAEMON_EXEC", "1")
             .env("PSEUDOLIFE_MCP_NO_SPAWN", "1");
         command
     }
@@ -492,6 +493,18 @@ impl LeaseHome {
     }
     pub fn call(&self, args: &[&str]) -> std::process::Output {
         self.command().args(args).output().unwrap()
+    }
+    pub fn completed_pid(&self) -> u32 {
+        let mut child = self
+            .command()
+            .args(["lease", "--help"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(child.wait().unwrap().success());
+        pid
     }
 }
 impl Drop for LeaseHome {

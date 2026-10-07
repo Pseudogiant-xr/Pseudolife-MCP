@@ -423,3 +423,14 @@ runtime, helper and image bindings remain attached to `5220b5ee`; a docs/results
 carrier does not change the executed head. PORT-STATE.md records counts,
 source ratio, numeric tables and remaining hosted/review gates. Version
 remains deferred.
+
+`lease_operator_cases.json` is an additive Phase 4 **unrun fixture plan** for
+native offline break. Its first whole-command cell uses an existing guarded
+disposable PG bank with no matching lease, compares exact raw streams and all
+unchanged rows/files, and starts no daemon. Held-row cells then require the
+identical `fixed-clock-replay` seam in both arms and exact fences, payload TEXT,
+audit hashes, expiry and queue changes. Named embedded refusal and native PG
+diagnostics have rejecting controls; the retained container transport compares
+its actual argv and inherited streams. Use the existing `cli_process` fixture
+and `harness.run_cli` capture, preserving raw observations before policy. This
+plan supplies no execution receipt or acceptance claim.
