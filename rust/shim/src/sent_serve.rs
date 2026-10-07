@@ -541,13 +541,8 @@ async fn handle(
         return Ok(error(401, "authentication_required"));
     }
     if method != "GET" {
-        return Ok(json(
-            405,
-            vec![
-                ("error", Json::String("method_not_allowed".into())),
-                ("path", Json::String("/api/maintainer/sent".into())),
-            ],
-        ));
+        // The known maintainer route catches dispatch's wrong-verb KeyError.
+        return Ok(error(400, "invalid_request"));
     }
     let snapshot = state.snapshot.lock().await;
     let admitted = c.allowed.contains(&principal)

@@ -201,6 +201,7 @@ def test_installer_yaml_and_deferred_constant(prefix, tmp_path):
     "coordination:\n  enabled: yes", "coordination:\n  enabled: no",
     "coordination:\n  enabled: on", "coordination:\n  enabled: off",
     "ignored: 012", "ignored: 0o12", "ignored: 1:20", "ignored: 1_000",
+    "ignored: 2026-1-2T3:04:05",
     "ignored: !custom value", "x: 1\nx: 2", "coordination:\n  enabled: 'true'",
     "coordination:\n  allowed_principals: [1]", "coordination:\n  maintainer:\n    rp_id: 1",
 ])

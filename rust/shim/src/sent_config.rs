@@ -100,6 +100,21 @@ fn ambiguous(value: &str) -> bool {
     {
         return true;
     }
+    // PyYAML's timestamp resolver also accepts single-digit month/day/hour
+    // when a time follows. Refuse that family before YAML 1.2 makes a string.
+    if let Some((date, time)) = number.split_once(['T', 't', ' ', '\t']) {
+        let parts: Vec<_> = date.split('-').collect();
+        if parts.len() == 3
+            && parts[0].len() == 4
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+            && parts[1..].iter().all(|part| part.len() <= 2)
+            && time.contains(':')
+        {
+            return true;
+        }
+    }
     if value.parse::<f64>().is_ok() {
         if let Some((mantissa, exponent)) = value.split_once(['e', 'E']) {
             // PyYAML's 1.1 float resolver needs both a dot and an exponent sign.
@@ -205,6 +220,7 @@ mod tests {
             "1e3",
             "1.2e3",
             "2026-10-07",
+            "2026-1-2T3:04:05",
         ] {
             assert!(
                 parse(&format!("ignored: {scalar}\n"))
