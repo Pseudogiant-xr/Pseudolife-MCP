@@ -620,6 +620,7 @@ async fn get(
         } else {
             reqwest::redirect::Policy::none()
         })
+        .referer(false)
         .connect_timeout(timeout)
         .read_timeout(timeout)
         .user_agent("Python-urllib/3.11")
@@ -627,13 +628,19 @@ async fn get(
         .ok()?;
     let mut request = client.get(format!("{origin}{target}"));
     if let Some(token) = token.filter(|s| !s.is_empty()) {
-        // Python's http.client encodes header values as Latin-1. HeaderValue
-        // validation remains in force; control/folding differences are retained
-        // by the process corpus, not bypassed through unchecked headers.
+        // Python's http.client encodes header values as Latin-1.
+        // http-forbidden-input-refused rejects C0/DEL and folded bearer values.
         let bytes: Option<Vec<u8>> = format!("Bearer {token}")
             .chars()
             .map(|c| u8::try_from(c as u32).ok())
             .collect();
+        if bytes
+            .as_ref()?
+            .iter()
+            .any(|byte| *byte < 0x20 || *byte == 0x7f)
+        {
+            return None;
+        }
         request = request.header(
             reqwest::header::AUTHORIZATION,
             reqwest::header::HeaderValue::from_bytes(&bytes?).ok()?,
@@ -698,7 +705,7 @@ async fn briefing(argv: &[Argument]) -> u8 {
     match super::hook_json::input(&health) {
         Ok(Value::Null) => return 0,
         Ok(_) => {}
-        Err(()) => return reply_not_understood(),
+        Err(()) => return 0,
     }
     let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
     let target = if args.coordination {

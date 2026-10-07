@@ -46,6 +46,26 @@ def test_beyond_u64_ignored_metadata_keeps_output_and_request():
     assert base64.b64decode(cli_briefing_hook.native_expected(cases["briefing-json-beyond-u64-extra"], {})["stdout_b64"]).strip() == b"ok"
 
 
+def test_non_json_health_stays_quiet_without_payload_request():
+    case = next(case for case in cli_briefing_hook.cases() if case["id"] == "briefing-health-non-json")
+    raw = cli_briefing_hook.expected(case, {})
+    native = cli_briefing_hook.native_expected(case, {})
+    assert native == {**raw, "policies": []}
+    assert native["exit_code"] == 0 and native["stdout_b64"] == native.get("stderr_b64", "") == ""
+    assert [request["target"] for request in native["wire"]] == ["/health"]
+
+
+@pytest.mark.parametrize("name", ["briefing-token-control", "briefing-token-del", "briefing-token-fold"])
+def test_forbidden_bearer_candidate_disposition_keeps_raw_python_observation(name):
+    case = next(case for case in cli_briefing_hook.cases() if case["id"] == name)
+    raw = cli_briefing_hook.expected(case, {})
+    native = cli_briefing_hook.native_expected(case, {})
+    assert len(raw["wire"]) == 2
+    assert [request["target"] for request in native["wire"]] == ["/health"]
+    assert native["exit_code"] == 0 and native["stdout_b64"] == ""
+    assert native["policies"] == ["http-forbidden-input-refused"]
+
+
 @pytest.mark.parametrize("name", [
     "briefing-json-nan-extra", "briefing-json-infinity-extra", "briefing-json-surrogate-extra",
     "briefing-json-malformed", "briefing-json-deep-extra", "briefing-markdown-false",

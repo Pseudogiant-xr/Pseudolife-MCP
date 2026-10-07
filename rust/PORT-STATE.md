@@ -25,14 +25,17 @@ and failed; its log is retained separately from the successful rerun. The
 `64f5a6a2` gates keep their original attribution. Fresh review, hosted checks
 and the committed-head remote Python full suite remain required.
 
-The dedicated hook production is now 944 lines before test modules (911 for
-briefing_hook plus 33 for hook_json), down from 1,811 under the same counting
-rule. All 12 remove/narrow inventory sites are addressed; the 12 keep sites
+At `64f5a6a2`, the dedicated hook production was 944 lines before test modules
+(911 for briefing_hook plus 33 for hook_json), down from 1,811 under the same
+counting rule. All 12 remove/narrow inventory sites are addressed; the 12 keep sites
 retain their operational contracts. The prior 1,813 count included two blank
 separator lines; neither count is a readiness or performance claim.
 
-The branch merges accepted master forward. Four code conflicts were resolved
-in the measurement helper, CLI dispatcher, pytest adapter and binary entrypoint;
+The branch merges accepted master forward. The earlier `0b46bb8e` integration
+resolved four code conflicts in the measurement helper, CLI dispatcher, pytest
+adapter and binary entrypoint. The later `59a8624e` merge at `273e6533` resolved
+two code conflicts (`cli_measurement.py` and `cli.rs`) and two documentation
+conflicts (CHANGELOG.md and PARITY.md), plus a manual lease wrapper in main.rs;
 a committed-head remote Python full suite is still required,
 separately from hosted Rust correctness and both-platform parity checks. The merged
 adapter preserves version routing and all 18 hook admissions (26 selected
@@ -41,6 +44,30 @@ measurement helper preserves image warmups and owned briefing fixtures.
 The leaves dispatch before the proxy enters its Tokio runtime, removing the
 hook thread without nesting runtimes. CPU-light self-checks alone do not
 establish runtime correctness, security or readiness.
+
+The subsequent health/header repair keeps non-JSON `/health` quiet and preserves
+valid degraded JSON 503 handling, while malformed consumed JSON payloads retain
+the named diagnostic. Redirects emit no Referer. C0/DEL/folded bearer inputs use
+`http-forbidden-input-refused`; HTTP field association and the explicit 53-ID
+`hook-absent-accept-wildcard` ledger are documented in PARITY.md. Raw Python
+expectations and historical failures remain unchanged. Production hook source
+is 951 lines before test modules (918 plus 33), using the same trimmed-boundary
+count as the earlier 944-line source; the transport repair adds seven lines.
+
+The repair passed its first disposable Windows malformed-health execution cell
+before the remaining gates: nine hook contracts with each feature configuration,
+formatting, default/no-default all-target check and warning-denied Clippy, and
+103 focused Python policy/wire/briefing instrument checks. These checks exercised
+quiet health refusal, JSON 503, malformed payload, redirect headers and bearer
+refusal against owned scripted peers. They establish no broad corpus, timing,
+Linux, hosted or committed-head remote full-suite result. Earlier `273e6533`
+unit/lease/version gates and the `6ab79123` Python instrument gate retain their
+own attribution; the old remote suite does not validate the repair.
+The published `6ab79123` hosted Parity jobs failed a stale eight-node total
+assertion after the hook admissions increased selection to 26. The port-owned
+version assertion now checks the three version admissions, uniqueness and
+existing boundaries without pinning total selection; its 12 focused tests pass.
+The two hosted failures remain historical and fresh hosted checks are required.
 
 ### Historical briefing candidate evidence
 
@@ -138,7 +165,9 @@ release-profile or general speed claim is made.
 
 The current local core corpus passes 50/53 declared comparisons per OS, with
 three configured bearer failures. Raw request headers also differ outside that
-comparator; full wire equality is unproven. Pending groups 5 (configured bearer headers), 10 (unmatched
+comparator; full wire equality is unproven. Configured C0/DEL/folded bearer refusal now has the named
+`http-forbidden-input-refused` disposition; its three historical raw failures
+remain retained. Pending groups 10 (unmatched
 traceback prefixes) and 12 (response-head/chunk-framing inactivity) remain
 historical; briefing header failures were measured, while its chunk-framing gap
 is inferred from the shared client. Broader daemon/cursor sequencing and hosted

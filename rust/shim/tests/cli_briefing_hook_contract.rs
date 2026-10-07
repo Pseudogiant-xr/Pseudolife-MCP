@@ -22,6 +22,210 @@ fn parser_command() -> Command {
     command
 }
 
+fn scripted_hook(
+    arguments: &[&str],
+    replies: &[(u16, &str)],
+    token: Option<&str>,
+) -> (std::process::Output, Vec<String>) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let home =
+        std::env::temp_dir().join(format!("pseudolife-health-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let digest = home.join("digests");
+    let mark = digest.join(format!("{:x}.mark", Sha256::digest(b"public-hook")));
+    if arguments[0] == "prompt-hook" {
+        fs::create_dir(&digest).unwrap();
+        fs::write(&mark, b"77.0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&digest, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&mark, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let replies: Vec<_> = replies
+        .iter()
+        .map(|(status, body)| (*status, body.to_string()))
+        .collect();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop = stopped.clone();
+    let peer = std::thread::spawn(move || {
+        let mut requests = Vec::new();
+        while !stop.load(Ordering::SeqCst) {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => panic!("fixture peer: {error}"),
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            let (status, body) = &replies[requests.len()];
+            requests.push(String::from_utf8(request).unwrap());
+            let location = if *status == 302 {
+                "Location: /ready\r\n"
+            } else {
+                ""
+            };
+            write!(stream, "HTTP/1.1 {status} fixture\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            stream.flush().unwrap();
+        }
+        requests
+    });
+    let mut command = parser_command();
+    command
+        .args(arguments)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("LOCALAPPDATA", &home)
+        .env("PSEUDOLIFE_DIGEST_DIR", &digest)
+        .env("PSEUDOLIFE_MCP_DAEMON_URL", format!("http://{address}"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(token) = token {
+        command.env("PSEUDOLIFE_MCP_TOKEN", token);
+    }
+    let mut child = command.spawn().unwrap();
+    if arguments[0] == "prompt-hook" {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"session_id\":\"public-hook\"}")
+            .unwrap();
+    } else {
+        drop(child.stdin.take());
+    }
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let output = child.wait_with_output().unwrap();
+    stopped.store(true, Ordering::SeqCst);
+    let requests = peer.join().unwrap();
+    if arguments[0] == "prompt-hook" {
+        assert_eq!(fs::read(&mark).unwrap(), b"77.0\n");
+    }
+    fs::remove_dir_all(home).unwrap();
+    (output, requests)
+}
+
+#[test]
+fn public_non_json_health_is_quiet_without_payload_request() {
+    let (output, requests) = scripted_hook(
+        &["briefing", "--hook-json"],
+        &[(502, "<html>bad gateway</html>")],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("GET /health HTTP/1.1\r\n"));
+}
+
+#[test]
+fn public_health_payload_and_redirect_headers_keep_their_scopes() {
+    let (output, requests) = scripted_hook(&["briefing"], &[(200, "oops")], None);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    assert_eq!(requests.len(), 1);
+    let (output, requests) = scripted_hook(
+        &["briefing"],
+        &[(503, "false"), (200, "{\"markdown\":\"ok\"}")],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.stdout,
+        if cfg!(windows) {
+            b"ok\r\n".as_slice()
+        } else {
+            b"ok\n".as_slice()
+        }
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(requests.len(), 2);
+    let (output, requests) = scripted_hook(
+        &["briefing"],
+        &[(302, ""), (200, "{}"), (200, "oops")],
+        Some("synthetic-hook"),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        if cfg!(windows) {
+            b"pseudolife-mcp briefing: daemon reply not understood\r\n".as_slice()
+        } else {
+            b"pseudolife-mcp briefing: daemon reply not understood\n".as_slice()
+        }
+    );
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].starts_with("GET /health HTTP/1.1\r\n"));
+    assert!(requests[1].starts_with("GET /ready HTTP/1.1\r\n"));
+    assert!(
+        requests[2]
+            .starts_with("GET /api/briefing?max_unsure=3&max_lessons=3&max_world=3 HTTP/1.1\r\n")
+    );
+    for (index, request) in requests.iter().enumerate() {
+        let headers = request.to_ascii_lowercase();
+        assert!(headers.contains("\r\nuser-agent: python-urllib/3.11\r\n"));
+        assert!(headers.contains("\r\naccept: */*\r\n"));
+        assert!(
+            !headers.contains("\r\nreferer:")
+                && !headers.contains("\r\naccept-encoding:")
+                && !headers.contains("\r\nconnection:")
+        );
+        assert_eq!(
+            headers.contains("\r\nauthorization: bearer synthetic-hook\r\n"),
+            index == 2
+        );
+    }
+    let (output, requests) =
+        scripted_hook(&["prompt-hook"], &[(200, "<html>bad gateway</html>")], None);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with(
+        "GET /api/hook/memory-changes?session_id=public-hook&since=77.0 HTTP/1.1\r\n"
+    ));
+}
+
+#[test]
+fn public_forbidden_bearer_bytes_refuse_before_the_payload_request() {
+    for token in ["bad\tvalue", "bad\u{7f}value", "bad\r\n folded"] {
+        let (output, requests) = scripted_hook(&["briefing"], &[(200, "{}")], Some(token));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with("GET /health HTTP/1.1\r\n"));
+        let (output, requests) = scripted_hook(&["prompt-hook"], &[], Some(token));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+        assert!(requests.is_empty());
+    }
+}
+
 #[test]
 fn public_columns_ascii_fallback_and_narrow_whitespace() {
     let baseline = parser_command()

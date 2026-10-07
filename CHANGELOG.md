@@ -18,6 +18,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cursors untouched. Numeric options use signed ASCII decimal, and output
   failures follow native write/flush semantics. These are named substitutions
   in the porting contract; no installation path installs the candidate.
+
 ### Added (2026-10-07 — native lease candidate and help drift guards)
 
 - Add a scoped native Rust `lease check`, `lease list` and `lease run`

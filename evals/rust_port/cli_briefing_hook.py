@@ -205,10 +205,13 @@ def native_expected(case, env):
         policies.append("hook-strict-json-refusal")
         result = {"wire": [], "stdout_b64": "", "exit_code": 0, "marks": marks}
     elif name == "briefing-health-non-json":
-        policies.append("hook-strict-json-refusal")
         result = expected(case, env)
-        result["exit_code"] = 1
-        diagnostic = "pseudolife-mcp briefing: daemon reply not understood\n"
+    elif name in {"briefing-token-control", "briefing-token-del", "briefing-token-fold"}:
+        policies.append("http-forbidden-input-refused")
+        result = expected(case, env)
+        result["wire"] = result["wire"][:1]
+        result["stdout_b64"] = ""
+        result["exit_code"] = 0
     elif name in {"briefing-json-nan-extra", "briefing-json-infinity-extra", "briefing-json-surrogate-extra",
                   "briefing-json-malformed", "briefing-json-deep-extra", "briefing-markdown-false",
                   "briefing-markdown-list", "briefing-markdown-object", "briefing-markdown-zero"}:
