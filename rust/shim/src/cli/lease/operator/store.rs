@@ -182,6 +182,24 @@ pub fn audit_timestamp(now: f64) -> Result<String, Error> {
     }
     Ok(text)
 }
+fn audit_material(seq: i64, event: &Event, stamp: &str) -> String {
+    let before = json!([
+        "pseudolife-coordination-audit-v1",
+        seq,
+        event.event,
+        event.actor,
+        "",
+        event.agent,
+        Value::Null,
+        event.project,
+        event.task,
+        Value::Null
+    ]);
+    let after = json!(["", event.payload]);
+    let before = before.to_string();
+    let after = after.to_string();
+    format!("{},{},{}", &before[..before.len() - 1], stamp, &after[1..])
+}
 async fn append(tx: &Transaction<'_>, events: Vec<Event>, now: f64) -> Result<(), Error> {
     tx.query_one(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -205,28 +223,16 @@ async fn append(tx: &Transaction<'_>, events: Vec<Event>, now: f64) -> Result<()
     let stamp = audit_timestamp(now)?;
     for event in events {
         seq = seq.checked_add(1).ok_or(Error::Database)?;
-        let before = json!([
-            "pseudolife-coordination-audit-v1",
-            seq,
-            event.event,
-            event.actor,
-            "",
-            event.agent,
-            Value::Null,
-            event.project,
-            event.task,
-            Value::Null
-        ]);
-        let after = json!(["", event.payload]);
-        let before = before.to_string();
-        let after = after.to_string();
-        let material = format!("{},{},{}", &before[..before.len() - 1], stamp, &after[1..]);
+        let material = audit_material(seq, &event, &stamp);
         let hash = hex_hash(format!("{prev}{material}"));
         tx.execute("INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,$2,$3,'',$4,NULL,$5,$6,NULL,$7,$8,'',$9,$10)", &[&seq, &event.event, &event.actor, &event.agent, &event.project, &event.task, &event.payload, &now, &prev, &hash]).await?;
         prev = hash;
     }
     Ok(())
 }
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;
 /// The clock is read inside BEGIN, matching the existing Python store seam.
 /// Fixtures can inject the same clock into both stores without a production
 /// Python change. Callers must compare all rows and hash bytes exactly.

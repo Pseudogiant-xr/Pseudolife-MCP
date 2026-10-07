@@ -109,12 +109,13 @@ fn required_arguments_and_operator_duration_errors_precede_effects() {
 #[test]
 fn hold_rejects_command_separator_and_preserves_unicode_names() {
     let home = Home::new();
+    let pid = home.completed_pid().to_string();
     let output = home.call(&[
         "lease",
         "hold",
         "资源",
         "--while-pid",
-        "4294967295",
+        &pid,
         "--",
         "unexpected",
     ]);
@@ -128,12 +129,14 @@ fn hold_rejects_command_separator_and_preserves_unicode_names() {
         ))
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
-    let output = home.call(&["lease", "hold", "资源", "--while-pid", "4294967295"]);
+    let output = home.call(&["lease", "hold", "资源", "--while-pid", &pid]);
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
-        native("lease: pid 4294967295 is already gone; nothing to hold '资源' for\n")
+        native(&format!(
+            "lease: pid {pid} is already gone; nothing to hold '资源' for\n"
+        ))
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
 }

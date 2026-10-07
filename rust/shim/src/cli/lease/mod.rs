@@ -57,7 +57,16 @@ pub async fn main(arguments: &[String]) -> i32 {
         "check" => view::check(&args).await,
         "list" => view::list(&args).await,
         "hold" => hold::hold(args).await,
-        "break" | "delegate" => operator::command(&args, arguments).await,
+        "break" | "delegate" => {
+            let mut forwarded = arguments.to_vec();
+            if forwarded
+                .first()
+                .is_some_and(|action| action == "designate")
+            {
+                forwarded[0] = "delegate".into();
+            }
+            operator::command(&args, &forwarded).await
+        }
         _ => run::run(args).await,
     };
     if OUTPUT_FAILED.load(std::sync::atomic::Ordering::Relaxed) {

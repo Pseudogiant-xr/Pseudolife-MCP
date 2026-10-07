@@ -150,14 +150,63 @@ fn negative_number(text: &str) -> bool {
     if rest.is_empty() {
         return false;
     }
-    if rest.bytes().all(|b| b.is_ascii_digit()) {
+    if rest.chars().all(|c| decimal_digit(c).is_some()) {
         return true;
     }
     rest.split_once('.').is_some_and(|(a, b)| {
         !b.is_empty()
-            && a.bytes().all(|c| c.is_ascii_digit())
-            && b.bytes().all(|c| c.is_ascii_digit())
+            && a.chars().all(|c| decimal_digit(c).is_some())
+            && b.chars().all(|c| decimal_digit(c).is_some())
     })
+}
+
+fn decimal_digit(c: char) -> Option<u32> {
+    // Decimal blocks at the pinned CPython 3.11 / Unicode 14 producer.
+    const ZEROS: &[u32] = &[
+        0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
+        0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
+        0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0,
+        0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0,
+        0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0,
+        0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0,
+    ];
+    ZEROS
+        .iter()
+        .find_map(|zero| (c as u32).checked_sub(*zero).filter(|digit| *digit < 10))
+}
+
+fn process_id(text: &str) -> Result<u32, String> {
+    // int() permits underscores only between digits and one optional sign.
+    let invalid = || format!("not a process id: {}", repr(text));
+    let trimmed = text.trim_matches(char::is_whitespace);
+    let (negative, digits) = if let Some(digits) = trimmed.strip_prefix('-') {
+        (true, digits)
+    } else {
+        (false, trimmed.strip_prefix('+').unwrap_or(trimmed))
+    };
+    let mut decimal = String::new();
+    let mut previous_digit = false;
+    for c in digits.chars() {
+        if c == '_' && previous_digit {
+            previous_digit = false;
+            continue;
+        }
+        let digit = decimal_digit(c).ok_or_else(invalid)?;
+        decimal.push(char::from(b'0' + digit as u8));
+        previous_digit = true;
+    }
+    if !previous_digit {
+        return Err(invalid());
+    }
+    if negative || decimal.bytes().all(|digit| digit == b'0') {
+        return Err("a process id is a positive whole number".into());
+    }
+    let pid = decimal.parse::<u32>().map_err(|_| invalid())?;
+    #[cfg(unix)]
+    if pid > i32::MAX as u32 {
+        return Err(invalid());
+    }
+    Ok(pid)
 }
 
 /// The public separator is consumed before parsing, just as lease_cli.main does.
@@ -320,28 +369,9 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                 v
             };
             if option == "--while-pid" {
-                let trimmed = value.trim_matches(super::whitespace);
-                let number = trimmed.strip_prefix('+').unwrap_or(trimmed);
-                if number.strip_prefix('-').is_some_and(|digits| {
-                    !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())
-                }) {
-                    return Err(error(
-                        action,
-                        "argument --while-pid: a process id is a positive whole number",
-                    ));
-                }
-                let pid = number.parse::<u32>().map_err(|_| {
-                    error(
-                        action,
-                        &format!("argument --while-pid: not a process id: {}", repr(value)),
-                    )
+                let pid = process_id(value).map_err(|message| {
+                    error(action, &format!("argument --while-pid: {message}"))
                 })?;
-                if pid == 0 {
-                    return Err(error(
-                        action,
-                        "argument --while-pid: a process id is a positive whole number",
-                    ));
-                }
                 args.while_pid = Some(pid);
             } else if option == "--worktree" {
                 args.worktree = value.into();
@@ -438,4 +468,54 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         return Err(error(action, &format!("{action} takes no command")));
     }
     Ok(args)
+}
+
+#[cfg(test)]
+mod pid_tests {
+    use super::process_id;
+    #[test]
+    fn ordinary_pid_int_grammar_matches_the_original_producer() {
+        for (text, expected) in [
+            ("1_000", 1000),
+            ("١٢٣", 123),
+            ("１２３", 123),
+            ("+1_000", 1000),
+            (" 42\t", 42),
+            ("\u{2003}42\u{2003}", 42),
+        ] {
+            assert_eq!(process_id(text).unwrap(), expected);
+        }
+        for text in ["+-5", "--5", "_5", "5_", "5__0", "\u{1c}5", "²", "+", ""] {
+            assert!(
+                process_id(text)
+                    .unwrap_err()
+                    .starts_with("not a process id:")
+            );
+        }
+        for text in ["-5", "-١٢", "0", "+0_0"] {
+            assert_eq!(
+                process_id(text).unwrap_err(),
+                "a process id is a positive whole number"
+            );
+        }
+    }
+    #[test]
+    fn pid_range_refuses_without_wrapping() {
+        assert_eq!(process_id("2147483647").unwrap(), i32::MAX as u32);
+        #[cfg(windows)]
+        assert_eq!(process_id("4294967295").unwrap(), u32::MAX);
+        #[cfg(unix)]
+        for text in ["2147483648", "4294967295"] {
+            assert!(
+                process_id(text)
+                    .unwrap_err()
+                    .starts_with("not a process id:")
+            );
+        }
+        assert!(
+            process_id("4294967296")
+                .unwrap_err()
+                .starts_with("not a process id:")
+        );
+    }
 }

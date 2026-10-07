@@ -331,6 +331,30 @@ pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
         ));
     };
     let token = crate::credentials::decode_token(token.as_bytes()).map_err(unusable)?;
+    connected(url, &token)
+}
+/// Hold connects only after local acquisition, matching BoardMirror._connect.
+/// Its URL-first credential failures degrade mirroring and never release hold.
+pub fn connect_hold(no_board: bool) -> Result<Arc<Board>, Failure> {
+    if no_board {
+        return Err(Failure::refused("--no-board was given"));
+    }
+    let url = crate::daemon_url::from_environment().map_err(|_| {
+        Failure::refused("PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) origin (scheme, host and optional port only)")
+    })?;
+    let snapshot = crate::credentials::CredentialProvider::from_environment()
+        .and_then(|provider| provider.snapshot())
+        .map_err(|error| {
+            Failure::refused(format!("the bearer credential is unusable ({error})"))
+        })?;
+    let Some(token) = snapshot.token() else {
+        return Err(Failure::refused(
+            "no bearer token (set PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE)",
+        ));
+    };
+    connected(url, token)
+}
+fn connected(url: String, token: &str) -> Result<Arc<Board>, Failure> {
     if !token.is_ascii() {
         return Err(Failure::refused("registration headers are not understood"));
     }

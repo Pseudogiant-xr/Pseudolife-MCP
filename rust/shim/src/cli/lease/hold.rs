@@ -446,12 +446,6 @@ pub async fn hold(args: Args) -> i32 {
         start: Instant::now(),
         seconds,
     });
-    let connection = board::connect(args.no_board);
-    if let Err(failure) = &connection
-        && failure.fatal_input
-    {
-        return failure.report();
-    }
     let mut stops = match Stops::new() {
         Ok(stops) => stops,
         Err(_) => {
@@ -465,6 +459,7 @@ pub async fn hold(args: Args) -> i32 {
     let mut mirror = None;
     let work = async {
         wait_lock(&mut lock, &name, deadline, false).await?;
+        let connection = board::connect_hold(args.no_board);
         mirror = Some(Mirror::start(connection, args.clone(), &directory));
         while pid_alive(pid) {
             tokio::time::sleep(Duration::from_millis(500)).await;

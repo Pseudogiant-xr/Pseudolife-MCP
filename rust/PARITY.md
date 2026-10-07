@@ -1309,10 +1309,12 @@ delegate/designate exit-1 deferrals. Subsequent operator preparation supersedes
 those implementation deferrals; acceptance of all four actions remains deferred.
 
 The named `hold-mirror-best-effort` rule follows the producer contract in
-`pseudolife_memory/lease_cli.py:964` (`BoardMirror`) and local release ordering in
-`pseudolife_memory/lease_cli.py:1285-1324` (`_hold`). It preserves local ownership:
-a configured forbidden bearer refuses before acquiring or creating a lock/stamp; a failure
-observed after acquisition, including forbidden registration headers or
+`pseudolife_memory/lease_cli.py:487-509` (`_connect`), lines 1103-1115
+(`BoardMirror` connection failure), and lines 1285-1324 (`_hold`). Hold acquires
+its local lock before attempting the mirror. An unusable configured bearer
+therefore reports board skipped after acquisition; it does not refuse local
+ownership. This corrects the earlier pre-lock bearer refusal in the historical
+Phase 4 candidate. A failure after acquisition, including forbidden registration headers or
 `HTTP_REPLY_NOT_UNDERSTOOD`, stops only the mirror. The hold keeps its lock,
 leaves the followed PID running and retains its normal exits. Core refusal
 before lock/fallback/child effects remains scoped to check/list/run. The
@@ -1418,7 +1420,14 @@ exit is 1, and stderr is the designate deprecation line followed by
 `cannot open the bank (PostgreSQL DSN is not understood)`; the port-owned
 control asserts the same streams, exit, ordering and unchanged files,
 without a socket or listener. `designate` retains its deprecation
-before the refusal. Coordination refusal codes and their surrounding bytes
+before the refusal. Unknown DSN options use the fixed parenthesized diagnostic
+`unsupported PostgreSQL DSN option`; operator diagnostics never echo an option
+spelling supplied by the DSN, which can be a malformed password fragment.
+The no-bank line remains exactly the prefix-free producer at
+`pseudolife_memory/daemon_exec.py:40-43` and `lease_cli.py:1887-1888`.
+The designate rewrite at `lease_cli.py:1854-1859` also applies to the argv
+forwarded into the container, so its deprecation is emitted once.
+Coordination refusal codes and their surrounding bytes
 remain exact. The separate named embedded refusal retains its specified
 diagnostic. Failure controls must
 compare every durable row, raw stream and local file; no row or time field is
@@ -1429,10 +1438,11 @@ The additive [operator fixture plan](../evals/rust_port/lease_operator_cases.jso
 pins the first missing-row whole-command cell, queue/reserved/revocation,
 rollback, secret-boundary and container/refusal controls. Held-row comparisons
 use `fixed-clock-replay` with the same clock seam in both arms and exact audit
-hashes. No build, service or native action was executed for this source
-checkpoint; the old PG transport and Phase 2d receipts retain their identities.
-Delegate/designate transaction proof, broader hold/break lifecycle proof,
-both-OS corpus, real database/TLS state proof and fresh independent review remain pending.
+hashes. No build, service or native action was executed at the original break
+source checkpoint. Subsequent targeted execution is recorded above against
+`67478612`; those receipts retain that source identity. New source repairs need
+new validation. Broader whole-command, Windows durable-state, cancellation/
+rollback coverage, final hosted gates and fresh independent review remain pending.
 Every lease mode row remains deferred.
 
 ## Phase 4 delegate source preparation
@@ -1448,16 +1458,50 @@ field order are retained. The shared PG/TLS policy and container transport are
 unchanged; embedded banks still refuse `phase4-embedded-pg-deferred`, naming
 the requested action. Generic failures use `native-pg-diagnostics`.
 
-This successor is source preparation only. Its additive project, prefix,
-listener and output controls have not run; neither compilation nor a whole
-delegate command has run. Mutation proof requires `fixed-clock-replay` and
+The original delegate successor was source preparation only. Subsequent
+compilation and whole-command receipts are recorded above against `90fd0082`
+and `67478612`; they do not validate later source repairs. Mutation proof requires `fixed-clock-replay` and
 exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
 images retain their original source identities and do not validate this
 changed runtime. The port-owned operator deferral assertion is replaced by
 the approved explicit malformed-DSN refusal control, retaining exact exit,
-streams, deprecation ordering and unchanged local files; this control has not
-run on the successor. Original Python and tests retain accepted master bytes.
+streams, deprecation ordering and unchanged local files. That control ran on
+the historical candidates; the current repairs remain unrun. Original Python
+and tests retain accepted master bytes.
 No lease mode is promoted.
+
+## Phase 4 source repair validation boundary
+
+`LeaseHome` always sets `PSEUDOLIFE_DAEMON_EXEC=1`, preventing operator tests
+without a bank from entering a real daemon container. The additive admission
+test first proves its owned synthetic Docker executable works, then requires
+both fixture constructors to refuse without invoking it. A separate owned
+transport test explicitly removes the guard to inspect designate's rewritten
+argv and single deprecation, without using a real container.
+
+The named **`lease-pid-platform-range`** rule retains Python `int()` grammar at
+`pseudolife_memory/lease_cli.py:1693-1700`: Unicode decimal digits, underscores
+between digits, surrounding whitespace and one sign. Zero and negative values
+retain the exact positive-whole-number diagnostic. Platform PID producers
+(`$$`, `$PID`, Get-Process and launchers) supply representable PIDs. Other
+positive values refuse exit 2 with the usage-shaped `not a process id` error
+before any lock, board or child effects: POSIX permits 1 through i32::MAX and
+Windows permits 1 through u32::MAX. This avoids the POSIX `os.kill` overflow at
+line 1267 and Windows DWORD truncation. Original baseline nodes are
+`tests/test_lease_cli.py::test_hold_and_check_usage_errors_exit_2`,
+`test_hold_of_a_pid_that_is_gone_releases_at_once` and
+`test_hold_keeps_the_lease_while_the_pid_lives_then_releases`.
+The port-owned boundary tests require Windows 4294967295 exit 0, POSIX exit 2
+with unchanged files, and rejection above the respective range.
+
+DB-free operator units pin all secret/ordinary vectors from unchanged
+`tests/test_coordination_secrets.py` and append's canonical material against
+the unchanged Python `coordination.audit_hash` producer, including non-ASCII
+payload and a null recipient. Audit predecessor and unrelated-payload controls
+must change the hash. These source repairs and their new controls are unrun;
+prior receipts and hosted failures retain their original identities. The
+separate Windows doorbell repair must merge before forwarding and final gates.
+All lease acceptance rows remain deferred.
 
 ## Episode merge-forward validation boundary
 

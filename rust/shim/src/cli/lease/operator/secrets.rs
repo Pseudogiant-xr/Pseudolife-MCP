@@ -197,3 +197,6 @@ pub(super) fn refused(text: &str) -> bool {
     }
     false
 }
+#[cfg(test)]
+#[path = "secrets_tests.rs"]
+mod tests;

@@ -14,12 +14,20 @@ use tokio::process::Command;
 
 fn no_bank() -> i32 {
     say(
-        "lease: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)",
+        "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)",
     );
     1
 }
 fn configure(command: &mut Command) {
     command.kill_on_drop(true);
+}
+fn diagnostic(error: &pg::Error) -> String {
+    match error {
+        // Unknown option text is supplied by the DSN and can be a malformed
+        // password fragment. Never include it in a public operator diagnostic.
+        pg::Error::UnsupportedOption(_) => "unsupported PostgreSQL DSN option".into(),
+        error => error.to_string(),
+    }
 }
 fn lite_directory() -> Result<std::path::PathBuf, pg::Error> {
     #[cfg(windows)]
@@ -147,14 +155,14 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
         }
         Ok(resolution::Target::Container) => return container(arguments).await,
         Err(error) => {
-            say(&format!("cannot open the bank ({error})"));
+            say(&format!("cannot open the bank ({})", diagnostic(&error)));
             return 1;
         }
     };
     let mut session = match pg::Session::open(&dsn).await {
         Ok(session) => session,
         Err(error) => {
-            say(&format!("cannot open the bank ({error})"));
+            say(&format!("cannot open the bank ({})", diagnostic(&error)));
             return 1;
         }
     };
