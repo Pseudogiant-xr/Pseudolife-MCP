@@ -19,6 +19,22 @@ def case():
             "normalizations": []}
 
 
+def test_fixture_token_file_is_admitted_without_environment_bearer(tmp_path):
+    from evals.rust_baseline.transport import TOKEN
+    from pseudolife_memory.credentials import CredentialProvider
+    commands = {"oracle": [sys.executable]}
+    home = tmp_path / "home"
+    env = cli_process.fixture_env(home, commands, "http://127.0.0.1:49152")
+    assert "PSEUDOLIFE_MCP_TOKEN" not in env
+    token_file = Path(env["PSEUDOLIFE_MCP_TOKEN_FILE"])
+    assert token_file.is_relative_to(home)
+    admitted = CredentialProvider(path=token_file).snapshot().token == TOKEN
+    assert admitted
+    bytes_unchanged = token_file.read_bytes() == TOKEN.encode("ascii")
+    assert bytes_unchanged
+    assert not list(token_file.parent.glob(".pseudolife-token-*"))
+
+
 def test_paired_process_records_raw_stdin_and_poststate(tmp_path):
     code = ("import os,pathlib,sys; raw=sys.stdin.buffer.read(); "
             "sys.stdout.buffer.write(raw); sys.stderr.buffer.write(b'err\\r\\n'); "

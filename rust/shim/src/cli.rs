@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 mod briefing_hook;
 mod hook_json;
+pub mod lease;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");
@@ -29,7 +30,6 @@ const DEFERRED_MODES: &[&str] = &[
     "episode-start",
     "episode-end",
     "wait-mail",
-    "lease",
     "maintainer",
 ];
 

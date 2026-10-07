@@ -1,0 +1,19 @@
+usage: pseudolife-mcp lease [-h] {run,hold,check,list,break,delegate} ...
+
+Hold a named lease on a shared resource (a test suite, the GPU, a maintenance
+window) around a command. The lease is an OS file lock; the agent board, where
+the daemon has one, mirrors it so other agents see the holder, queue in order
+and see the expected end.
+
+positional arguments:
+  {run,hold,check,list,break,delegate}
+    run                 run a command while holding a lease
+    hold                hold a lease for as long as another process runs
+    check               exit 0 when a lease is free, 1 when it is held
+    list                show the board's leases and the local lock files
+    break               (operator) free a lease whatever its holder says
+    delegate            (operator) make one session the maintainer's delegate
+                        for a project
+
+options:
+  -h, --help            show this help message and exit
