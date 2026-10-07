@@ -914,6 +914,21 @@ pub(super) fn run(mode: &str) -> ExitCode {
 mod tests {
     use super::*;
     #[test]
+    fn first_line_cursor_ignores_trailing_bytes_but_refuses_malformed_first_line() {
+        let path =
+            std::env::temp_dir().join(format!("pseudolife-hook-mark-{}", uuid::Uuid::new_v4()));
+        for (bytes, expected) in [
+            (b"100.0\n\xff".as_slice(), "100.0"),
+            (b"100.0\r\xff".as_slice(), "100.0"),
+            (b"junk\n100.0".as_slice(), ""),
+            (b"100.0\xff\n".as_slice(), ""),
+        ] {
+            fs::write(&path, bytes).unwrap();
+            assert_eq!(first_line(&path), expected);
+        }
+        fs::remove_file(path).unwrap();
+    }
+    #[test]
     fn columns_use_positive_ascii_decimal() {
         for value in ["40", "+40", " 40\t", "00040"] {
             assert_eq!(columns_width(value), Some(40));

@@ -212,7 +212,8 @@ def native_expected(case, env):
     elif name in {"briefing-json-nan-extra", "briefing-json-infinity-extra", "briefing-json-surrogate-extra",
                   "briefing-json-malformed", "briefing-json-deep-extra", "briefing-markdown-false",
                   "briefing-markdown-list", "briefing-markdown-object", "briefing-markdown-zero"}:
-        policies.append("hook-typed-markdown" if name.startswith("briefing-markdown") else "hook-strict-json-refusal")
+        policies.append("hook-typed-markdown" if name.startswith("briefing-markdown") else
+                        "hook-bounded-json-nesting" if name == "briefing-json-deep-extra" else "hook-strict-json-refusal")
         changed["peer"]["content"] = [200, encode(b'{"markdown":""}')]
         result = expected(changed, env)
         result["exit_code"] = 1

@@ -81,13 +81,20 @@ and historical failures remain evidence rather than candidate expectations.
 
 - **`hook-strict-json-refusal`** governs complete prompt stdin and daemon JSON
   replies, including ignored fields. NaN, Infinity, lone surrogate escapes,
-  malformed JSON and nesting beyond serde_json's default bound are refused.
+  and malformed JSON are refused.
   Prompt stdin refusal is silent exit 0 before any request or cursor access;
   malformed prompt responses are silent exit 0 without cursor changes or a
   subsequent request. Briefing JSON refusal is exit 1, no stdout and exactly
   `pseudolife-mcp briefing: daemon reply not understood` plus a newline on
   stderr. First case: `prompt-json-nan-extra`. Plain session-start, coordination
   and memory-change response bodies retain their text/cursor grammar.
+- **`hook-bounded-json-nesting`** governs JSON resource refusal beyond the
+  parser's default depth budget of 128, separately from malformed JSON.
+  Prompt refusal is silent exit 0 without a request or cursor change;
+  briefing refusal uses the exact named diagnostic and exit 1 above.
+  No known hook producer emits deep metadata. The precise native accepted/
+  refused container boundary must be observed and recorded before acceptance.
+  First case: `briefing-json-deep-extra`.
 - **`hook-typed-markdown`** governs `/api/briefing`'s consumed `markdown` field.
   Its producer is `MemoryService.session_briefing`, which emits a string.
   False, numbers, arrays and objects use the briefing refusal above; missing,

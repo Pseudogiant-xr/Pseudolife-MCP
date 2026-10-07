@@ -692,7 +692,8 @@ Integration of master `57c007ff292cffdbb6755911bd54de837a00f9a5` retains #611 re
 
 The briefing/prompt-hook candidate remains deferred pending actual runtime
 checks on the reduced source. `hook-strict-json-refusal`, `hook-typed-markdown`,
-`hook-ascii-numeric`, `hook-first-line-cursor` and `hook-native-output-failure`
+`hook-ascii-numeric`, `hook-first-line-cursor`, `hook-bounded-json-nesting` and
+`hook-native-output-failure`
 are deliberate substitutions described in PORTING.md, not byte-parity claims.
 
 Numeric source evidence: `briefing_cli.py::run_briefing` declares argparse
@@ -708,5 +709,17 @@ The port-owned COLUMNS and closed-output tests use the named candidate rules;
 additive malformed-input, typed-markdown, beyond-u64, first-line cursor and
 closed-output cursor controls are prepared. Historical Python diagnostics are
 preserved by `cli_briefing_hook.expected`; `native_expected` is separate.
-The help asset has a pinned Python drift guard at COLUMNS=80. No native test,
-build, corpus, timing or full suite has been run for this prepared reduction.
+The help asset has a pinned Python drift guard at COLUMNS=80. The Windows
+prepublication gate passed the debug build, format check, default/no-default
+all-targets Clippy, 12 CLI unit tests and six hook integration tests. The first
+disposable native prompt cell fetched a fixture note and advanced its cursor
+before the remaining native checks ran. The first-line cursor unit controls
+accepted `100.0\n\xff` as `100.0` and refused malformed first lines.
+
+The executed `hook-bounded-json-nesting` unit control observed 127 nested
+arrays accepted and 128 refused; a root object plus 126 nested arrays was
+accepted and plus 127 refused. This is serde_json's default parser budget,
+not a new application limit. The controls also preserved signed ASCII caps
+of arbitrary magnitude, beyond-u64 ignored metadata and native output-failure
+cursor state. These targeted Windows checks establish no corpus, timing,
+full-suite, hosted or both-platform acceptance; the candidate remains deferred.

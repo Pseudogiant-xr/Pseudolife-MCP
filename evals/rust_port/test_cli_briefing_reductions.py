@@ -33,6 +33,8 @@ def test_native_substitutions_keep_raw_python_expectations():
     case = cases["prompt-mark-nonascii-after-lf"]
     assert "&since=" not in cli_briefing_hook.expected(case, env)["wire"][0]["target"]
     assert cli_briefing_hook.native_expected(case, env)["wire"][0]["target"].endswith("&since=100.0")
+    malformed = cases["prompt-mark-invalid-ascii"]
+    assert "&since=" not in cli_briefing_hook.native_expected(malformed, env)["wire"][0]["target"]
 
 
 def test_beyond_u64_ignored_metadata_keeps_output_and_request():
@@ -55,6 +57,8 @@ def test_briefing_refusal_has_exact_terminal_output_and_no_followup(name):
     assert result["exit_code"] == 1 and result["stdout_b64"] == ""
     assert [cell["target"] for cell in result["wire"]] == ["/health", "/api/briefing?max_unsure=3&max_lessons=3&max_world=3"]
     assert base64.b64decode(result["stderr_b64"]).replace(b"\r\n", b"\n") == b"pseudolife-mcp briefing: daemon reply not understood\n"
+    if name == "briefing-json-deep-extra":
+        assert result["policies"] == ["hook-bounded-json-nesting"]
 
 
 def test_briefing_help_asset_matches_pinned_python_at_columns80(monkeypatch, capsys):

@@ -67,6 +67,26 @@ mod tests {
     }
 
     #[test]
+    fn bounded_json_nesting_records_the_native_boundary() {
+        let arrays = |depth| format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+        let first_refused = (1..=200)
+            .find(|depth| input(&arrays(*depth)).is_err())
+            .unwrap();
+        eprintln!(
+            "hook-bounded-json-nesting: accepted array depth {}; refused {}",
+            first_refused - 1,
+            first_refused
+        );
+        assert_eq!(first_refused, 128);
+        let metadata = |depth| format!("{{\"session_id\":\"sess-1\",\"other\":{}}}", arrays(depth));
+        assert!(input(&metadata(126)).is_ok());
+        assert!(input(&metadata(127)).is_err());
+        eprintln!(
+            "hook-bounded-json-nesting: accepted object plus 126 arrays; refused object plus 127 arrays"
+        );
+    }
+
+    #[test]
     fn wire_escaping_retains_ascii_json_and_surrogate_pairs() {
         assert_eq!(
             quoted(" café — 🐍\n\u{1c}\"\\"),
