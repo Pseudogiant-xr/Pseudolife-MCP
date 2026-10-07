@@ -1,0 +1,438 @@
+[
+  {
+    "id": "empty-page",
+    "producer": "json-compatible",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "messages",
+          {
+            "kind": "array",
+            "items": []
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "16",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJtZXNzYWdlcyI6IFtdfQ=="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"messages\": []}"
+  },
+  {
+    "id": "escaping-and-separators",
+    "producer": "json-compatible",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "text",
+          {
+            "kind": "string",
+            "value": "\u00e9\u96ea\ud83d\ude00\"\\\b\f\n\r\t\u0000\u001f"
+          }
+        ],
+        [
+          "literal",
+          {
+            "kind": "string",
+            "value": "\\u00e9\\n"
+          }
+        ],
+        [
+          "empty",
+          {
+            "kind": "string",
+            "value": ""
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "100",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJ0ZXh0IjogIlx1MDBlOVx1OTZlYVx1ZDgzZFx1ZGUwMFwiXFxcYlxmXG5cclx0XHUwMDAwXHUwMDFmIiwgImxpdGVyYWwiOiAiXFx1MDBlOVxcbiIsICJlbXB0eSI6ICIifQ=="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"text\": \"\\u00e9\\u96ea\\ud83d\\ude00\\\"\\\\\\b\\f\\n\\r\\t\\u0000\\u001f\", \"literal\": \"\\\\u00e9\\\\n\", \"empty\": \"\"}"
+  },
+  {
+    "id": "finite-float-spelling",
+    "producer": "float64",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "numbers",
+          {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "float64",
+                "bits_be": "4341c37937e08000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "430c6bf526340000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3f1a36e2eb1c432d"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3ee4f8b588e368f1"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3eb0c6f7a0b5ed8d"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3e7ad7f29abcaf48"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3ff4000000000000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "8000000000000000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "0000000000000000"
+              },
+              {
+                "kind": "integer",
+                "decimal": "0"
+              },
+              {
+                "kind": "integer",
+                "decimal": "1"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3ff0000000000000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "4341c37937e07fff"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "3f1a36e2eb1c432c"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "140",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJudW1iZXJzIjogWzFlKzE2LCAxMDAwMDAwMDAwMDAwMDAwLjAsIDAuMDAwMSwgMWUtMDUsIDFlLTA2LCAxZS0wNywgMS4yNSwgLTAuMCwgMC4wLCAwLCAxLCAxLjAsIDk5OTk5OTk5OTk5OTk5OTguMCwgOS45OTk5OTk5OTk5OTk5OTllLTA1XX0="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"numbers\": [1e+16, 1000000000000000.0, 0.0001, 1e-05, 1e-06, 1e-07, 1.25, -0.0, 0.0, 0, 1, 1.0, 9999999999999998.0, 9.999999999999999e-05]}"
+  },
+  {
+    "id": "large-integers",
+    "producer": "integer",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "numbers",
+          {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "integer",
+                "decimal": "9007199254740993"
+              },
+              {
+                "kind": "integer",
+                "decimal": "10000000000000000000000000000000000000000"
+              },
+              {
+                "kind": "integer",
+                "decimal": "-10000000000000000000000000000000000000000"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "118",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJudW1iZXJzIjogWzkwMDcxOTkyNTQ3NDA5OTMsIDEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwLCAtMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBdfQ=="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"numbers\": [9007199254740993, 10000000000000000000000000000000000000000, -10000000000000000000000000000000000000000]}"
+  },
+  {
+    "id": "jsonb-order-discriminator",
+    "producer": "supplemental-ordered-object-not-database-proof",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "wake",
+          {
+            "kind": "object",
+            "members": [
+              [
+                "a",
+                {
+                  "kind": "integer",
+                  "decimal": "1"
+                }
+              ],
+              [
+                "b",
+                {
+                  "kind": "integer",
+                  "decimal": "2"
+                }
+              ],
+              [
+                "aa",
+                {
+                  "kind": "integer",
+                  "decimal": "3"
+                }
+              ],
+              [
+                "zz",
+                {
+                  "kind": "object",
+                  "members": [
+                    [
+                      "x",
+                      {
+                        "kind": "array",
+                        "items": []
+                      }
+                    ],
+                    [
+                      "yy",
+                      {
+                        "kind": "object",
+                        "members": []
+                      }
+                    ],
+                    [
+                      "zzz",
+                      {
+                        "kind": "array",
+                        "items": [
+                          {
+                            "kind": "integer",
+                            "decimal": "2"
+                          },
+                          {
+                            "kind": "integer",
+                            "decimal": "1"
+                          },
+                          {
+                            "kind": "integer",
+                            "decimal": "2"
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ]
+            ]
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "80",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJ3YWtlIjogeyJhIjogMSwgImIiOiAyLCAiYWEiOiAzLCAienoiOiB7IngiOiBbXSwgInl5Ijoge30sICJ6enoiOiBbMiwgMSwgMl19fX0="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"wake\": {\"a\": 1, \"b\": 2, \"aa\": 3, \"zz\": {\"x\": [], \"yy\": {}, \"zzz\": [2, 1, 2]}}}"
+  },
+  {
+    "id": "default-str-uuid",
+    "producer": "fixture-only-uuid-not-sent-sql-reachability",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "value",
+          {
+            "kind": "fixture-uuid",
+            "hex": "12345678123456781234567812345678"
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "49",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJ2YWx1ZSI6ICIxMjM0NTY3OC0xMjM0LTU2NzgtMTIzNC01Njc4MTIzNDU2NzgifQ=="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"value\": \"12345678-1234-5678-1234-567812345678\"}"
+  },
+  {
+    "id": "default-str-timestamp-naive",
+    "producer": "fixture-only-datetime-not-sent-sql-reachability",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "value",
+          {
+            "kind": "fixture-datetime",
+            "year": 2026,
+            "month": 1,
+            "day": 2,
+            "hour": 3,
+            "minute": 4,
+            "second": 5,
+            "microsecond": 123456,
+            "utc": false
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "39",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJ2YWx1ZSI6ICIyMDI2LTAxLTAyIDAzOjA0OjA1LjEyMzQ1NiJ9"
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"value\": \"2026-01-02 03:04:05.123456\"}"
+  },
+  {
+    "id": "default-str-timestamp-utc",
+    "producer": "fixture-only-datetime-not-sent-sql-reachability",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "value",
+          {
+            "kind": "fixture-datetime",
+            "year": 2026,
+            "month": 1,
+            "day": 2,
+            "hour": 3,
+            "minute": 4,
+            "second": 5,
+            "microsecond": 0,
+            "utc": true
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "38",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJ2YWx1ZSI6ICIyMDI2LTAxLTAyIDAzOjA0OjA1KzAwOjAwIn0="
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"value\": \"2026-01-02 03:04:05+00:00\"}"
+  },
+  {
+    "id": "nonfinite-compatibility",
+    "producer": "separate-nonfinite-compatibility-control",
+    "input": {
+      "kind": "object",
+      "members": [
+        [
+          "numbers",
+          {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "float64",
+                "bits_be": "7ff8000000000000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "7ff0000000000000"
+              },
+              {
+                "kind": "float64",
+                "bits_be": "fff0000000000000"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "expected": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "39",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      },
+      "body_b64": "eyJudW1iZXJzIjogW05hTiwgSW5maW5pdHksIC1JbmZpbml0eV19"
+    },
+    "required": true,
+    "evidence_scope": "supplemental-serializer-only",
+    "expected_body_ascii": "{\"numbers\": [NaN, Infinity, -Infinity]}"
+  }
+]

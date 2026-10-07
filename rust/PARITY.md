@@ -26,39 +26,39 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
-## Maintainer sent source preparation
+## Maintainer sent native candidate
 
 The SQL-first endpoint oracle is `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
-This checkpoint prepares its projection and exact JSON encoder. The HTTP
-listener, gates, PostgreSQL connection and external pytest process routing are
-incomplete. No builds, tests, disposable endpoint cells or parity acceptance
-are claimed; the native `serve` leaf retains its deferred CLI refusal.
+The bounded native `serve` entry point owns the listener, request admission,
+query limits, initialized-bank SQL projection and exact response bytes for
+`GET /api/maintainer/sent`. It uses the committed shared PostgreSQL module
+from `0341ad38e04df356360b1d3cbd4b51b5faefa5b4`, with explicit DSN/TLS
+and the named SAN-only hostname policy; no Python implementation is called.
+Its first Windows disposable cell matched a nonempty SQL result against the
+Python store plus JSON contract, and verified process-tree/database cleanup.
+That cell used JSON-as-YAML and does not establish whole HTTP oracle parity,
+YAML parity, the later candidate source, Linux execution or performance.
+The complete corpus and external test routing still require execution.
 
-The approved next entry point is a bounded native `serve` subset. Pinned Python
-`serve` parses no trailing flags: it calls `run_daemon()` and reads bind, port,
-bank/config and bearer/principal settings from the existing environment. The
-complete `/api/maintainer/sent` boundary must own gates, queries, SQL, errors
-and bytes. Every other path will return HTTP 501 with this fixed body, also
-declared as `maintainer_sent::DEFERRED_BODY`:
+Pinned Python `serve` parses no trailing flags: it calls `run_daemon()` and
+reads `PSEUDOLIFE_MCP_HOST`, `PORT`, `DATABASE_URL`, `CONFIG`, `TOKEN`, `TOKENS`
+and `TRUST_BIND` using the `PSEUDOLIFE_MCP_` prefix. The candidate follows this
+entry point; no new Python mode or command-line flags are introduced.
+All other paths, including `/health`, return HTTP 501 with the same body:
+`{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}`.
+Affirmative readiness is a flushed stdout JSON notice, verified against the
+fixture's nonce, listener port and owned process. Fixture shutdown uses the
+existing process-tree owner; graceful signal shutdown remains separately
+unverified. No installation, production shadow or cutover is enabled.
 
-```json
-{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}
-```
-
-That body is a candidate refusal, not Python parity. `/health` is deferred too;
-the future owned-process adapter needs affirmative readiness independently of
-that HTTP response, and bounded shutdown with no descendants. Original
-maintainer web/role/fixture tests remain unchanged. Direct internals, successful
-Recorder calls and the mixed signed-write workflow remain Python oracle cases
-until a real process mapping preserves their assertions and bank ownership.
-No installation path selects the candidate.
-
-Supplemental controls in `evals/rust_port/maintainer_sent.py` retain raw bytes,
-application headers, Python default separators/ASCII escapes, float spelling,
-named UUID/timestamp producers and proof truthiness. The ordered-object fixture
-is not a database JSONB-order proof. Real SQL/JSONB/gate corpus replay, shared
-PostgreSQL integration, cold/TLS/recovery and both-platform acceptance remain
-pending. The generic earlier HTTP comparator is not the exact-byte sent gate.
+| Boundary | Candidate coverage | Status |
+|---|---|---|
+| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL corpus prepared | deferred pending executed corpus |
+| Supplemental serialization | ASCII escaping, Python float spelling, separators, producer order, large integers, named UUID/timestamp `default=str` fixtures | deferred pending native corpus execution |
+| Configuration | `config-yaml-typed`: pinned pure Rust YAML reader, audited typed fields/defaults, named ambiguity/tag/duplicate/type refusals | substitution decision; execution pending |
+| Original tests | External plugin routes only the eligible tokenless sent GET node to a real owned HTTP process; Recorder success/internal assertions remain Python | routing execution pending |
+| Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred |
+| Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred |
 
 ## Parity rows
 

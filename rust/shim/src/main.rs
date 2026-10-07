@@ -11,6 +11,9 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if arguments.first().and_then(|mode| mode.to_str()) == Some("serve") {
+        return pseudolife_stdio::sent_serve::run().await;
+    }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
     {

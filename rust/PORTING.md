@@ -74,6 +74,44 @@ installation or an implicit interpreter lookup.
 
 ## Types and serialization
 
+The SQL-first maintainer sent candidate is pinned separately to Python
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75`. For this leaf, status, the four
+application headers and body bytes are exact: no object sorting, rounding,
+Unicode normalization, timestamp substitution or semantic JSON comparison.
+Database-observed JSONB member order is retained. SQL orders by descending
+`created_at`, then ascending `message_id`; expired/read/acknowledged/repudiated
+messages are not filtered. UUID and datetime `default=str` cases are named
+supplemental serializer producers, not claims about the current SQL columns.
+
+The maintainer approved `config-yaml-typed`: use the maintained pure Rust
+`yaml-rust2 = 0.13.0`, without its encoding feature, instead of the deprecated
+serde_yaml stack or a bespoke YAML parser. Its presentation events retain
+quoting and tags before the safe loader constructs values. The audited fields
+are `coordination.enabled`, `coordination.allowed_principals`, and
+`coordination.maintainer.rp_id/origin`; missing fields/files use AppConfig's
+defaults. Explicit tags are outside this candidate's configuration domain.
+Duplicate keys, wrong audited field/section types, multiple documents and
+unquoted YAML 1.1/1.2 disagreements fail startup with `config-yaml-typed`.
+The disagreement corpus includes yes/no/on/off, leading-zero/0o/0b integers,
+base-60 numbers, underscored numbers, differing exponent forms and timestamps;
+quoted equivalents remain strings. Plain integer spellings that the YAML
+loader would turn into strings are explicitly refused, so they cannot satisfy
+an audited string field. Unused ordinary sections retain the
+Python loader's ignored-field behavior. The first disposable smoke cell used
+JSON-as-YAML and is not evidence for this later YAML reader. The
+[upstream parser API](https://docs.rs/yaml-rust2/0.13.0/yaml_rust2/parser/index.html)
+documents the event/style information this policy uses.
+
+For eligible original assertions, `evals/rust_port/pytest_plugin.py` passes
+the unchanged ASGI request through `sent_http.py` to a real owned native HTTP
+process on a generated disposable bank. It never replaces a Python service
+method with Rust. Direct Python internal/Recorder assertions remain oracle
+tests. Additional paired HTTP/SQL tests own equivalent generated banks
+sequentially and check unchanged durable state after each arm. No production
+shadow is enabled: Python remains the serving implementation until the full
+comparison, snapshot/export, TLS and rollback gates in the accepted decision
+brief pass. Embedding-ranked reads remain deferred with no numerical claim.
+
 | Python behaviour | Rust contract |
 |---|---|
 | Absent key, explicit `None`, empty string/list/object | Preserve each distinction at the boundary; do not insert defaults during comparison. |

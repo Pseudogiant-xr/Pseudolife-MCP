@@ -1,6 +1,5 @@
 //! Own response bytes for the sent HTTP slice; no Python serialization bridge.
 //!
-//! This source checkpoint is not connected to a listener or PostgreSQL yet.
 //! Objects retain producer order, including database-observed JSONB order.
 use std::fmt::Write as _;
 

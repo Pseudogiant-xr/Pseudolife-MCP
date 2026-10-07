@@ -1,5 +1,4 @@
-//! SQL/projection preparation for the complete sent HTTP boundary.
-//! No listener, admission gate or PostgreSQL session is wired at this checkpoint.
+//! SQL/projection for the initialized-bank native sent HTTP boundary.
 use crate::sent_json::Json;
 
 pub const SENT_SQL: &str = "SELECT m.*,a.label AS recipient_label FROM coordination_messages m \
