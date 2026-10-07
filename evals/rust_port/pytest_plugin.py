@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import subprocess
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 import os
 import subprocess
 
@@ -54,6 +54,14 @@ def boundary(node):
     return MANIFEST["mapped"].get(node)
 
 
+def sent_eligible(item):
+    """Recorder success assertions remain internal Python oracle tests."""
+    return (item.nodeid.startswith("tests/test_maintainer_web.py::test_a_tokenless_daemon_refuses_every_maintainer_route[")
+            and getattr(item, "callspec", None) is not None
+            and item.callspec.params.get("method") == "GET"
+            and item.callspec.params.get("path") == "/api/maintainer/sent")
+
+
 def public_cli_arguments(command):
     if not isinstance(command, (list, tuple)) or not command:
         return None
@@ -67,17 +75,20 @@ def public_cli_arguments(command):
 def pytest_addoption(parser):
     parser.addoption("--port-cli-json", help="JSON argv prefix for the whole executable under test")
     parser.addoption("--port-stdio-json", help="JSON argv prefix for public shim process tests")
+    parser.addoption("--port-sent-json", help="JSON argv prefix for native sent HTTP process tests")
     parser.addoption("--port-full-suite", action="store_true",
                      help="Route mapped stdio tests and run all other tests against Python")
 
 
 def pytest_configure(config):
     for option, attribute in (("--port-cli-json", "_port_cli_prefix"),
-                              ("--port-stdio-json", "_port_stdio_prefix")):
+                              ("--port-stdio-json", "_port_stdio_prefix"),
+                              ("--port-sent-json", "_port_sent_prefix")):
         value = config.getoption(option)
         if value is None:
             value = os.environ.get({"--port-cli-json": "PSEUDOLIFE_PORT_CLI_JSON",
-                                    "--port-stdio-json": "PSEUDOLIFE_PORT_STDIO_JSON"}[option])
+                                    "--port-stdio-json": "PSEUDOLIFE_PORT_STDIO_JSON",
+                                    "--port-sent-json": "PSEUDOLIFE_PORT_SENT_JSON"}[option])
         if value is None:
             continue
         try:
@@ -95,6 +106,8 @@ def pytest_collection_finish(session):
         boundaries.add("cli-main-process")
     if hasattr(session.config, "_port_stdio_prefix"):
         boundaries.add("stdio-shim-process")
+    if hasattr(session.config, "_port_sent_prefix"):
+        boundaries.add("sent-http-process")
     if not boundaries:
         if session.config.getoption("--port-full-suite"):
             raise pytest.UsageError("--port-full-suite requires --port-stdio-json")
@@ -111,7 +124,11 @@ def pytest_collection_finish(session):
             reporter.write_line(f"Rust shim routing: {routed} candidate nodes; "
                                 f"{len(session.items) - routed} Python oracle nodes")
         return
-    unmapped = [item.nodeid for item in session.items if boundary(item.nodeid) not in boundaries]
+    unmapped = [item.nodeid for item in session.items if boundary(item.nodeid) not in boundaries
+               and not ("sent-http-process" in boundaries and (sent_eligible(item)
+                        or item.nodeid.startswith(("evals/rust_port/test_sent_http_process.py::",
+                                                  "evals/rust_port/test_sent_review_controls.py::",
+                                                  "evals/rust_port/test_sent_jsonb_keys.py::"))))]
     if unmapped:
         # No silent skip/deselection: an explicit supported selection is required.
         raise pytest.UsageError("selected tests have no process adapter: " + ", ".join(unmapped))
@@ -119,6 +136,26 @@ def pytest_collection_finish(session):
 
 @pytest.fixture(autouse=True)
 def _port_selected_boundary(request):
+    sent_prefix = getattr(request.config, "_port_sent_prefix", None)
+    if sent_prefix is not None and sent_eligible(request.node):
+        from evals.rust_baseline.daemon import disposable_database
+        from evals.rust_port.sent_http import native_sent, asgi_http_adapter
+        from psycopg.conninfo import make_conninfo
+        # The original test's Recorder is never called; only its assertions run.
+        # Tokenless admission requires no schema or application-service startup.
+        stack = ExitStack()
+        request.addfinalizer(stack.close)
+        generated = stack.enter_context(disposable_database())
+        client, _ = stack.enter_context(native_sent(
+            sent_prefix, request.getfixturevalue("tmp_path"),
+            make_conninfo(generated, sslmode="disable")))
+        adapter = asgi_http_adapter(client)
+        def app(service, token=None):
+            if token is not None:
+                raise ValueError("tokenless routing adapter received a bearer fixture")
+            return adapter
+        request.getfixturevalue("monkeypatch").setattr(request.node.module, "_app", app)
+        return
     stdio_prefix = getattr(request.config, "_port_stdio_prefix", None)
     if stdio_prefix is not None and MANIFEST["mapped"].get(request.node.nodeid) == "stdio-shim-process":
         import mcp.client.stdio

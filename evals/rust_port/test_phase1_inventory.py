@@ -34,6 +34,19 @@ def test_legacy_inventory_retains_its_real_pin(inventory):
     assert result["buckets"] == {"oracle": 68, "candidate": 1, "internal": 337}
 
 
+@pytest.mark.parametrize("phase1", [False, True])
+def test_candidate_summary_does_not_admit_candidate_register_status(inventory, monkeypatch, phase1):
+    original = inventory.source
+    def candidate_register(path):
+        text = original(path)
+        if path == "rust/PARITY.md":
+            text += "\n| Row | Status |\n|---|---|\n| SENT-CANDIDATE-ONLY | candidate |\n"
+        return text
+    monkeypatch.setattr(inventory, "source", candidate_register)
+    with pytest.raises(AssertionError, match="invalid parity status:"):
+        inventory.validate(phase1=phase1)
+
+
 def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
     root = inventory.ROOT
     pinned = subprocess.check_output(["git", "show", inventory.PHASE1_ORACLE + ":pyproject.toml"], cwd=root)
