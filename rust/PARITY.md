@@ -45,7 +45,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
-| CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. | Final7e both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md); final hosted acceptance and independent review pending | deferred |
+| CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
 | CLI-LEASE | 4 remainder | Complete action set; `hold`, `break`, `delegate` and `designate` explicitly refuse exit 1 with `deferred in this candidate`, without Python/silent fallback. This candidate loses those actions until Phase 4. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; full mode requires every action native plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
@@ -833,7 +833,7 @@ historical extreme-text exception expectations; raw observations are preserved.
 
 Per-cell raw response/expected hashes, actual exits, fixture bytes, original
 instrument bindings and cleanup are in `policy-evidence.json`/`policy-inputs.json`
-in the bundle. The new additive `test_lease_extreme_list_exit_policy.py`
+in the bundle. The new additive [evals/rust_port/test_lease_extreme_list_exit_policy.py](../evals/rust_port/test_lease_extreme_list_exit_policy.py)
 rejects unrelated list exit differences and malformed/no traceback; the current
 checker also replays all 32 captured cells and rejects 32 wrong-exit controls
 offline. No old test file or assertion is changed.
@@ -848,7 +848,13 @@ surrogates and UTF-16/32 replies are not understood. A malformed or nonfinite
 HTTP 200 reply produces exit 1, empty stdout and exactly
 `lease: HTTP_REPLY_NOT_UNDERSTOOD` plus the platform newline, before local
 fallback, lock creation or child launch. A registration request needed to receive
-that reply is permitted; no lease/release request follows. This named
+that reply is permitted; an unsuccessful registration leaves no address for a
+subsequent lease/release request. If registration succeeded and a grant/queue
+reply is malformed, run releases its local lock and makes a best-effort scoped
+board release before returning the refusal, removing any committed holder or
+waiter when the board accepts cleanup. This parse-refusal policy applies only
+to HTTP 200 replies; malformed non-200 bodies retain ordinary HTTP refusal or
+transient retry/fallback handling. This named
 `http-reply-not-understood` substitution also covers a malformed surrogate reply
 containing a forbidden header field. After successful parsing, every present
 string-valued registration header still undergoes C0/DEL admission before
