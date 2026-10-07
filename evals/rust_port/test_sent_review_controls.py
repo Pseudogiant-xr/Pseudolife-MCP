@@ -28,6 +28,27 @@ from evals.rust_port.processes import owned_process
 MERGE_FIELDS = ["enabled: false", "allowed_principals: []", "enabled: false, allowed_principals: []"]
 
 
+def require_sent_postgres():
+    """Skip optional producer controls only when the admin transport is absent."""
+    __tracebackhide__ = True
+    from tests.pg_defaults import default_admin_url, is_server_unavailable
+
+    admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()
+    try:
+        with psycopg.connect(admin, autocommit=True, connect_timeout=5):
+            pass
+    except psycopg.OperationalError as error:
+        if (is_server_unavailable(error)
+                and os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1"):
+            pytest.skip("disposable sent PostgreSQL admin is unreachable; real-PG producer control not executed")
+        raise
+
+
+@pytest.fixture
+def sent_postgres():
+    require_sent_postgres()
+
+
 def merge_configuration(fields):
     return (f"defaults: &deny {{{fields}}}\ncoordination:\n  <<: *deny\n"
             "  maintainer:\n    rp_id: localhost\n    origin: http://localhost\n")
@@ -226,7 +247,7 @@ def test_jsonb_read_domains(prefix, tmp_path, monkeypatch, raw, native_status, o
         assert raw.encode().replace(b":", b": ") in base64.b64decode(actual["body_b64"])
 
 
-def test_canonical_send_ingress_rejects_4301_before_store(tmp_path):
+def test_canonical_send_ingress_rejects_4301_before_store(tmp_path, sent_postgres):
     from pseudolife_memory.maintainer import MaintainerOps
     from pseudolife_memory.web.fixtures import FixtureService
     from pseudolife_memory.web.api import build_console_app
@@ -255,7 +276,7 @@ def test_canonical_send_ingress_rejects_4301_before_store(tmp_path):
 
 
 @pytest.mark.parametrize("depth,accepted", [(200, True), (2048, False), (2049, False)])
-def test_canonical_board_send_depth(tmp_path, depth, accepted):
+def test_canonical_board_send_depth(tmp_path, sent_postgres, depth, accepted):
     proof = 0
     for _ in range(depth - 1):
         proof = [proof]
@@ -264,7 +285,7 @@ def test_canonical_board_send_depth(tmp_path, depth, accepted):
 
 
 @pytest.mark.parametrize("sign", [1, -1])
-def test_canonical_board_send_integer4301(sign):
+def test_canonical_board_send_integer4301(sent_postgres, sign):
     board_send_proof({"label": "synthetic", "integer_control": sign * (10 ** 4300)}, False, ValueError)
 
 
