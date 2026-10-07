@@ -101,6 +101,14 @@ unverified. No installation, production shadow or cutover is enabled.
 | Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | approved substitution; bounded Windows controls passed |
 | JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | named read domain; depth 200 exact, boundary policy controls separate |
 | JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
+
+Actual JSONB object keys remain ordinary application data, including
+`$serde_json::private::Number`. The decoder reversibly prefixes object keys
+before serde validation and removes exactly that prefix before projection;
+values and database-observed member order remain unchanged. This avoids serde's
+internal arbitrary-precision number tag without changing shared serde features
+or normalizing response bytes. Canonical send admission and paired whole HTTP
+controls cover numeric-string, text, numeric-value and nested object cases.
 | Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | one mapped node passed locally; no native claim for internal nodes |
 | Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred |
 | Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred |
