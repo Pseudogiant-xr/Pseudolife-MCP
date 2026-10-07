@@ -100,7 +100,7 @@
       <h2 class="panel-title">Artifacts <span class="dim">{data.artifacts.length} shown</span></h2>
       {#each data.artifacts as artifact (artifact.id)}
         <details class="proof-card">
-          <summary><span class="mono">{artifact.locator || `Artifact ${artifact.id}`}</span><span class="chip">{artifact.kind}</span><p>{artifact.summary || artifact.source_path}</p></summary>
+          <summary><span class="mono">{artifact.locator || `Artifact ${artifact.id}`}</span><span class="chip">{artifact.kind}</span><p>{artifact.summary || artifact.source_path}</p><p class="meta" title={fmtDateTime(artifact.ingested_at)}>Added {fmtRelative(artifact.ingested_at)}</p></summary>
           <dl>
             <dt>Artifact id</dt><dd>#{artifact.id}</dd>
             <dt>Source</dt><dd>{artifact.source_path}</dd>
@@ -116,7 +116,7 @@
       <h2 class="panel-title">Claims <span class="dim">{data.claims.length} shown</span></h2>
       {#each data.claims as claim (claim.id)}
         <details class="proof-card">
-          <summary><span class="mono">{claim.subject}</span><span class="chip">{claim.status}</span><p>{claim.claim}</p></summary>
+          <summary><span class="mono">{claim.subject}</span><span class="chip">{claim.status}</span><p>{claim.claim}</p><p class="meta" title={fmtDateTime(claim.created_at)}>Added {fmtRelative(claim.created_at)}</p></summary>
           <dl>
             <dt>Claim id</dt><dd>#{claim.id}</dd>
             <dt>Confidence</dt><dd>{claim.confidence == null ? "Unspecified" : `${Math.round(claim.confidence * 100)}%`}</dd>

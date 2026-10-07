@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-07 — RE Evidence card ages)
+- Show relative ingestion and creation ages on collapsed artifact and claim
+  cards, with the exact timestamp available on hover.
+
 ### Changed (2026-10-05 — upstream v0.17.0 integration)
 - Integrate upstream v0.17.0 and its v55 schema while retaining the independent
   `v34-rehub` proof tables, immutable artifacts and evidence-linked claims.
