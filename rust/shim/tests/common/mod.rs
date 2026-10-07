@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod cli;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -465,13 +466,8 @@ impl LeaseHome {
         home
     }
     fn base_command(&self, url: &str) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
-        command.env_clear();
-        for key in ["SYSTEMROOT", "WINDIR"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
+        let mut command =
+            cli::cleared_command(std::path::Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
         command
             .env("HOME", &self.0)
             .env("USERPROFILE", &self.0)

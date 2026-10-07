@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+mod common;
+use common::cli::{cleared_command, native_text as bytes};
 use std::{
     fs,
     path::Path,
@@ -25,22 +27,8 @@ impl Drop for DisposableHome {
     }
 }
 
-fn bytes(text: &str) -> Vec<u8> {
-    if cfg!(windows) {
-        text.replace('\n', "\r\n").into_bytes()
-    } else {
-        text.as_bytes().to_vec()
-    }
-}
-
 fn command(executable: &Path, home: &Path) -> Command {
-    let mut command = Command::new(executable);
-    command.env_clear();
-    for name in ["SYSTEMROOT", "WINDIR"] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
+    let mut command = cleared_command(executable);
     command
         .env("HOME", home)
         .env("USERPROFILE", home)
