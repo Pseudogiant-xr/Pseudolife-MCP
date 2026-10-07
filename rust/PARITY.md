@@ -1465,8 +1465,9 @@ exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
 images retain their original source identities and do not validate this
 changed runtime. The port-owned operator deferral assertion is replaced by
 the approved explicit malformed-DSN refusal control, retaining exact exit,
-streams, deprecation ordering and unchanged local files. That control ran on
-the historical candidates; the current repairs remain unrun. Original Python
+streams, deprecation ordering and unchanged local files. At source checkpoint
+`3583bb6c`, that control had run only on the historical candidates; the repairs
+at that checkpoint remained unrun. Original Python
 and tests retain accepted master bytes.
 No lease mode is promoted.
 
