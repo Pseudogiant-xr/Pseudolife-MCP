@@ -8,10 +8,9 @@ use std::{
 };
 #[path = "doorbell_files.rs"]
 mod files;
-#[allow(dead_code, unused_imports, unused_macros)]
 #[path = "doorbell_json.rs"]
 mod json;
-use json::{Number, Value};
+use json::Value;
 #[derive(Debug)]
 enum Failure {
     Silent,
@@ -24,79 +23,59 @@ impl From<()> for Failure {
         Self::Silent
     }
 }
-impl From<json::Error> for Failure {
-    fn from(error: json::Error) -> Self {
-        match error {
-            json::Error::Invalid => Self::Silent,
-            json::Error::Recursion(diagnostic) => Self::Exceptional(diagnostic),
-        }
-    }
-}
-
-fn repr(text: &str) -> String {
-    super::mode_repr(text)
-}
-fn number_json(value: &serde_json::Value, _pretty: bool) -> String {
-    value.to_string()
-}
-
-fn integer(value: &Value) -> Option<String> {
-    if let Value::Number(Number::Ordinary(n)) = value {
-        let text = n.to_string();
-        if !text.contains(['.', 'e', 'E']) {
-            return Some(text);
-        }
-    }
-    None
-}
-fn positive(value: &Value) -> Option<String> {
-    integer(value).filter(|n| n != "0" && !n.starts_with('-'))
-}
-fn int_le(a: &str, b: &str) -> bool {
-    a.len() < b.len() || (a.len() == b.len() && a <= b)
-}
-fn timestamp(value: &Value) -> Result<Option<f64>, Failure> {
-    let number = value.as_f64();
-    if integer(value).is_some() && number.is_none_or(|n| !n.is_finite()) {
-        return Err(Failure::Exceptional(
-            "OverflowError: int too large to convert to float",
-        ));
-    }
-    Ok(number.filter(|n| n.is_finite() && *n >= 0.0))
-}
-fn add_day(integer: &str) -> String {
-    let mut digits = integer.as_bytes().to_vec();
-    let mut carry = 86400_u32;
-    for digit in digits.iter_mut().rev() {
-        let sum = u32::from(*digit - b'0') + carry;
-        *digit = b'0' + (sum % 10) as u8;
-        carry = sum / 10;
-    }
-    let tail = String::from_utf8(digits).expect("decimal integer");
-    if carry == 0 {
-        tail
-    } else {
-        format!("{carry}{tail}")
-    }
-}
-fn expiry_equal(expiry: &Value, first: &Value) -> Result<bool, Failure> {
-    let Some(first_float) = timestamp(first)? else {
-        return Ok(false);
+fn integer(value: &Value) -> Option<u64> {
+    let Value::Number(number) = value else {
+        return None;
     };
+    let text = number.to_string();
+    if text == "-0" {
+        Some(0)
+    } else if !text.contains(['.', 'e', 'E']) {
+        number.as_u64()
+    } else {
+        None
+    }
+}
+fn positive(value: &Value) -> Option<u64> {
+    integer(value).filter(|n| *n > 0)
+}
+fn timestamp(value: &Value) -> Option<f64> {
+    let Value::Number(number) = value else {
+        return None;
+    };
+    let text = number.to_string();
+    let number = if text.contains(['.', 'e', 'E']) {
+        number.as_f64()?
+    } else {
+        integer(value)? as f64
+    };
+    (number.is_finite() && number >= 0.0).then_some(number)
+}
+fn expiry_equal(expiry: &Value, first: &Value) -> bool {
+    let Some(first_float) = timestamp(first) else {
+        return false;
+    };
+    if timestamp(expiry).is_none() {
+        return false;
+    }
     if let Some(first_integer) = integer(first) {
-        let expected = add_day(&first_integer);
+        let Some(expected) = first_integer.checked_add(86400) else {
+            return false;
+        };
         if let Some(actual) = integer(expiry) {
-            return Ok(actual == expected);
+            return actual == expected;
         }
-        return Ok(expiry
+        return expiry
             .as_f64()
-            .is_some_and(|n| n.fract() == 0.0 && format!("{n:.0}") == expected));
+            .is_some_and(|n| n.fract() == 0.0 && format!("{n:.0}") == expected.to_string());
     }
     let expected = first_float + 86400.0;
     if let Some(actual) = integer(expiry) {
-        return Ok(expected.fract() == 0.0 && actual == format!("{expected:.0}"));
+        return expected.is_finite()
+            && expected.fract() == 0.0
+            && actual.to_string() == format!("{expected:.0}");
     }
-    Ok(expiry.as_f64() == Some(expected))
+    expected.is_finite() && expiry.as_f64() == Some(expected)
 }
 
 fn notice_text(count: &str, nonce: &str, version: &str, unknown: bool, maintainer: &str) -> String {
@@ -126,8 +105,7 @@ fn notice_text(count: &str, nonce: &str, version: &str, unknown: bool, maintaine
 
 fn current(path: &Path, thread: &str) -> Result<Value, Failure> {
     let text = files::read_text(path)?;
-    // The public _current caller adds two frames to the hook's JSON boundary.
-    let mut record = json::from_str_bounded(&text, 988)?;
+    let mut record = json::from_str(&text)?;
     if !record.is_object() || record["thread_id"].as_str() != Some(thread) {
         return Err(Failure::Silent);
     }
@@ -142,30 +120,29 @@ fn current(path: &Path, thread: &str) -> Result<Value, Failure> {
         .ok_or(())?;
     let version = record
         .get("version")
-        .map_or(Some("1".into()), integer)
-        .filter(|v| matches!(v.as_str(), "1" | "2" | "3"))
+        .map_or(Some(1), integer)
+        .filter(|v| matches!(v, 1 | 2 | 3))
         .ok_or(())?;
     let state = &record["recipient_state"];
-    if !state.is_null() && state.as_str() != Some("unknown") || version == "1" && !state.is_null() {
+    if !state.is_null() && state.as_str() != Some("unknown") || version == 1 && !state.is_null() {
         return Err(Failure::Silent);
     }
     let maintainer = record
         .get("maintainer")
-        .map_or(Some("0".into()), integer)
+        .map_or(Some(0), integer)
         .ok_or(())?;
-    if (version == "3") != record.get("maintainer").is_some()
-        || version == "3"
-            && (maintainer == "0" || maintainer.starts_with('-') || !int_le(&maintainer, &count))
+    if (version == 3) != record.get("maintainer").is_some()
+        || version == 3 && (maintainer == 0 || maintainer > count)
     {
         return Err(Failure::Silent);
     }
     if record["text"].as_str()
         != Some(&notice_text(
-            &count,
+            &count.to_string(),
             nonce,
-            &version,
+            &version.to_string(),
             state.as_str() == Some("unknown"),
-            &maintainer,
+            &maintainer.to_string(),
         ))
     {
         return Err(Failure::Silent);
@@ -179,20 +156,17 @@ fn current(path: &Path, thread: &str) -> Result<Value, Failure> {
             .map_err(|_| ())?
             .as_secs_f64();
         record["version"] = 1.into();
-        record["legacy_first_seen"] = Value::Number(Number::Ordinary(
-            serde_json::Number::from_f64(now).ok_or(())?,
-        ));
-        record["expires_at"] = Value::Number(Number::Ordinary(
-            serde_json::Number::from_f64(now + 86400.0).ok_or(())?,
-        ));
+        record["legacy_first_seen"] = Value::Number(serde_json::Number::from_f64(now).ok_or(())?);
+        record["expires_at"] =
+            Value::Number(serde_json::Number::from_f64(now + 86400.0).ok_or(())?);
         record["expiry_basis"] = "legacy_upper_bound".into();
         files::write_atomic(path, &record.to_string())?;
     }
-    timestamp(&record["expires_at"])?.ok_or(())?;
+    timestamp(&record["expires_at"]).ok_or(())?;
     match record["expiry_basis"].as_str() {
         Some("message") => (),
         Some("legacy_upper_bound")
-            if expiry_equal(&record["expires_at"], &record["legacy_first_seen"])? => {}
+            if expiry_equal(&record["expires_at"], &record["legacy_first_seen"]) => {}
         _ => return Err(Failure::Silent),
     }
     Ok(record)
@@ -278,7 +252,7 @@ fn handle() -> Result<(), Failure> {
     if raw.len() > 65536 {
         return Ok(());
     }
-    let payload = json::from_str_bounded(std::str::from_utf8(&raw).map_err(|_| ())?, 990)?;
+    let payload = json::from_str(std::str::from_utf8(&raw).map_err(|_| ())?)?;
     let thread = payload["session_id"]
         .as_str()
         .and_then(crate::board::policy::canonical_uuid)
@@ -303,17 +277,8 @@ fn handle() -> Result<(), Failure> {
     Ok(())
 }
 pub(super) fn run() -> ExitCode {
-    // The shared JSON decoder keeps Python's string/number domain. A separate
-    // stack accommodates its recursion without relying on the console stack.
-    let result = std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(handle)
-        .and_then(|t| {
-            t.join()
-                .map_err(|_| io::Error::other("prompt parser failed"))
-        });
-    match result {
-        Ok(Err(Failure::Exceptional(diagnostic))) => {
+    match handle() {
+        Err(Failure::Exceptional(diagnostic)) => {
             #[cfg(windows)]
             let newline = "\r\n";
             #[cfg(not(windows))]
@@ -333,12 +298,48 @@ mod tests {
     #[test]
     fn exact_integer_domain() {
         assert_eq!(
-            positive(&json::from_str("184467440737095516160").unwrap()).as_deref(),
-            Some("184467440737095516160")
+            positive(&json::from_str("18446744073709551615").unwrap()),
+            Some(u64::MAX)
         );
+        assert!(positive(&json::from_str("18446744073709551616").unwrap()).is_none());
         for value in ["true", "1.0", "0", "-1"] {
             assert!(positive(&json::from_str(value).unwrap()).is_none());
         }
+    }
+    #[test]
+    fn relevant_timestamps_and_checked_expiry_are_exact() {
+        let parse = |text: &str| json::from_str(text).unwrap();
+        for invalid in ["true", "-1", "18446744073709551616"] {
+            assert!(timestamp(&parse(invalid)).is_none());
+        }
+        assert_eq!(timestamp(&parse("-0")), Some(0.0));
+        assert!(timestamp(&parse("18446744073709551615")).is_some());
+        assert!(expiry_equal(
+            &parse("18014398509568384"),
+            &parse("18014398509481984")
+        ));
+        assert!(!expiry_equal(
+            &parse("18014398509568385"),
+            &parse("18014398509481984")
+        ));
+        assert!(expiry_equal(
+            &parse("18014398509568384.0"),
+            &parse("18014398509481984")
+        ));
+        assert!(expiry_equal(
+            &parse("18014398509568384"),
+            &parse("18014398509481984.0")
+        ));
+        assert!(!expiry_equal(
+            &parse("18446744073709551615"),
+            &parse("18446744073709551615")
+        ));
+        assert!(!expiry_equal(
+            &parse("18446744073709551616"),
+            &parse("18446744073709465216")
+        ));
+        assert!(expiry_equal(&parse("86400.5"), &parse("0.5")));
+        assert!(!expiry_equal(&parse("86400"), &parse("0.5")));
     }
     #[test]
     fn v3_keeps_unknown_and_maintainer_text() {

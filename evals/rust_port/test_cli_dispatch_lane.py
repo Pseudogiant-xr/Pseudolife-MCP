@@ -103,8 +103,8 @@ def test_cli_dispatch_includes_exact_admitted_hooks_without_duplicates(monkeypat
                   if mode == "cli-main-process"}
     admitted = pytest_plugin.CLI_HOOK_NODES
     nodes = cli_dispatch.selected_nodes()
-    assert len(historical) == 5 and len(admitted) == 4 and not pytest_plugin.CLI_SUBPROCESS_NODES
-    assert nodes == sorted(historical | admitted) and len(nodes) == 9
+    assert len(historical) == 8 and len(admitted) == 4 and not pytest_plugin.CLI_SUBPROCESS_NODES
+    assert nodes == sorted(historical | admitted) and len(nodes) == 12
     monkeypatch.setattr(pytest_plugin, "CLI_HOOK_NODES", admitted | historical)
     assert cli_dispatch.selected_nodes() == nodes
     monkeypatch.setattr(pytest_plugin, "CLI_HOOK_NODES", set())

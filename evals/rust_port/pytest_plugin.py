@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 from contextlib import asynccontextmanager
 import os
+import subprocess
 
 import pytest
 

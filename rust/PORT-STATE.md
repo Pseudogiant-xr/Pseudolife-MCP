@@ -2,6 +2,27 @@
 
 ## Doorbell prompt receipt candidate
 
+The doorbell candidate's source now uses the four approved producer domains
+listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
+Preparation removes the cloned CPython value/parser model and retains private
+files, locking, atomic replacement and the production rollback allowlist.
+Fresh Windows/Linux native proof, interruption controls, full-suite validation,
+independent review and current-head CI are pending; the mode remains deferred.
+
+Accepted master `0b46bb8e` is integrated locally. Four code conflicts were
+resolved in `evals/rust_baseline/cli_measurement.py`,
+`evals/rust_port/cli_dispatch.py`, `evals/rust_port/pytest_plugin.py` and
+`rust/shim/src/main.rs`; accepted version admission and warm-image behavior
+were retained with the doorbell paths. The doorbell's residual `users` calls now
+use the accepted native account lookup and real uid mechanism. A local full
+suite is required after these manual code resolutions. No native execution or
+new performance measurement has occurred for this reduced source.
+
+The captures, fault outcomes and line counts below describe the historical
+CPython-compatible candidate before producer reduction; they do not validate
+the reduced source. Integer-limit, unsupported JSON and recursion expectations
+are superseded only by the four named domains; raw evidence remains retained.
+
 Native `doorbell-prompt-seen` is implemented against the
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remains deferred.
 Current committed ordinary captures at `5803ea08767316078d9b3f4877c4db5376a489bf`

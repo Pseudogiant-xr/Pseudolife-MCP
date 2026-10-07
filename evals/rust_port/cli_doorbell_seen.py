@@ -23,7 +23,7 @@ def child_binding_source():
     return '''import atexit,sys,pathlib,hashlib,json,types,os
 @atexit.register
 def bind():
- result={'executable':sys.executable,'prefix':sys.prefix,'integer_max_digits':sys.get_int_max_str_digits(),'modules':{}}
+ result={'executable':sys.executable,'prefix':sys.prefix,'modules':{}}
  for name in ('__main__','pseudolife_memory.codex_doorbell_state','pseudolife_memory.private_state','pseudolife_memory.codex_coordination','pseudolife_memory.coordination_identity','pseudolife_memory.os_lock'):
   module=sys.modules.get(name)
   if module is None or not getattr(module,'__file__',None):continue
@@ -52,8 +52,9 @@ def cases(notice_text):
 
     def add(name, *, pending=record, value=payload, raw=None, receipt=None,
             writes=False, locks=True, argv=(), deltas=None, state_root="digests", digest_variant=None,
-            lock_bytes=None):
-        result.append(dict(id=name, pending=copy.deepcopy(pending),
+            lock_bytes=None, pending_raw=None, candidate=None, oracle_failure=None):
+        result.append(dict(id=name, pending=copy.deepcopy(pending), pending_raw=pending_raw,
+                           candidate_expectation=candidate or {}, oracle_failure=oracle_failure,
                            stdin_b64=base64.b64encode(raw if raw is not None else
                            json.dumps(value, separators=(",", ":")).encode()).decode(),
                            receipt_b64=None if receipt is None else base64.b64encode(receipt).decode(),
@@ -153,12 +154,79 @@ def cases(notice_text):
         count = int("9"*digits)
         p = dict(record, count=count, text=notice_text(count, NONCE, version=2))
         add(f"unbounded-count-{digits}", pending=p, value=dict(payload, prompt=p["text"]), writes=True)
+    # Each policy keeps the Python input and observation intact; only the native
+    # expectation changes under the four explicitly approved producer domains.
+    standard_input = dict(writes=False, locks=False, substitution="doorbell-standard-json")
+    standard_pending = dict(writes=False, substitution="doorbell-standard-json")
+    raw_payload = json.dumps(payload).encode()
+    for token in [b"NaN", b"Infinity", b"-Infinity", b"1e99999", b'"\\ud800"', b'"\\udfff"']:
+        suffix = token.decode()
+        add("standard-input-" + suffix,
+            raw=raw_payload[:-1] + b',"extra":' + token + b'}', writes=True,
+            candidate=standard_input)
+        add("standard-pending-" + suffix, writes=True, receipt=b"prior\n",
+            pending_raw=json.dumps(record)[:-1] + ',"extra":' + suffix + '}',
+            candidate=standard_pending)
+    add("overwritten-float-overflow", raw=raw_payload[:-1] + b',"extra":1e99999,"extra":0}',
+        writes=True, candidate=standard_input)
+    add("surrogate-pair-extra", value=dict(payload, extra="😀"), writes=True)
+    for nested_arrays in [126, 127, 128]:
+        raw_extra = "[" * nested_arrays + "0" + "]" * nested_arrays
+        supported = nested_arrays < 127  # Root object also consumes serde's budget.
+        add(f"native-depth-input-{nested_arrays}", writes=True,
+            raw=raw_payload[:-1] + b',"extra":' + raw_extra.encode() + b'}',
+            candidate=dict(writes=supported, locks=supported, substitution="doorbell-native-nesting-bound"))
+        add(f"native-depth-pending-{nested_arrays}", writes=True, receipt=b"prior\n",
+            pending_raw=json.dumps(record)[:-1] + ',"extra":' + raw_extra + '}',
+            candidate=dict(writes=supported, substitution="doorbell-native-nesting-bound"))
+    for digits in [4301, 5001]:
+        add(f"ignored-pending-integer-{digits}", receipt=b"prior\n",
+            pending_raw=json.dumps(record)[:-1] + ',"extra":' + "9" * digits + '}',
+            candidate=dict(writes=True, substitution="doorbell-ignore-python-digit-limit"))
+    for count in [2**64 - 1, 2**64]:
+        p = dict(record, count=count, text=notice_text(count, NONCE, version=2))
+        add(f"count-u64-{count}", pending=p, value=dict(payload, prompt=p["text"]), writes=True,
+            candidate=dict(writes=count < 2**64, substitution="doorbell-bounded-relevant-numbers"))
+        p.update(version=3, maintainer=count, text=notice_text(count, NONCE, version=3, maintainer=count))
+        add(f"maintainer-u64-{count}", pending=p, value=dict(payload, prompt=p["text"]), writes=True,
+            candidate=dict(writes=count < 2**64, substitution="doorbell-bounded-relevant-numbers"))
+    for expiry in [2**64 - 1, 2**64]:
+        add(f"timestamp-u64-{expiry}", pending=dict(record, expires_at=expiry), writes=True,
+            candidate=dict(writes=expiry < 2**64, substitution="doorbell-bounded-relevant-numbers"))
+    p = dict(record, expiry_basis="legacy_upper_bound", legacy_first_seen=2**64 - 1,
+             expires_at=2**64 - 1 + 86400)
+    add("checked-day-overflow", pending=p, writes=True, receipt=b"prior\n",
+        candidate=dict(writes=False, substitution="doorbell-bounded-relevant-numbers"))
+    add("huge-timestamp-quiet-refusal", pending=dict(record, expires_at=10**400), receipt=b"prior\n",
+        oracle_failure="OverflowError: int too large to convert to float",
+        candidate=dict(writes=False, oracle_failure=None, substitution="doorbell-bounded-relevant-numbers"))
+    return result
+
+
+def candidate_case(case):
+    """Native expectations for the four approved producer substitutions."""
+    result = copy.deepcopy(case)
+    name = case["id"]
+    if name in {"extra-payload", "unused-float-overflow", "prompt-suffix-" + repr("\ud800")}:
+        result.update(writes=False, locks=False, substitution="doorbell-standard-json")
+    elif name == "extra-record":
+        result.update(writes=False, substitution="doorbell-standard-json")
+    elif name.startswith(("python-integer-limit-", "configured-integer-limit-")):
+        result.update(writes=True, locks=True, substitution="doorbell-ignore-python-digit-limit")
+    elif name.startswith("unbounded-count-"):
+        result.update(writes=False, substitution="doorbell-bounded-relevant-numbers")
+    result.update(case.get("candidate_expectation", {}))
     return result
 
 
 def assert_effect(case, observation, key, pre):
-    assert observation["exit_code"] == 0
-    assert observation["stdout_b64"] == observation["stderr_b64"] == ""
+    assert observation["stdout_b64"] == ""
+    if case.get("oracle_failure"):
+        assert observation["exit_code"] == 1
+        assert base64.b64decode(observation["stderr_b64"]).decode().splitlines()[-1] == case["oracle_failure"]
+    else:
+        assert observation["exit_code"] == 0
+        assert observation["stderr_b64"] == ""
     post = observation["post_files_b64"]
     root = case.get("state_root", "digests") + "/"
     pending = root + key + ".bell-pending"
@@ -241,7 +309,7 @@ def main():
                 pending = PendingNotice(capture/case["state_root"], THREAD)
                 pending.path.parent.mkdir(parents=True)
                 if case["pending"] is not None:
-                    text = json.dumps(case["pending"], ensure_ascii=False, separators=(",", ":"))
+                    text = case["pending_raw"] or json.dumps(case["pending"], ensure_ascii=False, separators=(",", ":"))
                     try:
                         text.encode("utf-8")
                     except UnicodeEncodeError:
@@ -279,12 +347,17 @@ def main():
                     observation["metadata"][path.name] = dict(private=True, nlink=st.st_nlink,
                                                               mode=oct(st.st_mode & 0o777))
                     os.close(fd)
-                assert_effect(case, observation, key, pre)
+                expected = candidate_case(case) if arm == "candidate" else case
+                assert_effect(expected, observation, key, pre)
                 arms[arm] = observation
             fields = ["exit_code", "stdout_b64", "stderr_b64", "post_files_b64"]
-            assert not compare({f: arms["oracle"][f] for f in fields},
-                               {f: arms["candidate"][f] for f in fields}, BYTE_POLICY), case["id"]
-            records.append(dict(case=case, **arms, controls=controls(arms["candidate"])))
+            differences = compare({f: arms["oracle"][f] for f in fields},
+                                  {f: arms["candidate"][f] for f in fields}, BYTE_POLICY)
+            expected = candidate_case(case)
+            if "substitution" not in expected:
+                assert not differences, case["id"]
+            records.append(dict(case=case, candidate_expectation=expected, raw_differences=differences,
+                                **arms, controls=controls(arms["candidate"])))
             args.output.write_text(json.dumps(dict(records=records, complete=False), indent=2)+"\n")
     finally:
         reset_home(home)
@@ -293,7 +366,7 @@ def main():
     args.output.write_text(json.dumps(dict(records=records, complete=True, cleanup=True,
                                          candidate_sha256=hashlib.sha256(args.candidate.read_bytes()).hexdigest()),
                                      indent=2)+"\n")
-    print(json.dumps(dict(cases=len(records), exact=True, private_metadata=True, cleanup=True)))
+    print(json.dumps(dict(cases=len(records), expectations_checked=True, private_metadata=True, cleanup=True)))
 
 
 if __name__ == "__main__":

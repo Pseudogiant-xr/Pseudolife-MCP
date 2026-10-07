@@ -10,6 +10,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Changed (2026-10-07 — bounded native prompt receipts)
+
+- The experimental native `doorbell-prompt-seen` candidate accepts standard
+  finite JSON, bounded relevant integers and the native parser depth budget;
+  unsupported input quietly leaves receipts unchanged. Ignored integer extras
+  no longer depend on Python's digit-limit environment setting. Native proof
+  remains pending and the mode remains deferred.
+
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 
 - The experimental native `version` command reports an installed runtime only

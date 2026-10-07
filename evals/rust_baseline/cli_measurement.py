@@ -226,6 +226,8 @@ def measure(args, resource, *, prepare=None, case=None):
                 except BaseException:
                     remove_root_link(active_home)
                     raise
+            if doorbell and reuse:
+                home_identity = (home.stat().st_dev, home.stat().st_ino)
             before = snapshot(active_home)
             if control:
                 baseline_files = before

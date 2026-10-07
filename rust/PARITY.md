@@ -687,3 +687,28 @@ These source-level observations remain deferred and add no merge gates.
 The subsequent integration of master `7b0abf921fe4bd4ef1c84864eef118309b400705` inherits the reviewed #607 users runtime/dependency changes without a conflict: 5 of the 341 capture-bound paths differed at `181a50d1` from executed `5220b5ee` (`rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`), while the other 336 and all 146 original production/test guard paths remain exact. The `5220b5ee` measurements remain historical source-bound executions and do not validate the inherited users implementation or this combined tree; current hosted CI and fresh review are required.
 
 Integration of master `57c007ff292cffdbb6755911bd54de837a00f9a5` retains #611 readiness evidence, #607 users and #608 executable resolution. Of the 341 paths bound to executed `5220b5ee`, 11 now differ (`evals/rust_port/phase1.py`, `evals/rust_port/phase1_receipts.py`, `evals/rust_port/stdio_judge.py`, `rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`, `rust/shim/src/lifecycle.rs`, `rust/shim/tests/auth_windows_private_state/mod.rs`, `rust/shim/tests/nonboard_final_assertions.rs`); 330 remain exact, including all 146 original production/test guard paths. Incoming changes from reviewed `181a50d1` affect 9 bound paths. The old timing images and captures remain historical executions of `5220b5ee`, without acceptance claims for this combined tree.
+
+
+## Doorbell producer domains (2026-10-07)
+
+The prompt receipt candidate now parses the hook payload and shim-owned pending
+record as standard JSON, with bounded relevant numbers and ordinary native
+parser depth. These are approved substitutions; fresh native proof is pending
+and `doorbell-prompt-seen` remains deferred. Historical CPython captures retain
+their raw inputs, outputs, failures and source identities.
+
+| Named substitution | Producer and supported domain | Refusal and controls |
+| --- | --- | --- |
+| `doorbell-standard-json` | UTF-8 host-hook forwarding and the shim's fixed-scalar pending writer. Reject NaN, Infinity, overflowing float tokens and lone surrogate escapes anywhere, including keys, ignored extras and overwritten duplicate values; valid escaped surrogate pairs remain supported. | Exit 0, empty streams, zero daemon requests. Invalid stdin creates no new files; invalid pending preserves pending/receipt bytes after the ordinary lock may be created. Token and whole-input controls are prepared. |
+| `doorbell-ignore-python-digit-limit` | External metadata may contain ignored integers; fixed pending fields have separate numeric admission. Ignored integer tokens have no Python environment digit limit within the existing 65536-byte stdin / 8192-character pending caps. | An otherwise valid input writes the normal nonce-plus-LF marker and lock regardless of `PYTHONINTMAXSTRDIGITS`; 640/641/4300/4301/5001/65000-digit stdin and large pending-extra controls retain the raw Python outcome separately. |
+| `doorbell-bounded-relevant-numbers` | Daemon SQL counts and current finite timestamps. Count is positive u64, v3 maintainer is an integer in 1..count; timestamps are nonnegative finite f64 numbers or u64 integers. Legacy integer +86400 uses checked addition and exact equality, including mixed float comparisons. | Beyond-u64 relevant integers and checked-add overflow invalidate pending with exit 0 and empty streams, preserving pending/receipt bytes; an ordinary lock may exist. Exact 2**54 expiry distinctions, u64 edges and huge-timestamp controls are prepared. |
+| `doorbell-native-nesting-bound` | Fixed pending records are shallow; arbitrary hook metadata is admitted under serde's default recursion budget of 128. Every container consumes the budget and serde rejects when it reaches zero, so 127 nested containers are supported and the 128th is refused. | The same quiet stdin/pending refusal rules apply. Boundary controls count the root object as a container. No CPython recursion frame accounting or extra parser thread remains. |
+
+Duplicate keys still take the last value without moving the first key position.
+Legacy rewrites retain the original fixed-field order, appended upgrade fields,
+compact serialization, finite generated number formatting and final LF; byte
+controls are prepared and must be verified natively before acceptance. This
+change grants no serialization substitution. Path expansion, private-file gates,
+codepoint file limits, interprocess locks, atomic staging and the production
+rollback allowlist remain in place. The interpreter-wide Windows errno sweep is
+replaced by bounded tests around the same unchanged raw-code allowlist.

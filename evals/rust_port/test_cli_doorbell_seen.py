@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from .cli_doorbell_seen import NONCE, THREAD, assert_effect, cases, controls
+from .cli_doorbell_seen import NONCE, THREAD, assert_effect, candidate_case, cases, controls
 
 
 def successful_observation():
@@ -55,3 +55,37 @@ def test_review_integer_counterexamples_have_independent_receipt_expectations():
         assert case["environment_deltas"] == {"PYTHONINTMAXSTRDIGITS": limit}
         assert case["writes"] is writes and case["locks"] is writes
         assert b'"extra":' + b'9'*digits in base64.b64decode(case["stdin_b64"])
+
+
+def test_approved_substitutions_preserve_raw_oracle_expectations():
+    selected = {case["id"]: case for case in cases(lambda *args, **kwargs: "fixed notice")}
+    for name, writes, locks, policy in [
+        ("extra-payload", False, False, "doorbell-standard-json"),
+        ("extra-record", False, True, "doorbell-standard-json"),
+        ("unused-float-overflow", False, False, "doorbell-standard-json"),
+        ("python-integer-limit-4301", True, True, "doorbell-ignore-python-digit-limit"),
+        ("configured-integer-limit-640-641", True, True, "doorbell-ignore-python-digit-limit"),
+        ("unbounded-count-20", False, True, "doorbell-bounded-relevant-numbers"),
+    ]:
+        original = copy.deepcopy(selected[name])
+        candidate = candidate_case(selected[name])
+        assert (candidate["writes"], candidate["locks"], candidate["substitution"]) == (writes, locks, policy)
+        assert selected[name] == original
+
+
+def test_native_boundary_cells_carry_only_approved_policy_names():
+    selected = {case["id"]: case for case in cases(lambda *args, **kwargs: "fixed notice")}
+    policies = {"doorbell-standard-json", "doorbell-ignore-python-digit-limit",
+                "doorbell-bounded-relevant-numbers", "doorbell-native-nesting-bound"}
+    for original in selected.values():
+        candidate = candidate_case(original)
+        if "substitution" in candidate:
+            assert candidate["substitution"] in policies
+    for depth, writes in [(126, True), (127, False), (128, False)]:
+        stdin = candidate_case(selected[f"native-depth-input-{depth}"])
+        pending = candidate_case(selected[f"native-depth-pending-{depth}"])
+        assert (stdin["writes"], stdin["locks"]) == (writes, writes)
+        assert (pending["writes"], pending["locks"]) == (writes, True)
+        assert selected[f"native-depth-input-{depth}"]["writes"] is True
+    assert candidate_case(selected["huge-timestamp-quiet-refusal"])["oracle_failure"] is None
+    assert selected["huge-timestamp-quiet-refusal"]["oracle_failure"].startswith("OverflowError:")
