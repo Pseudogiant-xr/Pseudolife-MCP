@@ -24,6 +24,7 @@ fn reply_once(raw: &'static [u8]) -> (String, thread::JoinHandle<String>) {
                 Err(error) => panic!("HTTP peer: {error}"),
             }
         };
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
@@ -143,7 +144,7 @@ fn deferred_actions_have_exact_refusal_before_state() {
         assert_eq!(
             output.stderr,
             text(&format!(
-                "pseudolife-stdio: lease action {action} is deferred in this candidate\n"
+                "pseudolife-stdio: lease action '{action}' is deferred in this candidate\n"
             ))
         );
         assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
