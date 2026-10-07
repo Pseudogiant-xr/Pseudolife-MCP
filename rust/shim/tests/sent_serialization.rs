@@ -86,12 +86,55 @@ fn exact_python_serialization_corpus() {
     ))
     .unwrap();
     for case in cases.as_array().unwrap() {
-        let actual = fixture(&case["input"]);
+        let actual = if case["id"] == "nonfinite-compatibility" {
+            fixture(&case["input"])
+        } else {
+            // Exercise the production object/array encoder too; only fixture
+            // default=str producers are converted to ordinary strings here.
+            encode(&production_fixture(&case["input"])).unwrap()
+        };
         assert_eq!(
             actual,
             case["expected_body_ascii"].as_str().unwrap().as_bytes(),
             "{}",
             case["id"]
         );
+    }
+}
+
+fn production_fixture(v: &Value) -> Json {
+    match v["kind"].as_str().unwrap() {
+        "null" => Json::Null,
+        "bool" => Json::Bool(v["value"].as_bool().unwrap()),
+        "integer" => Json::Integer(v["decimal"].as_str().unwrap().into()),
+        "float64" => Json::Float(f64::from_bits(
+            u64::from_str_radix(v["bits_be"].as_str().unwrap(), 16).unwrap(),
+        )),
+        "string" => Json::String(v["value"].as_str().unwrap().into()),
+        "array" => Json::Array(
+            v["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(production_fixture)
+                .collect(),
+        ),
+        "object" => Json::Object(
+            v["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|pair| {
+                    (
+                        pair[0].as_str().unwrap().into(),
+                        production_fixture(&pair[1]),
+                    )
+                })
+                .collect(),
+        ),
+        "fixture-uuid" | "fixture-datetime" => {
+            Json::String(serde_json::from_slice::<String>(&fixture(v)).unwrap())
+        }
+        kind => panic!("unsupported producer: {kind}"),
     }
 }
