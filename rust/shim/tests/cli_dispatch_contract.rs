@@ -1,14 +1,8 @@
 #![forbid(unsafe_code)]
+mod common;
+use common::cli::native_text as bytes;
 use sha2::{Digest, Sha256};
 use std::process::Command;
-
-fn bytes(text: &str) -> Vec<u8> {
-    if cfg!(windows) {
-        text.replace('\n', "\r\n").into_bytes()
-    } else {
-        text.as_bytes().to_vec()
-    }
-}
 
 #[test]
 fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
