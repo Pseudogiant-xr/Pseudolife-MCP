@@ -1246,8 +1246,21 @@ The new branch prepares native hold and the full action parser/help surface
 against the pending Phase 2d base. Hold follows an external PID without
 signalling it; its asynchronous mirror preserves local ownership under the
 named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
-Break/delegate/designate remain explicit exit-1 deferrals while native operator
-resolution is prepared. No Phase 4 execution, hosted acceptance or new timing
+The hold checkpoint retained break/delegate/designate exit-1 deferrals. Break
+source is now prepared as described below; delegate/designate remain deferred.
+No Phase 4 execution, hosted acceptance or new timing
 claim is made; previous runtime receipts retain their original identities.
 Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
 pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Phase 4 offline break source preparation
+
+Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged ordinarily
+into the hold/shared-PG branch. External-DSN break and retained container-host
+transport are prepared in source; reviewed PG admission/TLS and hold ownership
+remain unchanged. The named `phase4-embedded-pg-deferred` refusal and
+`native-pg-diagnostics` are described in [PARITY](PARITY.md#phase-4-offline-break-source-preparation).
+Whole-command streams, SQL rows, audit chains, rollback, container cancellation
+and identical-clock replay are unrun. No current runtime image or acceptance
+receipt is claimed; the earlier PG and Phase 2d proofs remain historical.
+Delegate/designate implementation and all lease mode acceptance remain deferred.

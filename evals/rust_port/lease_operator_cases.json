@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "status": "source-preparation-unrun",
+  "producer": {
+    "cli": "pseudolife_memory/lease_cli.py::_break/_operator",
+    "store": "pseudolife_memory/storage/coordination.py::break_lease/_settle/_append/secret_kind",
+    "transport": "pseudolife_memory/daemon_exec.py::run_in_daemon"
+  },
+  "instrument": "evals.rust_port.cli_process + evals.rust_port.harness.run_cli",
+  "fixture_requirements": [
+    "Existing guarded disposable PostgreSQL fixture; no production bank or daemon",
+    "Identical initial full coordination rows, audit head and fence sequence in each reset arm",
+    "Private homes with no ambient PG connection/TLS controls or client certificate/key/CRL files",
+    "Pinned original Python command and frozen candidate; raw exit/stdout/stderr captured before policy",
+    "Mutation cells require identical fixed clock through the SAME existing or OS-level seam in both arms; receipt declares clock/source",
+    "Preserve every timestamp, payload TEXT, fence, audit hash and file byte; no normalizations",
+    "Capture and verify dedicated connection/process/fixture cleanup"
+  ],
+  "first_cell": {
+    "id": "break-missing-row",
+    "argv": ["lease", "break", "fixture-missing"],
+    "preparation": "No lease with this name; full schema already prepared by the existing fixture",
+    "expected_exit": 0,
+    "expected_stdout_utf8": "{\"name\": \"fixture-missing\", \"broken\": false, \"was_held_by\": null}\n",
+    "expected_stderr_utf8": "",
+    "platform_text_encoding": "Existing text_bytes platform LF/CRLF rule",
+    "state": "All rows, fence sequence, audit head and local home bytes unchanged",
+    "clock": "No timestamp/hash/expiry is emitted or mutated in this missing-row cell; this does not accept mutation clock behavior"
+  },
+  "mutation_cells": [
+    {"id": "break-held-no-waiter", "assert": "Vacate exactly holder/purpose/acquired/expires/expect/expected_end, preserve fence, set freed_at to fixed clock, append one operator lease_break event"},
+    {"id": "break-fifo-grant", "assert": "Grant earliest eligible ticket; nextval fence, min(ttl,300), exact principal/purpose/expect/end; break then daemon grant chain"},
+    {"id": "break-departed-and-revoked", "assert": "Dequeue departed with retention3600/604800 policy; retain but skip revoked waiter, then grant eligible head"},
+    {"id": "break-reserved-queue", "names": ["delegate:fixture", "designated:fixture"], "assert": "Dequeue reserved waiters, never grant agent-owned role"},
+    {"id": "break-already-free", "assert": "No settlement/dequeue/audit, exactly unchanged state"},
+    {"id": "break-does-not-own-local-lock", "assert": "An independently held byte0 lock, stamp and holder PID remain unchanged/running"},
+    {"id": "break-audit-insert-failure", "assert": "Force deterministic audit insert rejection after mutation; exit1/empty stdout/native diagnostic, exact whole transaction rollback"},
+    {"id": "break-commit-loss", "assert": "Record actual committed versus uncommitted outcome and cleanup; no acceptance unless the failure contract is resolved"}
+  ],
+  "admission_controls": [
+    {"id": "break-invalid-name", "values": [" padded", "padded ", "zero\u200bwidth", "unassigned\u0378"], "code": "invalid_lease", "state": "unchanged"},
+    {"id": "break-secret-shapes", "assert": "Synthetic positive input for every producer shape, CLI assignment and key assignment refuses secret_like_body without echo/durable writes"},
+    {"id": "break-secret-boundaries", "assert": "Reject prefix boundary, tokenise/tokenize, mixed-case and overlapping-prefix mutations; retain ordinary words, SHA/UUID/SRI, paths/branches and DSN placeholders as negative secret controls"},
+    {"id": "break-pg-diagnostic", "assert": "Connection or deterministic SQL error exits1; empty stdout; safe native diagnostic only; all durable state unchanged"},
+    {"id": "break-embedded-refusal", "argv": ["lease", "break", "fixture"], "prepare_file": "bank/embedded_pg/PG_VERSION", "expected_exit": 1, "expected_stderr_utf8": "lease: break refused: phase4-embedded-pg-deferred\n", "assert": "No PG connection, docker invocation, bank startup/shutdown or state change"},
+    {"id": "break-direct-priority", "assert": "Valid explicit DSN overrides embedded marker; reviewed PG/TLS admission remains in force"}
+  ],
+  "container_controls": [
+    {"id": "break-container-argv", "assert": "Owned fake docker records inspect then exact retained exec argv, stdin/stdout/stderr inheritance and normal exit3; no host Python storage process"},
+    {"id": "break-container-missing", "assert": "Missing docker, missing/stopped container, inspect OS failure and producer30s timeout print exact no-bank exit1; stdout unchanged"},
+    {"id": "break-container-nested", "assert": "PSEUDOLIFE_DAEMON_EXEC prevents recursion"},
+    {"id": "break-container-cancel", "assert": "Compare parent/child interruption status and verify owned inspect/exec processes are gone; pending runtime proof"}
+  ],
+  "rejecting_controls": [
+    "Any changed exit or unrelated raw stdout/stderr byte fails except the named native-pg-diagnostics substitution",
+    "Any unrelated row/file mutation fails",
+    "Changed timestamp/expiry/fence/payload TEXT, omitted or reordered event, broken prev_hash/hash or wrong fixed-clock source fails",
+    "Clearing a local lock or signalling its holder fails",
+    "Successful embedded attach/start or silent plaintext/TLS-policy downgrade fails"
+  ]
+}

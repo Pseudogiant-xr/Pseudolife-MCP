@@ -38,6 +38,7 @@ tokio-postgres-rustls.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 percent-encoding.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 tokio-rustls.workspace = true

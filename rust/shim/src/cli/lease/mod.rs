@@ -4,6 +4,7 @@ mod board;
 mod hold;
 mod json;
 mod lock;
+pub mod operator;
 mod run;
 mod view;
 
@@ -56,7 +57,8 @@ pub async fn main(arguments: &[String]) -> i32 {
         "check" => view::check(&args).await,
         "list" => view::list(&args).await,
         "hold" => hold::hold(args).await,
-        "break" | "delegate" => {
+        "break" => operator::command(&args, arguments).await,
+        "delegate" => {
             say(&format!(
                 "pseudolife-stdio: lease action {} is deferred in this candidate",
                 repr(&args.action)

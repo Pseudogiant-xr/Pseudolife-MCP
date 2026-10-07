@@ -46,7 +46,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
 | CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
-| CLI-LEASE | 4 remainder | Complete action set; `hold`, `break`, `delegate` and `designate` explicitly refuse exit 1 with `deferred in this candidate`, without Python/silent fallback. This candidate loses those actions until Phase 4. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; full mode requires every action native plus its own acceptance | deferred |
+| CLI-LEASE | 4 remainder | Native hold and offline break source prepared; delegate/designate still explicitly refuse exit 1 with `deferred in this candidate`. Break admits external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; hold/break whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
@@ -905,14 +905,15 @@ functional-policy-evidence.json; no broader exit substitution is admitted.
 
 ## Phase 4 lease hold preparation
 
-The Phase 4 branch builds on the pending Phase 2d lease-core candidate. Native
+The Phase 4 branch includes the accepted Phase 2d source base. Native
 `hold` takes the existing named local OS lock, follows an external PID using a
 read-only process probe, and releases without signalling that PID. Its board
 mirror registers `lease-hold@<instance-id>`, renews and notifies the concerned
 peers asynchronously; local exclusion ends before bounded board cleanup.
 The parser and pinned Python help guards include hold/break/delegate and the
-`designate` deprecation alias. Break/delegate/designate still have explicit
-exit-1 deferrals while native PostgreSQL operator resolution is prepared.
+`designate` deprecation alias. The hold checkpoint retained break/delegate/
+designate exit-1 deferrals; the following operator preparation replaces only
+break's action deferral. Delegate/designate remain deferred.
 
 The named `hold-mirror-best-effort` rule preserves local ownership: a configured
 forbidden bearer refuses before acquiring or creating a lock/stamp; a failure
@@ -964,8 +965,46 @@ additive controls require the named refusal before startup and separately show
 that `verify-ca` still accepts their valid CA chains. No bespoke hostname
 verifier, timestamp/hash relaxation or certificate normalization is added.
 
-This module prepares a reusable dedicated client, not native break/delegate/
-designate transactions or embedded/container lifecycle. Real PostgreSQL rows,
+The shared-client checkpoint prepared the reusable dedicated client separately
+from break/delegate/designate transactions and embedded/container lifecycle. Real PostgreSQL rows,
 audit-chain effects, shared fixed-clock replay, Linux execution and fresh review remain pending; targeted Windows
 format, both-feature Clippy and eight PG transport tests passed. Neither full CLI-LEASE nor any
 new mode is promoted by these transport observations.
+
+## Phase 4 offline break source preparation
+
+`shim/src/cli/lease/operator/` prepares native external-DSN break with the
+reviewed shared PG client. It locks the lease before waiters, vacates the
+holder, removes departed waiters, skips revoked waiters and grants the earliest
+eligible ticket with the existing 300-second grant window. Reserved delegate/
+designated queues dequeue instead of inheriting an operator role. Mutation and
+ordered audit append share one transaction; the audit advisory lock is last,
+and success is printed only after an observed commit. Names retain Unicode,
+whitespace, length and credential-shaped-text admission before durable writes.
+Break never acquires an OS lease lock or signals its holder's process.
+
+The retained container transport uses the same Docker inspect and `docker exec`
+argv, inherited streams, terminal choice and container exit. Its Python command
+runs inside the daemon container; no host Python storage bridge or agent HTTP
+operator route is introduced. The named **`phase4-embedded-pg-deferred`** rule
+refuses an existing embedded bank with exit 1 and stderr
+`lease: break refused: phase4-embedded-pg-deferred`; it never starts, attaches to
+or stops that bank. An explicit DSN takes priority. Native detection uses the
+existing bank marker without importing the host's pg0 package.
+
+The named **`native-pg-diagnostics`** rule replaces generic psycopg class names
+with safe native PG diagnostics, retaining exit 1, empty stdout and stderr-only
+placement. Coordination refusal codes remain exact. Failure controls must
+compare every durable row, raw stream and local file; no row or time field is
+dropped. Transport loss around COMMIT needs an actual outcome/rollback control
+before acceptance; preparation is not a guarantee about an unobserved commit.
+
+The additive [operator fixture plan](../evals/rust_port/lease_operator_cases.json)
+pins the first missing-row whole-command cell, queue/reserved/revocation,
+rollback, secret-boundary and container/refusal controls. Held-row comparisons
+use `fixed-clock-replay` with the same clock seam in both arms and exact audit
+hashes. No build, service or native action was executed for this source
+checkpoint; the old PG transport and Phase 2d receipts retain their identities.
+Delegate/designate implementation, hold/break lifecycle proof, both-OS corpus,
+real database/TLS state proof and fresh independent review remain pending.
+Every lease mode row remains deferred.

@@ -38,4 +38,5 @@ tokio-postgres-rustls = { version = "=0.14.0", features = ["aws-lc-rs"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 rustls-pemfile = "2"
 percent-encoding = "2"
+regex = "=1.13.1"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }

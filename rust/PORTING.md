@@ -637,8 +637,9 @@ The new branch prepares native hold and the full action parser/help surface
 against the pending Phase 2d base. Hold follows an external PID without
 signalling it; its asynchronous mirror preserves local ownership under the
 named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
-Break/delegate/designate remain explicit exit-1 deferrals while native operator
-resolution is prepared. No Phase 4 execution, hosted acceptance or new timing
+The hold checkpoint retained break/delegate/designate exit-1 deferrals. Break
+source is now prepared as described below; delegate/designate remain deferred.
+No Phase 4 execution, hosted acceptance or new timing
 claim is made; previous runtime receipts retain their original identities.
 Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
 pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
@@ -684,11 +685,33 @@ CRL files, PGSSL*/PGTLS* variables and libpq connection/session PG* controls by
 name. Only the platform default root file participates implicitly. The pure
 resolution module retains configured DSN, existing embedded data, then container
 order, and pins the container's own `python -m pseudolife_memory.cli` argv.
-Embedded start/stop, container process dispatch and native operator SQL remain
-unimplemented. Fixed-clock operator comparisons remain a later gate.
+At the shared-client checkpoint, embedded start/stop, container process dispatch
+and native operator SQL were unimplemented. Fixed-clock operator comparisons
+remain a later gate.
 
 Windows transport tests use only owned loopback fake PostgreSQL peers and
 disposable fixture CA files; no bank, daemon or trust store is changed. Linux,
 real-server TLS, full transaction/audit/state comparison, independent review and
 hosted acceptance remain pending. The Phase 2d and hold checkpoint receipts
 retain their original runtime identities.
+
+## Offline break source preparation
+
+The [break preparation](PARITY.md#phase-4-offline-break-source-preparation) adds
+external-DSN transactions and the existing container-host deployment transport.
+The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
+has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
+`native-pg-diagnostics` without driver details or copied interpreter classes.
+Regex 1.13.1 implements the producer's existing secret-shaped-text business
+guard; unsupported look-around is expressed as explicit ASCII boundary and
+tokenize/tokenise checks, preserving match iteration. This dependency does not
+introduce a Python parser or runtime bridge. Audit payloads retain sorted UTF-8
+JSON and timestamp decimal spelling because both are hashed durable state.
+
+Only locked offline dependency metadata and source formatting were checked;
+compilation and every new runtime cell remain unrun. The additive fixture plan
+starts with `lease break fixture-missing` on an owned disposable bank, whose
+missing-row result creates no audit/time fields. Subsequent mutations require
+the identical clock seam in both arms, all-row/byte comparison and rejecting
+controls. Delegate/designate, container cancellation, ambiguous COMMIT and full
+mode acceptance remain pending; prior transport measurements are historical.
