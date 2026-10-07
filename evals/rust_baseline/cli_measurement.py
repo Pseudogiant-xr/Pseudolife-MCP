@@ -176,7 +176,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
                 if fixture_url is not None:
                     env = fixture_env(active_home, prefixes, fixture_url)
                     env.update(case["environment_deltas"])
-                    for relative, encoded in case["pre_files_b64"].items():
+                    for relative, encoded in case.get("pre_files_b64", {}).items():
                         target = file_path(active_home, relative)
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_bytes(base64.b64decode(encoded, validate=True))

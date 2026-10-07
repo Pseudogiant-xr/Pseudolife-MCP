@@ -62,6 +62,22 @@ def test_briefing_uses_fixture_inputs_reset_before_timer_and_existing_floors(tmp
                for arm in ("python", "rust"))
 
 
+def test_briefing_accepts_an_omitted_optional_input_file_map(tmp_path, monkeypatch):
+    args, case, calls = briefing_instrument(tmp_path, monkeypatch)
+    case.pop("pre_files_b64")
+
+    def observed(command, argv, **kwargs):
+        calls.append(list(argv))
+        assert kwargs["env"]["PSEUDOLIFE_MCP_TOKEN"] == TOKEN
+        return {"exit_code": 0, "stdout_b64": "YQ0K", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_measurement, "run_cli", observed)
+    receipt = cli_measurement.measure(args, {}, case=case, fixture_url="http://127.0.0.1:19873")
+    assert len(calls) == 62
+    assert receipt["prepared_case"] == case and "pre_files_b64" not in case
+    assert all(len(rows) == 30 for rows in receipt["runs"].values())
+
+
 @pytest.mark.parametrize("mutation", ["auth", "extra_env", "argv", "stdin", "files", "normalization", "url"])
 def test_briefing_rejects_unaccepted_inputs_before_launch(tmp_path, monkeypatch, mutation):
     args, case, calls = briefing_instrument(tmp_path, monkeypatch)

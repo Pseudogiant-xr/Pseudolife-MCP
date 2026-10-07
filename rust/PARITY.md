@@ -737,7 +737,7 @@ hook, dispatch, version and lease contracts. The initial contract failure from
 an omitted existing oracle metadata setting is retained alongside the passing
 rerun; source, tests and oracle were unchanged. Historical `64f5a6a2` execution
 retains its original attribution. Fresh independent review, hosted checks,
-the committed-head Python suite on dev-playground and remaining both-platform
+the committed-head remote Python suite and remaining both-platform
 proof are still required.
 ## Lease phase 2c policy preparation
 
