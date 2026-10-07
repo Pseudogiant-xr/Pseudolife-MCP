@@ -121,7 +121,7 @@ fn current(path: &Path, thread: &str) -> Result<Value, Failure> {
     let version = record
         .get("version")
         .map_or(Some(1), integer)
-        .filter(|v| matches!(v, 1 | 2 | 3))
+        .filter(|v| matches!(v, 1..=3))
         .ok_or(())?;
     let state = &record["recipient_state"];
     if !state.is_null() && state.as_str() != Some("unknown") || version == 1 && !state.is_null() {
