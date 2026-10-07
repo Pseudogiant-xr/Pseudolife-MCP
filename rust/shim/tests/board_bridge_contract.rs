@@ -1,3 +1,5 @@
+#![cfg(feature = "codex-delivery")]
+
 mod board_fixture;
 use board_fixture::*;
 use futures::{SinkExt, StreamExt};

@@ -231,9 +231,8 @@ fn directory() -> Result<PathBuf, Failure> {
             if bytes.first() == Some(&b'~') {
                 let slash = bytes.iter().position(|b| *b == b'/').unwrap_or(bytes.len());
                 let name = std::str::from_utf8(&bytes[1..slash]).map_err(|_| HOME_ERROR)?;
-                use users::os::unix::UserExt;
-                if let Some(user) = users::get_user_by_name(name) {
-                    return Ok(user.home_dir().join(std::ffi::OsStr::from_bytes(
+                if let Some(user_home) = crate::credentials::unix_accounts::home_by_name(name) {
+                    return Ok(user_home.join(std::ffi::OsStr::from_bytes(
                         bytes.get(slash + 1..).unwrap_or_default(),
                     )));
                 }

@@ -1,0 +1,15 @@
+[package]
+name = "which-resolver-comparison"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+which = "=8.0.6"
+serde_json = "=1.0.151"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }

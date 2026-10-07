@@ -7,15 +7,34 @@ fn write(home: &Home, name: &str, text: &str) {
     state::atomic_write(&home.0.join(name), text.as_bytes(), None).unwrap();
 }
 #[test]
-fn board_ring_reason_uses_rust_character_predicates() {
-    // Maintainer substitution: Unicode predicates follow the Rust toolchain;
-    // repository claim normalization retains its separate Unicode 14 tables.
-    assert!(!liveness::whitespace('\u{1c}'));
+fn board_ring_reason_uses_python_unicode14_predicates() {
+    assert!(liveness::whitespace('\u{1c}'));
     assert!(liveness::whitespace('\u{2003}'));
     assert!(liveness::alphanumeric('é'));
-    assert_eq!(liveness::reason("alpha\u{1c}beta <>!"), "alphabeta ");
+    assert!(!liveness::alphanumeric('\u{0345}'));
+    assert!(!liveness::alphanumeric('\u{093e}'));
+    assert_eq!(liveness::reason("alpha\u{1c}beta <>!"), "alpha beta ");
     assert_eq!(liveness::reason("<>!"), "unknown");
     assert_eq!(liveness::reason(&"a".repeat(80)).len(), 60);
+}
+#[test]
+fn board_ring_unicode14_full_range_contract() {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for point in 0..0x110000 {
+        let predicates = char::from_u32(point).map_or([0, 0], |value| {
+            [
+                u8::from(liveness::alphanumeric(value)),
+                u8::from(liveness::whitespace(value)),
+            ]
+        });
+        digest.update(predicates);
+    }
+    // evals/rust_port/unicode14_reason.py computes this at the oracle pin.
+    assert_eq!(
+        format!("{:x}", digest.finalize()),
+        "f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe"
+    );
 }
 #[tokio::test]
 async fn board_digest_sweeps_only_stale_regular_foreign_markers_and_cleans_own_subagents() {

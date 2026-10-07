@@ -92,7 +92,7 @@ fn open(path: &Path, write: bool, create: bool) -> Result<File> {
             file.set_permissions(fs::Permissions::from_mode(0o600))
                 .map_err(|_| ())?;
         }
-        if m.uid() != users::get_current_uid() || m.mode() & 0o077 != 0 {
+        if m.uid() != rustix::process::getuid().as_raw() || m.mode() & 0o077 != 0 {
             return Err(());
         }
     }

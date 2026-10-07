@@ -260,7 +260,7 @@ fn test_windows_private_handle_preserves_no_delete_sharing_identity_fence() {
 }
 
 fn disposable_command(program: &str, home: &Home) -> std::process::Command {
-    let executable = which::which(program).unwrap();
+    let executable = crate::lifecycle::find_executable(program).unwrap();
     let mut command = std::process::Command::new(executable);
     command
         .env_clear()

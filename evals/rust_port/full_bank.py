@@ -17,6 +17,7 @@ import sys
 from .harness import (HttpClient, Policy, compare, isolated_env, write_new, strict_json_loads,
                       capture_platform, HTTP_HEADER_ALLOWLIST, NORMALIZATION_RULES, observe_boundary)
 from .provenance import require_oracle_source as require_historical_source, source_metadata, runtime_metadata
+from .registration_policy import POLICY_NAME, REGISTRATION_CASES, generated_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED = json.loads(Path(__file__).with_name("full_seed.json").read_text(encoding="utf-8"))["seed"]
@@ -303,7 +304,12 @@ def normalize_payload(normal, payload, operation):
         raise ValueError("synthetic seed store rejected")
     elif operation == "store-empty" and (payload.get("stored") is not False or payload.get("reason") != "empty"):
         raise ValueError("empty store contract failed")
-    return normal.apply(payload, rules)
+    evidence = (generated_name(payload, operation.removeprefix("register-"))
+                if operation in REGISTRATION_CASES else None)
+    normalized = normal.apply(payload, rules)
+    if evidence is not None:
+        normalized["name"] = evidence["normalized_name"]
+    return normalized
 
 
 def observe(corpus, url, token, *, candidate=False):
@@ -345,6 +351,10 @@ def observe(corpus, url, token, *, candidate=False):
         if raw is not None:
             normalize_content_length(response, raw, original_body)
         records.append({**case, "response": response})
+        if case["operation"] in REGISTRATION_CASES and response["status"] == 200:
+            evidence = generated_name(original_body, case["operation"].removeprefix("register-"))
+            if evidence is not None:
+                records[-1]["policy_evidence"] = evidence
         serialized = json.dumps(records[-1], allow_nan=False)
         credentials = [v for name, v in normal.bindings.items() if normal.kinds[name] == "credential"]
         raw_text = base64.b64decode(response.get("raw_mcp_body_b64", "")).decode("utf-8")
@@ -478,7 +488,11 @@ def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
             d["arm"] == len(passes) - 1 for d in differences) else "failed" if validate_controls else "not-run",
         "url_candidate_validation": "passed" if validate_url_candidate and not any(d["arm"] == 2 for d in differences)
                                     else "failed" if validate_url_candidate else "not-run",
-        "compared_http_headers": list(HTTP_HEADER_ALLOWLIST), "normalization_rules": list(NORMALIZATION_RULES),
+        "policy_instances": [{"case": record["id"], "arm": arm, **record["policy_evidence"]}
+                             for arm, records in enumerate(passes) for record in records
+                             if "policy_evidence" in record],
+        "compared_http_headers": list(HTTP_HEADER_ALLOWLIST),
+        "normalization_rules": [*NORMALIZATION_RULES, POLICY_NAME],
         "ranking_order": "strict; sequential integer memory IDs retained exactly"}
 
 

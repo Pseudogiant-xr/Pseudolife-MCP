@@ -89,6 +89,13 @@ def replacements(text, original, normalized, *, source_text_paths=Policy().sourc
                                 start + boundaries[match.end()], '\\n'))
         elif type(old) is type(new) and old == new:
             return
+        elif path == ('name',) and isinstance(old, str) and isinstance(new, str):
+            from .registration_policy import name_replacement
+            suffix_start, replacement = name_replacement(original, normalized)
+            start, end = locations[path]
+            boundaries = string_boundaries(text[start:end])
+            changes.append((start + boundaries[suffix_start], start + boundaries[len(old)],
+                            json.dumps(replacement, ensure_ascii=False)[1:-1]))
         elif (isinstance(old, str) and isinstance(new, str) and len(path) >= 3
               and path[-1] == 'text' and path[-3] == 'content'):
             # JSON text is itself escaped inside the MCP envelope: adjust only

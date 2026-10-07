@@ -12,7 +12,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
-PHASE1_ORACLE = "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
+PHASE1_ORACLE = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
 PHASE1_FUNCTION_FILES = (
     "tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/test_shim_board_retry.py", "tests/test_version_handshake.py",

@@ -11,6 +11,16 @@ from .provenance import ROOT
 from .stdio_capture import ORACLE_HEAD, require_phase1_source
 
 
+def prepare_metadata(destination):
+    """Export exact pinned package metadata without installing a runtime."""
+    destination = Path(destination).resolve()
+    metadata = subprocess.check_output(["git", "show", ORACLE_HEAD + ":pyproject.toml"], cwd=ROOT)
+    version = tomllib.loads(metadata.decode("utf-8"))["project"]["version"]
+    destination.mkdir(parents=True, exist_ok=False)
+    (destination / "pyproject.toml").write_bytes(metadata)
+    return {"source": str(destination), "oracle_head": ORACLE_HEAD, "version": version}
+
+
 def prepare(destination):
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=False)
@@ -50,8 +60,9 @@ def prepare(destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", type=Path, required=True, help="new private directory")
+    parser.add_argument("--metadata-only", action="store_true", help="export pinned pyproject.toml only")
     args = parser.parse_args()
-    print(json.dumps(prepare(args.destination)))
+    print(json.dumps((prepare_metadata if args.metadata_only else prepare)(args.destination)))
 
 
 if __name__ == "__main__":

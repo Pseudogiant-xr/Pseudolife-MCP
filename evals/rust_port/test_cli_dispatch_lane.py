@@ -27,7 +27,7 @@ def test_public_cli_subprocess_adapter_routes_only_public_entrypoints():
     assert pytest_plugin.public_cli_arguments(["pseudolife-mcp", "lease", "list"]) == ["lease", "list"]
     assert pytest_plugin.public_cli_arguments([sys.executable, "-m", "pseudolife_memory.doctor_cli"]) is None
     assert pytest_plugin.boundary("tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes") is None
-    assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") is None
+    assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") == "cli-main-process"
 
 
 @pytest.mark.parametrize("drift", [None, "hook", "runner", "launcher", "pythonpath"])

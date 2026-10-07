@@ -1,4 +1,5 @@
 mod auth_fixture;
+mod common;
 use auth_fixture::DisposableHome;
 use pseudolife_stdio::lifecycle::{self, DaemonControl, EnsureOptions};
 use serde_json::{Value, json};
@@ -16,6 +17,7 @@ struct Control {
     spawns: usize,
     notes: Vec<String>,
     health_after: Option<usize>,
+    first_probe_notes: Vec<String>,
 }
 impl DaemonControl for Control {
     type Child = ();
@@ -26,6 +28,9 @@ impl DaemonControl for Control {
         self.now += duration;
     }
     async fn probe(&mut self, _: &str, timeout: Duration) -> Option<Value> {
+        if self.probes.is_empty() {
+            self.first_probe_notes = self.notes.clone();
+        }
         self.probes.push(timeout);
         self.health_after
             .filter(|after| self.probes.len() >= *after)
@@ -41,6 +46,47 @@ impl DaemonControl for Control {
     fn note(&mut self, note: &str) {
         self.notes.push(note.into());
     }
+}
+#[tokio::test]
+async fn invalid_spawn_note_precedes_the_first_health_probe() {
+    let home = DisposableHome::new();
+    let url = "http://127.0.0.1:18765";
+    let mut options = EnsureOptions::new(url, true, &home.0);
+    options.no_spawn_reason = Some(lifecycle::INVALID_SERVE_COMMAND_NOTE);
+    let mut control = Control {
+        health_after: Some(1),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon(url, &mut control, &options)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        control.first_probe_notes,
+        [lifecycle::INVALID_SERVE_COMMAND_NOTE]
+    );
+    assert_eq!(control.spawns, 0);
+}
+#[tokio::test]
+async fn healthy_unconfigured_daemon_keeps_startup_silent() {
+    let home = DisposableHome::new();
+    let url = "http://127.0.0.1:18765";
+    let mut options = EnsureOptions::new(url, true, &home.0);
+    options.no_spawn_reason = Some(lifecycle::NO_CONFIGURED_SPAWN_NOTE);
+    let mut control = Control {
+        health_after: Some(1),
+        ..Default::default()
+    };
+    assert!(
+        lifecycle::ensure_daemon(url, &mut control, &options)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(control.notes.is_empty());
+    assert_eq!(control.spawns, 0);
 }
 #[tokio::test]
 async fn test_no_spawn_env_falsy_value_still_spawns() {
@@ -88,9 +134,32 @@ async fn unconfigured_spawn_uses_the_no_spawn_wait_and_names_the_substitution() 
     assert_eq!(control.notes[0], lifecycle::NO_CONFIGURED_SPAWN_NOTE);
     assert_eq!(
         control.notes[1],
-        "[shim] no daemon at http://127.0.0.1:18765 and PSEUDOLIFE_MCP_NO_SPAWN is set — waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)..."
+        "[shim] no daemon at http://127.0.0.1:18765 and fallback spawning is disabled — waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)..."
     );
-    assert!(control.notes[2].starts_with("[shim] no answer from the memory daemon at http://127.0.0.1:18765.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n"));
+    assert!(control.notes[2].starts_with("[shim] no answer from the memory daemon at http://127.0.0.1:18765.\n  (fallback spawning is disabled, so no fallback daemon was spawned.)\n"));
+}
+#[test]
+fn malformed_serve_command_is_nonfatal_before_healthy_startup() {
+    let fixture = common::Fixture::start();
+    for command in ["not-json", "[]", "[1]", "[\"\"]"] {
+        let mut shim = common::Shim::start_with_env(
+            &fixture.url,
+            &[
+                ("PSEUDOLIFE_MCP_NO_SPAWN", "0"),
+                ("PSEUDOLIFE_MCP_SERVE_COMMAND", command),
+                ("PSEUDOLIFE_MCP_PYTHON", "absent-fixture-python"),
+            ],
+        );
+        shim.send(json!({"jsonrpc":"2.0","id":"open","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"spawn-policy-proof","version":"1"}}}));
+        assert!(shim.receive()["result"].is_object());
+        shim.send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+        assert!(shim.finish().is_empty());
+        assert_eq!(
+            shim.stderr().trim_end(),
+            "[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable; fallback spawning is disabled, using the PSEUDOLIFE_MCP_NO_SPAWN waiting path."
+        );
+    }
+    fixture.assert_deleted();
 }
 #[tokio::test]
 async fn test_loopback_daemon_url_forms_still_spawn() {

@@ -5,6 +5,22 @@ import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 
+from .stdio_judge import stderr_evidence_complete
+
+
+def receipt_status(receipt):
+    # Judge-sensitivity mutations are diagnostics with a source capture, not
+    # process observations that can satisfy the genuine capture evidence gate.
+    groups = [receipt["differences"], receipt.get("normalizations_applied", []),
+              *(control["differences"] for control in receipt.get("process_controls", {}).get("controls", {}).values())]
+    if not all(stderr_evidence_complete(differences) for differences in groups):
+        return "incomplete"
+    if receipt["differences"] or not receipt.get("process_tests", {"passed": True})["passed"]:
+        return "failed"
+    if any(not control["rejected"] for control in receipt.get("judge_sensitivity_controls", {}).values()):
+        return "failed"
+    return "passed" if receipt["coverage_complete"] else "incomplete"
+
 
 def command_identity(command, root):
     executable = shutil.which(command[0]) if not Path(command[0]).is_absolute() else command[0]
