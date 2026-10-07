@@ -133,11 +133,15 @@ def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, token=T
         dsn = make_conninfo(generated, sslmode="disable")
         seed(dsn, proof=proof, missing=missing, principals=stored)
         before = bank_snapshot(dsn)
-        with native_sent(prefix, tmp_path / "native", dsn, configuration=text, token=token, tokens=tokens) as (client, _):
+        with native_sent(prefix, tmp_path / "native", dsn, configuration=text, token=token, tokens=tokens) as (client, process):
             actual = [observe_http(client, **request) for request in requests]
         assert bank_snapshot(dsn) == before
     for request, wanted, observed in zip(requests, expected, actual, strict=True):
         assert compare_response(wanted, observed) == [], request.get("query", "admission")
+    return {"expected": expected, "actual": actual, "differences": [],
+            "readiness": process.sent_readiness, "owned_cleanup": process.owned_cleanup,
+            "oracle_bank_unchanged": True, "native_bank_unchanged": True,
+            "disposable_banks_dropped": True}
 
 
 def test_whole_http_sql_order_and_query_controls(prefix, tmp_path, monkeypatch):

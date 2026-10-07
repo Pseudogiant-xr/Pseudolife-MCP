@@ -43,6 +43,9 @@ def native_sent(prefix, private, dsn, *, configuration="{}", token=None, tokens=
                 or ready.get("ready") is not True or ready.get("nonce") != nonce
                 or ready.get("port") != port or not process.owns_runtime_pid(ready.get("pid"))):
             raise RuntimeError("native sent readiness identity mismatch")
+        process.sent_readiness = {"candidate": ready["candidate"], "ready": True,
+                                  "pid": ready["pid"], "port": port,
+                                  "nonce_verified": True, "owned_pid_verified": True}
         yield HttpClient(f"http://127.0.0.1:{port}"), process
     if process.owned_cleanup != {"process_stopped": True, "subtree_stopped": True}:
         raise RuntimeError("native sent process cleanup failed")
