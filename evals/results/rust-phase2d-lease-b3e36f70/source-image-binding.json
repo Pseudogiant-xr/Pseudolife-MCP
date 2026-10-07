@@ -552,7 +552,7 @@
     }
   },
   "limits": [
-    "The publishing successor changes only evidence and PARITY/PORT-STATE; it does not relabel these b3 executions.",
+    "Publication changes evidence/documentation and removes unused test tuple columns; production components remain identical and these b3 executions are not relabelled.",
     "Archive path affects debug bytes; independently bind rebuilt images.",
     "Source archive includes documentation at executed b3; publication documentation is a later component."
   ]

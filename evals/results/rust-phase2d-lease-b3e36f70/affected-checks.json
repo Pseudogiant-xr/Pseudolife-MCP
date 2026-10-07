@@ -331,7 +331,7 @@
   },
   "limits": [
     "Windows build command record was superseded by its scoped checks driver; original build log and source/image attestation remain bound separately.",
-    "Format checks completed without output in under one second.",
+    "Format checks completed successfully without output; retained timestamps record each platform interval.",
     "No local full suite or hosted acceptance is asserted."
   ]
 }

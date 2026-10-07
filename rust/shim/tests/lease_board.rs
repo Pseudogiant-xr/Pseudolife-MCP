@@ -587,18 +587,12 @@ fn nonproducer_json_reply_is_refused_without_a_report() {
 
 #[test]
 fn surrogate_replies_are_refused_without_aliasing_or_state_changes() {
-    for (name, _detail) in [
-        (b"\\ud800".as_slice(), "character '\\ud800' in position 0"),
-        (b"ab\\udfff".as_slice(), "character '\\udfff' in position 2"),
-        (b"\\ud800\\ud800".as_slice(), "characters in position 0-1"),
-        (
-            b"\xed\xa0\x80\xed\xb0\x80".as_slice(),
-            "characters in position 0-1",
-        ),
-        (
-            b"emoji-\xf0\x9f\x98\x80-\\ud800".as_slice(),
-            "character '\\ud800' in position 8",
-        ),
+    for name in [
+        b"\\ud800".as_slice(),
+        b"ab\\udfff".as_slice(),
+        b"\\ud800\\ud800".as_slice(),
+        b"\xed\xa0\x80\xed\xb0\x80".as_slice(),
+        b"emoji-\xf0\x9f\x98\x80-\\ud800".as_slice(),
     ] {
         for json in [false, true] {
             let home = Home::board();
@@ -780,7 +774,7 @@ fn nonascii_stamp_does_not_discount_an_existing_board_holder() {
 
 #[test]
 fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
-    for (queue, _kind) in [("1", "int"), ("1.5", "float"), ("true", "bool")] {
+    for queue in ["1", "1.5", "true"] {
         let home = Home::board();
         let raw = format!(r#"{{"leases":[{{"name":"resource","holder":{{"label":"h"}},"queued":1,"queue":{queue}}}]}}"#).into_bytes();
         let (url, peer) = server_raw(1, move |_, header, _| {

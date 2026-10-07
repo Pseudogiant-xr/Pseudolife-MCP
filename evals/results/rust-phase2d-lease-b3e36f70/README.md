@@ -3,8 +3,9 @@
 This bundle records actual Windows/Linux executions on
 `b3e36f707d4e8b038c258b5378c064d62b4d977a`, tree
 `6730038c3e4b40399c6493060293670ffca9be61`. The later publishing commit adds
-only evidence and documentation; runtime, assets, Cargo inputs and tests remain
-byte-identical to b3. Final hosted acceptance and fresh independent review are
+evidence and documentation; the review-fix successor also removes unused
+integration-test tuple columns without changing cases or assertions. Runtime,
+assets and Cargo inputs remain byte-identical to b3. Final hosted acceptance and fresh independent review are
 pending. **CLI-LEASE-core(check/list/run) and full CLI-LEASE remain deferred.**
 `hold`, `break`, `delegate` and `designate` each refuse with exit 1 and
 `deferred in this candidate`; the candidate loses those actions until Phase 4.

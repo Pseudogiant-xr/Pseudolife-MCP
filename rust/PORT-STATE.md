@@ -1226,7 +1226,8 @@ cells, successful/nonzero child and release evidence, Windows Ctrl-C and four
 recaptured check/list measurements. Its executed head is
 `b3e36f707d4e8b038c258b5378c064d62b4d977a`, tree
 `6730038c3e4b40399c6493060293670ffca9be61`. The publishing successor changes
-only evidence and documentation; hosted acceptance and fresh review remain pending.
+evidence/documentation and unused test tuple scaffolding; production inputs
+remain identical, and hosted acceptance and fresh review remain pending.
 CLI-LEASE-core(check/list/run) and full CLI-LEASE remain deferred, and
 hold/break/delegate/designate retain their explicit exit-1 Phase 4 refusal.
 
