@@ -18,12 +18,31 @@ lease check/list fixtures and episode-end callbacks/readback; neither fixture
 inherits the other's state checks. Both CHANGELOG histories and the workflow's
 lease corpus plus fresh episode executable selection are retained.
 
+Windows validation executed the exact source merge
+`77fec51ee7077c12c60f419ea0c478e8b8e84c9a`, tree
+`25713c6dc66f86022fc4cd00cd9f4c058ba0be8d`, on 2026-10-07. Formatting,
+locked/offline all-target check and warning-denied all-target Clippy passed in
+default/no-default configurations. Each configuration passed 13 CLI library tests
+and 54 integration tests across episode, lease, dispatch and version. The shared
+measurement/process-adapter selection passed 256 tests with 12 skips. Tests ran
+serially; build jobs were two with incremental compilation disabled.
+
+The initial `e170d674` Rust gates passed, but its instrument selection failed
+17 episode cases because lease file setup required a key absent from the exact
+admitted episode case. The corrected merge restores the optional-file default;
+all original assertions remain unchanged. That first failure is retained separately
+and is not relabelled as a pass. Default/no-default debug images at `77fec51e`
+are 20,398,080/19,231,232 bytes, with SHA256
+`ebdfe2444df9b3c3636bf6c3885987942cfdff518fbfacf176517a475cf901e7` and
+`8e81222823fd4c3e211eee991b4dee792d23d354ca3884dba8304507c9f11281`.
+
 The box full-suite result still belongs to `d2e86010`: 18,203 passed, 76 skipped,
 exit 0. Historical native `17459703`/capture `63922667` measurements retain their
-own image/source identities. No merge-head execution or performance result is
-claimed. Exact-merge fmt/check/Clippy in both feature configurations, Cargo tests,
-fresh independent review and fresh hosted merge-ref CI remain outstanding under
-the maintainer's conflict-merge directive. Both episode modes remain deferred.
+own image/source identities. No merge-head performance result is claimed. The
+merge's full Python suite remains pending on the approved isolated Linux suite
+machine, as do fresh independent review and hosted merge-ref CI. The documentation
+successor records these results without changing runtime or instrument inputs;
+execution remains attributed to `77fec51e`. Both episode modes remain deferred.
 
 ## Episode producer grammar reduction
 
