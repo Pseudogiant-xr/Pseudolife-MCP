@@ -62,6 +62,9 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
         from evals.rust_port.episode_corpus import cases
         _base_url(fixture_url)
         accepted = next(row for row in cases() if row["id"] == "episode-key-7-episode-end")
+        if case is not None and case.get("id") == "episode-hook-string42-episode-end":
+            accepted["id"] = "episode-hook-string42-episode-end"
+            accepted["stdin_b64"] = base64.b64encode(b'{"session_id": "42"}').decode("ascii")
         accepted["environment_deltas"] = {"PSEUDOLIFE_MCP_TOKEN": TOKEN}
         if mode != "episode-end" or argv != accepted["argv"] or case != accepted \
                 or getattr(args, "layout", "bare") != "bare" \
