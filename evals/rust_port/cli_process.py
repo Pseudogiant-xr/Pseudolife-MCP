@@ -342,13 +342,9 @@ def observe(case, command, commands, *, root, home, url, prepare=None, process_s
             wall_started = time.time()
             response = run_cli(selected, arguments, cwd=root, env=env,
                                timeout=case.get("timeout_seconds", 10),
-<<<<<<< HEAD
                                stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True),
                                **({"process_timing": process_timing} if process_timing is not None else {}))
-=======
-                               stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
             wall_finished = time.time()
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
             admit_environment()
         admit_environment()
         if "expected_stdout" in case:

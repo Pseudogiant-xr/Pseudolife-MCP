@@ -1,13 +1,11 @@
 #![forbid(unsafe_code)]
 mod argv;
 use std::process::ExitCode;
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     // Episode hooks ignore every tail argument, including opaque OS strings.
     let first = std::env::args_os().nth(1);
     if let Some(code) =
-        pseudolife_stdio::cli::dispatch_episode(first.as_deref().and_then(std::ffi::OsStr::to_str))
-            .await
+        run_episode(first.as_deref().and_then(std::ffi::OsStr::to_str))
     {
         return code;
     }
@@ -34,7 +32,7 @@ async fn main() -> ExitCode {
             pseudolife_stdio::stderrln!("lease: arguments must be valid Unicode");
             return ExitCode::from(2);
         };
-        std::process::exit(pseudolife_stdio::cli::lease::main(&lease_arguments).await);
+        std::process::exit(run_lease(&lease_arguments));
     }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
@@ -50,6 +48,21 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    serve_proxy(channel)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_episode(mode: Option<&str>) -> Option<ExitCode> {
+    pseudolife_stdio::cli::dispatch_episode(mode).await
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_lease(arguments: &[String]) -> i32 {
+    pseudolife_stdio::cli::lease::main(arguments).await
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn serve_proxy(channel: bool) -> ExitCode {
     let proxy = match pseudolife_stdio::Proxy::attach_mode(channel).await {
         Ok(proxy) => proxy,
         Err(error) => {

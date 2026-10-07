@@ -1,6 +1,5 @@
 # Rust port state
 
-<<<<<<< HEAD
 ## Episode integration with accepted lease master
 
 Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged forward,
@@ -306,7 +305,6 @@ against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
 excluding tests/assets and dispatch. The broader title denominator caveat above
 still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
 the future full PR's independent review remain open; both modes stay deferred.
-=======
 ## Wait-mail preparation on accepted master (2026-10-07)
 
 The producer reduction now implements canonical unsigned ASCII watermarks
@@ -429,7 +427,179 @@ size observation, not coverage.
 Follow-up review, committed-source acceptance, routed/additive CI integration,
 measurements and the remaining byte-policy decisions are pending. The mode
 remains deferred in the parity register.
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
+## Briefing and prompt-hook candidate
+
+The hook candidate remains deferred. Its producer reduction replaces the
+private Python JSON domain and stack thread with bounded strict parsing,
+retains valid ignored large integers, and implements the named typed-markdown,
+ASCII-numeric, first-line-cursor and native-output-failure substitutions in
+PORTING.md. Windows validation of `64f5a6a2` passed the native build, formatting,
+both Clippy configurations, 12 CLI unit tests, six hook integration tests and
+the first public prompt cell. The 13 offline policy checks also passed; these
+checks do not establish both-platform or mode acceptance.
+
+The subsequent master-forward integration of `59a8624e` adds the accepted
+native lease source and shared credential/dependency changes. The binary
+entrypoint keeps synchronous hook/version dispatch and starts a separate
+current-thread runtime for the lease leaf. The hook production modules and
+all 18 original hook admissions are unchanged. Its 118 offline policy and
+fake measurement checks passed after restoring the mode-specific diagnostic;
+the initial one-test failure remains historical. The combined source at
+`273e6533` passed Windows formatting, all-target check and Clippy with both
+feature configurations, 19 CLI unit tests and 55 hook/dispatch/version/lease
+contracts. The first contract run lacked the existing oracle metadata setting
+and failed; its log is retained separately from the successful rerun. The
+`64f5a6a2` gates keep their original attribution. Fresh review, hosted checks
+and the committed-head remote Python full suite remain required.
+
+At `64f5a6a2`, the dedicated hook production was 944 lines before test modules
+(911 for briefing_hook plus 33 for hook_json), down from 1,811 under the same
+counting rule. All 12 remove/narrow inventory sites are addressed; the 12 keep sites
+retain their operational contracts. The prior 1,813 count included two blank
+separator lines; neither count is a readiness or performance claim.
+
+The branch merges accepted master forward. The earlier `0b46bb8e` integration
+resolved four code conflicts in the measurement helper, CLI dispatcher, pytest
+adapter and binary entrypoint. The later `59a8624e` merge at `273e6533` resolved
+two code conflicts (`cli_measurement.py` and `cli.rs`) and two documentation
+conflicts (CHANGELOG.md and PARITY.md), plus a manual lease wrapper in main.rs;
+a committed-head remote Python full suite is still required,
+separately from hosted Rust correctness and both-platform parity checks. The merged
+adapter preserves version routing and all 18 hook admissions (26 selected
+nodes total); the
+measurement helper preserves image warmups and owned briefing fixtures.
+The leaves dispatch before the proxy enters its Tokio runtime, removing the
+hook thread without nesting runtimes. CPU-light self-checks alone do not
+establish runtime correctness, security or readiness.
+
+The subsequent health/header repair keeps non-JSON `/health` quiet and preserves
+valid degraded JSON 503 handling, while malformed consumed JSON payloads retain
+the named diagnostic. Redirects emit no Referer. C0/DEL/folded bearer inputs use
+`http-forbidden-input-refused`; HTTP field association and the explicit 53-ID
+`hook-absent-accept-wildcard` ledger are documented in PARITY.md. Raw Python
+expectations and historical failures remain unchanged. Production hook source
+is 951 lines before test modules (918 plus 33), using the same trimmed-boundary
+count as the earlier 944-line source; the transport repair adds seven lines.
+
+The repair passed its first disposable Windows malformed-health execution cell
+before the remaining gates: nine hook contracts with each feature configuration,
+formatting, default/no-default all-target check and warning-denied Clippy, and
+103 focused Python policy/wire/briefing instrument checks. These checks exercised
+quiet health refusal, JSON 503, malformed payload, redirect headers and bearer
+refusal against owned scripted peers. They establish no broad corpus, timing,
+Linux, hosted or committed-head remote full-suite result. Earlier `273e6533`
+unit/lease/version gates and the `6ab79123` Python instrument gate retain their
+own attribution; the old remote suite does not validate the repair.
+The published `6ab79123` hosted Parity jobs failed a stale eight-node total
+assertion after the hook admissions increased selection to 26. The port-owned
+version assertion now checks the three version admissions, uniqueness and
+existing boundaries without pinning total selection; its 12 focused tests pass.
+The two hosted failures remain historical and fresh hosted checks are required.
+
+### Historical briefing candidate evidence
+
+The native `briefing` and `prompt-hook` leaves target the
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remain deferred.
+Independent review requested changes. The repair preserves argparse prescan
+priority, spaced unknown values, COLUMNS-dependent formatting, body inactivity
+budgets, and measured buffered/unbuffered output behavior. Response-header
+inactivity still differs: reqwest applies a deadline across the response head.
+Ordinary large or unbuffered output failures still differ in Python traceback
+prefixes. Those historical runs retained configured bearer-header, nonstring and
+lone-surrogate differences. The current named substitutions above supersede
+the prior unapproved-rule description without replacing its raw evidence.
+
+The completed repair matrix is exact in 77/83 Windows and 78/87 Linux pairs;
+its 50/53 core corpus and 13/15 focused corpus are bound to the preceding binary.
+The 32 signed-zero digit pairs and one independent positive request/cursor pair
+per host remain attributed to the preceding formatter binary. The subsequent
+COLUMNS grammar and narrow-help whitespace repair passes all eight review cells
+and six relevant parser-limit cells on each current binary, with no requests
+and 56 rejected output/file controls per host. Five focused helper checks, one
+public formatter process check, formatting and warning-denied clippy pass on
+both hosts. Earlier native checks retain their original binary attribution. These are scripted-peer diagnostics;
+broader real-daemon acceptance, persistent multi-turn sequencing and hosted CI
+remain outstanding; the bounded positive proof and debug timing below do not
+close those gates. Existing Python tests and the generic
+CLI fixture remain unchanged; daemon-backed routing is not claimed.
+
+The external subprocess adapter now admits 18 collected existing prompt-hook
+nodes (17 hook cases and the help-listing case), with an exact argv allowlist
+per node. They pass unchanged on Python and on each native binary on Windows
+and Linux; each routed selection makes 21 actual candidate calls, including
+three sequential cursor advances. Of 19 eligible baseline nodes, Windows
+passes 18 and skips the symlink case because the host cannot create symlinks;
+Linux passes all 19; an additional private adapter run passes the symlink
+node on Linux. That node remains outside the tracked admission.
+This scripted-peer coverage does not establish full-mode acceptance.
+
+Automatic CLI receipt selection includes the five historical dispatcher nodes
+and all 18 current subprocess admissions, sorted without duplicates. Runtime
+validation derives the exact expected version from the selected pinned
+pyproject while retaining source-origin and installed-distribution equality.
+The prepared dispatcher component passes all 23 nodes on Python and native
+Windows and Linux, with 26 actual CLI calls per arm. These uncommitted-candidate
+proofs are preparatory: the full runner still requires committed clean Rust
+source before it can emit an acceptance receipt.
+
+Dedicated hook production contains 1,030 physical lines plus a 76-line JSON
+caller wrapper and a reused 707-line JSON data module, or 1,813 total. This
+includes separator blanks before test modules; the earlier 1,811-line total
+excluded two such blanks. Against the shared pinned Python `briefing_cli.py`
+module (251 lines), the ratio is 7.22311. Tests, assets and dispatch are excluded.
+This count covers both `briefing` and `prompt-hook`, with no ratio target.
+
+The first credential-file proof refused an unprotected Windows token file and
+is rejected as positive-path evidence. Later env-token proofs establish actual
+GETs and cursor effects after implementation began, without repairing the
+required proof-before-implementation sequence. Follow-up review is pending.
+
+The bounded owned-daemon nonempty `briefing` pair now passes on Windows and
+Linux against Python 0.17.0/schema 55 at the oracle above. One synthetic world
+fact is seeded through pinned production storage APIs without embedding
+computation. Independently expected stdout is 67 Windows bytes and 65 Linux
+bytes, with exit 0, empty stderr, unchanged home files, four rejected output/file
+controls, identical endpoint responses before/after and verified owned cleanup.
+Local untracked proof evidence is
+`briefing-committed-daemon-nonempty-windows-proof.json` and
+`briefing-committed-daemon-nonempty-linux-proof.json`; this bounded result does
+not retroactively repair the earlier proof-before-implementation sequence.
+
+The existing CLI instrument at
+`840cccf85ec99bd5e8e97cb820d3a1d899005de3`, tree
+`941df01bc9eed839946ac5b6eadad5d81501b4db`, completes the same owned-daemon bare
+fixture with three repeats of ten cold-start-to-exit samples per arm on each OS,
+alternating arms and retaining the existing repeat floors. The 1x1 plumbing
+smokes remain separate. Exact arm-level controls are retained; the instrument
+compares every invocation's output and prepared environment/home to its control
+before appending the timing row. Timed rows do not retain individual raw streams
+or full post-file payloads. All bounded fixture resources were cleaned up.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `briefing-measurement-windows-3x10.json` | `3287483ee5ad27ad28281fb9d87bbd8728de7ce766cb2c4e590ea80a4baad395` |
+| Linux | `briefing-measurement-linux-3x10.json` | `9de318f28132f03bc563e711629d3591104dd379dde3e9c115d9086dc07994ca` |
+
+Native executable SHA256 is
+`4c8757f9268464c8c04d01e70287ea474649e51fe2888ac1e6a7f7e80d509ac6` on Windows
+and `d3e73627e849aeff812eb6cb013722fc9811c59ab1b12b4eb2c06c1e0f061315` on Linux.
+The retained evidence supports debug/unoptimized builds; producing Cargo
+invocation/profile/options attestation remains incomplete for both final
+executables. Local `briefing-retained-build-attestation.md` records that limit;
+`briefing-{windows,linux}-measurement-result.md` and the corresponding audit JSON
+files retain the descriptive results and source/runtime/helper bindings. No
+release-profile or general speed claim is made.
+
+The current local core corpus passes 50/53 declared comparisons per OS, with
+three configured bearer failures. Raw request headers also differ outside that
+comparator; full wire equality is unproven. Configured C0/DEL/folded bearer refusal now has the named
+`http-forbidden-input-refused` disposition; its three historical raw failures
+remain retained. Pending groups 10 (unmatched
+traceback prefixes) and 12 (response-head/chunk-framing inactivity) remain
+historical; briefing header failures were measured, while its chunk-framing gap
+is inferred from the shared client. Broader daemon/cursor sequencing and hosted
+acceptance remain open. The reduced source next needs committed-head runtime checks
+and the remaining full-mode gates; `briefing` and `prompt-hook` remain deferred.
 
 The version branch targets the current Python oracle at master
 `3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.

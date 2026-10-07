@@ -4,6 +4,8 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 mod episode;
+mod briefing_hook;
+mod hook_json;
 pub mod lease;
 mod version;
 pub mod wait_mail;
@@ -14,8 +16,6 @@ const DEFERRED_MODES: &[&str] = &[
     "embedded",
     "coordination-recovery",
     "board-audit",
-    "briefing",
-    "prompt-hook",
     "doorbell-prompt-seen",
     "doctor",
     "connect",
@@ -29,12 +29,6 @@ const DEFERRED_MODES: &[&str] = &[
     "backup",
     "export",
     "import",
-<<<<<<< HEAD
-    "wait-mail",
-=======
-    "episode-start",
-    "episode-end",
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
     "maintainer",
 ];
 
@@ -104,6 +98,9 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if matches!(mode, "shim" | "channel") {
         return None;
+    }
+    if matches!(mode, "briefing" | "prompt-hook") {
+        return Some(briefing_hook::run(mode));
     }
     if matches!(mode, "help" | "-h" | "--help") {
         return Some(

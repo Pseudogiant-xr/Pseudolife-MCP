@@ -197,6 +197,81 @@ parity is deferred to Phase 5: this candidate proves the explicit-interpreter
 launch and scheduling seam against a disposable sentinel module, not a client
 installation or an implicit interpreter lookup.
 
+## Briefing and prompt-hook producer substitutions
+
+The experimental hook candidate validates prompt stdin and consumed daemon JSON
+payload replies with strict JSON parsing. It consumes string session IDs and markdown while ignoring
+ordinary metadata, including integers beyond u64; original Python observations
+and historical failures remain evidence rather than candidate expectations.
+
+- **`hook-strict-json-refusal`** governs complete prompt stdin and consumed daemon
+  JSON payload replies, including ignored fields. The `/health` availability
+  probe is separate: non-JSON health, including HTML 502/503, means no daemon
+  and quiet exit 0 before a payload request. Valid non-null JSON health remains
+  available, including Python's degraded JSON 503. Prompt-hook performs no
+  health probe; malformed memory-change text stays quiet without cursor changes. NaN, Infinity, lone surrogate escapes,
+  and malformed JSON are refused.
+  Prompt stdin refusal is silent exit 0 before any request or cursor access;
+  malformed prompt responses are silent exit 0 without cursor changes or a
+  subsequent request. Briefing JSON refusal is exit 1, no stdout and exactly
+  `pseudolife-mcp briefing: daemon reply not understood` plus a newline on
+  stderr. First case: `prompt-json-nan-extra`. Plain session-start, coordination
+  and memory-change response bodies retain their text/cursor grammar.
+- **`hook-bounded-json-nesting`** governs JSON resource refusal beyond the
+  parser's default depth budget of 128, separately from malformed JSON.
+  Prompt refusal is silent exit 0 without a request or cursor change;
+  briefing refusal uses the exact named diagnostic and exit 1 above.
+  No known hook producer emits deep metadata. Native controls at `64f5a6a2`
+  observed 127 nested arrays accepted and 128 refused; a root object plus 126
+  arrays was accepted and plus 127 refused. This is the observed serde_json
+  default parser budget, not an additional application limit.
+  First case: `briefing-json-deep-extra`.
+- **`hook-typed-markdown`** governs `/api/briefing`'s consumed `markdown` field.
+  Its producer is `MemoryService.session_briefing`, which emits a string.
+  False, numbers, arrays and objects use the briefing refusal above; missing,
+  null and empty strings remain quiet. First case: `briefing-markdown-false`.
+- **`hook-ascii-numeric`** governs briefing caps and COLUMNS. Caps accept signed
+  ASCII decimal with ASCII surrounding whitespace and arbitrary magnitude;
+  leading zeros/signs are canonicalized, negatives are transmitted unchanged.
+  Unicode digits and underscores receive argparse-shaped exit 2. No Python
+  digit-limit environment setting applies. COLUMNS accepts positive ASCII
+  decimal or falls back to 80; large widths retain finite-text saturation.
+  First case: `briefing-custom-negative-unknown`.
+- **`hook-first-line-cursor`** governs owned mark reads. Only the first CR/LF
+  terminated line is interpreted as ASCII `[0-9.]{1,22}` after whitespace
+  trimming; bytes after that line cannot invalidate its cursor. The own writer
+  emits the cursor plus LF. First case: `prompt-mark-nonascii-after-lf`.
+- **`hook-native-output-failure`** governs hook stdout writes and flushes.
+  Briefing/help failure is exit 1 with exactly
+  `pseudolife-mcp briefing: output failed` plus a newline on stderr. Prompt
+  failure remains silent exit 0 without truncating or advancing its mark.
+  Opening a new mark before printing can leave an empty mark. First control:
+  `public_help_closed_output_has_native_failure_contract`.
+
+The hook HTTP client uses the oracle-pinned **`Python-urllib/3.11` User-Agent**.
+Python's urllib default `Accept-Encoding: identity` and `Connection: close`
+are explicitly dropped by the native transport; no full raw-header equality is
+claimed. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
+DEL and folded values before sending an authenticated payload request. Ordinary
+Latin-1 bearer values retain their encoded bytes; other non-Latin-1 values keep
+the existing refusal. Raw historical Python bearer diagnostics remain retained.
+
+**`hook-absent-accept-wildcard`** permits only absent-oracle Accept versus native
+exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md. No other
+Accept difference or unrecorded ID receives this disposition. **`http-field-name-case-insensitive`** associates HTTP field names
+by lowercase ASCII spelling; distinct-name ordering is free, while same-name value
+order, multiplicity and bytes stay exact. The port-owned comparison helper
+retains raw observations and provides no other header, body or framing waiver.
+The native client disables Referer generation on redirects, including `/health`;
+Referer is never removed by comparison. The targeted native controls exercise
+health redirects, degraded health and malformed payload separately.
+
+All surrounding authentication, path, cursor and hook-envelope wire semantics
+remain required. The hook serializer retains ensure_ascii escaping, including
+astral surrogate pairs; this strict parser is local to hooks and changes no
+separate lease parser. Native policy controls retain the raw oracle function
+and label candidate substitutions explicitly.
+
 ## Types and serialization
 
 | Python behaviour | Rust contract |

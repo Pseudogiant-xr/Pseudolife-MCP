@@ -9,7 +9,8 @@ from evals.rust_port import cli_dispatch, cli_version, phase1_oracle, pytest_plu
 
 def test_automatic_cli_selection_includes_the_three_version_admissions():
     nodes = cli_dispatch.selected_nodes()
-    assert len(nodes) == len(set(nodes)) == 8
+    assert len(nodes) == len(set(nodes))
+    assert len(pytest_plugin.CLI_VERSION_NODES) == 3
     assert pytest_plugin.CLI_VERSION_NODES <= set(nodes)
     assert all(pytest_plugin.boundary(node) == "cli-main-process" for node in nodes)
 

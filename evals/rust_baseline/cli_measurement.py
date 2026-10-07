@@ -68,11 +68,7 @@ def lease_list_case():
     return case
 
 
-<<<<<<< HEAD
-def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify=None):
-=======
-def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record_invocation=None):
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
+def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify=None, record_invocation=None):
     mode = getattr(args, "mode", "help")
     warm_images = mode == "version" or getattr(args, "warm_images", False)
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
@@ -81,8 +77,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 and not (fixture_url is not None and mode in {"lease-check", "lease-list"}
                          and argv[:2] == ["lease", mode.removeprefix("lease-")])):
         raise ValueError("measurement argv must name the selected CLI mode")
-<<<<<<< HEAD
     episode_fixture = fixture_url is not None and mode == "episode-end"
+    wait_delivery = fixture_url is not None and mode == "wait-mail"
     if episode_fixture:
         from .transport import TOKEN
         from evals.rust_port.episode_corpus import cases
@@ -96,22 +92,26 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 or getattr(args, "layout", "bare") != "bare" \
                 or not callable(prepare) or not callable(verify):
             raise ValueError("daemon measurement requires the recorded authenticated episode-end case and state callbacks")
-=======
-    wait_delivery = fixture_url is not None and mode == "wait-mail"
-    if wait_delivery:
+    elif wait_delivery:
         from evals.rust_port.wait_mail_measurement import measurement_case, project_invocation
         _base_url(fixture_url)
         if mode != "wait-mail" or case != measurement_case() or argv != case["argv"] \
                 or prepare is not None or not warm_images or getattr(args, "layout", "bare") != "bare":
             raise ValueError("daemon delivery measurement requires the retained wait-mail case and equal warmups")
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
     elif fixture_url is not None:
         _base_url(fixture_url)
-        admitted_case = {"lease-check": lease_check_case, "lease-list": lease_list_case}.get(mode)
-        if admitted_case is None or case != admitted_case() or argv != case["argv"] \
-                or prepare is not None or verify is not None or getattr(args, "layout", "bare") != "bare":
-            raise ValueError("daemon measurement requires a retained TOKEN_FILE lease check/list fixture")
-    elif verify is not None:
+        if mode == "briefing":
+            from .transport import TOKEN
+            if argv != ["briefing"] or case is None \
+                    or case.get("environment_deltas") != {"PSEUDOLIFE_MCP_TOKEN": TOKEN} \
+                    or case.get("stdin_b64", "") != "" or getattr(args, "layout", "bare") != "bare":
+                raise ValueError("daemon measurement requires the authenticated plain briefing fixture")
+        else:
+            admitted_case = {"lease-check": lease_check_case, "lease-list": lease_list_case}.get(mode)
+            if admitted_case is None or case != admitted_case() or argv != case["argv"] \
+                    or prepare is not None or verify is not None or getattr(args, "layout", "bare") != "bare":
+                raise ValueError("daemon measurement requires a retained TOKEN_FILE lease check/list fixture")
+    if verify is not None and not episode_fixture:
         raise ValueError("state verification requires the owned episode-end fixture")
     root = args.oracle_root.resolve()
     pin = require_phase1_source(root)
@@ -161,18 +161,16 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
         raise ValueError("prepared measurement requires both a callback and a recorded case")
     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
                              or (fixture_url is None and case.get("environment_deltas"))
-                             or (fixture_url is None and case.get("pre_files_b64"))):
+                             or ((fixture_url is None or mode == "briefing") and case.get("pre_files_b64"))):
         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
     case = copy.deepcopy(case)
+    prepared = prepare is not None or fixture_url is not None
     prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
     warmups = []
-<<<<<<< HEAD
     state_checks = []
-=======
     raw_invocations = []
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
         home = directory / "cli-home"
@@ -187,7 +185,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
             control = label == "control-" + arm
             reuse = warm_images and not control
             # Keep the historical per-invocation reset for modes without opt-in.
-            active_home = home if prepare is not None or fixture_url is not None or warm_images else directory / label
+            active_home = home if prepared or warm_images else directory / label
             if reuse:
                 for installed_arm, entry in installed.items():
                     if file_identity(entry["selected"]) != identities[installed_arm]:
@@ -198,18 +196,16 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 selected_identity = installed[arm]["selected_identity"]
                 original_identity = installed[arm]["original_identity"]
                 binding = copy.deepcopy(installed[arm]["binding"])
-<<<<<<< HEAD
                 if episode_fixture:
                     # Warm images still need a fresh owned episode before every CLI.
                     prepared_case = copy.deepcopy(case)
                     prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
-                    prepared, prepared_identity, prepared_original = prepared_command(
+                    prepared_image, prepared_identity, prepared_original = prepared_command(
                         prepared_case, commands[arm], prefixes, root=root,
                         home=active_home, env=env, prepare=prepare)
-                    if prepared_case != case or prepared != selected \
+                    if prepared_case != case or prepared_image != selected \
                             or prepared_identity != selected_identity or prepared_original != original_identity:
                         raise ValueError("CLI warmup preparation must retain recorded inputs and images")
-=======
             elif wait_delivery:
                 reset_home(active_home)
                 env = fixture_env(active_home, {"oracle": commands["python"], "candidate": commands["rust"]}, fixture_url)
@@ -222,8 +218,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
                            "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                          "cwd": str(root), "command_identity": selected_identity}}
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
-            elif prepare is None and fixture_url is None:
+            elif not prepared:
                 reset_home(active_home)
                 env = isolated_env(active_home)
                 selected = commands[arm]
@@ -303,8 +298,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 if binding is not None:
                     if env != binding["environment"]:
                         raise RuntimeError("CLI effective environment changed during measurement")
-<<<<<<< HEAD
-                    binding["post_files_b64"] = after
+                    binding["post_files_b64"] = compared_after
                     if episode_fixture:
                         state = verify(copy.deepcopy(case), active_home, env, list(selected), copy.deepcopy(prefixes),
                                        copy.deepcopy(response))
@@ -318,9 +312,6 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                     if command_identity(selected, root) != selected_identity \
                             or command_identity(commands[arm], root) != original_identity:
                         raise RuntimeError("CLI executable changed during measurement capture")
-=======
-                    binding["post_files_b64"] = compared_after
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
                 return response, elapsed, binding
             finally:
                 remove_root_link(active_home)
@@ -333,12 +324,11 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
                 prepared_controls[arm] = binding
         if controls["python"] != controls["rust"] or controls["python"]["exit_code"] != 0:
             raise RuntimeError("CLI byte control failed; measurement not comparable")
+        if fixture_url is not None and mode == "briefing" and (not base64.b64decode(controls["python"]["stdout_b64"], validate=True)
+                                        or controls["python"]["stderr_b64"]):
+            raise RuntimeError("CLI briefing control must have nonempty stdout and empty stderr")
 
-<<<<<<< HEAD
-        if fixture_url is not None and not episode_fixture:
-=======
-        if fixture_url is not None and not wait_delivery:
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
+        if fixture_url is not None and mode in {"lease-check", "lease-list"}:
             if mode == "lease-check":
                 expected = {"name": "sample", "held": False,
                             "local": {"file": "lease-sample.lock", "state": None},
@@ -424,14 +414,9 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
-<<<<<<< HEAD
-            "limitations": ["Fresh public CLI process against an already running owned daemon; image warmup follows start_protocol."
-                            if fixture_url is not None else "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
-=======
             "limitations": ["Fresh public CLI process delivering recorded mail in an owned daemon fixture; no model execution."
-                             if wait_delivery else "Fresh public CLI process with warm OS filesystem cache against an already running owned daemon."
+                             if wait_delivery else "Fresh public CLI process against an already running owned daemon; image warmup follows start_protocol."
                              if fixture_url is not None else "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
->>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
                              if warm_images else "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
