@@ -177,7 +177,20 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     }}
     $global:LASTEXITCODE = 91
 }}"""
+    # Only the built-in modules are discoverable. The block's `Get-Command
+    # claude` misses in the no-CLI scenarios, and a miss makes PowerShell
+    # scan every module on PSModulePath for an exported command of that
+    # name. The windows-2025 runner image carries Az, AWSPowershell and
+    # Microsoft.Graph, and that scan with a cold module-analysis cache ran
+    # past this call's 30 s on two unrelated PRs (test-lite-windows, runs
+    # 37503897287 attempt 1 and 37515413330, 2026-10-07; each rerun passed).
+    # Measured locally (2026-10-07, 74 modules on PSModulePath): pwsh
+    # startup 0.2 s, the miss 1.0 s, the miss over $PSHOME\Modules alone
+    # 0.4 s; a hit on the fake function costs nothing. The real CLI is an
+    # application on PATH, so the narrower module path leaves what the
+    # block checks unchanged.
     script = f"""$ErrorActionPreference = 'Stop'
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 $env:FAKE_HELP_YES = '{"yes" if sc.help_has_yes else "no"}'
 $env:FAKE_MARKET_EXIT = '{sc.marketplace_exit}'
 $env:FAKE_INSTALL_EXIT = '{sc.install_exit}'
