@@ -225,7 +225,8 @@ def test_snapshot_roundtrip_preserves_stamps_and_freshness():
     assert cur.freshness_class == "volatile"
 
     parked = loaded.contenders_for("project", "language")
-    assert parked, "contested record must survive the snapshot"
+    assert [p.value for p in parked] == ["rust"], (
+        "contested record must survive the snapshot")
     c = parked[0]
     assert (c.hlc_phys, c.hlc_logical) == (2000, 0)
     assert c.tx_time == 2000.0

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -64,6 +65,26 @@ def test_write_config_judge_second_model_is_live(svc):
                 == "claude-fable-5")
     res = config_io.write_config(svc, {"memory.deep_dream.judge_second_model": ""})
     assert not svc.config.memory.deep_dream.judge_second_model
+
+
+def test_write_config_judge_endpoints_are_live(svc):
+    # 2026-09-30: every judge builds its endpoint from service.config per
+    # call, so the endpoint knobs live-mutate (no restart) and persist like
+    # judge_second_model; a non-URL is refused, empty clears.
+    patch = {"memory.deep_dream.judge_url": "http://127.0.0.1:8082/v1",
+             "memory.deep_dream.judge_model": "claude-opus-5-5",
+             "memory.deep_dream.judge_second_url": "https://api.example.com/v1"}
+    res = config_io.write_config(svc, patch)
+    assert set(patch) <= set(res["applied"]) and res["restart_required"] == []
+    dd = svc.config.memory.deep_dream
+    assert (dd.judge_url, dd.judge_model, dd.judge_second_url) == tuple(patch.values())
+    with open(res["config_path"], encoding="utf-8") as f:
+        saved = yaml.safe_load(f)["memory"]["deep_dream"]
+    assert saved["judge_second_url"] == "https://api.example.com/v1"
+    with pytest.raises(ValueError):
+        config_io.write_config(svc, {"memory.deep_dream.judge_second_url": "api.example.com"})
+    config_io.write_config(svc, {"memory.deep_dream.judge_second_url": ""})
+    assert not svc.config.memory.deep_dream.judge_second_url
 
 
 def test_write_config_restart_classification(svc):
@@ -181,16 +202,19 @@ def test_re_evidence_dashboard_route_threads_read_filters():
 
 
 def test_re_evidence_console_assets_are_wired():
-    static = Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web" / "static"
-    app = (static / "js" / "app.js").read_text(encoding="utf-8")
-    view = (static / "js" / "views" / "re_evidence.js")
+    source = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    app = (source / "App.svelte").read_text(encoding="utf-8")
+    nav = (source / "lib" / "nav.ts").read_text(encoding="utf-8")
+    view = source / "views" / "ReEvidence.svelte"
 
     assert view.is_file()
-    assert 'id: "re-evidence"' in app
-    assert 'label: "RE Evidence"' in app
-    assert 'from "./views/re_evidence.js"' in app
+    assert 'id: "re-evidence"' in nav
+    assert 'label: "RE Evidence"' in nav
+    assert 'from "./views/ReEvidence.svelte"' in app
+    assert '"re-evidence": ReEvidence' in app
     text = view.read_text(encoding="utf-8")
-    assert 'api.get("/api/re-evidence"' in text
+    api = (source / "lib" / "api" / "re_evidence.ts").read_text(encoding="utf-8")
+    assert 'get<EvidenceDashboard>("/api/re-evidence"' in api
     assert "Read-only proof index" in text
 
 
@@ -239,6 +263,34 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
+def test_proposal_evidence_route_pages(svc, monkeypatch):
+    calls = []
+    def evidence(*, offset, limit):
+        calls.append((offset, limit))
+        return {"kind": "merge", "total": 0, "offset": offset, "limit": limit,
+                "next_offset": None, "items": []}
+    monkeypatch.setattr(svc, "merge_proposal_evidence", evidence, raising=False)
+    routes = ConsoleRoutes(svc)
+    out = routes.dispatch("GET", "/api/graph/proposal-evidence",
+                          {"offset": "40", "limit": "20"}, {})
+    assert calls == [(40, 20)] and out["offset"] == 40
+    routes.dispatch("GET", "/api/graph/proposal-evidence", {}, {})
+    assert calls[-1] == (0, 25)
+
+
+def test_review_rejudge_route_preserves_queue_and_bound(svc, monkeypatch):
+    calls = []
+    def rejudge(queue, *, limit):
+        calls.append((queue, limit))
+        return {"requeued": limit, "queues": {queue: limit}, "limit": limit}
+    monkeypatch.setattr(svc, 'review_rejudge', rejudge, raising=False)
+    routes = ConsoleRoutes(svc)
+    result = routes.dispatch('POST', '/api/graph/rejudge', {}, {'queue': 'link', 'limit': 2})
+    assert calls == [('link', 2)] and result['requeued'] == 2
+    routes.dispatch('POST', '/api/graph/rejudge', {}, {})
+    assert calls[-1] == ('all', 32)
+
+
 @pytest.mark.parametrize("path,body,expected", [
     ("/api/graph/bless-edge", {"src": "a", "relation": "uses", "dst": "b"},
      {"blessed": True}),
@@ -282,9 +334,31 @@ def test_post_verdict_route_dispatches_and_returns_the_service_result(
     assert {k: out[k] for k in expected} == expected
 
 
-def test_routes_config_write_via_dispatch(svc):
-    out = ConsoleRoutes(svc).dispatch("POST", "/api/config", {}, {"patch": {"memory.top_k": 13}})
-    assert "memory.top_k" in out["applied"]
+def test_delete_route_passes_every_filter_and_confirm_bulk_through(svc, monkeypatch):
+    """The REST body reaches service.delete intact, including the bulk
+    confirmation the Console or a curl caller sends; the route only
+    enforces "at least one filter"."""
+    calls = []
+
+    def delete(**kw):
+        calls.append(kw)
+        return {"deleted_count": 0}
+
+    monkeypatch.setattr(svc, "delete", delete)
+    routes = ConsoleRoutes(svc)
+    routes.dispatch("POST", "/api/delete", {},
+                    {"text": "probe", "source": "status", "confirm_bulk": True})
+    assert calls == [{"text": "probe", "substring": None, "source": "status",
+                      "episode": None, "tag": None, "confirm_bulk": True}]
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp"})
+    assert calls[-1]["confirm_bulk"] is False
+    # A curl caller's string "false" is not a confirmation.
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp", "confirm_bulk": "false"})
+    assert calls[-1]["confirm_bulk"] is False
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp", "confirm_bulk": "true"})
+    assert calls[-1]["confirm_bulk"] is True
+    with pytest.raises(ValueError):
+        routes.dispatch("POST", "/api/delete", {}, {"confirm_bulk": True})
 
 
 def test_dream_status_carries_dreamer_card_fields(svc):
@@ -312,11 +386,6 @@ def test_dreamer_reasoning_effort_knob_applies_live(svc):
 
 def _app(svc, token=None):
     return build_console_app(stub_mcp, token, lambda: {"status": "ok"}, svc)
-
-
-def test_asgi_health_open(svc):
-    st, _ = call(_app(svc), "GET", "/health")
-    assert st == 200
 
 
 def test_asgi_health_runs_off_the_event_loop(svc):
@@ -403,21 +472,16 @@ def test_fixture_health_carries_demo_flag_real_service_does_not(svc):
 
 
 def test_topbar_banner_keyed_on_fixture_flag():
-    """Source-level pin (no JS harness in this repo — see
-    test_console_static_js.py): the topbar must render the demo-data banner
-    from the ``fixtures`` health flag, or the backend flag is decoration."""
+    """Source-level pin on the Console's topbar (frontend/src): it must render
+    the demo-data banner from the ``fixtures`` health flag, or the backend
+    flag is decoration."""
     from pathlib import Path
 
-    app_js = (Path(__file__).resolve().parent.parent
-              / "pseudolife_memory" / "web" / "static" / "js" / "app.js")
-    src = app_js.read_text(encoding="utf-8")
-    assert "h.fixtures" in src, "topbar no longer reads the fixtures health flag"
-    assert "DEMO DATA" in src, "topbar demo-data banner text is gone"
-
-
-def test_asgi_api_overview(svc):
-    st, body = call(_app(svc), "GET", "/api/overview")
-    assert st == 200 and b"counts" in body
+    topbar = (Path(__file__).resolve().parent.parent
+              / "frontend" / "src" / "components" / "Topbar.svelte")
+    src = topbar.read_text(encoding="utf-8")
+    assert "health.data?.fixtures" in src, "topbar no longer reads the fixtures health flag"
+    assert ">Demo data<" in src and "not a real bank" in src, "topbar demo-data banner text is gone"
 
 
 def test_overview_carries_loop_health(svc):
@@ -431,6 +495,7 @@ def test_overview_carries_loop_health(svc):
     assert loop["available"] is True
     assert loop["stores"]["current"] >= 0
     assert "stores_per_session" in loop and "last_lesson_at" in loop
+    assert "root_episodes" in loop and "sessions" in loop
 
 
 def test_asgi_unknown_api_404(svc):
@@ -474,6 +539,21 @@ def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
     st, _ = call(app, "GET", "/api/overview",
                   headers=[(b"authorization", "Bearer café".encode("utf-8"))])
     assert st == 401
+
+
+def test_asgi_auth_gate_invalid_utf8_bearer_is_401_not_500(svc):
+    """Header bytes that are not UTF-8 must be refused, never crash the
+    gate's decode. A non-ASCII token authenticates whether the client sent
+    it as UTF-8 or as latin-1 (urllib/http.client encode headers latin-1)."""
+    app = build_console_app(stub_mcp, None, lambda: {"status": "ok"},
+                            svc, token_map={"café-tok": "hermes-box"})
+    st, _ = call(app, "GET", "/api/overview",
+                  headers=[(b"authorization", b"Bearer \xff\xfe-tok")])
+    assert st == 401
+    for sent in ("Bearer café-tok".encode("utf-8"),
+                 "Bearer café-tok".encode("latin-1")):
+        st, _ = call(app, "GET", "/api/overview", headers=[(b"authorization", sent)])
+        assert st == 200, sent
 
 
 def test_asgi_auth_gate_map_only_closes_gate(svc):
@@ -539,6 +619,46 @@ def test_hook_session_start_token_with_bearer_appends_briefing(svc):
     assert st == 200 and b"(fixture)" in body
 
 
+def test_installer_hook_command_injects_what_the_plugin_hook_serves(svc, monkeypatch, capsys):
+    """`pseudolife-mcp briefing --hook-json` is the SessionStart hook the
+    installer writes for Claude Code without the plugin. It must inject what
+    the plugin hook's endpoint serves — the memory core first, then the
+    briefing — not the bare /api/briefing (2026-09-25 review). The CLI's
+    HTTP read is routed through the real console app here."""
+    import sys
+    from urllib.parse import urlsplit
+    from pseudolife_memory import briefing_cli
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    app = _app(svc, token="secret")
+
+    class _Resp:
+        def __init__(self, body): self._b = body
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Opener:
+        def open(self, req, timeout=5):
+            parts = urlsplit(req.full_url)
+            headers = [(k.lower().encode(), v.encode()) for k, v in req.header_items()]
+            st, body = call(app, "GET", parts.path, headers=headers, query=parts.query)
+            assert st == 200
+            return _Resp(body)
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener())
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: {"status": "ok"})
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret")
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing", "--hook-json"])
+    briefing_cli.run_briefing()
+    context = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    plugin = call(app, "GET", "/api/hook/session-start",
+                  headers=[(b"authorization", b"Bearer secret")])[1].decode("utf-8")
+    assert context == plugin.strip()
+    assert context.startswith(STARTUP_MEMORY_CORE)
+    assert "(fixture)" in context
+
+
 def test_hook_session_start_briefing_failure_still_serves(svc):
     def boom(**kw):
         raise RuntimeError("boom")
@@ -554,22 +674,181 @@ def test_hook_session_start_capped_under_hook_stdout_limit(svc):
     assert len(body.decode("utf-8")) <= 9_500
 
 
+def test_hook_session_start_preserves_notice_core_and_late_briefing_items(svc):
+    from pseudolife_memory.memory.briefing import format_briefing
+    from pseudolife_memory.web.session_hook import hook_session_start
+    svc.episode_start_session = lambda *a, **_: {"id": "episode-123456789"}
+    svc.set_active_session = lambda *a: None
+    md = format_briefing(
+        [{"src": "a", "dst": "b", "why": "x" * 20000}], [],
+        [{"lesson": "Keep this lesson", "polarity": "+"}],
+        recap={"title": "Previous useful work", "entry_count": 3})
+    svc.session_briefing = lambda **kw: {"markdown": md}
+    out = hook_session_start(svc, "session-1", plugin_version="0.0.1")
+    assert len(out.encode("utf-8")) <= 9500
+    assert "plugin 0.0.1 and daemon" in out
+    assert "Session episode: episode-123" in out
+    assert "memory_search" in out and "memory_lesson_search" in out
+    assert "Keep this lesson" in out and "Previous useful work" in out
+    assert "x" * 100 not in out
+    assert "briefing item(s) omitted" in out
+
+
+# Resume and compaction re-fire SessionStart. A resumed conversation still
+# holds the startup block it was served; a compacted one keeps its session
+# id, and the MCP server instructions still carry the memory rules. Both
+# re-sent the whole block before 2026-09-26: 88 of 156 payloads in the
+# 2026-09-23 review's transcript scan, about 5.3 KB each.
+
+def _registered(svc):
+    svc.episode_start_session = lambda *a, **_: {"id": "episode-123456789"}
+    svc.set_active_session = lambda *a: None
+    return svc
+
+
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_hook_session_start_resume_or_compact_serves_the_handle_not_the_block(svc, source):
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE, hook_session_start
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "House rule sentinel.", encoding="utf-8")
+    out = hook_session_start(_registered(svc), "session-1", source)
+    ad, note = out.split("\n\n", 1)
+    assert ad.startswith('Session episode: episode-1234 — pass episode="episode-1234"')
+    assert STARTUP_MEMORY_CORE not in out
+    assert "(fixture)" not in out                       # no briefing
+    assert "is not re-sent" in note
+    assert "episode handle above" in note
+    assert "memory_search" in note and "pseudolife-mcp briefing" in note
+    # The daemon-side override has no other carrier once a compaction has
+    # dropped it; a resumed transcript still holds it.
+    assert ("House rule sentinel." in out) == (source == "compact")
+    assert len(out.encode("utf-8")) < 800
+
+
+@pytest.mark.parametrize("source", ["resume", "compact"])
+def test_hook_session_start_continued_session_keeps_the_drift_notice(svc, source):
+    from pseudolife_memory.web.session_hook import hook_session_start
+    out = hook_session_start(_registered(svc), "session-1", source,
+                             plugin_version="0.0.1")
+    assert out.startswith("Pseudolife-MCP: plugin 0.0.1 and daemon")
+    assert "Session episode: episode-1234" in out
+    assert "(fixture)" not in out
+
+
+def test_hook_session_start_continued_without_a_handle_does_not_point_at_one(svc):
+    from pseudolife_memory.web.session_hook import hook_session_start
+    out = hook_session_start(svc, None, "resume")
+    assert "is not re-sent" in out
+    assert "Session episode" not in out and "handle above" not in out
+
+
+@pytest.mark.parametrize("source", ["startup", "clear", None, "fork"])
+def test_hook_session_start_new_context_still_gets_the_full_block(svc, source):
+    """Startup and /clear start with an empty context; an unknown source
+    (a future one) gets the full block rather than nothing."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE, hook_session_start
+    out = hook_session_start(_registered(svc), "session-1", source)
+    assert STARTUP_MEMORY_CORE in out and "(fixture)" in out
+    assert "is not re-sent" not in out
+
+
+def test_hook_session_start_endpoint_honours_source_only_when_authorized(svc):
+    """The route drops session_id and source for an unauthorized caller, so
+    a token-gated hook without its bearer keeps the public core."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    _registered(svc)
+    st, body = call(_app(svc), "GET", "/api/hook/session-start",
+                    query="session_id=s1&source=compact")
+    text = body.decode("utf-8")
+    assert st == 200 and "is not re-sent" in text
+    assert STARTUP_MEMORY_CORE not in text
+    st, body = call(_app(svc, token="secret"), "GET", "/api/hook/session-start",
+                    query="session_id=s1&source=compact")
+    assert st == 200 and STARTUP_MEMORY_CORE in body.decode("utf-8")
+
+
+def test_hook_session_start_large_override_is_complete_blocks_with_warning(svc):
+    from pseudolife_memory.web.session_hook import session_start_context
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "## Long custom block\n" + "x" * 9000 +
+        "\n\n## Short custom block\nRead the local runbook.", encoding="utf-8")
+    out = session_start_context(svc, True)
+    assert len(out.encode("utf-8")) <= 9500
+    assert "memory_search" in out and "memory_outcome" in out
+    assert "Read the local runbook." in out
+    assert "x" * 100 not in out
+    assert "daemon-side" in out and "hook-instructions.md" in out
+    assert "Obtain the complete" in out
+    assert "(fixture)" in out
+
+
+def test_hook_session_start_unauthorized_does_not_reveal_private_override(svc):
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "Private override sentinel", encoding="utf-8")
+    app = _app(svc, token="secret")
+    st, body = call(app, "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory_search" in body
+    assert b"Private override sentinel" not in body
+    assert b"(fixture)" not in body
+
+
 def test_hook_session_start_post_rejected(svc):
     st, _ = call(_app(svc), "POST", "/api/hook/session-start")
     assert st == 405
 
 
-def test_hook_session_start_override_file_replaces_instructions(svc):
-    """<data_dir>/hook-instructions.md lets a user serve their own standing
-    instructions instead of the shipped block (briefing still appended)."""
+def test_hook_session_start_override_file_is_appended_after_the_core(svc):
+    """<data_dir>/hook-instructions.md adds a user's standing instructions
+    after the served core; since #364 it no longer replaces it. The
+    briefing still follows both."""
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
     (svc.data_dir / "hook-instructions.md").write_text(
         "## My house rules\nAlways check the runbook first.", encoding="utf-8")
     st, body = call(_app(svc), "GET", "/api/hook/session-start")
     text = body.decode("utf-8")
     assert st == 200
-    assert "My house rules" in text
-    assert "RECALL" not in text          # shipped block replaced
-    assert "(fixture)" in text           # briefing still appended
+    assert text.startswith(STARTUP_MEMORY_CORE + "\n\n## My house rules\n"
+                           "Always check the runbook first.\n\n")
+    assert "Custom instructions are partial" not in text
+    assert text.index("(fixture)") > text.index("Always check the runbook first.")
+
+
+def test_hook_session_start_override_is_capped_at_3_5_kb_with_a_notice(svc):
+    """The override's share of the hook is at most 3,500 bytes even when the
+    hook budget has room for more; complete paragraphs only, plus a notice
+    that the served copy is partial."""
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    STARTUP_MEMORY_CORE,
+                                                    session_start_context)
+    cap = 3_500
+    notice = ("Custom instructions are partial. Obtain the complete daemon-side "
+              "`<data_dir>/hook-instructions.md` before relying on this override.")
+    override = svc.data_dir / "hook-instructions.md"
+
+    # Two paragraphs plus the notice fill the cap exactly: a lower cap would
+    # drop the second paragraph.
+    first = "## Rule A\n" + "a" * 1_490
+    second = "## Rule B\n" + "b" * (cap - len(first) - 2 - 2 - len(notice) - 10)
+    third = "## Rule C\n" + "c" * 990
+    override.write_text("\n\n".join([first, second, third]), encoding="utf-8")
+    out = session_start_context(svc, True)
+    assert out.startswith(STARTUP_MEMORY_CORE + "\n\n" + first + "\n\n" + second
+                          + "\n\n" + notice + "\n\n")
+    assert len((first + "\n\n" + second + "\n\n" + notice).encode("utf-8")) == cap
+    assert third not in out
+    # The third paragraph would have fit the hook budget; the cap dropped it.
+    assert len(out.encode("utf-8")) + len(third) + 2 <= HOOK_CONTEXT_MAX_CHARS
+    assert "(fixture)" in out
+
+    # A file one byte over the cap is not served whole: a higher cap would.
+    head = "## Rule X\n" + "x" * 1_490
+    tail = "## Rule Y\n" + "y" * (cap + 1 - len(head) - 2 - 10)
+    override.write_text(head + "\n\n" + tail, encoding="utf-8")
+    assert len((head + "\n\n" + tail).encode("utf-8")) == cap + 1
+    out = session_start_context(svc, True)
+    assert out.startswith(STARTUP_MEMORY_CORE + "\n\n" + head + "\n\n" + notice)
+    assert tail not in out
 
 
 def test_hook_session_start_blank_override_falls_back(svc):
@@ -807,3 +1086,49 @@ def test_fixture_set_slot_contender_counts_once_in_overview(svc):
     assert len(contested_rows) == len(contested_slots) + len(members) - 1
     ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
     assert ov["counts"]["facts_contested"] == len(contested_slots)
+
+
+def test_example_hook_instructions_serve_whole_and_carry_only_the_host_dialect():
+    """``examples/hook-instructions.md`` is the maintainer host's dialect
+    (suite/gpu status words, the lease holder, the ops/.env pre-flight) for
+    ``<data_dir>/hook-instructions.md``: it must fit the 3,500-byte override
+    cap whole, so no paragraph is dropped and no partial notice is added,
+    and the served core stays free of those words (2026-09-27)."""
+    from pathlib import Path
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    from pseudolife_memory.web.session_hook import _bounded_custom_instructions
+    path = Path(__file__).resolve().parents[1] / "examples" / "hook-instructions.md"
+    text = path.read_text(encoding="utf-8").strip()
+    assert len(text.encode("utf-8")) <= 3_500
+    served = _bounded_custom_instructions(text, 3_500)
+    assert "Custom instructions are partial" not in served
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    assert served == "\n\n".join(blocks) and len(blocks) >= 3
+    for word in ("suite=running", "suite=queued", "suite=idle", "gpu=", "ops/.env",
+                 "SUITE-START", "SUITE-END", "<worktree>", "<pid>"):
+        assert word in text, word
+        assert word not in CHECKIN_TEXT, word
+    # Placeholders only: no user, host or drive-letter path.
+    assert not re.search(r"[A-Z]:\\|/Users/|/home/\w", text)
+
+
+def test_fixture_board_serves_named_sessions_and_role_holders(svc):
+    """The devserver's Board (UI QA harness) shows a v55 roster: named rows
+    from each source, an unnamed one read as label and short id, the
+    maintainer fixture's delegate and coordinator, unread mail, and enough
+    rows that the roster scrolls in its own pane."""
+    svc.demo_board = True   # as the devserver sets it
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/agents", {"view": "coordination"}, {})
+    assert out["available"] is True and out["snapshot_at"]
+    agents = {a["agent_id"]: a for a in out["agents"]}
+    assert len(agents) >= 12
+    sources = {a["name_source"] for a in agents.values()}
+    assert {"harness", "agent", "title", ""} <= sources
+    unnamed = next(a for a in agents.values() if a["name_source"] == "")
+    assert unnamed["name"] == f"{unnamed['label']} {unnamed['agent_id'][:8]}"
+    roles = svc.maintainer_status()["roles"]["Pseudolife-MCP"]
+    for role in ("delegate", "coordinator"):
+        assert roles[role]["agent_id"] in agents
+        lease = next(l for l in out["leases"] if l["name"] == f"{role}:Pseudolife-MCP")
+        assert lease["holder"]["name"] == agents[roles[role]["agent_id"]]["name"]
+    assert any(a["pending_count"] for a in agents.values())

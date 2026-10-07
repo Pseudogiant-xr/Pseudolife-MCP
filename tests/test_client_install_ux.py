@@ -1,5 +1,6 @@
 """Claude and Codex installer UX guards."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -61,8 +62,9 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert ("codex mcp add pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert any("codex mcp add pseudolife-memory" in line
+                   and "PSEUDOLIFE_MCP_NO_SPAWN=1" in line
+                   for line in text.splitlines())
         assert "codex mcp add pseudolife-memory --url" in text
 
 
@@ -74,37 +76,31 @@ def test_docker_tier_shim_registrations_disable_the_spawn_fallback() -> None:
     shadow the real bank with a stale one. Every provider, both platforms:
     fresh registrations carry the guard through the probed env flag, the
     generic snippet embeds it, and pre-existing registrations get an
-    upgrade warning with paste-ready commands."""
+    in-place repair guidance that preserves custom configuration."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        # Upgrade commands for pre-existing registrations (paste-ready).
-        # NB flag order: claude's --env is variadic — placed before the
-        # server name it swallows it and the whole registration fails
-        # (verified against the live CLI 2026-08-29). Name first, then
-        # --env, then the `--` separator.
-        assert ("claude mcp add --scope user pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
-        assert ("codex mcp add pseudolife-memory "
-                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert "Edit the existing registration in place" in text
+        assert "preserve its command, arguments, daemon URL, token file" in text
+        assert "mcp remove pseudolife-memory" not in text
         # Gemini registrations and the generic snippet carry the guard too.
         assert ("gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini "
-                "-e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp") in text
+                "-e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory ") in text
         assert '"PSEUDOLIFE_MCP_NO_SPAWN": "1"' in text
     # Fresh registrations set the guard through the probed env flag — the
     # spellings differ per script (the .sh quotes its variable).
     assert ('claude mcp add --scope user pseudolife-memory "$env_flag" '
             "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
-            "-- pseudolife-mcp") in sh
+            '-- "$SHIM_PATH"') in sh
     assert ('codex mcp add pseudolife-memory "$env_flag" '
             'PSEUDOLIFE_WRITER_ID=codex "$env_flag" '
-            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in sh
+            'PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"') in sh
     assert ("claude mcp add --scope user pseudolife-memory $envFlag "
             "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
-            "-- pseudolife-mcp") in ps
+            "-- $script:shimInstallPath") in ps
     assert ("codex mcp add pseudolife-memory $envFlag "
             "PSEUDOLIFE_WRITER_ID=codex $envFlag "
-            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in ps
+            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- $script:shimInstallPath") in ps
 
 
 def test_compose_writer_default_is_client_neutral() -> None:
@@ -139,35 +135,29 @@ def test_codex_http_auth_uses_supported_token_configuration() -> None:
     assert 'bearer_token_env_var = "PSEUDOLIFE_MCP_TOKEN"' in readme
 
 
-def test_hook_installers_wire_user_prompt_submit_for_claude() -> None:
-    """Non-plugin Claude installs get the every-turn mid-session discipline
-    line too (UserPromptSubmit), including the recall-before-review clause —
-    the one-shot session-start briefing loses salience over a long session
-    (2026-08-25 finding). Claude client only: Codex per-prompt hook support
-    is unverified, and every new Codex hook needs a manual trust review
-    (2026-08-28), so the installer must not silently write one there."""
+def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
+    """Both clients get the per-turn memory-change note; Codex runs it after
+    trust. The static line stays in both files only so re-runs can migrate
+    it (test_installer_legacy_hooks.py runs the scripts)."""
     ps = _read("ops/install-hook.ps1")
     sh = _read("ops/install-hook.sh")
     for text in (ps, sh):
         assert "UserPromptSubmit" in text
-        assert "reviewing code, docs, or a PR" in text
-    # Pin the client gating itself — a refactor that hoists the wiring out of
-    # the guard would silently write an untrusted per-prompt hook into every
-    # Codex install. (Line identity + idempotency needle are pinned by
-    # test_plugin_packaging.py::test_discipline_line_synced_across_plugin_and_installers.)
-    assert 'if [ "$CLIENT" = claude ]' in sh
-    assert 'if ($Client -eq "claude")' in ps
+        assert "pseudolife-mcp prompt-hook" in text
+    assert 'add_group(hooks["UserPromptSubmit"], prompt_cmd)' in sh
+    assert 'if ($Client -in "claude", "codex")' in ps
 
 
 def test_installers_offer_dreamer_model_choice() -> None:
     """Claude-shim installs prompt for the dreamer model (2026-08-04): all
-    four current Anthropic tiers are offered, Opus is the recommended
-    default (dreamer-choice-verdict.json), and the choice reaches the
+    current Anthropic tiers are offered, Opus is the recommended default
+    (dreamer-choice-verdict.json; Opus 5.5 since 2026-09-29, on
+    ladder-opus55-paired-verdict-threshold.json), and the choice reaches the
     autostart script instead of being hardcoded there."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        for model in ("claude-opus-5", "claude-sonnet-5",
+        for model in ("claude-opus-5", "claude-opus-5-5", "claude-sonnet-5",
                       "claude-haiku-4-5", "claude-fable-5"):
             assert model in text, f"missing model option: {model}"
     assert "-Model $Model" in ps          # choice forwarded to autostart
@@ -177,9 +167,11 @@ def test_installers_offer_dreamer_model_choice() -> None:
 def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
     ps = _read("ops/install-shim-autostart.ps1")
     sh = _read("ops/install-shim-autostart.sh")
-    # Opus stays the non-interactive default (measured winner).
-    assert 'Model = "claude-opus-5"' in ps
-    assert 'MODEL="claude-opus-5"' in sh
+    # Opus 5.5 is the non-interactive default since 2026-09-29: it clears
+    # the paired extraction-ladder gate with no regression against Opus 5,
+    # the 2026-08-02 measured winner.
+    assert 'Model = "claude-opus-5-5"' in ps
+    assert 'MODEL="claude-opus-5-5"' in sh
     assert "--model" in sh
     # The Linux unit must launch the shim that exists: evals/claude_shim.py
     # (sonnet_shim.py was renamed; a unit pointing at it fails at start).
@@ -190,14 +182,15 @@ def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
 
 def test_installers_offer_codex_extractor_modes() -> None:
     """A ChatGPT-plan adopter gets the same one-shot path a Max-plan user has
-    (2026-08-31): codex-only / codex-fallback extractor modes with a GPT-5.6
+    (2026-08-31): openai-only / openai-fallback extractor modes (named
+    codex-only / codex-fallback until 2026-09-28) with a GPT-5.6
     dreamer-model prompt. Terra is the non-interactive default (the shim's
     own default; nothing is quality-measured yet, and the menus must say so
     rather than borrow the Claude modes' 'recommended')."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        for needle in ("codex-only", "codex-fallback", "gpt-5.6-sol",
+        for needle in ("openai-only", "openai-fallback", "gpt-5.6-sol",
                        "gpt-5.6-terra", "gpt-5.6-luna", "unmeasured"):
             assert needle in text, f"missing: {needle}"
     # A model from the wrong family must be rejected up front, not passed
@@ -233,15 +226,16 @@ def test_codex_shim_autostart_scripts_mirror_the_claude_pair() -> None:
 
 
 def test_installer_env_block_covers_codex_modes() -> None:
-    """codex-fallback / codex-only write the same env-triple shapes as the
-    sonnet pair (fallback => auto + sidecar pair; only => primary), and the
+    """openai-fallback / openai-only write the same env-triple shapes as the
+    claude pair (fallback => auto + sidecar pair; only => primary), and the
     installer-managed override marker keeps recognizing files written by
-    pre-codex installs (legacy '(sonnet-only)' text) while writing the
-    generalized marker."""
+    earlier installs (the '(sonnet-only)' and '(shim-only extractor)' texts)
+    while writing the generalized marker."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert "managed override (shim-only extractor)" in text
+        assert "managed override (sidecar disabled)" in text
+        assert "managed override (shim-only extractor)" in text  # legacy accepted
         assert "managed override (sonnet-only)" in text     # legacy accepted
     # codex modes reach the autostart stage with the codex script, not the
     # claude one.
@@ -268,7 +262,7 @@ def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
 def test_shim_modes_fail_fast_on_a_missing_cli() -> None:
     """The shim family's CLI is checked right after the extractor choice,
     BEFORE volumes/env/compose — preflight only knows -Client, so
-    `-Extractor codex-fallback -Client claude` used to sail through
+    `-Extractor openai-fallback -Client claude` used to sail through
     preflight and die at stage 8 with the stack already up (2026-08-31
     review finding; symmetric fix for the claude modes)."""
     ps = _read("ops/install.ps1")
@@ -341,16 +335,16 @@ def test_installers_wire_gemini_via_shim_and_http() -> None:
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for text in (sh, ps):
-        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp" in text
+        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory " in text
         assert "gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp" in text
         assert "gemini mcp list" in text  # idempotency: there is no `gemini mcp get`
 
 
-def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() -> None:
+def test_installers_pass_writer_id_and_refuse_flagless_registration() -> None:
     """Per-provider writer ids ride each shim registration's env (the shim
     forwards PSEUDOLIFE_WRITER_ID as X-PL-Writer). Env-flag support is
-    probed, never assumed: the flagless forms must survive verbatim as the
-    fallback, or a CLI without the flag turns into a failed install."""
+    probed, never assumed: without the flag, Docker-tier stdio setup must
+    refuse registration rather than omit the no-spawn guard."""
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for text in (sh, ps):
@@ -358,32 +352,57 @@ def test_installers_pass_writer_id_on_registration_with_a_flagless_fallback() ->
                        "PSEUDOLIFE_WRITER_ID=codex",
                        "PSEUDOLIFE_WRITER_ID=gemini"):
             assert writer in text, writer
-        # The probed-flag pattern and its flagless fallbacks.
+        # The probed-flag pattern and its explicit refusal.
         assert "mcp add --help" in text
-        assert "claude mcp add --scope user pseudolife-memory -- pseudolife-mcp" in text
-        assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
+        assert "has no env flag; the stdio registration was skipped" in text
+    assert 'claude mcp add --scope user pseudolife-memory -- "$SHIM_PATH"' not in sh
+    assert 'codex mcp add pseudolife-memory -- "$SHIM_PATH"' not in sh
+    assert ("claude mcp add --scope user pseudolife-memory -- "
+            "$script:shimInstallPath") not in ps
+    assert "codex mcp add pseudolife-memory -- $script:shimInstallPath" not in ps
 
 
-def test_installers_skip_codex_hook_on_windows() -> None:
-    """Codex hooks are not available on Windows, so install.ps1 must gate the
-    Codex hook install on the OS and say what replaces it (the standing
-    AGENTS.md block). The .sh installer never runs on Windows and carries no
-    such gate."""
+def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
+    for rel in ("ops/install.sh", "ops/install.ps1"):
+        text = _read(rel)
+        assert "setup-codex-coordination.py" in text, rel
+        assert "--credentials" in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN_FILE" in text, rel
+
+
+def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration() -> None:
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for rel, text in (("ops/install.sh", sh), ("ops/install.ps1", ps)):
+        assert "--runtime-defaults" in text, rel
+        assert "startup_timeout_sec = 240" not in text, rel
+        assert "tool_timeout_sec = 180" not in text, rel
+        assert "runtime defaults were not confirmed" in text, rel
+    assert sh.count("configure_codex_runtime_defaults") == 3
+    assert ps.count("Set-CodexRuntimeDefaults") == 3
+    assert "configure_codex_runtime_defaults" not in sh.split(
+        'if existing_codex=$(codex mcp get pseudolife-memory', 1)[1].split(
+            'elif [ "$TRANSPORT" = "shim" ]', 1)[0]
+    assert "Set-CodexRuntimeDefaults" not in ps.split(
+        '$existingCodex = codex mcp get pseudolife-memory', 1)[1].split(
+            '} elseif (($Transport -eq "shim")', 1)[0]
+    assert "MCP_CODEX=failed" in sh
+    assert '$mcpState["codex"] = "failed"' in ps
+
+
+def test_installers_support_codex_hook_on_windows() -> None:
+    """Current runtimes support Windows; the installer must say so."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
-    assert "$IsWindows" in ps
-    assert "the standing AGENTS.md block is the briefing there" in ps
+    assert "Current Codex runtimes enable hooks by default, including Windows" in ps
     assert "$IsWindows" not in sh
 
 
-def test_hook_installer_explains_experimental_codex_opt_in() -> None:
-    """Codex hooks are off by default: writing hooks.json is not enough, the
-    user must also opt in via [features] codex_hooks = true in config.toml
-    (and then trust the hook — test_codex_hook_install_explains_required_
-    trust_review pins that part)."""
+def test_hook_installer_explains_codex_runtime_and_policy() -> None:
+    """Document intentional disablement and retain the separate trust step."""
     for rel in ("ops/install-hook.sh", "ops/install-hook.ps1", "README.md"):
         text = _read(rel)
-        assert "codex_hooks = true" in text, rel
+        assert "hooks = false" in text, rel
         assert "[features]" in text, rel
 
 
@@ -434,27 +453,26 @@ def test_providers_guide_matches_installer_matrix() -> None:
     matrix on the provider set and the writer ids (loose agreement — the
     markdown table is formatted differently on purpose)."""
     guide = _read("docs/guide/providers.md")
-    for label in ("Claude Code", "OpenAI Codex", "Gemini CLI"):
+    for label in ("Claude Code", "Claude Desktop", "OpenAI Codex", "Gemini CLI"):
         assert label in guide, f"providers guide missing: {label}"
-    for writer in ("claude-code", "codex", "gemini", "mcp-client"):
+    for writer in ("claude-code", "claude-desktop", "codex", "gemini", "mcp-client"):
         assert writer in guide, f"providers guide missing writer id: {writer}"
-    assert "codex_hooks = true" in guide
+    assert "commandWindows" in guide
     assert "@AGENTS.md" in guide
 
 
 def test_update_scripts_carry_the_shared_header_style() -> None:
-    """The deploy scripts get the installers' colored step styling (gated on
-    NO_COLOR / TTY, literal `==>` prefix kept for log greps) but no banner —
-    their output is tee'd into deploy logs."""
-    sh = _read("ops/update.sh")
-    ps = _read("ops/update.ps1")
-    for text in (sh, ps):
-        assert "NO_COLOR" in text
-        assert "==>" in text
+    """The deploy's step lines keep the literal `==>` prefix for log greps
+    (the output is tee'd into deploy logs) and carry no escape bytes; the
+    wrappers print no banner. The steps are printed by the Python deploy
+    the wrappers hand over to."""
+    deploy = _read("pseudolife_memory/update_cli.py")
+    assert '"==> ' in deploy and "\x1b" not in deploy
+    for path in ("ops/update.sh", "ops/update.ps1"):
+        text = _read(path)
         assert "\x1b" not in text
         assert "# >>> banner >>>" not in text
-    assert "step()" in sh
-    assert "function Step" in ps
+        assert "update.py" in text
 
 
 def test_installer_ps1_parses() -> None:
@@ -525,13 +543,11 @@ def test_capability_matrix_is_synced_across_installers() -> None:
 
 
 def test_capability_matrix_states_codex_hook_limits() -> None:
-    """The matrix must be honest about Codex hooks: experimental opt-in via
-    config.toml, and unavailable on Windows (there the standing AGENTS.md
-    block IS the briefing — which is why append is recommended)."""
+    """The matrix separates supported runtime behavior from hook trust."""
     joined = "\n".join(_heredoc_payload(
         _marker_block(_read("ops/install.sh"), "capability-matrix")))
-    assert "codex_hooks = true" in joined
-    assert "NOT available on Windows" in joined
+    assert "enable hooks by default, including Windows" in joined
+    assert "Review and trust" in joined
 
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
@@ -545,10 +561,9 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     sh = _read("ops/install.sh")
     # Every install command is the condition of an `if`, so errexit is
     # suspended and failure reaches the fallback branch instead of aborting.
-    assert "if pipx install pseudolife-mcp; then" in sh
-    assert "if pipx upgrade pseudolife-mcp; then" in sh
-    assert "if python3 -m pip install --user pseudolife-mcp; then" in sh
-    assert "if python -m pip install --user pseudolife-mcp; then" in sh
+    assert 'if pipx install --force "$repo"; then' in sh
+    assert 'if python3 -m pip install --user --upgrade "$repo"; then' in sh
+    assert 'if python -m pip install --user --upgrade "$repo"; then' in sh
     # The failure-mode hint names the PEP 668 cause and the recovery paths.
     assert "externally-managed" in sh
     assert "pipx" in _read("ops/preflight.sh")
@@ -630,3 +645,207 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     assert "serving" in after
     assert "throw" in after
     assert after.index("throw") < after.index("Registered + started")
+
+
+def test_shim_autostart_scripts_pick_an_interpreter_that_imports_the_package() -> None:
+    """Both shims import the dream system prompt from ``pseudolife_memory``,
+    which pulls in torch. On a Docker-tier Linux host with no checkout
+    ``.venv`` the autostart scripts fell back to a bare ``python3`` and
+    registered ``pseudolife-codex-shim.service`` with an ExecStart that
+    exited 1 in a restart loop until it was re-registered with ``--python``
+    (Debian 13, 2026-09-29). All four scripts now ask ``ops/shim_python.py``
+    for an interpreter (the checkout's venv, pipx's venv, a venv it made
+    earlier, a PATH python that imports the package, else a venv it creates
+    from the checkout — each verified before the unit is written), say
+    which one was chosen, and refuse rather than register a unit that
+    cannot start."""
+    for rel in ("ops/install-shim-autostart.sh", "ops/install-codex-shim-autostart.sh"):
+        sh = _read(rel)
+        assert "shim_python.py" in sh, rel
+        assert "--python" in sh, rel                       # the override stays
+        assert 'PYTHON_EXE="$(command -v python3)"' not in sh, rel   # the old fallback
+        # Quoted in ExecStart: systemd splits an unquoted path with a space,
+        # which is the crash loop this pick exists to prevent (review, 2026-09-29).
+        assert 'ExecStart="$PYTHON_EXE" "$repo/ops/shim_autostart.py" run ' in sh, rel
+        # The chosen interpreter is printed with the registration line.
+        assert "Registered + started" in sh and "$PYTHON_EXE" in sh.split("Registered + started", 1)[1], rel
+    for rel in ("ops/install-shim-autostart.ps1", "ops/install-codex-shim-autostart.ps1"):
+        ps = _read(rel)
+        assert "shim_python.py" in ps, rel
+        assert "(Get-Command python).Source" not in ps, rel  # the old fallback
+        assert "Registered + started" in ps and "$PythonExe" in ps.split("Registered + started", 1)[1], rel
+
+
+def test_installers_register_the_shim_autostart_after_installing_the_shim() -> None:
+    """The MCP shim install (pipx, or pip --user) is what puts the package
+    where an interpreter imports it on a host without a checkout venv, so the
+    autostart registration must run after it, or the picker builds a venv of
+    its own that the installer then duplicates a few steps later."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    assert sh.index("ensure_shim() {") < sh.index("CLI shim autostart (Claude / Codex modes)")
+    assert ps.index("function Install-ShimOnce") < ps.index("CLI shim autostart (Claude / Codex modes)")
+    # And it sits OUTSIDE every stage range the installer tests execute
+    # (stages 9 through the '12. health' header, and stage 11's loop up to
+    # that header): a test that reached it would call the real systemctl
+    # or Task Scheduler and could disable a live shim on the machine running
+    # the suite. Before the health wait, so an unhealthy daemon still leaves
+    # the autostart registered.
+    for text, health, wait in (
+            (sh, "\n# ── 12. health", 'step "Waiting for the daemon to report healthy..."'),
+            (ps, "\n# -- 12. health", 'Step "Waiting for the daemon to report healthy..."')):
+        start = text.index("# >>> shim autostart >>>")
+        assert text.count("# >>> shim autostart >>>") == 1
+        assert text.index(health) < start < text.index("# <<< shim autostart <<<") < text.index(wait)
+    # The failure hint names the interpreter refusal beside the systemd one.
+    assert "imports pseudolife_memory" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
+
+
+def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:
+    """Choosing a mode removes the other family's shim autostart (pinned
+    above); the 2026-09-29 Debian install did that without a line the
+    operator could read. The removal now names the unit, the family and the
+    extractor mode that made it redundant."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for text in (sh, ps):
+        removal = text.split("A mode switch must tear down the OTHER family", 1)[1]
+        removal = removal.split("Registering the", 1)[0]
+        assert "does not use it" in removal
+        assert "$EXTRACTOR" in removal or "$Extractor" in removal
+
+
+def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
+    """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
+    sanitized environment (no PATH extras, no user env vars), so its entry
+    is merged into claude_desktop_config.json by ops/register_claude_desktop.py
+    — one implementation both installers call — with the shim's ABSOLUTE
+    path and, for a token-gated daemon, a token FILE path: never a token
+    value, never a reliance on the OS environment (2026-09-19 incident:
+    four days of 401s behind "unhandled errors in a TaskGroup")."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for text, rel in ((sh, "install.sh"), (ps, "install.ps1")):
+        assert "register_claude_desktop.py" in text, rel
+        assert "--writer-id" in text and "--token-file" in text, rel
+        assert "Claude Desktop" in text, rel          # menu + ladder
+        assert "fully quit" in text, rel              # the relaunch step
+        assert "sanitized environment" in text, rel   # the why, in the script
+        # The token VALUE reaches the registrar only by env-var NAME, so it
+        # never appears on a command line or in the config file.
+        assert "--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE" in text.replace(
+            '", "', " ").replace('"', ""), rel
+        assert "--token " not in text and '"--token"' not in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN=" not in text.split("claude-desktop", 1)[1].split(
+            "generic", 1)[0].replace("PSEUDOLIFE_MCP_TOKEN=<token>", ""), rel
+    # Provider validation admits it, in both spellings of the list.
+    assert 'claude|claude-desktop|codex|gemini|generic) expanded="$expanded $tok"' in sh
+    assert '{ $_ -in "claude", "claude-desktop", "codex", "gemini", "generic" }' in ps
+    # Preflight accepts it (install.* passes the list straight through).
+    for rel in ("ops/preflight.sh", "ops/preflight.ps1"):
+        assert "claude-desktop" in _read(rel), rel
+    # The synced capability matrix names it.
+    matrix = "\n".join(_heredoc_payload(_marker_block(sh, "capability-matrix")))
+    assert "Claude Desktop" in matrix
+    # A single-client Desktop install gets its own daemon-side writer id.
+    assert "claude-desktop) WRITER_ID=claude-desktop" in sh
+    assert '"claude-desktop" { "claude-desktop" }' in ps
+
+
+# -- the closing update line (2026-09-29 first-update findings) ----------------
+# The launcher directory is not on PATH, so a bare `pseudolife-mcp update`
+# is "command not found" on a new install and the old pipx package on an
+# upgraded one. The line names the launcher by its path until PATH finds it.
+
+def _update_line_bash(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+    from tests.test_codex_hooks import bash_exe
+    launcher = tmp_path / "launcher dir" / "pseudolife-mcp"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    block = "\n".join(_marker_block(_read("ops/install.sh"), "update line"))
+    win = str(launcher).replace("'", "'\\''")
+    script = f"""set -eu
+SHIM_PATH="$(cygpath -u '{win}' 2>/dev/null || printf '%s' '{win}')"
+CLIENT_ONLY='{"1" if client_only else ""}'
+PATH='/usr/bin:/bin'
+if [ '{"yes" if on_path else "no"}' = yes ]; then PATH="$(dirname "$SHIM_PATH"):$PATH"; fi
+{block}
+print_update_line
+"""
+    proc = subprocess.run([bash_exe()], input=script, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def test_install_sh_update_line_names_the_launcher_until_path_finds_it(tmp_path: Path) -> None:
+    off = _update_line_bash(tmp_path, on_path=False, client_only=False)
+    assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" update \(--check', off), off
+    assert "to PATH" in off and "ops/update.sh --all" in off
+    on = _update_line_bash(tmp_path, on_path=True, client_only=False)
+    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+
+
+def test_install_sh_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:
+    out = _update_line_bash(tmp_path, on_path=False, client_only=True)
+    assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" update --clients-only', out), out
+    assert "ops/update.sh --all" not in out
+
+
+def _update_line_ps1(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh not available")
+    import os
+    launcher = tmp_path / "launcher dir" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_bytes(b"MZ")
+    launcher.chmod(0o755)
+    block = "\n".join(_marker_block(_read("ops/install.ps1"), "update line"))
+    path = str(launcher).replace("'", "''")
+    env = {**os.environ, "PATH": (str(launcher.parent) + os.pathsep if on_path else "") + os.environ.get("PATH", "")}
+    if not on_path:
+        env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep)
+                                      if not (Path(p) / launcher.name).exists())
+    script = block + f"\nWrite-UpdateLine -ShimPath '{path}' -ClientOnly:${'true' if client_only else 'false'}\n"
+    proc = subprocess.run([pwsh, "-NoProfile", "-Command", script], capture_output=True, text=True,
+                          timeout=60, env=env)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def test_install_ps1_update_line_names_the_launcher_until_path_finds_it(tmp_path: Path) -> None:
+    off = _update_line_ps1(tmp_path, on_path=False, client_only=False)
+    assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update \(--check", off), off
+    assert "to PATH" in off and "update.ps1 -All" in off
+    on = _update_line_ps1(tmp_path, on_path=True, client_only=False)
+    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+
+
+def test_install_ps1_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:
+    out = _update_line_ps1(tmp_path, on_path=False, client_only=True)
+    assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update --clients-only", out), out
+    assert "update.ps1 -All" not in out
+
+
+def test_the_client_only_notes_point_at_the_update_command() -> None:
+    notes = "\n".join(_heredoc_payload(_marker_block(_read("ops/install.sh"), "client-only notes")))
+    assert "--clients-only" in notes
+
+def test_install_ps1_puts_the_launcher_on_the_user_path_and_says_so_in_the_summary() -> None:
+    """Once the shim runtime installs, the launcher directory goes first on
+    the user PATH (ops/shim_runtime.py expose, HKCU only), so `pseudolife-mcp`
+    in a new terminal is the launcher rather than an older pipx copy
+    (2026-09-29); the outcome is repeated in the summary, before the board
+    line, marked [!] when the step failed."""
+    ps = _read("ops/install.ps1")
+    install_shim = ps[ps.index("function Install-ShimOnce"):]
+    install_shim = install_shim[:install_shim.index("\nfunction ")]
+    assert '(Join-Path $repo "ops\shim_runtime.py") --json expose' in install_shim
+    assert install_shim.index("--json expose") < install_shim.index("$script:shimInstallResult = $true")
+    summary = ps[ps.index('if ($script:shimPathNotes.Count -gt 0) {'):]
+    assert summary.index("Launcher on PATH") < summary.index("# >>> board line >>>")
+    assert '$pathMarker = if ($script:shimPathState -eq "failed") { "[!]" } else { "[x]" }' in summary
+    # the machine PATH is never written, here or in the module the step runs
+    assert "'Machine'" not in ps and '"Machine"' not in ps
+    assert "HKEY_LOCAL_MACHINE" not in _read("pseudolife_memory/runtimes.py")

@@ -1,8 +1,8 @@
-<!-- i18n-sync: v10 -->
+<!-- i18n-sync: v13 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v10 (2026-09-04)
+[README original em inglês](../../README.md) — sincronizado: v13 (2026-09-28)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -85,20 +85,28 @@ usar — um modelo Claude via seu plano Max (a instalação mais leve), o
 shim do Claude com o modelo local incluído como fallback automático, as
 mesmas duas formas com um modelo GPT-5.6 em um plano ChatGPT (via Codex
 CLI), ou apenas o modelo local incluído, que não precisa de nenhum plano.
-Em seguida, ele sobe a stack, conecta os clientes selecionados (o hook de
-briefing no início da sessão, que entrega a orientação do loop de memória
-a cada sessão, e o registro do transporte MCP), e faz o health-check do
-daemon. Ele é idempotente: pode ser executado novamente a qualquer
-momento; `--extractor <mode>` alterna entre as configurações de extrator.
+Em seguida, ele sobe a stack, conecta os clientes selecionados (hooks de
+sessão nos clientes que têm um sistema de hooks, e o registro do
+transporte MCP), e faz o health-check do daemon. Ele é idempotente: pode
+ser executado novamente a qualquer momento; `--extractor <mode>` alterna
+entre as configurações de extrator.
 
-Com o daemon em execução, o **plugin** do Claude Code adiciona o briefing
-de memória no início da sessão, a orientação permanente do loop de
-memória e os comandos `/dream` e `/memory-status` — o próprio servidor
-MCP é registrado pelo instalador, então o plugin nunca duplica as
-ferramentas dele:
+Quando o Claude Code é um dos clientes selecionados, o instalador também
+adiciona o **plugin** do Claude Code (`--claude-plugin skip` /
+`-ClaudePlugin skip` pula essa etapa). O hook de memória de início de sessão
+do plugin — o mesmo que os hooks verificados do Codex executam — entrega
+um núcleo compacto da orientação do loop de memória e um briefing ao vivo
+de tamanho limitado; o plugin também adiciona lembretes a cada prompt e os
+comandos `/dream` e `/memory-status`. Sem o plugin, o hook do
+`settings.json` do Claude Code gravado pelo instalador entrega apenas o
+briefing. Nenhum dos dois entrega a orientação completa do loop de
+memória: para isso, acrescente `examples/CLAUDE.memory.md` ao seu
+`CLAUDE.md` ou `AGENTS.md`. O próprio servidor MCP é registrado pelo
+instalador, então o plugin nunca duplica as ferramentas dele. Para
+adicionar o plugin manualmente, dentro do Claude Code:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
@@ -107,15 +115,22 @@ usado para o Claude, mantendo `PSEUDOLIFE_MCP_NO_SPAWN=1` definido na
 camada Docker para que uma sessão do Codex tenha sua própria identidade
 em vez de herdar o episódio de uma sessão concorrente do Claude. Comandos
 exatos, a alternativa via HTTP direto, e portas/tokens não padrão:
-[README — Wire into your coding agent](../../README.md#wire-into-your-coding-agent).
+[README — Conectar ao seu agente de codificação](../../README.md#wire-into-your-coding-agent).
 
 ## Como funciona
 
 O agente armazena uma afirmação de cada vez enquanto trabalha
 (`memory_store`, `memory_fact_set`). Entre sessões, o **sonho** destila o
-fluxo em fatos canônicos, relações de grafo e lições procedurais. No início de cada
-sessão, um briefing injeta o que a memória tem incerteza, lições de
-trabalhos anteriores e onde você parou. A recuperação combina busca
+fluxo em fatos canônicos, relações de grafo e lições procedurais. Onde há
+hooks de sessão instalados — o plugin do Claude Code, o hook do
+`settings.json` do Claude Code gravado pelo instalador ou os hooks
+verificados do Codex —, no início de cada sessão um briefing injeta aquilo
+de que a memória não tem certeza, lições de trabalhos anteriores e onde
+você parou. O Início rápido de dois comandos não instala nenhum hook, e o
+instalador não conecta nenhum para o Gemini CLI nem para outros agentes
+MCP, então essas configurações não recebem briefing; ainda assim, as
+instruções curtas do próprio servidor MCP pedem ao agente que busque na
+memória ao começar uma tarefa. A recuperação combina busca
 semântica sobre o armazenamento associativo com o repositório de fatos
 canônicos, de modo que respostas corrigidas prevalecem sobre as
 desatualizadas.
@@ -126,6 +141,7 @@ A documentação canônica e sempre atualizada está em inglês:
 
 - [README](../../README.md) — instalação completa, integração,
   ferramentas, solução de problemas
+- [Atualização](../../README.md#updating) — abrange a migração do instalador, a atualização dos clientes e a reinicialização das sessões
 - [Configuração](../guide/configuration.md) · [Recuperação](../guide/retrieval.md)
   · [Sonhos](../guide/dreaming.md) · [Episódios](../guide/episodes.md)
   · [Modelo de memória](../guide/memory-model.md) · [Benchmarks](../guide/benchmarks.md)

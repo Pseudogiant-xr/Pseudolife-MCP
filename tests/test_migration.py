@@ -68,6 +68,18 @@ def _build_legacy_bank(data_dir, suffix: str = "", config=None):
     target.superseded_at = 123.0
     target.superseded_by_text = "legacy fact beta" + suffix
     cms.save(data_dir / "memory_state")
+    # Exercise an old-format import, independent of today's CMS writer.
+    # Schema 7 adds a service-initialized acknowledgement checkpoint.
+    cms_path = data_dir / "memory_state" / "cms_state.pt"
+    payload = torch.load(cms_path, map_location="cpu", weights_only=True)
+    payload["schema_version"] = 6
+    payload.pop("dream_ack_secret", None)
+    payload.pop("dream_display_cursor", None)
+    for band in payload["bands"].values():
+        for entry in band["entries"]:
+            entry.pop("dream_state", None)
+            entry.pop("dream_id", None)
+    torch.save(payload, cms_path)
 
     cortex = CortexStore()
     cortex.write_fact(Slot("legacy-proj" + suffix, "language", "rust"),
@@ -194,8 +206,9 @@ def test_interrupted_migration_records_progress_and_resumes(
         storage.close()
 
 
+@pytest.mark.parametrize("legacy_progress", [False, True])
 def test_interrupted_entries_loop_resumes_without_duplicates(
-        pg_conn, pg_url, tmp_path):
+        pg_conn, pg_url, tmp_path, legacy_progress):
     """Death *inside* the entries loop — the half-imported case."""
     from pseudolife_memory.storage.migrate import migrate_legacy
     from pseudolife_memory.storage.postgres import PostgresStorage
@@ -218,6 +231,12 @@ def test_interrupted_entries_loop_resumes_without_duplicates(
             migrate_legacy(tmp_path, storage, embedder)
         assert len(storage.load_entries()) == 1
         assert _migration_state(storage)["status"] == "in_progress"
+
+        if legacy_progress:
+            from pseudolife_memory.storage.migrate import MIGRATION_META_KEY
+            state = _migration_state(storage)
+            state.pop("entry_cursor")
+            storage.meta_set(MIGRATION_META_KEY, state)
 
         storage.insert_entry = real_insert
         summary = migrate_legacy(tmp_path, storage, embedder)

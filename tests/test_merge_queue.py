@@ -268,6 +268,7 @@ def test_write_dedup_skips_vetoed_match_but_files_plain_near_dup(svc):
     assert len(_pending_merges(svc)) >= 1      # control: plain near-dup files
 
 
+@pytest.mark.real_model
 def test_deep_dream_filters_vetoed_merge_candidates(svc):
     # The deep-dream filing site: a high-similarity name-contained pair that
     # trips the event-slug veto must be absent from would_merge_propose,
@@ -315,6 +316,7 @@ def test_write_dedup_skips_pair_with_pending_junk(svc):
     assert "flurble relay service node" not in paired  # junk-owned: skipped
 
 
+@pytest.mark.real_model
 def test_deep_dream_skips_merge_cands_with_pending_junk(svc):
     # Same staging as the veto wiring test's control pair — which must file
     # a merge candidate — EXCEPT one side carries a pending junk proposal.
@@ -327,6 +329,7 @@ def test_deep_dream_skips_merge_cands_with_pending_junk(svc):
     assert "live gadget daemon" not in flat
 
 
+@pytest.mark.real_model
 def test_deep_dream_candidates_exclude_pending_link_proposals(svc):
     _stage_link_pair(svc, "gadget relay", "widget beacon")
     out1 = svc.deep_dream(apply=False, include_snippets=False)
@@ -341,6 +344,7 @@ def test_deep_dream_candidates_exclude_pending_link_proposals(svc):
     assert frozenset(("gadget relay", "widget beacon")) not in pairs2
 
 
+@pytest.mark.real_model
 def test_deep_dream_candidates_exclude_junk_owned_entities(svc):
     _stage_link_pair(svc, "gadget relay", "widget beacon")
     svc._storage.insert_entity_proposal(

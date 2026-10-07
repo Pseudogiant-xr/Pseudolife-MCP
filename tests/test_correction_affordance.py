@@ -137,6 +137,21 @@ def test_fresh_and_evergreen_cortex_facts_are_not_nagged(tmp_path, monkeypatch):
     assert "correction_note" not in out
 
 
+def _assert_contested_call(cw, entity, attribute):
+    """A contested slot is settled by a human decision, never by writing.
+    Re-asserting ``memory_fact_set`` only contests the slot further (the
+    standing TRUST ORDER block says so), and a prefilled ``accept`` boolean
+    would let a model settle the conflict blindly — observed 2026-10-04: a
+    live recall served a contested slot with a ``memory_fact_set`` call."""
+    assert cw, "contested fact has no correct_with affordance"
+    assert cw.startswith("memory_fact_get("), cw
+    assert "memory_fact_resolve(" in cw, cw
+    assert "(core tier)" in cw, cw
+    assert "memory_fact_set" not in cw, cw
+    assert "accept=True" not in cw and "accept=False" not in cw, cw
+    assert repr(entity) in cw and repr(attribute) in cw, cw
+
+
 def test_contested_fact_carries_the_affordance_regardless_of_age(
         tmp_path, monkeypatch):
     mod = _reload_mcp_filemode(tmp_path, monkeypatch)
@@ -146,7 +161,33 @@ def test_contested_fact_carries_the_affordance_regardless_of_age(
     ])
 
     (fact,) = out["cortex"]
-    assert fact.get("correct_with", "").startswith("memory_fact_set("), fact
+    _assert_contested_call(fact.get("correct_with"),
+                           "daemon", "deployed-version")
+
+
+def test_contested_wins_over_aged(tmp_path, monkeypatch):
+    """An aged fact that is also contested gets the resolve path: writing
+    the verified value would park another contender, not settle it."""
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
+    out = _search_with_cortex(mod, monkeypatch, [
+        _cortex_fact("daemon", "deployed-version", "v0.8", age_days=11,
+                     freshness_class="volatile", contested=True),
+    ])
+
+    (fact,) = out["cortex"]
+    _assert_contested_call(fact.get("correct_with"),
+                           "daemon", "deployed-version")
+
+
+def test_correction_note_keeps_run_now_off_contested_facts():
+    """The response-level note is shared by both kinds, so it must scope
+    "run it NOW" to aged facts and send contested ones to a human."""
+    from pseudolife_memory.mcp_server import CORRECTION_NOTE
+    sentences = [x.lower() for x in CORRECTION_NOTE.split(". ")]
+    (run_now,) = [x for x in sentences if "now" in x]
+    assert "aged" in run_now and "contested" not in run_now
+    (contested,) = [x for x in sentences[1:] if "contested" in x]
+    assert "human decides" in contested
 
 
 def test_response_carries_one_norm_note_when_any_fact_is_flagged(
@@ -236,6 +277,24 @@ def test_fact_get_attaches_affordance_to_an_aged_record(tmp_path, monkeypatch):
     assert "correct_with" in out.get("correction_note", "")
 
 
+def test_fact_get_contested_record_points_at_resolve(tmp_path, monkeypatch):
+    """The read surface a contested ``correct_with`` names must itself serve
+    the resolve path, not a ``memory_fact_set`` call."""
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
+    rec = _cortex_fact("daemon", "deployed-version", "v0.8", age_days=1,
+                       freshness_class="volatile")
+    rival = _cortex_fact("daemon", "deployed-version", "v0.9", age_days=0)
+    monkeypatch.setattr(mod.service, "cortex_lookup", lambda *a, **k: rec)
+    monkeypatch.setattr(mod.service, "cortex_contenders",
+                        lambda *a, **k: {"contenders": [rival]})
+    monkeypatch.setattr(mod.service, "entity_ref", lambda *a, **k: None)
+    out = mod.memory_fact_get(entity="daemon", attribute="deployed-version")
+
+    _assert_contested_call(out["record"].get("correct_with"),
+                           "daemon", "deployed-version")
+    assert out.get("correction_note") == mod.CORRECTION_NOTE
+
+
 def test_fact_get_leaves_a_fresh_record_alone(tmp_path, monkeypatch):
     mod = _reload_mcp_filemode(tmp_path, monkeypatch)
     rec = _cortex_fact("daemon", "deployed-version", "v0.8", age_days=1,
@@ -254,10 +313,16 @@ def test_fact_get_leaves_a_fresh_record_alone(tmp_path, monkeypatch):
 
 
 def test_trust_order_teaches_the_affordance():
-    """The briefing is where the norm is taught, the affordance is where it
-    is applied — TRUST ORDER must name `correct_with` and frame correction
-    as part of discovery, not a follow-up. (The examples/CLAUDE.memory.md
-    byte-pin in test_plugin_packaging keeps both halves identical.)"""
-    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    """Served instructions teach the norm, the affordance is where it is
+    applied. The standing block's TRUST ORDER (MEMORY_LOOP_BLOCK, byte-pinned
+    to examples/CLAUDE.memory.md in test_plugin_packaging) must name
+    `correct_with` and frame correction as part of discovery. Since #364 the
+    SessionStart hook serves only STARTUP_MEMORY_CORE, so the core must name
+    the correction step itself."""
+    from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
+                                                    STARTUP_MEMORY_CORE)
     assert "correct_with" in MEMORY_LOOP_BLOCK
     assert "memory_outcome" in MEMORY_LOOP_BLOCK
+    core = " ".join(STARTUP_MEMORY_CORE.split())
+    assert "correct the memory on the spot" in core
+    assert "`memory_outcome` with `correction`" in core

@@ -75,6 +75,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
 import lme_v2_adapter as A  # noqa: E402 — light module, no heavy imports
+import embedder_stamp  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 OUT_FILE = RESULTS_DIR / "lme-v2-smoke.jsonl"
@@ -777,6 +778,7 @@ def run_smoke(limit: int, max_traj: int, retrv: dict | None = None,
             "retrieval_seconds": retrieval_seconds,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
         }
+        embedder_stamp.stamp_row(row, "extract", svc)
         row = answer_judge_score(row, answer_system=answer_system)
         marks = " ".join(f"{a}={'Y' if row[f'{a}_correct'] else 'n'}"
                          for a in ARMS)
@@ -860,6 +862,9 @@ def report() -> None:
     print(f"supersessions across runs: {sup}   "
           f"retrieval s/q: {summary['retrieval_seconds_mean']}")
     summary["superseded_total"] = sup
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        summary["embedder"] = embedder
     SUMMARY_FILE.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"summary -> {SUMMARY_FILE}")
 

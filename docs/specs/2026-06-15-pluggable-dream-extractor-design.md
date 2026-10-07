@@ -1,5 +1,10 @@
 # Pluggable dream extractor — design spec
 
+> Historical API note (2026-09-11): numeric dream cursor commits in this plan
+> have been replaced by exact-batch `commit_token` acknowledgement. Use the
+> [current dreaming guide](../guide/dreaming.md) for manual calls and retry semantics.
+
+
 Status: **proposed (design)**, pending review + plan.
 Target: **Pseudolife-MCP** `origin/master`. Core-only; no external-agent deps.
 Touches `pseudolife_memory/service.py`, `mcp_server.py`, `daemon.py`,

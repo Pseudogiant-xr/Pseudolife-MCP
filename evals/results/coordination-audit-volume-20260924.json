@@ -1,0 +1,205 @@
+{
+ "arms": {
+  "audit": {
+   "bytes_per_event": 601.1,
+   "events": {
+    "ack": 623,
+    "attach": 80,
+    "detach": 80,
+    "expire": 1,
+    "prune": 1,
+    "read": 623,
+    "register": 40,
+    "send": 623,
+    "update": 600
+   },
+   "events_total": 2671,
+   "latency": {
+    "ack": {
+     "mean_ms": 7.037,
+     "n": 623,
+     "p50_ms": 6.518,
+     "p95_ms": 9.134
+    },
+    "receive": {
+     "mean_ms": 6.345,
+     "n": 623,
+     "p50_ms": 5.868,
+     "p95_ms": 8.416
+    },
+    "send": {
+     "mean_ms": 10.573,
+     "n": 623,
+     "p50_ms": 9.772,
+     "p95_ms": 13.91
+    },
+    "update": {
+     "mean_ms": 7.259,
+     "n": 600,
+     "p50_ms": 7.153,
+     "p95_ms": 9.03
+    }
+   },
+   "payload_bytes": 522783,
+   "prune": {
+    "agents_removed": 40,
+    "audit_removed": 0,
+    "bodies_expired": 623,
+    "removed": 623
+   },
+   "table_heap_bytes": 1327104,
+   "table_total_bytes": 1605632
+  },
+  "audit-repeat": {
+   "bytes_per_event": 601.1,
+   "events": {
+    "ack": 623,
+    "attach": 80,
+    "detach": 80,
+    "expire": 1,
+    "prune": 1,
+    "read": 623,
+    "register": 40,
+    "send": 623,
+    "update": 600
+   },
+   "events_total": 2671,
+   "latency": {
+    "ack": {
+     "mean_ms": 7.099,
+     "n": 623,
+     "p50_ms": 6.287,
+     "p95_ms": 10.303
+    },
+    "receive": {
+     "mean_ms": 6.212,
+     "n": 623,
+     "p50_ms": 5.632,
+     "p95_ms": 9.203
+    },
+    "send": {
+     "mean_ms": 10.301,
+     "n": 623,
+     "p50_ms": 9.416,
+     "p95_ms": 14.486
+    },
+    "update": {
+     "mean_ms": 5.521,
+     "n": 600,
+     "p50_ms": 5.329,
+     "p95_ms": 6.044
+    }
+   },
+   "payload_bytes": 522799,
+   "prune": {
+    "agents_removed": 40,
+    "audit_removed": 0,
+    "bodies_expired": 623,
+    "removed": 623
+   },
+   "table_heap_bytes": 1327104,
+   "table_total_bytes": 1605632
+  },
+  "control": {
+   "bytes_per_event": null,
+   "events": {},
+   "events_total": 0,
+   "latency": {
+    "ack": {
+     "mean_ms": 4.732,
+     "n": 623,
+     "p50_ms": 4.449,
+     "p95_ms": 5.387
+    },
+    "receive": {
+     "mean_ms": 3.979,
+     "n": 623,
+     "p50_ms": 3.765,
+     "p95_ms": 4.657
+    },
+    "send": {
+     "mean_ms": 8.106,
+     "n": 623,
+     "p50_ms": 7.543,
+     "p95_ms": 9.844
+    },
+    "update": {
+     "mean_ms": 4.326,
+     "n": 600,
+     "p50_ms": 3.883,
+     "p95_ms": 7.305
+    }
+   },
+   "payload_bytes": 0,
+   "prune": {
+    "agents_removed": 40,
+    "audit_removed": 0,
+    "bodies_expired": 623,
+    "removed": 623
+   },
+   "table_heap_bytes": 0,
+   "table_total_bytes": 24576
+  },
+  "control-repeat": {
+   "bytes_per_event": null,
+   "events": {},
+   "events_total": 0,
+   "latency": {
+    "ack": {
+     "mean_ms": 5.643,
+     "n": 623,
+     "p50_ms": 4.852,
+     "p95_ms": 9.807
+    },
+    "receive": {
+     "mean_ms": 4.837,
+     "n": 623,
+     "p50_ms": 4.066,
+     "p95_ms": 8.489
+    },
+    "send": {
+     "mean_ms": 9.637,
+     "n": 623,
+     "p50_ms": 8.164,
+     "p95_ms": 19.411
+    },
+    "update": {
+     "mean_ms": 8.472,
+     "n": 600,
+     "p50_ms": 5.725,
+     "p95_ms": 16.16
+    }
+   },
+   "payload_bytes": 0,
+   "prune": {
+    "agents_removed": 40,
+    "audit_removed": 0,
+    "bodies_expired": 623,
+    "removed": 623
+   },
+   "table_heap_bytes": 0,
+   "table_total_bytes": 24576
+  }
+ },
+ "harness": "evals/coordination_audit_volume.py",
+ "if_every_night_were_a_trial_mb": {
+  "30": 48.2,
+  "365": 586.1,
+  "90": 144.5
+ },
+ "measured_at": "2026-09-24T03:00:15+1000",
+ "per_trial_night_mb": 1.61,
+ "platform": "Windows-10-10.0.26200-SP0",
+ "postgres": "18.6 (Debian 18.6-1.pgdg12+2)",
+ "python": "3.11.9",
+ "reference": "2026-09-23/24 fifteen-session coordination trial board export: 40 agents, 623 messages, 273,426 body bytes (mean 439, median 397, max 2110) over 9.6 h",
+ "workload": {
+  "agents": 40,
+  "assumption": "updates_per_agent and attaches_per_agent are assumed; the reference export records neither",
+  "attaches_per_agent": 2,
+  "messages": 623,
+  "per_message": "send, pull receive, ack",
+  "seed": 20260924,
+  "updates_per_agent": 15
+ }
+}

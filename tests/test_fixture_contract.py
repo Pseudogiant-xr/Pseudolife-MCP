@@ -20,7 +20,7 @@ from pseudolife_memory.service import _entry_to_dict
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 from pseudolife_memory.web.fixtures import FixtureService
 
-# What views/stream.js actually reads.
+# What the Console's Stream view (frontend/src/lib/api/stream.ts) reads.
 _DRAWER_TIER_KEYS = {"name", "candidates"}
 _DRAWER_CANDIDATE_KEYS = {"text_preview", "kept"}
 _DRAWER_TOPK_KEYS = {"text_preview", "score"}
@@ -70,7 +70,7 @@ def test_fixture_trace_matches_drawer_contract():
     _assert_drawer_shape(fx, "FixtureService.trace")
 
 
-# What atlas_review.js's curation section actually reads per duplicate pair.
+# What the Review view's curation panel (frontend/src/components/review/CurationPanel.svelte) reads per duplicate pair.
 _CURATION_PAIR_KEYS = {"a_key", "b_key", "a", "b", "similarity"}
 _CURATION_LESSON_SIDE_KEYS = {"entity", "attribute", "value",
                               "polarity", "outcome", "about"}
@@ -102,3 +102,219 @@ def test_entry_dicts_match_entry_card_contract():
     assert fx_entries
     assert _ENTRY_CARD_KEYS <= set(fx_entries[0]), (
         f"fixture entry keys: {sorted(fx_entries[0])}")
+
+
+# ── maintainer passkey and Board roles (spec 2026-10-04, section 4) ─────────
+# What the Console's lib/maintainer.ts, SignedAction.svelte, RolesBand.svelte
+# and PasskeysPanel.svelte read. The real side runs the service's own
+# dict-building code over canned rows (a MaintainerStore whose two query
+# helpers return them), so no Postgres is needed; the send answer, the
+# repudiate answer and the completing routes need the database and are
+# covered by tests/test_maintainer_messages.py and test_maintainer_roles.py.
+
+_MX_STATUS_KEYS = {"available", "rp_id", "origin", "passkeys", "roles", "key_changes"}
+_MX_KEY_CHANGE_KEYS = {"at", "principal", "change", "credential_id", "label", "by", "path",
+                       "revoked"}
+_MX_PASSKEY_KEYS = {"credential_id", "label", "state", "enrolled_by", "active_from",
+                    "created_at", "last_used_at", "revoked_at", "revoked_by", "flagged_at"}
+# reachable/reason: whether maintainer mail rings the holder now (2026-10-05).
+_MX_DELEGATE_KEYS = {"agent_id", "expires_at", "granted_by", "reachable", "reason"}
+_MX_COORDINATOR_KEYS = {"agent_id", "expires_at", "reachable", "reason"}
+_MX_RECIPIENT_KEYS = {"agent_id_prefix", "name", "label", "principal", "host", "client",
+                      "project", "task", "last_activity", "duplicate_name"}
+_MX_ROLE_PREVIEW_KEYS = {"role", "project", "action", "current_holder"}
+_MX_GRANT_PREVIEW_KEYS = _MX_ROLE_PREVIEW_KEYS | {"replaces", "also_breaks"} | _MX_RECIPIENT_KEYS
+_MX_SENT_KEYS = {"message_id", "recipient_agent_id", "recipient_label", "created_at", "label",
+                 "text", "wake", "first_read_at", "acknowledged_at", "repudiated_at"}
+_MX_INBOX_KEYS = {"message_id", "sender_agent_id", "sender_label", "sender_principal",
+                  "reply_to", "text", "created_at", "acknowledged_at", "origin"}
+_MX_AGENT = "a" * 32
+_MX_DUMMY = {"id": "fixture", "response": {}}
+
+
+def _real_maintainer_store():
+    """A real MaintainerStore whose queries answer one canned row carrying
+    every column its dict builders read."""
+    import time
+
+    from pseudolife_memory.storage.maintainer import MaintainerStore
+
+    now = time.time()
+    row = {
+        # passkeys
+        "credential_id": "cred", "label": "laptop", "state": "active",
+        "enrolled_by": "bootstrap", "active_from": now - 60, "created_at": now - 120,
+        "last_used_at": None, "revoked_at": None, "revoked_by": None, "flagged_at": None,
+        # leases (roles, role_holder)
+        "name": "delegate:p", "holder_agent_id": _MX_AGENT, "expires_at": now + 3600,
+        "granted_by": "maintainer",
+        # the holder's agent row, joined for reachability (roles)
+        "row_agent_id": _MX_AGENT, "attachment_id": None, "lease_until": 0,
+        "wake_enabled": False,
+        # agents (recipient)
+        "agent_id": _MX_AGENT, "principal": "laptop", "parent_thread": None,
+        "capabilities": {}, "project": "p", "task": "", "last_activity": now,
+        # messages (sent, inbox)
+        "message_id": "m1", "recipient_agent_id": _MX_AGENT, "recipient_label": "worker",
+        "maintainer_proof": {"label": "laptop"}, "text": "hi",
+        "wake": {"decision": "rung", "reason": "maintainer_message", "ring_at": now},
+        "first_read_at": None, "acknowledged_at": None, "repudiated_at": None,
+        "sender_agent_id": _MX_AGENT, "sender_label": "worker", "sender_principal": "laptop",
+        "reply_to": "m0",
+        # audit events (key_changes)
+        "payload": '{"by":"bootstrap","change":"enrol","credential_id":"cred",'
+                   '"label":"laptop","path":"console","revoked":null}',
+    }
+
+    class Canned(MaintainerStore):
+        def _one(self, sql, params=()):
+            return row
+
+        def _all(self, sql, params=()):
+            return [row]
+
+    return Canned(None, rp_id="localhost", origin="http://localhost:8765")
+
+
+def _assert_status_shape(status, who):
+    assert _MX_STATUS_KEYS <= set(status), f"{who} status keys: {sorted(status)}"
+    if not status["available"]:
+        assert status["reason"] == "maintainer_not_enrolled", who
+    assert status["passkeys"], f"{who}: no passkey rows"
+    for key in status["passkeys"]:
+        assert set(key) == _MX_PASSKEY_KEYS, f"{who} passkey keys: {sorted(key)}"
+    assert status["key_changes"], f"{who}: no key changes"
+    for change in status["key_changes"]:
+        assert set(change) == _MX_KEY_CHANGE_KEYS, f"{who} key change keys: {sorted(change)}"
+        assert change["path"] in ("console", "host"), who
+    assert status["roles"], f"{who}: no roles"
+    for project, slots in status["roles"].items():
+        assert set(slots) == {"delegate", "coordinator"}, f"{who} {project}: {sorted(slots)}"
+        if slots["delegate"]:
+            assert set(slots["delegate"]) == _MX_DELEGATE_KEYS, (
+                f"{who} delegate keys: {sorted(slots['delegate'])}")
+        if slots["coordinator"]:
+            assert set(slots["coordinator"]) == _MX_COORDINATOR_KEYS, (
+                f"{who} coordinator keys: {sorted(slots['coordinator'])}")
+
+
+def test_maintainer_status_matches_console_contract():
+    from pseudolife_memory.maintainer import _status
+    _assert_status_shape(_status(None, None, _real_maintainer_store()), "real _status")
+    _assert_status_shape(FixtureService().maintainer_status(), "FixtureService")
+
+
+def test_maintainer_role_previews_match_console_contract():
+    from pseudolife_memory.maintainer import _role_preview
+    store = _real_maintainer_store()
+    grant = _role_preview(store, "grant-delegate", {"project": "p", "agent_id": _MX_AGENT})
+    revoke = _role_preview(store, "revoke-delegate", {"project": "p"})
+    assert set(grant) == _MX_GRANT_PREVIEW_KEYS, f"real grant preview: {sorted(grant)}"
+    assert set(revoke) == _MX_ROLE_PREVIEW_KEYS, f"real revoke preview: {sorted(revoke)}"
+
+    fx = FixtureService()
+    roles = fx.maintainer_status()["roles"]
+    project = next(iter(roles))
+    agent = roles[project]["coordinator"]["agent_id"]
+    fx_grant = fx.maintainer_challenge({"purpose": "grant-delegate", "project": project,
+                                        "agent_id": agent, "hold": 3600})
+    fx_revoke = fx.maintainer_challenge({"purpose": "revoke-coordinator", "project": project})
+    assert set(fx_grant["preview"]) == _MX_GRANT_PREVIEW_KEYS, sorted(fx_grant["preview"])
+    assert set(fx_revoke["preview"]) == _MX_ROLE_PREVIEW_KEYS, sorted(fx_revoke["preview"])
+    # replaces is an agent id (or null), also_breaks a lease name (or null).
+    assert isinstance(fx_grant["preview"]["replaces"], str)
+    assert fx_grant["preview"]["also_breaks"] == f"coordinator:{project}"
+
+
+def test_maintainer_send_preview_matches_console_contract():
+    real = _real_maintainer_store().recipient(_MX_AGENT)
+    assert set(real) == _MX_RECIPIENT_KEYS, f"real recipient preview: {sorted(real)}"
+    fx = FixtureService()
+    agent = next(iter(fx.maintainer_status()["roles"].values()))["delegate"]["agent_id"]
+    out = fx.maintainer_challenge({"purpose": "send", "to": agent, "text": "hi", "urgent": True})
+    assert set(out) == {"payload", "mac", "publicKey", "preview"}
+    assert set(out["preview"]) == _MX_RECIPIENT_KEYS, sorted(out["preview"])
+
+
+def test_maintainer_sent_and_inbox_rows_match_console_contract():
+    store = _real_maintainer_store()
+    (sent,), (reply,) = store.sent(5), store.inbox(5)
+    assert set(sent) == _MX_SENT_KEYS, f"real sent row: {sorted(sent)}"
+    assert set(reply) == _MX_INBOX_KEYS, f"real inbox row: {sorted(reply)}"
+
+    fx = FixtureService()
+    fx_sent, fx_inbox = fx.maintainer_sent(50), fx.maintainer_inbox(50)
+    assert set(fx_sent) == {"messages"} and set(fx_inbox) == {"messages"}
+    assert fx_sent["messages"] and fx_inbox["messages"]
+    for m in fx_sent["messages"]:
+        assert set(m) == _MX_SENT_KEYS, f"fixture sent row: {sorted(m)}"
+        assert m["wake"] is None or {"decision", "reason"} <= set(m["wake"])
+    for m in fx_inbox["messages"]:
+        assert set(m) == _MX_INBOX_KEYS, f"fixture inbox row: {sorted(m)}"
+
+
+def test_fixture_maintainer_answers_match_the_real_service():
+    """Fixture only: the real answers below need Postgres (they run inside
+    the signed transaction)."""
+    import json
+
+    fx = FixtureService()
+    roles = fx.maintainer_status()["roles"]
+    project = next(iter(roles))
+    delegate = roles[project]["delegate"]["agent_id"]
+
+    def signed(purpose, route, **fields):
+        c = fx.maintainer_challenge({"purpose": purpose, **fields})
+        return getattr(fx, f"maintainer_{route}")(
+            {"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY}), c
+
+    # A grant says whether its grantee is reachable, and warns when not; the
+    # demo's coordinator is the session whose listener lapsed.
+    coordinator = roles[project]["coordinator"]["agent_id"]
+    granted, _ = signed("grant-delegate", "role", project=project, agent_id=delegate, hold=3600)
+    assert (granted["reachable"], granted["reason"]) == (True, None) and "warning" not in granted
+    lapsed, _ = signed("assign-coordinator", "role", project=project, agent_id=coordinator,
+                       hold=3600)
+    assert (lapsed["reachable"], lapsed["reason"]) == (False, "listener_expired")
+    assert "next turn" in lapsed["warning"]
+
+    out, _ = signed("send", "send", to=delegate, text="hi", urgent=True)
+    assert set(out) == {"message_id", "wake"} and out["wake"]["decision"] == "rung"
+    rep, _ = signed("repudiate", "repudiate", message_id=out["message_id"])
+    assert set(rep) == {"message_id", "repudiated_at", "follow_up"}
+
+    # A grant also carries the other role's holder, as the real route signs it.
+    c = fx.maintainer_challenge({"purpose": "grant-delegate", "project": project,
+                                 "agent_id": delegate, "hold": 3600})
+    coordinator = roles[project]["coordinator"]["agent_id"]
+    assert json.loads(c["payload"])["other_holder"] == coordinator
+    slot = fx._mx()["roles"][project]["coordinator"]
+    slot["agent_id"] = delegate                  # the other role moved before the tap
+    try:
+        fx.maintainer_role({"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY})
+    except ValueError as exc:
+        assert str(exc) == "role_changed"
+    else:
+        raise AssertionError("a moved other-role holder was not refused")
+    slot["agent_id"] = coordinator
+
+    # A role payload carries the holder the daemon read; a change in between
+    # is role_changed, as the real route answers.
+    c = fx.maintainer_challenge({"purpose": "revoke-delegate", "project": project})
+    assert json.loads(c["payload"])["holder"] == delegate
+    fx._mx()["roles"][project]["delegate"]["agent_id"] = roles[project]["coordinator"]["agent_id"]
+    try:
+        fx.maintainer_role({"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY})
+    except ValueError as exc:
+        assert str(exc) == "role_changed"
+    else:
+        raise AssertionError("a moved holder was not refused")
+
+    # Extra challenge fields are refused, as the real route refuses them.
+    try:
+        fx.maintainer_challenge({"purpose": "revoke-delegate", "project": project,
+                                 "holder": delegate})
+    except ValueError as exc:
+        assert str(exc) == "invalid_request"
+    else:
+        raise AssertionError("an extra challenge field was accepted")

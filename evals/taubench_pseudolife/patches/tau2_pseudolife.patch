@@ -1,0 +1,105 @@
+diff -ru a/src/tau2/registry.py b/src/tau2/registry.py
+--- a/src/tau2/registry.py	2026-07-16 15:24:56.000000000 +1000
++++ b/src/tau2/registry.py	2026-09-08 15:15:49.118849000 +1000
+@@ -310,6 +310,16 @@
+         create_discrete_time_audio_native_agent,
+         "discrete_time_audio_native_agent",
+     )
++
++    # Pseudolife memory agent (pl_taubench package). Lazily imported so tau2
++    # stays importable without pl_taubench and to avoid import-order cycles;
++    # the real factory loads only when an agent is actually built.
++    def _create_pl_agent(*args, **kwargs):
++        from pl_taubench.agent import create_pl_agent
++
++        return create_pl_agent(*args, **kwargs)
++
++    registry.register_agent_factory(_create_pl_agent, "pl_memory")
+     registry.register_domain(mock_domain_get_environment, "mock")
+     registry.register_tasks(mock_domain_get_tasks, "mock")
+ 
+diff -ru a/src/tau2/runner/batch.py b/src/tau2/runner/batch.py
+--- a/src/tau2/runner/batch.py	2026-07-16 15:24:56.000000000 +1000
++++ b/src/tau2/runner/batch.py	2026-09-08 15:15:49.137435700 +1000
+@@ -645,6 +645,22 @@
+         task_key = f"{task.id}.{trial}"
+         monitor.task_started(task_key, trial)
+ 
++        # Stamp the per-simulation context for Pseudolife memory telemetry
++        # (thread-local, read back when recording events on this same worker
++        # thread). Best-effort: absent without the pl_taubench package.
++        try:
++            from pl_taubench.context import set_context as _pl_set_context
++
++            _pl_set_context(
++                task_id=task.id,
++                trial=trial,
++                seed=seed,
++                agent=getattr(config, "agent", None),
++                run=getattr(config, "save_to", None),
++            )
++        except Exception:
++            pass
++
+         console_text = Text(
+             text=f"{progress_str}. Running task {task.id}, trial {trial + 1}",
+             style="bold green",
+@@ -686,6 +702,20 @@
+                 shutdown_event=shutdown_event,
+             )
+ 
++            # PL_DREAM=episode: consolidate after each simulation, once the
++            # agent's task-end write-back has already landed. Trial- and
++            # run-level scheduling belong to the orchestrator, not here.
++            if (os.environ.get("PL_DREAM", "") or "").strip().lower() == "episode":
++                try:
++                    from pl_taubench.dream import dream_run
++
++                    dream_run(
++                        os.environ.get("PL_MCP_URL", "http://127.0.0.1:8765"),
++                        token=os.environ.get("PL_MCP_TOKEN") or None,
++                    )
++                except Exception as exc:  # noqa: BLE001
++                    logger.warning(f"PL_DREAM episode trigger failed: {exc!r}")
++
+             # Hallucination retry: if check detects fabricated info, re-run
+             is_full_duplex = result.ticks is not None and len(result.ticks) > 0
+             if hallucination_retries > 0 and is_full_duplex:
+diff -ru a/src/tau2/runner/build.py b/src/tau2/runner/build.py
+--- a/src/tau2/runner/build.py	2026-07-16 15:24:56.000000000 +1000
++++ b/src/tau2/runner/build.py	2026-09-08 15:15:49.127358200 +1000
+@@ -392,6 +392,16 @@
+ 
+     environment = build_environment(domain, solo_mode=solo_mode, env_kwargs=env_kwargs)
+ 
++    # Pseudolife memory hook: register the memory read tools on the environment
++    # so the orchestrator executes them like any domain tool. Must run BEFORE
++    # build_agent, or the agent never advertises them. Route and read-only mode
++    # are read from the environment inside attach_memory_tools. Lazy import
++    # keeps tau2 importable without pl_taubench.
++    if config.effective_agent == "pl_memory":
++        from pl_taubench.memory_env import attach_memory_tools
++
++        attach_memory_tools(environment)
++
+     agent = build_agent(
+         config.effective_agent,
+         environment,
+diff -ru a/src/tau2/runner/simulation.py b/src/tau2/runner/simulation.py
+--- a/src/tau2/runner/simulation.py	2026-07-16 15:24:56.000000000 +1000
++++ b/src/tau2/runner/simulation.py	2026-09-08 15:15:49.128358800 +1000
+@@ -89,4 +89,14 @@
+         f"reward={reward_info.reward}"
+     )
+ 
++    # Task-end lifecycle hook: lets a memory-augmented agent reflect on the
++    # trajectory and write back insights. Agent-name agnostic, best-effort and
++    # isolated so it can never affect the recorded result.
++    agent = getattr(orchestrator, "agent", None)
++    if agent is not None and hasattr(agent, "on_simulation_end"):
++        try:
++            agent.on_simulation_end(simulation)
++        except Exception as exc:  # noqa: BLE001
++            logger.warning(f"agent.on_simulation_end hook failed: {exc!r}")
++
+     return simulation

@@ -9,12 +9,16 @@ to a 31.5 GB cgroup peak and nearly OOMed the host. The dead copies sat in
 torch module reference cycles awaiting a gen-2 GC that a quiet process
 rarely triggers.
 
-Two contracts pin the fix independently:
+Three contracts pin the fix independently:
 
 * Storage connects FIRST: a down database costs a fast connect error, never
   a model load (``test_db_down_retries_load_no_models``).
 * An embedder built by a partially-successful attempt is reused by the next
   attempt, never rebuilt (``test_embedder_reused_across_failed_attempts``).
+* Fail-closed hydration (2026-09-23) turned a failed store hydration from a
+  logged warning into a failed init, so it now reaches the retry path too:
+  repeated failing attempts still build the embedder exactly once
+  (``test_failed_hydration_never_rebuilds_the_embedder``).
 """
 from __future__ import annotations
 
@@ -53,14 +57,30 @@ class _FakeConn:
 
 class _UpStorage:
     """Minimal stand-in for a *connected* PostgresStorage: just enough for
-    the parts of ``_ensure_init`` that run outside a try/except. Everything
-    else (hydration, migration) is reached only inside swallowing blocks."""
+    the parts of ``_ensure_init`` that run outside a try/except. Migration
+    and dream tracking are reached only inside swallowing blocks; hydration
+    fails closed, so tests stub it out with ``_stub_hydration``."""
 
     def __init__(self, _url: str) -> None:
         self.conn = _FakeConn()
 
     def get_meta(self, _key: str):
         return None
+
+
+def _stub_hydration(monkeypatch, **overrides) -> None:
+    """Hydrate nothing from the stand-in storage (it has no tables)."""
+    from pseudolife_memory.memory import graph_store as graph_store_module
+    from pseudolife_memory.storage import sync as sync_module
+
+    monkeypatch.setattr(
+        graph_store_module, "PostgresNetworkxGraphStore",
+        lambda storage: object(),
+    )
+    for name in ("hydrate_cms", "hydrate_cortex", "hydrate_world_cortex",
+                 "hydrate_lessons"):
+        monkeypatch.setattr(sync_module, name,
+                            overrides.get(name, lambda store, storage: 0))
 
 
 def _count_embedder_builds(monkeypatch) -> list:
@@ -93,11 +113,7 @@ def test_embedder_reused_across_failed_attempts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "pseudolife_memory.storage.postgres.PostgresStorage", _UpStorage,
     )
-    from pseudolife_memory.memory import graph_store as graph_store_module
-    monkeypatch.setattr(
-        graph_store_module, "PostgresNetworkxGraphStore",
-        lambda storage: object(),
-    )
+    _stub_hydration(monkeypatch)
 
     # Fail mid-init AFTER the embedder is built but BEFORE ``_cms`` is
     # assigned (the reranker constructor sits between the two), then
@@ -116,14 +132,36 @@ def test_embedder_reused_across_failed_attempts(tmp_path, monkeypatch):
         "pseudolife_memory.service.CrossEncoderReranker", _flaky_reranker,
     )
 
-    from pseudolife_memory.storage import sync as sync_module
-    monkeypatch.setattr(sync_module, "hydrate_cms", lambda cms, storage: 0)
-
     svc = MemoryService(data_dir=tmp_path, database_url="postgresql://fake/db")
     with pytest.raises(_Boom):
         svc._ensure_init()  # noqa: SLF001
     assert len(built) == 1
 
+    svc._init_retry_at = 0.0  # noqa: SLF001 — skip the retry backoff
     svc._ensure_init()  # noqa: SLF001 — second attempt completes
     assert svc._cms is not None
     assert len(built) == 1  # the embedder was reused, not rebuilt
+
+
+def test_failed_hydration_never_rebuilds_the_embedder(tmp_path, monkeypatch):
+    built = _count_embedder_builds(monkeypatch)
+    monkeypatch.setattr(
+        "pseudolife_memory.storage.postgres.PostgresStorage", _UpStorage,
+    )
+    hydrations: list = []
+
+    def _failing_cortex_hydration(cortex, storage):
+        hydrations.append(1)
+        raise _Boom("facts table unreadable")
+
+    _stub_hydration(monkeypatch, hydrate_cortex=_failing_cortex_hydration)
+
+    svc = MemoryService(data_dir=tmp_path, database_url="postgresql://fake/db")
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="cortex hydration failed"):
+            svc._ensure_init()  # noqa: SLF001
+        assert svc._cms is None  # noqa: SLF001 — nothing half-built kept
+        svc._init_retry_at = 0.0  # noqa: SLF001 — skip the retry backoff
+
+    assert len(hydrations) == 3  # every attempt really re-ran init...
+    assert len(built) == 1  # ...and none of them re-loaded the model

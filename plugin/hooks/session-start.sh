@@ -1,16 +1,155 @@
 #!/usr/bin/env bash
 # Pseudolife-MCP SessionStart hook — stdout becomes session context.
 # Serves the memory-loop instructions + briefing from the running daemon;
-# must never break a session start (always exits 0).
+# must never break a session start (always exits 0). With `memory-policy` it
+# serves the separate memory-policy output, and with `memory-changes`
+# (sourced by user-prompt-submit.sh) the per-turn memory-change note.
 #
-# Runs under Git Bash on Windows and bash/sh everywhere else. curl only —
-# no pip package, no node, no python on the host.
+# Runs under Git Bash on Windows and bash/sh everywhere else. curl, plus
+# native PowerShell for Windows ACL checks; no pip, node or Python needed.
 
-URL="${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}"
+private_regular() {
+    local path="$1" maximum="$2" current parent meta
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        path=$(cygpath -u "$path") || return 1 ;;
+    esac
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    current=$(dirname "$path")
+    while [ "$current" != "." ] && [ "$current" != "/" ]; do
+        [ ! -L "$current" ] || return 1
+        parent=$(dirname "$current")
+        [ "$parent" != "$current" ] || break
+        current="$parent"
+    done
+    meta=$(stat -c '%u %a %h' "$path" 2>/dev/null ||
+           stat -f '%u %Lp %l' "$path" 2>/dev/null) || return 1
+    set -- $meta
+    # Git Bash modes do not describe an NTFS DACL. Keep the regular-file,
+    # single-link and size checks, then apply lifecycle.ps1's native ACL rules.
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        [ "${3:-0}" = 1 ] || return 1
+        [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        # Three Windows runs (2026-09-28), including Git Bash launch:
+        # 0.344-0.375 s each; native ACL parity justifies this cost.
+        PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
+            $ErrorActionPreference = "Stop"
+            try {
+                # Git Bash can hide this module by converting PSModulePath.
+                Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1"
+                $item = Get-Item -LiteralPath $env:PSEUDOLIFE_PRIVATE_FILE -Force
+                if ($item.PSIsContainer -or $item.Length -lt 1 -or
+                    ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 }
+                $parent = $item.Directory
+                while ($parent) {
+                    if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }
+                    $parent = $parent.Parent
+                }
+                $acl = Get-Acl -LiteralPath $item.FullName
+                $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate(
+                    [Security.Principal.SecurityIdentifier]).Value
+                $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                $allowed = @($acl.Access | Where-Object AccessControlType -eq Allow)
+                if (-not $acl.AreAccessRulesProtected -or $owner -ne $current -or -not $allowed) { exit 1 }
+                foreach ($rule in $allowed) {
+                    $sid = $rule.IdentityReference.Translate(
+                        [Security.Principal.SecurityIdentifier]).Value
+                    if ($sid -notin $owner, "S-1-3-4") { exit 1 }
+                }
+                exit 0
+            } catch { exit 1 }
+        ' </dev/null >/dev/null 2>&1
+        return $?
+        ;;
+    esac
+    case "${2:-}" in *00) ;; *) return 1 ;; esac
+    [ "${1:-x}" = "$(id -u)" ] && [ "${3:-0}" = 1 ] || return 1
+    [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
+}
+decode_connection_value() {
+    if value=$(printf '%s' "$1" | base64 --decode 2>/dev/null); then
+        printf '%s' "$value"
+    else
+        printf '%s' "$1" | base64 -D 2>/dev/null
+    fi
+}
+
+CONNECTION_HOME="${CODEX_HOME:-${HOME}/.codex}"
+CONNECTION="${CONNECTION_HOME}/pseudolife/connection.json"
+MANAGED_URL=""
+MANAGED_TOKEN_FILE=""
+MANAGED_CONNECTION=""
+CONNECTION_ERROR=""
+CODEX_HOOK_CONTEXT=""
+if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
+        { [ -n "${PLUGIN_ROOT:-}" ] &&
+          [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
+    CODEX_HOOK_CONTEXT=1
+fi
+if [ -n "$CODEX_HOOK_CONTEXT" ] && [ -e "$CONNECTION" ]; then
+    if ! private_regular "$CONNECTION" 16384; then
+        CONNECTION_ERROR=1
+    else
+        [ "$(wc -l < "$CONNECTION")" -eq 5 ] &&
+            [ "$(sed -n '1p' "$CONNECTION")" = '{' ] &&
+            [ "$(sed -n '2p' "$CONNECTION")" = '  "version": 1,' ] &&
+            [ "$(sed -n '5p' "$CONNECTION")" = '}' ] || CONNECTION_ERROR=1
+        URL_B64=$(sed -n '3s/^  "daemon_url": "\([A-Za-z0-9+\/=]*\)",$/\1/p' "$CONNECTION")
+        TOKEN_FILE_B64=$(sed -n '4s/^  "token_file": "\([A-Za-z0-9+\/=]*\)"$/\1/p' "$CONNECTION")
+        MANAGED_URL=$(decode_connection_value "$URL_B64")
+        MANAGED_TOKEN_FILE=$(decode_connection_value "$TOKEN_FILE_B64")
+        [ -n "$MANAGED_URL" ] || CONNECTION_ERROR=1
+        [ -n "$CONNECTION_ERROR" ] || MANAGED_CONNECTION=1
+    fi
+fi
+
+MANAGED_TOKENLESS=""
+if [ -n "$MANAGED_CONNECTION" ] && [ -z "$MANAGED_TOKEN_FILE" ]; then
+    MANAGED_TOKENLESS=1
+    EXPLICIT_URL=""
+    TOKEN_FILE=""
+else
+    EXPLICIT_URL="${PSEUDOLIFE_MCP_DAEMON_URL:-}"
+    TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-$MANAGED_TOKEN_FILE}"
+fi
+if [ -n "$EXPLICIT_URL" ] && [ -n "$MANAGED_URL" ] &&
+        [ "${EXPLICIT_URL%/}" != "${MANAGED_URL%/}" ]; then
+    CONNECTION_ERROR=1
+fi
+if [ -z "$MANAGED_TOKENLESS" ] && [ -n "$MANAGED_URL" ] &&
+        [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ] &&
+        { [ -z "$EXPLICIT_URL" ] ||
+          [ "${EXPLICIT_URL%/}" != "${MANAGED_URL%/}" ]; }; then
+    CONNECTION_ERROR=1
+fi
+URL="${EXPLICIT_URL:-${MANAGED_URL:-http://127.0.0.1:8765}}"
+URL="${URL%/}"
+case "$URL" in
+    http://*|https://*) ;;
+    *) CONNECTION_ERROR=1 ;;
+esac
+AUTHORITY="${URL#*://}"; AUTHORITY="${AUTHORITY%%/*}"
+case "$AUTHORITY" in ""|*@*) CONNECTION_ERROR=1 ;; esac
+case "$URL" in *\?*|*\#*) CONNECTION_ERROR=1 ;; esac
+URL_REST="${URL#*://}"
+case "$URL_REST" in */*) CONNECTION_ERROR=1 ;; esac
+
+TOKEN=""
+if [ -z "$MANAGED_TOKENLESS" ]; then TOKEN="${PSEUDOLIFE_MCP_TOKEN:-}"; fi
+if [ -n "$TOKEN_FILE" ]; then
+    TOKEN=""
+    if ! private_regular "$TOKEN_FILE" 4096; then
+        CONNECTION_ERROR=1
+    else
+        TOKEN=$(cat "$TOKEN_FILE")
+        if [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
+            CONNECTION_ERROR=1
+        fi
+    fi
+fi
 
 AUTH=()
-if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}" ]; then
-    AUTH=(-H "Authorization: Bearer ${PSEUDOLIFE_MCP_TOKEN}")
+if [ -z "$CONNECTION_ERROR" ] && [ -n "$TOKEN" ]; then
+    AUTH=(-H "Authorization: Bearer $TOKEN")
 fi
 
 # Claude Code delivers hook input as JSON on stdin (session_id is a
@@ -18,8 +157,125 @@ fi
 INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+[ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# The per-turn memory-change note (user-prompt-submit.sh sources this script
+# with `memory-changes`): one request per turn, printing only when memory
+# changed since this session's last note (new lessons, other sessions'
+# status notes). The cursor lives in <digest dir>/<sha256(session id)>.mark
+# and is saved only after printing, so a request that failed or timed out
+# asks for the same window next turn. Silent on every failure: the
+# SessionStart hook reports a down daemon or a bad credential.
+if [ "${1:-}" = memory-changes ]; then
+    [ -z "$CONNECTION_ERROR" ] || exit 0
+    # The payload also carries the user's prompt, which may quote
+    # "session_id": only a top-level key counts, as in coordination-prompt.sh.
+    SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' 2>/dev/null |
+          head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
+    # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+    # a range by locale collation, where a-f takes upper case and 0-9 takes
+    # digits such as the superscript two (tests/test_hook_glob_ranges.py).
+    case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) exit 0 ;; esac
+    [ "${#SID}" -le 128 ] || exit 0
+    MARK_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+    KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    case "$KEY" in *[!0123456789abcdef]*) exit 0 ;; esac
+    [ "${#KEY}" -eq 64 ] || exit 0
+    MARK="$MARK_DIR/$KEY.mark"
+    SINCE=""
+    if [ -f "$MARK" ] && [ ! -L "$MARK" ]; then
+        IFS= read -r SINCE 2>/dev/null < "$MARK"
+    fi
+    SINCE=${SINCE%$'\r'}
+    case "$SINCE" in ''|*[!0123456789.]*) SINCE="" ;; esac
+    [ "${#SINCE}" -le 22 ] || SINCE=""
+    # One attempt, no retry: at most about 2 s of the 5 s hook budget.
+    BODY=$(curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
+        "${AUTH[@]}" "${URL}/api/hook/memory-changes?session_id=${SID}${SINCE:+&since=${SINCE}}" \
+        2>/dev/null) || exit 0
+    TOKEN=${BODY%%$'\n'*}
+    case "$TOKEN" in ''|*[!0123456789.]*) exit 0 ;; esac
+    [ "${#TOKEN}" -le 22 ] || exit 0
+    NOTE=""
+    case "$BODY" in *$'\n'*) NOTE=${BODY#*$'\n'} ;; esac
+    if [ ! -d "$MARK_DIR" ]; then
+        mkdir -p "$MARK_DIR" 2>/dev/null && chmod 700 "$MARK_DIR" 2>/dev/null
+    fi
+    # A cursor that cannot be saved would repeat the same note every turn:
+    # stay silent instead.
+    [ -d "$MARK_DIR" ] && [ -w "$MARK_DIR" ] && [ ! -L "$MARK" ] || exit 0
+    [ ! -e "$MARK" ] || [ -w "$MARK" ] || exit 0
+    if [ ! -f "$MARK" ]; then
+        # A session's first note: marks of sessions gone a month go too.
+        find "$MARK_DIR" -maxdepth 1 -type f -name '*.mark' -mtime +30 -delete 2>/dev/null
+    fi
+    [ -z "$NOTE" ] || printf '%s\n' "$NOTE"
+    printf '%s\n' "$TOKEN" 2>/dev/null > "$MARK"
+    exit 0
+fi
+# The separate memory-policy hook (hooks.json runs this script again with
+# `memory-policy`): the full memory-loop block when the daemon's
+# memory_policy variant is full_separate_hook, otherwise an empty body and
+# no context. A hook output of its own, so the block never shares the
+# briefing's budget. Silent on any failure: the main hook reports an
+# unreachable daemon.
+if [ "${1:-}" = memory-policy ]; then
+    [ -z "$CONNECTION_ERROR" ] || exit 0
+    PQS=""
+    [ -n "$SID" ] && PQS="?session_id=${SID}&source=${SRC}"
+    curl -L --max-redirs 0 -sf --max-time 5 --retry 1 --retry-delay 1 \
+        "${AUTH[@]}" "${URL}/api/hook/memory-policy${PQS}" || true
+    exit 0
+fi
+# The plugin release this hook runs from, read beside the script so the
+# daemon can open the briefing with a notice when the two differ (a cached
+# plugin moves only on an update; the daemon on every deploy). It lives in
+# release.json, not the manifest: Claude Code names its cache folder by the
+# manifest version, and the plugin carries none there so that each update
+# installs beside the copy running sessions use. A copy without release.json
+# beside it (Codex's content-addressed hooks) sends nothing. Only a
+# version-shaped value goes on the wire.
+PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]*\)".*/\1/p' \
+    "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/release.json" 2>/dev/null | head -1)
+# A digest of the hook scripts beside this one, so the daemon can tell
+# a cached plugin at its own version apart from its own hooks (the version
+# only moves with a release). Same function as pseudolife_memory.plugin_hooks
+# and lifecycle.ps1: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
+hooks_digest() {  # $1 = directory
+    local name
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh subagent-board.sh; do
+        [ -f "$1/$name" ] || return 1
+    done
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh subagent-board.sh; do
+        printf '%s\0' "$name"; tr -d '\r' < "$1/$name"; printf '\0'
+    done | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
+}
+PLUGIN_HOOKS_DIGEST=$(hooks_digest "$(dirname "$0")" 2>/dev/null) || PLUGIN_HOOKS_DIGEST=""
+case "$PLUGIN_HOOKS_DIGEST" in
+    *[!0123456789abcdef]*) PLUGIN_HOOKS_DIGEST="" ;;
+esac
+[ "${#PLUGIN_HOOKS_DIGEST}" -eq 64 ] || PLUGIN_HOOKS_DIGEST=""
 QS=""
 [ -n "$SID" ] && QS="?session_id=${SID}&source=${SRC}"
+if [ -n "$PLUGIN_VERSION" ]; then
+    # `+` (a local version label) would decode to a space server-side.
+    QS="${QS:-?}${QS:+&}plugin_version=${PLUGIN_VERSION//+/%2B}"
+fi
+if [ -n "$PLUGIN_HOOKS_DIGEST" ]; then
+    QS="${QS:-?}${QS:+&}plugin_hooks_digest=${PLUGIN_HOOKS_DIGEST}"
+fi
+# The shim launcher (pseudolife_memory/runtimes.py), when PATH does not find
+# it: the installers do not put its directory on PATH, so the served update
+# notices name it by its path instead of a bare `pseudolife-mcp`. The daemon
+# shape-checks it before it reaches the model's context.
+LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+if [ -f "$LAUNCHER" ]; then
+    FOUND=$(command -v pseudolife-mcp 2>/dev/null || true)
+    if [ -z "$FOUND" ] || ! [ "$FOUND" -ef "$LAUNCHER" ]; then
+        ENCODED=$(printf '%s' "$LAUNCHER" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/+/%2B/g' \
+            -e 's/&/%26/g' -e 's/#/%23/g' -e 's/\\/%5C/g')
+        QS="${QS:-?}${QS:+&}launcher=${ENCODED}"
+    fi
+fi
 # One retry bridges the daemon's short maintenance stalls (CMS autosave
 # ~1.5s, dream-sweep tick; measured 2026-09-01 against a 1,123-entry bank)
 # that can hold the service lock past a single attempt's timeout — a
@@ -29,8 +285,12 @@ QS=""
 # case 5+1+5=11s, inside the hook's 15s budget in hooks.json (guard-tested
 # in tests/test_plugin_packaging.py). Registration is idempotent per
 # session_id, so a retry after a half-completed first attempt is safe.
-curl -sf --max-time 5 --retry 1 --retry-delay 1 \
+if [ -n "$CONNECTION_ERROR" ]; then
+    echo "Pseudolife-MCP: session briefing unavailable because the managed connection or credential file is invalid."
+    exit 0
+fi
+curl -L --max-redirs 0 -sf --max-time 5 --retry 1 --retry-delay 1 \
     "${AUTH[@]}" "${URL}/api/hook/session-start${QS}" || \
-    echo "Pseudolife-MCP: the memory daemon at ${URL} did not answer the session-start hook — it may be down, or briefly busy with a maintenance pass. The mcp__pseudolife-memory__* tools may still work: make one call (e.g. memory_stats) before treating memory as offline. If the daemon really is down, tell the user to start the stack (docker compose -f <clone>/ops/docker-compose.yml up -d) or install it first: https://github.com/Pseudogiant-xr/Pseudolife-MCP#quickstart"
+    echo "Pseudolife-MCP: the memory daemon did not answer the session-start hook. Try memory_stats before treating memory as offline; then check the configured daemon and credential files."
 
 exit 0

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import contextvars
 import os
-from functools import lru_cache
 
 # (writer_id, session_id) override; (None, None) means "not set".
 _WRITER_CTX: contextvars.ContextVar[tuple[str | None, str | None]] = (
@@ -67,16 +66,22 @@ def _http_writer_session() -> tuple[str | None, str | None]:
 # the same binding.
 _REQUEST_HEADERS: contextvars.ContextVar = contextvars.ContextVar(
     "pl_request_headers", default=None)
+_REQUEST_PRINCIPAL: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "pl_request_principal", default=None)
 
 
-def bind_request_headers(headers):
+def bind_request_headers(headers, *, principal: str | None = None):
     """Bind the live request's headers for the current context; returns the
-    token for ``unbind_request_headers``. ``None`` clears (binds nothing)."""
-    return _REQUEST_HEADERS.set(headers)
+    tokens for ``unbind_request_headers``. ``principal`` is the transport's
+    validated identity, when supplied; otherwise resolve from the bearer as
+    before. ``None`` headers clear the request binding."""
+    return (_REQUEST_HEADERS.set(headers), _REQUEST_PRINCIPAL.set(principal))
 
 
 def unbind_request_headers(token) -> None:
-    _REQUEST_HEADERS.reset(token)
+    headers_token, principal_token = token
+    _REQUEST_PRINCIPAL.reset(principal_token)
+    _REQUEST_HEADERS.reset(headers_token)
 
 
 def _http_request_headers():
@@ -137,34 +142,53 @@ def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]
     return (headers.get("x-pl-writer"), headers.get("x-pl-session"), transport)
 
 
-@lru_cache(maxsize=8)
-def _parsed_token_map(raw: str) -> dict[str, str]:
-    from pseudolife_memory.principals import parse_token_map
-
-    return parse_token_map(raw)
-
-
 def current_principal() -> str:
     """Principal NAME for the live request's bearer (spec 2026-08-10).
 
-    Naming, not authentication — the transport gate already rejected unknown
-    tokens, so an unmatched bearer here (the singular token, or open loopback
-    mode) is simply the default principal. Fail-open: any error resolves to
-    ``"default"``; identity resolution must never fail a request."""
-    from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+    The principal the transport bound, else the bearer resolved here with the
+    one resolver: the environment's map and token, then the stored-principal
+    snapshot (spec 2026-10-02). Naming, not authentication: no bearer, the
+    singular token, or open loopback mode is the default principal.
 
+    Fails closed for a presented bearer that does not resolve while
+    authentication is configured (a snapshot that cannot be checked, or a
+    row revoked since the gate): it raises ``PrincipalsUnavailable`` rather
+    than naming the caller ``default``, whose X-PL-Writer would then be
+    honoured (security review, 2026-10-02). Any other error still resolves
+    to ``"default"``."""
+    from pseudolife_memory.principals import (
+        DEFAULT_PRINCIPAL, PrincipalsUnavailable, env_auth, installed_store, resolve_principal)
+
+    principal = _REQUEST_PRINCIPAL.get()
+    if principal is not None:
+        return principal
     try:
         headers = _http_request_headers()
         auth = headers.get("authorization") if headers is not None else None
-        raw = os.environ.get("PSEUDOLIFE_MCP_TOKENS")
-        if not auth or not raw:
+        if not auth:
             return DEFAULT_PRINCIPAL
-        scheme, _, presented = auth.partition(" ")
-        if scheme.lower() != "bearer":
-            return DEFAULT_PRINCIPAL
-        return _parsed_token_map(raw).get(presented.strip(), DEFAULT_PRINCIPAL)
+        token_map, token = env_auth()
+        # resolve_principal compares the bytes the client sent, so a
+        # non-ASCII bearer in latin-1-decoded transport headers still names
+        # its principal.
+        resolved = resolve_principal(auth, token_map, token, installed_store())
+    except PrincipalsUnavailable:
+        raise
     except Exception:  # noqa: BLE001
         return DEFAULT_PRINCIPAL
+    if resolved is None and (token_map or token):
+        raise PrincipalsUnavailable()
+    return resolved or DEFAULT_PRINCIPAL
+
+
+def request_principal() -> str | None:
+    """:func:`current_principal` inside a request whose headers are bound,
+    ``None`` outside one (in-process callers, tests) — for durable records
+    that must not claim the default principal for a caller that never
+    presented a credential."""
+    if _http_request_headers() is None:
+        return None
+    return current_principal()
 
 
 def resolve_writer_detailed(

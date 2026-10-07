@@ -72,9 +72,10 @@ def test_supersede_round_trips_slot_history(svc):
     by_value = {v: s for v, s in rows}
     assert by_value == {"1111": "superseded", "2222": "current"}
 
-    # And a fresh service hydrates the same picture (svc's autocommit
-    # connection holds no locks, so s2's ensure_schema DDL proceeds — H4).
+    # And a fresh service hydrates the same picture. svc stops first: a bank
+    # has one writer, and the restarted service needs the writer lease.
     from pseudolife_memory.service import MemoryService
+    svc._storage.close()
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         s2 = MemoryService(data_dir=d, database_url=svc._db_url)
         try:
@@ -151,6 +152,7 @@ def test_hlc_reseeds_from_stored_stamps_on_hydrate(svc):
             "WHERE entity_norm = %s", (future_ms, "clock-probe"))
 
     from pseudolife_memory.service import MemoryService
+    svc._storage.close()  # the first daemon run ends, releasing the bank
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         s2 = MemoryService(data_dir=d, database_url=svc._db_url)
         try:

@@ -1,7 +1,7 @@
 # Optional CPU llama.cpp server exposing an OpenAI-compatible API for the dream
 # extractor. The default GGUF is BAKED IN (via a throwaway download stage) so
 # the stack is batteries-included: `docker compose -f ops/docker-compose.yml
-# up -d` starts it with the stack (the installer's sonnet-only mode writes a
+# up -d` starts it with the stack (the installer's claude-only mode writes a
 # gitignored profiles override to disable it), no manual model step, offline
 # after the build.
 #

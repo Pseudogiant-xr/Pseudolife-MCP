@@ -78,14 +78,28 @@ def test_entry_crud_roundtrip(storage):
     assert r["tags"] == ["x"] and r["slots"] == [["e", "a", "v", "+"]]
     assert np.allclose(r["embedding"], _entry()["embedding"], atol=1e-6)
 
-    storage.update_entry(eid, band="fast", access_count=3,
-                         superseded_at=2000.0, superseded_by_text="newer")
+    storage.update_entry(eid, band="fast", access_count=3)
+    storage.supersede_entries(
+        [eid], superseded_at=2000.0, superseded_by_text="newer")
     r = storage.load_entries()[0]
     assert (r["band"], r["access_count"], r["superseded_at"],
             r["superseded_by_text"]) == ("fast", 3, 2000.0, "newer")
 
     storage.delete_entry_ids([eid])
     assert storage.load_entries() == []
+
+
+def test_entry_text_projection_preserves_full_load_order_and_sources(storage):
+    ids = [storage.insert_entry(_entry("duplicate alpha beta", ts=3000.0,
+                                       source="status", superseded_at=4000.0)),
+           storage.insert_entry(_entry("", ts=1000.0, source="")),
+           storage.insert_entry(_entry("duplicate alpha beta", ts=2000.0,
+                                       source="digest"))]
+
+    full = storage.load_entries()
+    assert [row["id"] for row in full] == ids
+    assert storage.load_entry_texts() == [
+        {key: row[key] for key in ("id", "text", "source")} for row in full]
 
 
 def test_episode_roundtrip(storage):

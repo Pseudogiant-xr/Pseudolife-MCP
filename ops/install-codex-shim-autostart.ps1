@@ -16,6 +16,16 @@
 #   ops\install-codex-shim-autostart.ps1                      # port 8086, terra
 #   ops\install-codex-shim-autostart.ps1 -Model gpt-5.6-sol   # pick the served model
 #
+# The task runs `ops\shim_autostart.py run codex`, which starts
+# evals/codex_shim.py with the model, port, health TTL (--health-ttl), host,
+# CLI path, interpreter and log file read from ops/.env
+# (PSEUDOLIFE_CODEX_SHIM_*) at every start; the flags here are written into
+# that file. Changing a value later is an edit plus
+# `python ops\shim_autostart.py restart codex` — no elevation.
+#   OpenAI models: gpt-5.6-terra (default), gpt-5.6-sol, gpt-5.6-luna, gpt-6-sol,
+#   gpt-6-luna (the list ops\install.ps1 offers; the GPT-6 ids were accepted by
+#   the Codex CLI on 2026-09-29; any other id passes to the shim unchanged)
+#
 # The shim wraps the ChatGPT-plan `codex` CLI as an OpenAI-compatible endpoint
 # on 127.0.0.1 for the daemon's dream pass. Requires a signed-in CLI
 # (`codex login` once, interactively). Extraction quality is UNMEASURED for
@@ -42,10 +52,6 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-if (-not $PythonExe) {
-    $venv = Join-Path $repo ".venv\Scripts\python.exe"
-    $PythonExe = (Test-Path $venv) ? $venv : (Get-Command python).Source
-}
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Fail fast if no codex CLI is findable — but do NOT bake a discovered path
@@ -63,21 +69,58 @@ if (-not $CodexCli) {
     }
 }
 
+# >>> shim python >>>
+# The task's interpreter must import pseudolife_memory with its
+# dependencies (the shim imports the dream system prompt from it): the
+# Linux twin registered this unit with a bare python3 that exited 1 in a
+# restart loop (Debian 13, 2026-09-29). ops\shim_python.py picks one (the
+# checkout's .venv, a venv it made earlier, a PATH python that imports the
+# package, else a venv it creates from the checkout; never pipx's
+# pseudolife-mcp venv here, which install.ps1 treats as held by a session
+# while anything runs from it), verifies it the way the task will use it,
+# and says which and why; -PythonExe names one to verify instead. After
+# the CLI check: a missing CLI fails faster than a venv build.
+$helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+    throw "no python on PATH to run ops\shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run."
+}
+$pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
+if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }
+# The helper prints the path as UTF-8; this shell must decode it the same
+# way, or a profile path with a non-ASCII character names an interpreter
+# that does not exist (review, 2026-09-29).
+$savedOutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    $picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+} finally {
+    [Console]::OutputEncoding = $savedOutputEncoding
+}
+if ($LASTEXITCODE -ne 0 -or -not $picked) {
+    throw "shim autostart not registered: no interpreter imports pseudolife_memory for the task (see the message above; -PythonExe <interpreter> names one)."
+}
+$PythonExe = "$picked".Trim()
+# <<< shim python <<<
+
 $taskName = "Pseudolife Codex Shim"
 # Same detached CreateNoWindow spawner as the Claude shim task — see the
 # comment block in install-shim-autostart.ps1 for why (Windows Terminal
 # otherwise pins a visible blank tab to the shim for its whole runtime).
-$innerCmd = "`"$PythonExe`" `"$repo\evals\codex_shim.py`" --port $Port " +
-            "--model $Model --health-ttl $HealthTtl"
-if ($CodexCli) { $innerCmd += " --cli `"$CodexCli`"" }
-$cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+# The task's only argument is the runner: the values live in ops/.env. An
+# explicit -CodexCli is written there; without one the shim re-resolves
+# the rotating %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ path at each start.
+$configArgs = @("config", "codex", "--model", $Model, "--port", "$Port", "--health-ttl", "$HealthTtl",
+                "--python", $PythonExe, "--log", $LogFile)
+if ($CodexCli) { $configArgs += @("--cli", $CodexCli) }
+& $PythonExe (Join-Path $repo "ops\shim_autostart.py") @configArgs 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = 'cmd.exe'
-`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.FileName = '$($PythonExe -replace "'", "''")'
+`$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run codex") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
-`$psi.WorkingDirectory = '$repo'
+`$psi.WorkingDirectory = '$($repo -replace "'", "''")'
 [System.Diagnostics.Process]::Start(`$psi) | Out-Null
 "@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -106,7 +149,8 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
            "anthropics/claude-code#61635).")
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, log $LogFile)."
+Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, python $PythonExe, log $LogFile)."
+Write-Host "To change the model, port, health TTL or CLI later: edit the PSEUDOLIFE_CODEX_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart codex (no elevation)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

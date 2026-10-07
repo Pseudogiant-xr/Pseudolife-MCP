@@ -5,6 +5,11 @@ writer and ``MemoryService``'s coarse lock already serializes calls,
 so no pooling is needed. Every mutating method commits before
 returning — a store that returned to the caller is durable.
 
+The single writer is enforced, not just assumed: each instance holds the
+bank's writer lease (a session advisory lock) on its connection, and a
+second instance on the same database refuses to start. See
+:meth:`PostgresStorage._acquire_writer_lease`.
+
 Embeddings ride pgvector (numpy float32 in/out via ``register_vector``).
 ``tags`` / ``slots`` / ``support`` / ``provenance`` are JSONB.
 """
@@ -12,19 +17,90 @@ Embeddings ride pgvector (numpy float32 in/out via ``register_vector``).
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import math
+import os
+import random
+import re
+import secrets
+import sys
 import time
+import uuid
 from contextlib import contextmanager
 from typing import Any, Sequence
 
-import numpy as np
+# numpy is imported where it is used: the stdio shim reaches this module
+# through storage.coordination (the board's constants) and must not need
+# numpy, which a shim runtime does not install (2026-09-29).
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
 from pseudolife_memory.storage.schema import ensure_schema
+from pseudolife_memory.storage.re_evidence import ReEvidenceStore
 
 logger = logging.getLogger(__name__)
+
+# meta row holding the durable record of capacity-eviction true drops:
+# {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.
+# Written only by ``delete_evicted_entry``, in the same transaction as the
+# DELETE it counts. It travels with a logical export: it is audit history
+# of this bank's entries, whose ids transfer verbatim.
+CAPACITY_DROPS_META_KEY = "capacity_true_drops"
+
+# libpq renders a Windows socket error as "<text> (0x%08X/%d)". Two codes
+# describe this host's own port table, not the server: WSAEADDRINUSE (10048),
+# which a loopback connect() returns when the local port it picked still has a
+# TIME_WAIT entry to the same server (the client closed first), and WSAENOBUFS
+# (10055), when the ephemeral range is exhausted. A second connect picks
+# another port. Measured 2026-09-25 on the maintainer's Windows host, about
+# twenty sessions against one Postgres on 127.0.0.1:5433: WSAEADDRINUSE failed
+# three connects in two full test runs (one inside ``_connect``), 0-2 per run,
+# with 250-600 TIME_WAIT entries to that port during a run. WSAENOBUFS, the
+# exhaustion case of the same table, then failed one test fixture's connect in
+# a full run the same evening. Four calls with a 0.05 s jittered exponential
+# backoff stay well under a second in all.
+_LOCAL_PORT_ERRORS = re.compile(r"/(10048|10055)\)")
+_LOCAL_PORT_ERROR_NAMES = {"10048": "WSAEADDRINUSE", "10055": "WSAENOBUFS"}
+_CONNECT_ATTEMPTS = 4
+_CONNECT_BACKOFF_SECONDS = 0.05
+
+
+def _local_port_error_code(exc: BaseException) -> str | None:
+    """The Windows error code when a connect failed for want of a usable
+    local port; None for anything else. A connect-time rejection from the
+    server (authentication, too many clients) arrives as libpq's message
+    with no SQLSTATE, so the code in the text is what excludes it; an error
+    that does carry a SQLSTATE is never a local-port failure either."""
+    if not isinstance(exc, psycopg.OperationalError) or exc.sqlstate:
+        return None
+    match = _LOCAL_PORT_ERRORS.search(str(exc))
+    return match.group(1) if match else None
+
+
+def connect_retrying_local_ports(conninfo: str, **kwargs: Any
+                                 ) -> psycopg.Connection:
+    """``psycopg.connect`` that tries again, up to ``_CONNECT_ATTEMPTS``
+    calls in all, when the local port was the problem (see
+    ``_LOCAL_PORT_ERRORS``). Every other failure (refused, timeout, any
+    SQLSTATE) is raised at once, and the last one if the port never frees.
+    The warning names only the attempt and the code: the error text carries
+    the host, and the conninfo the password."""
+    for attempt in range(1, _CONNECT_ATTEMPTS):
+        try:
+            return psycopg.connect(conninfo, **kwargs)
+        except psycopg.OperationalError as exc:
+            code = _local_port_error_code(exc)
+            if code is None:
+                raise
+            logger.warning(
+                "postgres connect failed on a local port (%s %s), attempt "
+                "%d of %d; retrying", _LOCAL_PORT_ERROR_NAMES[code], code,
+                attempt, _CONNECT_ATTEMPTS)
+        time.sleep(_CONNECT_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                   * random.uniform(0.5, 1.5))
+    return psycopg.connect(conninfo, **kwargs)
 
 _ENTRY_COLS = (
     "band", "text", "embedding", "surprise", "ts", "access_count", "source",
@@ -32,6 +108,9 @@ _ENTRY_COLS = (
     "episode_id", "episode_title", "tags", "slots",
     # v35: the write-time label pair — nullable, NULL = unlabelled.
     "authority", "distortion_tolerance",
+    # v38: NULL is accepted only when an importer explicitly marks an
+    # old-format row; an omitted value is a new pending write.
+    "dream_state",
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
@@ -88,6 +167,26 @@ _SIGNAL_COLS = (
     "episode_id", "created_at",
 )
 
+
+def signal_sources_survive(sources: set[int], existing: set[int]) -> bool:
+    """Whether a signal is still about something in the bank: it credits no
+    entry, or at least one credited entry still exists (superseded entries
+    exist as history). The same last-source rule retires lessons."""
+    return not sources or bool(sources & existing)
+
+
+def signal_source_ids(signal: dict) -> set[int]:
+    """Only server-credited entry uses establish a source dependency.
+
+    Unmatched/unchecked uses and episode membership are not evidence that
+    an entry contributed. Legacy signals without this partition stay unlinked.
+    """
+    uses = signal.get("used_ids")
+    credited = uses.get("credited") if isinstance(uses, dict) else None
+    if not isinstance(credited, list):
+        return set()
+    return {i for i in credited if type(i) is int and i > 0}
+
 # Ontology-lite builtin relations (spec §5.3) — the closed vocabulary a
 # weak model starts from. Referenced inverses must come first (FK).
 _BUILTIN_RELATIONS = (
@@ -114,8 +213,7 @@ _BUILTIN_RELATIONS = (
 
 # Mutable entry fields update_entry accepts — everything else is identity.
 _ENTRY_UPDATABLE = {
-    "band", "surprise", "access_count", "superseded_at",
-    "superseded_by_text", "last_logical_turn", "episode_id",
+    "band", "surprise", "access_count", "last_logical_turn", "episode_id",
     "episode_title", "tags", "slots",
 }
 
@@ -124,6 +222,7 @@ def _embedding_in(value: Any):
     """Accept numpy / torch / list; hand pgvector a float32 numpy array."""
     if value is None:
         return None
+    import numpy as np
     if hasattr(value, "detach"):  # torch.Tensor without importing torch here
         value = value.detach().cpu().numpy()
     return np.asarray(value, dtype=np.float32)
@@ -135,20 +234,372 @@ def _embedding_out(value: Any):
     objects, which ``np.asarray`` cannot coerce (TypeError)."""
     if value is None:
         return None
+    import numpy as np
     if hasattr(value, "to_numpy"):  # pgvector.Vector (0.5+ psycopg reads)
         value = value.to_numpy()
     return np.asarray(value, dtype=np.float32)
 
 
-class PostgresStorage:
+# The bank writer lease: a session advisory lock keyed in its own space
+# (seed 0), apart from the per-entry mutation locks (seed 41), so the two
+# can never collide on a key.
+WRITER_LEASE_KEY = "pseudolife-bank-writer"
+
+# Server-side TCP keepalive for the lease-holding session. A client that
+# vanishes without closing its socket (host sleep, a dropped link to a
+# remote server) otherwise keeps its session, and with it the lease, until
+# the server's own keepalive gives up: 7200 s idle + 9 x 75 s probes in the
+# bench server's settings (PG 18, read from pg_settings 2026-09-23, not
+# timed), over two hours of every restarted writer refusing. These bound it
+# to ~90 s. All three are user-settable GUCs; ignored on Unix-socket
+# connections, which have no such failure mode.
+_LEASE_KEEPALIVE = (
+    ("tcp_keepalives_idle", 60),
+    ("tcp_keepalives_interval", 10),
+    ("tcp_keepalives_count", 3),
+)
+
+# How long a new writer waits for the lease before refusing. A session that
+# is closing keeps its locks until its server process exits (a daemon
+# restart, the reconnect after this process closed its own connection, a
+# backend a test fixture just terminated), which can lag the client on a
+# loaded host. A live holder is refused after this. Not measured: long
+# enough for a backend exit, short enough that a refused call stays prompt.
+_LEASE_WAIT = "2s"
+
+# After a reconnect is refused the lease, calls inside this window are
+# refused from the cached message instead of each waiting out _LEASE_WAIT
+# under the service lock (a burst of 30 calls would otherwise hold it ~60 s).
+_LEASE_RETRY_SECONDS = 5.0
+
+# After a reconnect fails (the server is unreachable), calls inside this
+# window fail from the cached error instead of each paying another connect
+# attempt (up to connect_timeout) under the service lock. Not measured: it
+# bounds a burst to one attempt, and recovery waits at most this long.
+_RECONNECT_RETRY_SECONDS = 5.0
+
+# While a started bank has no coordination bank id yet (the board creates
+# it on its first context call), /health asks again at most this often.
+# Not measured: the Docker healthcheck polls every 15 s, and this keeps the
+# extra connection to one a minute until the id exists; once found it is
+# never read again.
+BANK_ID_RETRY_SECONDS = 60.0
+
+# How long a writer session verified alive stays trusted before
+# verify_writer_session probes it again. Measured 2026-09-23 on the bench PG
+# (Windows host -> Docker): the probe (SELECT 1) costs 0.72 ms median,
+# 1.8 ms p95. Probing on every call cost +1.0 ms (+17%) on cortex_lookup and
+# took recent(5) from 34 us to 673 us; on store/search (~200 ms with the CPU
+# embedder) it was below the noise. At most one probe per interval keeps a
+# burst of cheap calls cheap. The stale-read window it leaves needs another
+# writer to take, write and release the bank within this interval of the
+# last good probe, after this session died. Writes are not exposed: every
+# reconnect re-checks the lease epoch.
+_SESSION_PROBE_INTERVAL = 1.0
+
+# A meta row counting lease acquisitions. Each writer bumps it when it takes
+# the lease and remembers the value; after a reconnect, a different value
+# means another writer held the bank in the gap (see PostgresStorage.conn).
+_LEASE_EPOCH_KEY = "writer_lease_epoch"
+
+
+class WriterLeaseHeld(RuntimeError):
+    """Another session holds this bank's writer lease.
+
+    ``MemoryService`` records it as retryable (``/health`` reports
+    ``degraded`` with the message under ``not_ready``) and retries after a
+    backoff, since the holder may leave. A ``RuntimeError`` subclass, so
+    callers that only know the generic refusal still fail loudly."""
+
+
+class BankChangedHands(RuntimeError):
+    """Another writer held this bank while this instance was disconnected.
+
+    The lease guarantees one writer at a time, not that this one kept the
+    bank throughout. The owner's resident copy may predate the other
+    writer's changes, and its per-slot saves and flushes write that copy
+    back, so every call refuses until the owner has re-read the bank and
+    called :meth:`PostgresStorage.acknowledge_rehydration`."""
+
+
+# Two openers leave a root episode per client session: the plugin's
+# SessionStart hook keys its root by the client's own session id (a dashed
+# UUID), the stdio shim by a fresh 32-hex uuid. Same key pattern and pairing
+# rule as evals/capture_metrics.py (the memory-policy bench, 2026-09-25, as
+# of its review commit a0b1f533).
+_HOOK_SESSION_KEY = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# A hook root and its shim root open within a couple of seconds of each
+# other. Measured 2026-09-25 over 7 days of the live bank: the eight active
+# shim roots with a hook root nearby sat 1-8 s from it, the next nearest
+# 135 s. A wider window only adds fleet-start candidates, which the
+# uniqueness rule refuses.
+SESSION_PAIR_WINDOW_S = 5.0
+
+
+def count_client_sessions(roots, active_roots) -> int:
+    """Client sessions among keyed root episodes, counted the way
+    evals/capture_metrics.py counts them. ``roots`` holds
+    ``(id, session_key, started_at)`` per keyed root; ``active_roots`` the
+    ids with memory activity.
+
+    A hook root counts whether or not it was used: a session that never
+    touched memory is the miss a loop metric exists to show. Any other root
+    counts only when active, since an idle stdio-shim root is a transport
+    artifact. A hook root and an active non-hook root opened within
+    ``SESSION_PAIR_WINDOW_S`` of each other are one session when each is
+    the other's only candidate; both may be active, since writes that pass
+    ``episode=`` land on the hook root while the searches carry the shim's
+    key. Anything less certain stays unmerged, so the count is an upper
+    bound."""
+    hooks = [r for r in roots if _HOOK_SESSION_KEY.match(r[1])]
+    others = [r for r in roots
+              if not _HOOK_SESSION_KEY.match(r[1]) and r[0] in active_roots]
+    near = {h[0]: [o[0] for o in others
+                   if abs(o[2] - h[2]) <= SESSION_PAIR_WINDOW_S]
+            for h in hooks}
+    claims: dict[str, int] = {}
+    for cands in near.values():
+        for o in cands:
+            claims[o] = claims.get(o, 0) + 1
+    merged = sum(1 for cands in near.values()
+                 if len(cands) == 1 and claims[cands[0]] == 1)
+    return len(hooks) + len(others) - merged
+
+
+def _application_name() -> str:
+    """How this process appears in ``pg_stat_activity``, so a refused
+    writer can say who holds the bank: the daemon, a script, a test run.
+    Only a fallback: an ``application_name`` in the DSN still wins."""
+    argv = sys.argv or []
+    prog = os.path.basename(argv[0]) if argv and argv[0] else "python"
+    # A subcommand word (``serve``) says which process this is. Any other
+    # argument may be a path or a secret (``--dsn postgresql://...``), and
+    # pg_stat_activity shows this name to every role on the server.
+    if len(argv) > 1 and re.fullmatch(r"[a-z][a-z-]{0,19}", argv[1]):
+        prog = f"{prog} {argv[1]}"
+    return f"pseudolife-mcp pid={os.getpid()} {prog}"[:63]
+
+
+class PostgresStorage(ReEvidenceStore):
     """Durable layer under the in-memory bands / cortex (single writer)."""
 
-    def __init__(self, dsn: str) -> None:
+    # The coordination bank id once read (see cached_bank_id); it never
+    # changes for a bank. Class-level defaults: no I/O until asked.
+    _bank_id: str | None = None
+    _bank_id_retry_at = 0.0
+
+    def __init__(self, dsn: str, *, writer_lease: bool = True) -> None:
+        """Connect, take the bank's writer lease, and ensure the schema.
+
+        ``writer_lease=False`` is for a caller that deliberately opens a
+        second connection to a bank another instance owns (the test probes
+        that build a racing peer). Such an instance never takes, or waits
+        for, the lease. Anything that writes a live bank leaves it on.
+        """
         self.dsn = dsn
-        self._conn = self._connect()
-        ensure_schema(self._conn)
-        register_vector(self._conn)
-        self._seed_relations()
+        self._writer_lease = writer_lease
+        # Set while a reconnect is refused because another writer took the
+        # lease; ping() reports it (see there). Until _lease_retry_at, calls
+        # are refused from it without another lease wait.
+        self._lease_lost: str | None = None
+        self._lease_retry_at = 0.0
+        self._reconnect_error: str | None = None
+        self._reconnect_retry_at = 0.0
+        # The lease-epoch value this instance last wrote, and the sticky
+        # refusal set when a reconnect finds another writer's epoch.
+        self._lease_epoch: int | None = None
+        self.resident_invalidated: str | None = None
+        # When the writer session was last known alive and continuous (a
+        # probe, or a fresh epoch-checked session); see verify_writer_session.
+        self._session_ok_at = 0.0
+        self._transaction_connection = None
+        self._lesson_transaction_connection = None
+        self._entry_import_connection = None
+        self._entry_mutation_connection = None
+        self._conn = self._open_session()
+        try:
+            ensure_schema(self._conn)
+            register_vector(self._conn)
+            self._seed_relations()
+            if self._writer_lease:
+                self._lease_epoch = self._bump_lease_epoch(self._conn)
+            self._session_ok_at = time.monotonic()
+        except BaseException:
+            # Release the lease now, not when this half-built instance is
+            # garbage-collected: the caller's retry would otherwise refuse
+            # against its own earlier attempt.
+            self._conn.close()
+            raise
+
+    def _open_session(self) -> psycopg.Connection:
+        """A configured connection holding the writer lease (unless this
+        instance opted out). Closed again on any failure, so a refused
+        attempt never leaves a session behind."""
+        conn = self._connect()
+        try:
+            if self._writer_lease:
+                self._acquire_writer_lease(conn)
+        except BaseException:
+            conn.close()
+            raise
+        return conn
+
+    def _acquire_writer_lease(self, conn: psycopg.Connection) -> None:
+        """Take this database's writer lease on ``conn``'s session, or raise
+        :class:`WriterLeaseHeld` naming the session that holds it.
+
+        The service keeps a resident copy of every canonical store and saves
+        each slot by DELETE-then-insert from that copy, so a second writer on
+        the same bank does not merely race: whichever saves a slot last
+        erases the other's history for it. The single-writer rule was
+        documented but never enforced (fresh-eyes review 2026-09-23). Now a
+        second writer is refused.
+
+        The lease lives on the same session every read and write goes
+        through, never on a side connection. If that session dies, the lease
+        dies with it, and :attr:`conn` must win it back before the
+        replacement serves anything. It is a session-level lock, so a
+        rolled-back transaction does not release it; closing the session
+        does.
+        """
+        for name, value in _LEASE_KEEPALIVE:
+            # SET takes no bind parameters; names and values are constants.
+            conn.execute(f"SET {name} = {int(value)}")
+        # Wait (event-driven, not polled) up to _LEASE_WAIT for a holder that
+        # is exiting, then restore the session's own lock_timeout.
+        previous = conn.execute("SHOW lock_timeout").fetchone()[0]
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (_LEASE_WAIT,))
+        try:
+            conn.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                         (WRITER_LEASE_KEY,))
+        except psycopg.errors.LockNotAvailable:
+            raise WriterLeaseHeld(self._describe_lease_holder(conn)) from None
+        conn.execute("SELECT set_config('lock_timeout', %s, false)",
+                     (previous,))
+
+    @staticmethod
+    def _bump_lease_epoch(conn: psycopg.Connection) -> int:
+        """Record this lease acquisition in the bank and return its number.
+        Runs on the lease-holding session, so no other writer can bump in
+        between."""
+        # A value that is not a number (a hand edit, a bad import) restarts
+        # the count rather than failing every open of the bank.
+        return conn.execute(
+            """
+            INSERT INTO meta (key, value) VALUES (%s, '1'::jsonb)
+            ON CONFLICT (key) DO UPDATE
+              SET value = to_jsonb(COALESCE(
+                CASE WHEN jsonb_typeof(meta.value) = 'number'
+                     THEN (meta.value #>> '{}')::numeric::bigint END, 0) + 1)
+            RETURNING (value #>> '{}')::bigint
+            """,
+            (_LEASE_EPOCH_KEY,),
+        ).fetchone()[0]
+
+    @staticmethod
+    def _read_lease_epoch(conn: psycopg.Connection) -> int | None:
+        row = conn.execute(
+            "SELECT CASE WHEN jsonb_typeof(value) = 'number' "
+            "THEN (value #>> '{}')::numeric::bigint END "
+            "FROM meta WHERE key = %s",
+            (_LEASE_EPOCH_KEY,),
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def verify_writer_session(self) -> None:
+        """Round-trip on the writer session before its owner serves from a
+        resident copy (MemoryService calls this at the start of every
+        operation).
+
+        A live session still holds the lease it took, since a session-level
+        lock ends only with its session, so no other writer can have run.
+        A dead one is replaced here, not at the next storage call, which runs
+        the handover check: the owner learns from ``resident_invalidated``
+        before it serves a copy another writer may have made stale.
+
+        An unreachable server is tolerated: nothing else can write a bank
+        this process cannot reach either (short of a network partition), so
+        the resident copy stays servable, while every storage call still
+        fails on its own. Raises only if another writer holds the lease.
+        """
+        if not self._writer_lease or self._pinned():
+            return
+        c = self._conn
+        if (not (c.closed or c.broken) and time.monotonic()
+                - self._session_ok_at < _SESSION_PROBE_INTERVAL):
+            return  # verified alive moments ago (see _SESSION_PROBE_INTERVAL)
+        try:
+            try:
+                conn = self.conn
+                self._probe_session(conn)
+                self._session_ok_at = time.monotonic()
+                return
+            except psycopg.OperationalError:
+                if self._reconnect_error:
+                    return  # the reconnect itself failed: unreachable
+            self.conn  # noqa: B018 — the session died unnoticed; replace it
+        except BankChangedHands:
+            return  # flagged: the owner re-reads the bank next
+        except psycopg.OperationalError:
+            return  # unreachable; retried after _RECONNECT_RETRY_SECONDS
+
+    @staticmethod
+    def _probe_session(conn: psycopg.Connection) -> None:
+        conn.execute("SELECT 1")
+
+    def _pinned(self) -> bool:
+        return any(c is not None for c in (
+            self._transaction_connection, self._entry_mutation_connection,
+            self._entry_import_connection, self._lesson_transaction_connection))
+
+    def acknowledge_rehydration(self) -> None:
+        """The owner has dropped its resident copy and re-reads the bank from
+        here on: lift the refusal :class:`BankChangedHands` imposed."""
+        self.resident_invalidated = None
+
+    @staticmethod
+    def _lease_holders(conn: psycopg.Connection) -> list[tuple]:
+        """``(pid, application_name)`` of every session holding this
+        database's writer lease. A bigint advisory key shows in
+        ``pg_locks`` split into ``classid`` (high half) and ``objid`` (low
+        half), with ``objsubid`` 1."""
+        return conn.execute(
+            """
+            WITH k AS (SELECT hashtextextended(%s, 0) AS key)
+            SELECT a.pid, a.application_name
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON a.pid = l.pid
+            CROSS JOIN k
+            WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+              AND l.database = (SELECT oid FROM pg_database
+                                WHERE datname = current_database())
+              AND l.classid = ((k.key >> 32) & 4294967295)::oid
+              AND l.objid = (k.key & 4294967295)::oid
+            """,
+            (WRITER_LEASE_KEY,),
+        ).fetchall()
+
+    @classmethod
+    def _describe_lease_holder(cls, conn: psycopg.Connection) -> str:
+        """The refusal message: which session holds the lease, and what to
+        do about it."""
+        rows = cls._lease_holders(conn)
+        bank = conn.execute("SELECT current_database()").fetchone()[0]
+        if rows:
+            holder = ", ".join(
+                f"backend pid {pid} (application_name {(app or '')!r})"
+                for pid, app in rows)
+        else:
+            holder = "a session that released it a moment ago (retry)"
+        return (
+            f"another process holds the writer lease on bank {bank!r}: "
+            f"{holder}. A bank has exactly one writer, because two would "
+            "each save slots from their own resident copy and erase each "
+            "other's history. Stop that process first (for the Docker "
+            "daemon: `docker compose -f ops/docker-compose.yml stop "
+            "pseudolife-daemon`), or point this one at a different database.")
 
     def _connect(self) -> psycopg.Connection:
         """Open + session-configure a connection (shared by init and the
@@ -159,7 +610,9 @@ class PostgresStorage:
         autovacuum on the churny canonical tables) and held ACCESS SHARE
         locks that blocked any concurrent DDL. Mutations get explicit
         transaction blocks via :meth:`_txn`."""
-        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
+        conn = connect_retrying_local_ports(
+            self.dsn, connect_timeout=10, autocommit=True,
+            fallback_application_name=_application_name())
         # Never block forever on a lock — a stuck/orphaned writer should
         # raise here, not hang the whole daemon. (Session-level GUCs; they
         # apply immediately under autocommit.)
@@ -179,23 +632,125 @@ class PostgresStorage:
         daemon until manual restart). Heal-on-next-use: the call that hits
         the dead connection still raises; the *next* one reconnects.
         Schema is NOT re-ensured (it exists); the vector adapter is
-        per-connection and must be re-registered."""
+        per-connection and must be re-registered. The writer lease died with
+        the old session, so the replacement must win it back before it
+        serves anything. If another writer took the bank in the gap, this
+        raises, and keeps raising on every later call while the other holds
+        it (fail closed). Winning it back is not enough either: if another
+        writer held it meanwhile (the lease epoch moved), this instance's
+        owner may hold a stale resident copy, so every call refuses with
+        :class:`BankChangedHands` until the owner has re-read the bank."""
+        # A lesson batch must not silently reconnect halfway through its
+        # transaction: later helpers would then commit outside that batch.
+        if self._transaction_connection is not None:
+            return self._transaction_connection
+        if self._entry_mutation_connection is not None:
+            return self._entry_mutation_connection
+        if self._entry_import_connection is not None:
+            return self._entry_import_connection
+        if self._lesson_transaction_connection is not None:
+            return self._lesson_transaction_connection
         c = self._conn
         if c.closed or c.broken:
+            if self._lease_lost and time.monotonic() < self._lease_retry_at:
+                raise WriterLeaseHeld(self._lease_lost)
+            if (self._reconnect_error
+                    and time.monotonic() < self._reconnect_retry_at):
+                raise psycopg.OperationalError(self._reconnect_error)
             logger.warning("postgres connection lost (closed=%s broken=%s); "
                            "reconnecting", c.closed, c.broken)
-            self._conn = self._connect()
-            register_vector(self._conn)
+            try:
+                conn = self._open_session()
+            except WriterLeaseHeld as exc:
+                self._lease_lost = str(exc)
+                self._lease_retry_at = time.monotonic() + _LEASE_RETRY_SECONDS
+                raise
+            except psycopg.OperationalError as exc:
+                self._reconnect_error = f"reconnect failed: {exc}"
+                self._reconnect_retry_at = (
+                    time.monotonic() + _RECONNECT_RETRY_SECONDS)
+                raise
+            self._reconnect_error = None
+            handed_over = None
+            try:
+                register_vector(conn)
+                if self._writer_lease:
+                    found = self._read_lease_epoch(conn)
+                    if found != self._lease_epoch:
+                        handed_over = (self._lease_epoch, found)
+                    self._lease_epoch = self._bump_lease_epoch(conn)
+            except BaseException:
+                conn.close()
+                raise
+            self._conn = conn
+            self._lease_lost = None
+            self._session_ok_at = time.monotonic()  # fresh, epoch-checked
+            if handed_over is not None:
+                # Another writer may have restored a different bank here:
+                # the cached bank id goes with the resident copy.
+                self._bank_id = None
+                self._bank_id_retry_at = 0.0
+                self.resident_invalidated = (
+                    "another writer held this bank while this process was "
+                    f"disconnected (lease epoch {handed_over[0]} -> "
+                    f"{handed_over[1]}); its resident copy may be stale, so "
+                    "nothing is served or saved until it re-reads the bank")
+                logger.warning("%s", self.resident_invalidated)
+        if self.resident_invalidated:
+            raise BankChangedHands(self.resident_invalidated)
         return self._conn
 
     def ping(self) -> bool:
         """Cheap liveness probe for /health on a DEDICATED short-lived
         connection, so it can't interleave with — or leave an idle
         transaction on — the shared connection another thread is using.
-        Raises on an unreachable server."""
-        with psycopg.connect(self.dsn, connect_timeout=2) as c:
+        Raises on an unreachable server, and while the last reconnect was
+        refused because another writer holds the lease and that writer is
+        still there: a healthy server would otherwise report a daemon whose
+        every call fails as fine. Once the holder is gone the next call
+        reconnects and takes the lease, so the probe stops reporting it.
+        Also raises while the owner has yet to re-read a bank another writer
+        held in the meantime (:class:`BankChangedHands`)."""
+        with connect_retrying_local_ports(self.dsn, connect_timeout=2) as c:
             c.execute("SELECT 1")
+            if self._lease_lost and self._lease_holders(c):
+                raise WriterLeaseHeld(self._lease_lost)
+        if self.resident_invalidated:
+            raise BankChangedHands(self.resident_invalidated)
         return True
+
+    def cached_bank_id(self) -> str | None:
+        """The coordination bank id (meta ``coordination_bank_id``), for
+        ``/health``'s ``bank`` fingerprint, or ``None`` while it is unknown.
+
+        Read on a DEDICATED short-lived connection, like :meth:`ping`, so it
+        never waits on the shared connection, the service lock or a dream,
+        and never runs DDL. ``/health`` calls it only after :meth:`ping`
+        succeeded. Cached once found, and dropped when a reconnect finds
+        that another writer held the bank. While the row is absent or the
+        read fails, it is asked again at most every
+        ``BANK_ID_RETRY_SECONDS``. Raises on nothing it can catch."""
+        if self._bank_id is not None:
+            return self._bank_id
+        now = time.monotonic()
+        if now < self._bank_id_retry_at:
+            return None
+        self._bank_id_retry_at = now + BANK_ID_RETRY_SECONDS
+        from pseudolife_memory.storage.coordination import BANK_ID_META_KEY
+
+        try:
+            with connect_retrying_local_ports(
+                    self.dsn, connect_timeout=2, autocommit=True) as c:
+                c.execute("SET statement_timeout = '2s'")
+                row = c.execute("SELECT value FROM public.meta WHERE key = %s",
+                                (BANK_ID_META_KEY,)).fetchone()
+        except Exception:  # noqa: BLE001 — /health must never fail on this
+            logger.debug("bank id read failed", exc_info=True)
+            return None
+        value = row[0] if row else None
+        if isinstance(value, str) and value:
+            self._bank_id = value
+        return self._bank_id
 
     def _seed_relations(self) -> None:
         with self._txn(), self.conn.cursor() as cur:
@@ -240,12 +795,131 @@ class PostgresStorage:
                 f"transaction did not commit (status={tx.status.name}); "
                 "connection lost during the block")
 
+    @contextmanager
+    def transaction(self):
+        """One pinned-connection transaction for a multi-method mutation.
+
+        Storage helpers normally own one short transaction each. Callers that
+        must commit several statements as one decision use this context so a
+        broken connection cannot reconnect between statements and split the
+        decision across two transactions. Nested helper ``_txn`` blocks become
+        savepoints on the same pinned connection.
+        """
+        if self._transaction_connection is not None:
+            with self._txn():
+                yield
+            return
+        self._transaction_connection = self.conn
+        try:
+            with self._txn():
+                yield
+        finally:
+            self._transaction_connection = None
+
+    @contextmanager
+    def entry_mutation_lock(self, entry_ids: Sequence[int]):
+        """Serialize a durable entry mutation through resident publication.
+
+        Row locks end at commit, before a service can publish its staged
+        continuum.  Session advisory locks bridge that post-commit gap and
+        are released automatically by PostgreSQL if the connection dies.
+        """
+        keys = sorted({int(entry_id) for entry_id in entry_ids})
+        outermost = self._entry_mutation_connection is None
+        conn = self.conn
+        if outermost:
+            # Advisory locks belong to one PostgreSQL session.  Pin every
+            # operation in the context to that session so a disconnect fails
+            # closed instead of transparently continuing without the lock.
+            self._entry_mutation_connection = conn
+        acquired: list[int] = []
+        body_failed = False
+        abandon_session = False
+        try:
+            for entry_id in keys:
+                conn.execute(
+                    "SELECT pg_advisory_lock(hashtextextended(%s, 41))",
+                    (f"entry-mutation:{entry_id}",),
+                )
+                acquired.append(entry_id)
+            yield
+        except Exception:
+            # A routine refusal or error still releases on this session; the
+            # release below closes it anyway if the session is gone.
+            body_failed = True
+            raise
+        except BaseException:
+            body_failed = True
+            abandon_session = True
+            raise
+        finally:
+            try:
+                if abandon_session:
+                    # An interrupt can leave the session mid-statement.
+                    # Closing releases every lock it holds, including any
+                    # partially acquired set, without trusting its state.
+                    conn.close()
+                elif acquired and (conn.closed or conn.broken):
+                    raise psycopg.OperationalError(
+                        "entry mutation lock connection was lost before release")
+                for entry_id in (() if abandon_session else reversed(acquired)):
+                    released = conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended(%s, 41))",
+                        (f"entry-mutation:{entry_id}",),
+                    ).fetchone()
+                    if released is None or released[0] is not True:
+                        raise psycopg.OperationalError(
+                            "entry mutation lock release was not acknowledged")
+            except BaseException:
+                # A release error can leave other session locks held. Closing
+                # this exact session releases them without reconnecting.
+                conn.close()
+                if not body_failed:
+                    raise
+            finally:
+                # Cleanup failure must not pin a broken session forever; the
+                # next operation is then free to reconnect normally.
+                if outermost:
+                    self._entry_mutation_connection = None
+
+    @contextmanager
+    def entry_import_transaction(self):
+        """Commit one imported entry and its source cursor on one connection.
+
+        The boot importer owns storage during initialization. Pinning prevents
+        a dropped connection from reconnecting between the entry and meta writes.
+        """
+        if (self._entry_import_connection is not None
+                or self._lesson_transaction_connection is not None):
+            raise RuntimeError("entry import transaction is already active")
+        self._entry_import_connection = self.conn
+        try:
+            with self._txn():
+                yield
+        finally:
+            self._entry_import_connection = None
+
+    @contextmanager
+    def savepoint(self):
+        """A nested rollback boundary for ONE tolerated step of an open
+        transaction.
+
+        PostgreSQL aborts the whole transaction on the first error, so a
+        caller that wants to skip a failing step and keep the rest of its
+        batch (lesson synthesis skipping one poison claim) has to run that
+        step inside a savepoint. Same block as :meth:`_txn`, named for what
+        the caller means; outside a transaction it simply is one."""
+        with self._txn():
+            yield
+
     # ── entries ─────────────────────────────────────────────────────────
 
     def insert_entry(self, e: dict) -> int:
         values = []
         for c in _ENTRY_COLS:
             v = e.get(c)
+            if c == "dream_state" and c not in e:
+                v = "pending"
             if c == "embedding":
                 v = _embedding_in(v)
             elif c in _ENTRY_JSONB:
@@ -275,12 +949,478 @@ class PostgresStorage:
                 f"UPDATE entries SET {', '.join(sets)} WHERE id = %s", values,
             )
 
-    def delete_entry_ids(self, ids: list[int]) -> int:
+    def supersede_entries(
+        self, entry_ids, *, superseded_at: float,
+        superseded_by_text: str,
+    ) -> int:
+        """Atomically retire source entries and capture their traced slots.
+
+        Every target must exist and still be live. The source rows are locked
+        in stable ID order so a concurrent :meth:`add_trace` either lands
+        before this operation's trace scan or observes the committed
+        supersession and creates the event itself.
+        """
+        try:
+            raw_ids = [] if entry_ids is None else list(entry_ids)
+        except TypeError as exc:
+            raise ValueError(
+                "supersede_entries: entry_ids must be positive integers"
+            ) from exc
+        if any(type(value) is not int or value <= 0 for value in raw_ids):
+            raise ValueError("supersede_entries: entry_ids must be positive integers")
+        ids = sorted(set(raw_ids))
+        try:
+            superseded_at = float(superseded_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "supersede_entries: superseded_at must be finite"
+            ) from exc
+        if not math.isfinite(superseded_at):
+            raise ValueError("supersede_entries: superseded_at must be finite")
         if not ids:
             return 0
+
+        with self.transaction():
+            conn = self.conn
+            rows = conn.execute(
+                "SELECT id, superseded_at FROM entries "
+                "WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+                (ids,),
+            ).fetchall()
+            found = {int(row[0]) for row in rows}
+            missing = [i for i in ids if i not in found]
+            retired = [int(row[0]) for row in rows if row[1] is not None]
+            if missing or retired:
+                detail = []
+                if missing:
+                    detail.append(f"missing={missing}")
+                if retired:
+                    detail.append(f"already_retired={retired}")
+                raise ValueError("supersede_entries: " + ", ".join(detail))
+            conn.execute(
+                "UPDATE entries SET superseded_at = %s, "
+                "superseded_by_text = %s WHERE id = ANY(%s)",
+                (superseded_at, superseded_by_text, ids),
+            )
+            conn.execute(
+                "INSERT INTO memory_trace_invalidations "
+                "(entity_norm, attribute_norm, source_entry_id, "
+                " invalidated_at, cause) "
+                "SELECT entity_norm, attribute_norm, entry_id, %s, "
+                "       'source_superseded' FROM memory_traces "
+                "WHERE entry_id = ANY(%s) "
+                "ON CONFLICT (entity_norm, attribute_norm, source_entry_id) "
+                "DO NOTHING",
+                (superseded_at, ids),
+            )
+            # Lessons are deliberately untouched: a superseded entry is kept
+            # as history and still supports what was learned from it.
+        return len(ids)
+
+    @staticmethod
+    def _reinstatement_request(
+        *, entry_id: int, operation_id: str,
+        expected_text_sha256: str, expected_source_sha256: str,
+        expected_superseded_at: float,
+        expected_superseded_by_text_sha256: str,
+        evidence_packet_sha256: str, reviewer_ids: list[str],
+        reason: str, decided_by: str,
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Validate and fingerprint the immutable reinstatement request."""
+        if type(entry_id) is not int or entry_id <= 0:
+            raise ValueError("invalid_request: entry_id must be a positive integer")
+        try:
+            canonical_operation = str(uuid.UUID(operation_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("invalid_request: operation_id must be a UUID") from exc
+        if operation_id != canonical_operation:
+            raise ValueError("invalid_request: operation_id must be canonical")
+        hashes = {
+            "expected_text_sha256": expected_text_sha256,
+            "expected_source_sha256": expected_source_sha256,
+            "expected_superseded_by_text_sha256":
+                expected_superseded_by_text_sha256,
+            "evidence_packet_sha256": evidence_packet_sha256,
+        }
+        if any(not isinstance(value, str) or len(value) != 64
+               or any(ch not in "0123456789abcdef" for ch in value)
+               for value in hashes.values()):
+            raise ValueError("invalid_request: hashes must be lowercase SHA-256")
+        try:
+            expected_superseded_at = float(expected_superseded_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_request: expected_superseded_at must be finite") from exc
+        if not math.isfinite(expected_superseded_at):
+            raise ValueError("invalid_request: expected_superseded_at must be finite")
+        if (not isinstance(reviewer_ids, list) or not reviewer_ids
+                or any(not isinstance(value, str) or not value.strip()
+                       for value in reviewer_ids)):
+            raise ValueError("invalid_request: reviewer_ids must be non-empty strings")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("invalid_request: reason must be non-empty")
+        if not isinstance(decided_by, str) or not decided_by.strip():
+            raise ValueError("invalid_request: decided_by must be non-empty")
+        payload = {
+            "version": 1, "entry_id": entry_id,
+            "operation_id": canonical_operation,
+            **hashes, "expected_superseded_at": expected_superseded_at,
+            "reviewer_ids": reviewer_ids, "reason": reason,
+            "decided_by": decided_by,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        return canonical_operation, hashlib.sha256(encoded).hexdigest(), payload
+
+    def entry_reinstatement_decision(
+        self, operation_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT operation_id::text, entry_id, request_sha256, "
+            "entry_text_sha256, entry_source_sha256, prior_superseded_at, "
+            "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+            "evidence_packet_sha256, reviewer_ids, reason, decided_by, decided_at "
+            "FROM entry_reinstatement_decisions WHERE operation_id = %s::uuid",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        keys = (
+            "operation_id", "entry_id", "request_sha256", "entry_text_sha256",
+            "entry_source_sha256", "prior_superseded_at",
+            "prior_superseded_by_text", "prior_superseded_by_text_sha256",
+            "evidence_packet_sha256", "reviewer_ids", "reason", "decided_by",
+            "decided_at",
+        )
+        return dict(zip(keys, row))
+
+    def reinstate_entry(
+        self, *, entry_id: int, operation_id: str,
+        expected_text_sha256: str, expected_source_sha256: str,
+        expected_superseded_at: float,
+        expected_superseded_by_text_sha256: str,
+        evidence_packet_sha256: str, reviewer_ids: list[str],
+        reason: str, decided_by: str,
+    ) -> dict[str, Any]:
+        """Clear one reviewed retirement with an atomic append-only audit."""
+        operation_id, request_sha256, request = self._reinstatement_request(
+            entry_id=entry_id, operation_id=operation_id,
+            expected_text_sha256=expected_text_sha256,
+            expected_source_sha256=expected_source_sha256,
+            expected_superseded_at=expected_superseded_at,
+            expected_superseded_by_text_sha256=
+                expected_superseded_by_text_sha256,
+            evidence_packet_sha256=evidence_packet_sha256,
+            reviewer_ids=reviewer_ids, reason=reason, decided_by=decided_by,
+        )
+        conn = self.conn
         with self._txn():
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 41))",
+                (operation_id,),
+            )
+            prior = self.entry_reinstatement_decision(operation_id)
+            if prior is not None:
+                if prior["request_sha256"] != request_sha256:
+                    raise ValueError("operation_conflict")
+                current = conn.execute(
+                    "SELECT superseded_at FROM entries WHERE id = %s",
+                    (entry_id,),
+                ).fetchone()
+                state = ("missing" if current is None else
+                         "live" if current[0] is None else "retired_again")
+                return {
+                    "action": "already_reinstated", "decision": "committed",
+                    "operation_id": operation_id, "entry_id": entry_id,
+                    "current_state": state, "changed_by_this_call": False,
+                    "idempotent_replay": True,
+                }
+            row = conn.execute(
+                "SELECT text, source, superseded_at, superseded_by_text "
+                "FROM entries WHERE id = %s FOR UPDATE", (entry_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("target_not_found")
+            text, source, superseded_at, superseded_by_text = row
+            if superseded_at is None:
+                raise ValueError("target_not_retired")
+            if superseded_by_text is None:
+                # Pre-v5 migrations retired rows without recording the
+                # replacement text, so no exact preimage can name it.
+                raise ValueError("retirement_text_missing")
+            digest = lambda value: hashlib.sha256(value.encode("utf-8")).hexdigest()
+            if (digest(text) != request["expected_text_sha256"]
+                    or digest(source) != request["expected_source_sha256"]
+                    or superseded_at != request["expected_superseded_at"]
+                    or digest(superseded_by_text) !=
+                    request["expected_superseded_by_text_sha256"]):
+                raise ValueError("preimage_mismatch")
+            invalidations = conn.execute(
+                "SELECT count(*) FROM memory_trace_invalidations "
+                "WHERE source_entry_id = %s", (entry_id,),
+            ).fetchone()[0]
+            if invalidations:
+                raise ValueError("trace_invalidations_present")
+            decided_at = time.time()
+            conn.execute(
+                "INSERT INTO entry_reinstatement_decisions "
+                "(operation_id, entry_id, request_sha256, entry_text_sha256, "
+                "entry_source_sha256, prior_superseded_at, "
+                "prior_superseded_by_text, prior_superseded_by_text_sha256, "
+                "evidence_packet_sha256, reviewer_ids, reason, decided_by, "
+                "decided_at) VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s)",
+                (operation_id, entry_id, request_sha256,
+                 request["expected_text_sha256"],
+                 request["expected_source_sha256"], superseded_at,
+                 superseded_by_text,
+                 request["expected_superseded_by_text_sha256"],
+                 request["evidence_packet_sha256"], Jsonb(reviewer_ids),
+                 reason, decided_by, decided_at),
+            )
+            updated = conn.execute(
+                "UPDATE entries SET superseded_at = NULL, "
+                "superseded_by_text = NULL WHERE id = %s "
+                "AND superseded_at = %s AND superseded_by_text = %s",
+                (entry_id, superseded_at, superseded_by_text),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("reinstatement short write")
+        return {
+            "action": "reinstated", "decision": "committed",
+            "operation_id": operation_id, "entry_id": entry_id,
+            "current_state": "live", "changed_by_this_call": True,
+            "idempotent_replay": False,
+        }
+
+    def delete_entry_ids(self, ids: list[int], *, forgotten: bool = False) -> int:
+        """Delete entry rows.
+
+        ``forgotten=True`` marks an explicit forget: lessons whose last
+        trusted source it removes retire in the same transaction. A plain
+        delete (the default, also the eviction fallback for storages without
+        :meth:`delete_evicted_entry`) never retires lessons.
+        """
+        if not ids:
+            return 0
+        with self.transaction():
+            if forgotten:
+                # Match synthesis/correction lock order: source rows before lessons.
+                self.conn.execute("SELECT id FROM entries WHERE id = ANY(%s) "
+                                  "ORDER BY id FOR UPDATE", (sorted(set(ids)),)).fetchall()
+                self.retire_lessons_for_entries(ids, now=time.time())
             cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
+
+    def forget_entry_ids(self, ids: list[int], *, digest_ids: list[int],
+                         digest_cursor: dict, now: float) -> dict:
+        """Retract entry-backed facts, digests and dream edges with the delete.
+
+        Current surviving entries are the only remaining support. Legacy
+        edges without edge_evidence rows are intentionally untouched.
+        """
+        ids = sorted(set(int(i) for i in ids))
+        digest_ids = sorted(set(int(i) for i in digest_ids))
+        if not ids:
+            return {"slots": [], "digests": [], "edges": []}
+        with self.transaction():
+            # Match synthesis/correction lock order: source rows before lessons.
+            locked = self.conn.execute(
+                "SELECT id, source, superseded_at FROM entries WHERE id = ANY(%s) "
+                "ORDER BY id FOR UPDATE", (sorted(set(ids) | set(digest_ids)),)).fetchall()
+            retiring_digests = [r[0] for r in locked
+                                if r[0] in digest_ids and r[1] == "digest" and r[2] is None]
+            # Only deleted rows are forgotten. Digests retired below are
+            # superseded history, which still supports lessons.
+            self.retire_lessons_for_entries(ids, now=now)
+            slots = self.conn.execute(
+                "SELECT DISTINCT t.entity_norm, t.attribute_norm "
+                "FROM memory_traces t WHERE t.entry_id = ANY(%s) "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM memory_traces s "
+                " JOIN entries e ON e.id = s.entry_id "
+                " WHERE s.entity_norm = t.entity_norm "
+                " AND s.attribute_norm = t.attribute_norm "
+                " AND NOT (s.entry_id = ANY(%s)) "
+                " AND e.superseded_at IS NULL) "
+                "ORDER BY t.entity_norm, t.attribute_norm",
+                (ids, ids),
+            ).fetchall()
+            edge_ids = [int(r[0]) for r in self.conn.execute(
+                "SELECT DISTINCT ev.edge_id FROM edge_evidence ev "
+                "JOIN edges g ON g.id = ev.edge_id "
+                "WHERE ev.entry_id = ANY(%s) AND g.superseded_at IS NULL "
+                "AND g.origin = 'agent' AND NOT EXISTS ("
+                " SELECT 1 FROM edge_evidence s "
+                " JOIN entries e ON e.id = s.entry_id "
+                " WHERE s.edge_id = ev.edge_id "
+                " AND NOT (s.entry_id = ANY(%s)) "
+                " AND e.superseded_at IS NULL)",
+                (ids, ids),
+            ).fetchall()]
+            for entity, attribute in slots:
+                source_id = next(int(r[0]) for r in self.conn.execute(
+                    "SELECT entry_id FROM memory_traces WHERE "
+                    "entity_norm = %s AND attribute_norm = %s "
+                    "AND entry_id = ANY(%s) ORDER BY entry_id LIMIT 1",
+                    (entity, attribute, ids),
+                ).fetchall())
+                self.conn.execute(
+                    "UPDATE facts SET status = 'retired', "
+                    "superseded_at = %s, superseded_by_value = %s "
+                    "WHERE entity_norm = %s AND attribute_norm = %s "
+                    "AND status = 'current'",
+                    (now, f"forgotten source entry {source_id}",
+                     entity, attribute),
+                )
+            if edge_ids:
+                self.conn.execute(
+                    "UPDATE edges SET superseded_at = %s WHERE id = ANY(%s)",
+                    (now, edge_ids),
+                )
+            if digest_ids:
+                retired = [r[0] for r in self.conn.execute(
+                    "UPDATE entries SET superseded_at = %s, "
+                    "superseded_by_text = %s "
+                    "WHERE id = ANY(%s) AND source = 'digest' "
+                    "AND superseded_at IS NULL RETURNING id",
+                    (now, f"forgotten source entry {ids[0]}", digest_ids),
+                ).fetchall()]
+                if set(retired) != set(retiring_digests):
+                    raise RuntimeError("forget digest retirement was incomplete")
+                digest_ids = sorted(retired)
+            self.set_meta("session_digest_cursor", digest_cursor)
+            deleted = self.conn.execute(
+                "DELETE FROM entries WHERE id = ANY(%s)", (ids,),
+            ).rowcount
+            if deleted != len(ids):
+                raise RuntimeError("forget entry delete was incomplete")
+        return {"slots": [tuple(r) for r in slots],
+                "digests": digest_ids, "edges": edge_ids}
+
+    def lesson_lineage_sources(self, entity_norm: str, attribute_norm: str,
+                               lesson: str, asserted_at: float) -> set[int]:
+        """Trusted source entry IDs of one exact lesson (value + asserted_at).
+
+        The union over its synthesis ``lineage`` audits: the first derivation
+        and every later confirmation that added sources. Empty means the
+        lesson has no verified dependency (legacy, explicit or episode-only).
+        """
+        out: set[int] = set()
+        for (audit,) in self.conn.execute(
+                "SELECT record FROM store_decisions WHERE store = 'lesson' "
+                "AND entity_norm = %s AND attribute_norm = %s "
+                "AND action = 'lineage' AND decided_by = 'lesson_synthesis' "
+                "AND reason = 'verified_dependencies'",
+                (entity_norm, attribute_norm)).fetchall():
+            if (isinstance(audit, dict) and audit.get("lesson") == lesson
+                    and audit.get("asserted_at") == asserted_at
+                    and isinstance(audit.get("source_entry_ids"), list)):
+                out.update(i for i in audit["source_entry_ids"] if type(i) is int)
+        return out
+
+    def retire_lessons_for_entries(self, ids: list[int], *, now: float) -> None:
+        """Retire lessons whose last trusted source this explicit forget removes.
+
+        Called only by forget paths, inside their pinned transaction after
+        they lock the forgotten rows (source rows before lessons). A lesson
+        retires only when none of its lineage sources still exists once
+        ``ids`` are gone: superseded entries still exist and still support
+        it; entries deleted earlier (forgotten or evicted) count as gone.
+        Lessons without a lineage audit are untouched, whatever their
+        provenance tokens say.
+        """
+        forgotten = {int(i) for i in ids}
+        tokens = [f"entry:{i}" for i in sorted(forgotten)]
+        if not tokens:
+            return
+        cols = ("id", "entity", "attribute", "entity_norm", "attribute_norm",
+                "value", "about", "polarity", "outcome", "confidence", "origin",
+                "provenance", "support", "asserted_at", "last_confirmed",
+                "supersedes_value")
+        cause = "source_forgotten"
+        with self._txn():
+            # Confirmations merge every supporting source's token into
+            # provenance, so this prefilter finds each candidate.
+            records = [dict(zip(cols, r)) for r in self.conn.execute(
+                f"SELECT {', '.join(cols)} FROM lessons WHERE status = 'current' "
+                "AND provenance ?| %s ORDER BY id FOR UPDATE", (tokens,)).fetchall()]
+            retiring = []
+            for row in records:
+                sources = self.lesson_lineage_sources(
+                    row["entity_norm"], row["attribute_norm"], row["value"],
+                    row["asserted_at"])
+                if not sources & forgotten:
+                    continue
+                remaining = sorted(sources - forgotten)
+                if remaining and self.conn.execute(
+                        "SELECT 1 FROM entries WHERE id = ANY(%s) LIMIT 1",
+                        (remaining,)).fetchone() is not None:
+                    continue  # another source still supports the lesson
+                retiring.append(row)
+                snapshot = {k: row[k] for k in (
+                    "about", "polarity", "outcome", "confidence", "origin",
+                    "provenance", "support", "asserted_at", "last_confirmed",
+                    "supersedes_value")}
+                snapshot.update(task=row["entity"], aspect=row["attribute"],
+                                lesson=row["value"], status="retired",
+                                superseded_at=now, superseded_by_value=cause)
+                self.record_store_decision(
+                    "lesson", row["entity_norm"], row["attribute_norm"], "retire",
+                    decided_by="source_cascade", reason=cause, record=snapshot, now=now)
+            if retiring:
+                # The resident service mirrors committed retirements before
+                # its next lesson read or save; a rollback leaves only a
+                # harmless reload request.
+                self._lesson_source_refresh = True
+                self.conn.execute(
+                    "UPDATE lessons SET status = 'retired', superseded_at = %s, "
+                    "superseded_by_value = %s WHERE id = ANY(%s)",
+                    (now, cause, [r["id"] for r in retiring]))
+
+    def delete_evicted_entry(
+        self, entry_id: int | None, *, source: str, superseded: bool,
+    ) -> int:
+        """Delete a capacity-evicted entry and count the drop durably.
+
+        The DELETE and the ``meta`` counter share one transaction, so a
+        drop is never deleted without being counted, and a drop inside a
+        correction that rolls back is neither deleted nor counted.
+        ``entry_id=None`` (an entry whose insert write-through failed, so no
+        row exists) is still counted: its text left the bank all the same.
+        Eviction is capacity, not a forget: it never retires lessons.
+        Returns the all-time drop count.
+        """
+        record = {
+            "count": 1, "last_at": time.time(), "last_entry_id": entry_id,
+            "last_source": source, "last_superseded": bool(superseded),
+        }
+        conn = self.conn
+        with self._txn():
+            if entry_id is not None:
+                conn.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
+            # A malformed prior count (hand-edited or imported: not a
+            # number, negative, or without room below bigint max for the
+            # increment) restarts at 1 rather than failing the cast or the
+            # increment: a failure here would roll the DELETE back on every
+            # drop, leaving rows in Postgres past the cap that all return on
+            # the next restart. Nested CASE, not AND: Postgres does not fix
+            # the evaluation order of AND operands, and the numeric cast
+            # must only see a JSON number.
+            row = conn.execute(
+                "INSERT INTO meta (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
+                "|| jsonb_build_object('count', CASE "
+                "WHEN jsonb_typeof(meta.value->'count') "
+                "IS DISTINCT FROM 'number' THEN 0 "
+                "WHEN (meta.value->>'count')::numeric >= 0 "
+                "AND (meta.value->>'count')::numeric < 9223372036854775807 "
+                "THEN floor((meta.value->>'count')::numeric)::bigint "
+                "ELSE 0 END + 1) "
+                "RETURNING (value->>'count')::bigint",
+                (CAPACITY_DROPS_META_KEY, Jsonb(record)),
+            ).fetchone()
+        return int(row[0])
 
     def load_entries(self) -> list[dict]:
         cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
@@ -293,6 +1433,216 @@ class PostgresStorage:
             d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
+
+    def load_entry_texts(self) -> list[dict]:
+        """``id``/``text``/``source`` of every entry, in :meth:`load_entries`
+        order, for readers that never touch an embedding (review-judge
+        evidence packs and quarantine retyping). Transferring and decoding
+        the vectors is ~96% of a full load: 650 ms vs 23 ms for 2,239 entries,
+        live bank, 2026-09-23."""
+        return [{"id": r[0], "text": r[1], "source": r[2]}
+                for r in self.conn.execute(
+                    "SELECT id, text, source FROM entries ORDER BY id").fetchall()]
+
+    def load_entry_row(self, entry_id: int) -> dict | None:
+        """One entries row in the :meth:`load_entries` shape, or None."""
+        cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
+        row = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
+            (int(entry_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(zip(cols, row))
+        d["embedding"] = _embedding_out(d["embedding"])
+        return d
+
+    def initialize_dream_tracking(
+        self, *, eligible_sources=None, exclude_sources=None,
+    ) -> dict:
+        """Create the bank secret and classify pre-v38 entry rows once.
+
+        ``NULL`` is the only old-format marker. Explicit ``pending`` rows are
+        never interpreted through the legacy timestamp, which is what keeps
+        daemon writes made between interrupted import attempts visible.
+        """
+        allowed = set(eligible_sources) if eligible_sources else None
+        excluded = set(exclude_sources or [])
+        conn = self.conn  # one captured connection for the whole transaction
+        updated_states: dict[int, str] = {}
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM entries "
+                "WHERE dream_state IS NULL ORDER BY id FOR UPDATE"
+            )
+            unclassified = cur.fetchall()
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            dream_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if unclassified and not math.isfinite(dream_cursor):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: unclassified entries require "
+                    "a finite cortex_dream_cursor"
+                )
+
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'dream_ack_secret_v1'"
+            )
+            secret_row = cur.fetchone()
+            if secret_row is None:
+                secret = secrets.token_hex(32)
+                cur.execute(
+                    "INSERT INTO meta (key, value) VALUES "
+                    "('dream_ack_secret_v1', %s::jsonb)",
+                    (json.dumps(secret),),
+                )
+            else:
+                secret = secret_row[0]
+                try:
+                    valid_secret = (
+                        isinstance(secret, str)
+                        and len(secret) == 64
+                        and len(bytes.fromhex(secret)) == 32
+                    )
+                except ValueError:
+                    valid_secret = False
+                if not valid_secret:
+                    raise ValueError(
+                        "invalid_dream_ack_secret: dream_ack_secret_v1 must "
+                        "be a 64-character hexadecimal string"
+                    )
+
+            # Set-based, not row-by-row: this runs under the service lock
+            # at startup, and one round trip per legacy row made boot time
+            # scale with bank size. Two statements implement the same rule
+            # the per-row loop did — covered when the source is
+            # dream-eligible AND the row predates the legacy cursor,
+            # pending for everything else — and both are confined to
+            # dream_state IS NULL, so no explicitly-stated row is touched.
+            # `source` is NOT NULL in the DDL, so = ANY / <> ALL are exact
+            # translations of Python's `in` / `not in` here.
+            if unclassified:
+                if allowed is not None:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source = ANY(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(allowed), dream_cursor),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE entries SET dream_state = 'legacy-covered' "
+                        "WHERE dream_state IS NULL AND source <> ALL(%s) "
+                        "AND ts <= %s RETURNING id",
+                        (sorted(excluded), dream_cursor),
+                    )
+                updated_states.update(
+                    {int(row[0]): "legacy-covered" for row in cur.fetchall()})
+                cur.execute(
+                    "UPDATE entries SET dream_state = 'pending' "
+                    "WHERE dream_state IS NULL RETURNING id"
+                )
+                updated_states.update(
+                    {int(row[0]): "pending" for row in cur.fetchall()})
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream initialization"
+            )
+        return {
+            "secret": secret,
+            "dream_cursor": dream_cursor,
+            "updated_states": updated_states,
+        }
+
+    def acknowledge_dream_entries(
+        self, entry_ids: list[int], display_timestamp: float,
+    ) -> dict:
+        """Atomically acknowledge the exact PostgreSQL entry identities.
+
+        Already-acknowledged IDs are accepted so a retry after response loss
+        is idempotent. Unclassified and legacy-covered IDs reject the
+        complete batch before any row or display metadata is changed —
+        those are a real disagreement about what the batch was.
+
+        IDs whose row is GONE do not: a deleted row can never be pulled
+        again, so failing the batch over one only re-extracts its survivors
+        on every sweep forever. They are acknowledged as far as they can be
+        (nothing to update) and returned in ``missing_ids`` for the caller
+        to report and to retire in memory.
+        """
+        ids = list(entry_ids)
+        if (not ids
+                or any(type(value) is not int or value <= 0 for value in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError(
+                "dream_ack_invalid_states: entry ids must be distinct "
+                "positive integers"
+            )
+        display_timestamp = float(display_timestamp)
+        if not math.isfinite(display_timestamp):
+            raise ValueError(
+                "dream_ack_invalid_states: display timestamp must be finite"
+            )
+
+        conn = self.conn  # never re-resolve/reconnect inside this transaction
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, dream_state FROM entries "
+                "WHERE id = ANY(%s) FOR UPDATE",
+                (ids,),
+            )
+            states = {int(row[0]): row[1] for row in cur.fetchall()}
+            missing = [entry_id for entry_id in ids if entry_id not in states]
+            present = [entry_id for entry_id in ids if entry_id in states]
+            invalid = [
+                entry_id for entry_id in present
+                if states[entry_id] not in {"pending", "acknowledged"}
+            ]
+            if invalid:
+                raise ValueError(
+                    "dream_ack_invalid_states: "
+                    + ",".join(
+                        f"{entry_id}={states[entry_id]!r}" for entry_id in invalid
+                    )
+                )
+
+            cur.execute(
+                "UPDATE entries SET dream_state = 'acknowledged' "
+                "WHERE id = ANY(%s) AND dream_state = 'pending' RETURNING id",
+                (present,),
+            )
+            newly_acknowledged = len(cur.fetchall())
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor'"
+            )
+            cursor_row = cur.fetchone()
+            current_cursor = float(cursor_row[0] if cursor_row else 0.0)
+            if not math.isfinite(current_cursor):
+                raise ValueError(
+                    "dream_ack_invalid_states: stored display cursor must "
+                    "be finite"
+                )
+            dream_cursor = max(current_cursor, display_timestamp)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(dream_cursor),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during dream acknowledgement"
+            )
+        return {
+            "acknowledged_ids": present,
+            "missing_ids": missing,
+            "newly_acknowledged": newly_acknowledged,
+            "dream_cursor": dream_cursor,
+        }
 
     # ── episodes ────────────────────────────────────────────────────────
 
@@ -349,6 +1699,79 @@ class PostgresStorage:
                 (new_id, list(old_ids)),
             )
         return cur.rowcount or 0
+
+    # ── client sessions (v43) ───────────────────────────────────────────
+
+    def register_client_session(self, session_key: str, *, episode_id: str,
+                                registered_via: str, principal: str | None,
+                                policy_variant: str | None,
+                                now: float) -> None:
+        """Upsert the durable registration row for ``session_key``. The
+        first registration sets ``started_at``; a later one (resume,
+        compact, a shim restart) keeps it, clears the last close, appends
+        ``episode_id`` when it is new and its own time to ``start_times``,
+        and fills ``principal`` / ``policy_variant`` only where they are
+        still NULL."""
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO client_sessions (session_key, registered_via,
+                    principal, started_at, policy_variant, episode_ids,
+                    start_times)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (session_key) DO UPDATE SET
+                  ended_at = NULL,
+                  end_reason = NULL,
+                  principal = COALESCE(client_sessions.principal,
+                                       EXCLUDED.principal),
+                  policy_variant = COALESCE(client_sessions.policy_variant,
+                                            EXCLUDED.policy_variant),
+                  episode_ids = CASE
+                    WHEN client_sessions.episode_ids @> EXCLUDED.episode_ids
+                      THEN client_sessions.episode_ids
+                    ELSE client_sessions.episode_ids || EXCLUDED.episode_ids
+                  END,
+                  start_times = client_sessions.start_times
+                                || EXCLUDED.start_times
+                """,
+                (session_key, registered_via, principal, now, policy_variant,
+                 Jsonb([episode_id]), Jsonb([now])),
+            )
+
+    def reopen_client_session(self, session_key: str) -> None:
+        """Clear the last close of a registered session whose root was
+        reopened without a registration (a store or an episode handle
+        resuming it after the idle reaper closed it)."""
+        with self._txn():
+            self.conn.execute(
+                "UPDATE client_sessions SET ended_at = NULL, end_reason = NULL "
+                "WHERE session_key = %s AND ended_at IS NOT NULL",
+                (session_key,),
+            )
+
+    def end_client_session(self, session_key: str, *, episode_id: str | None,
+                           ended_at: float, reason: str) -> None:
+        """Stamp the most recent close on a registered session and record
+        the root it closed (a root the daemon opened lazily for a registered
+        key after its first one was pruned). ``episode_id=None`` stamps an
+        end that closed no root (SessionEnd after the idle reaper already
+        had). No row, no write: a session that never registered is not
+        invented here."""
+        ids = Jsonb([episode_id] if episode_id else [])
+        with self._txn():
+            self.conn.execute(
+                """
+                UPDATE client_sessions SET
+                  ended_at = %s,
+                  end_reason = %s,
+                  episode_ids = CASE
+                    WHEN episode_ids @> %s THEN episode_ids
+                    ELSE episode_ids || %s
+                  END
+                WHERE session_key = %s
+                """,
+                (ended_at, reason, ids, ids, session_key),
+            )
 
     # ── cortex facts ────────────────────────────────────────────────────
 
@@ -589,6 +2012,15 @@ class PostgresStorage:
             ).fetchone()
         return int(row[0])
 
+    def set_signal_used_ids(self, signal_id: int, used_ids: dict) -> bool:
+        """Record what an outcome's ``used_ids`` became (schema v44) on its
+        signal row. False when no row has that id."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE outcome_signals SET used_ids = %s WHERE id = %s",
+                (Jsonb(used_ids), int(signal_id)))
+        return cur.rowcount == 1
+
     def count_signals_for_episodes(self, episode_ids: list[str]) -> int:
         """Total outcome signals (consumed or not) across ``episode_ids`` —
         the auto-inference candidate scan's "already has a signal" check."""
@@ -600,15 +2032,25 @@ class PostgresStorage:
         ).fetchone()
         return int(row[0])
 
-    def pending_signals(self, limit: int | None = None) -> list[dict]:
-        cols = ("id",) + _SIGNAL_COLS
-        sql = (
-            f"SELECT {', '.join(cols)} FROM outcome_signals "
-            "WHERE consumed_at IS NULL ORDER BY created_at, id"
-        )
+    def pending_signals(self, limit: int | None = None,
+                        since_ts: float | None = None, *,
+                        after: tuple[float, int] | None = None) -> list[dict]:
+        """Unconsumed signals, oldest first. ``since_ts`` keeps only those
+        created at or after it (the synthesis retry window)."""
+        cols = ("id",) + _SIGNAL_COLS + ("used_ids",)
+        sql = (f"SELECT {', '.join(cols)} FROM outcome_signals "
+               "WHERE consumed_at IS NULL")
+        params: tuple = ()
+        if since_ts is not None:
+            sql += " AND created_at >= %s"
+            params = (float(since_ts),)
+        if after is not None:
+            sql += " AND (created_at, id) > (%s, %s)"
+            params += (float(after[0]), int(after[1]))
+        sql += " ORDER BY created_at, id"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
-        rows = self.conn.execute(sql).fetchall()
+        rows = self.conn.execute(sql, params).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
     def consume_signals(self, ids: list[int], now: float | None = None) -> int:
@@ -624,6 +2066,73 @@ class PostgresStorage:
                 (t, list(ids)),
             )
         return cur.rowcount
+
+    def lesson_batch_status(self, signals: list[dict], handled_ids: list[int],
+                            *, lock: bool = False) -> str:
+        """Revalidate extracted inputs, or reconcile an uncertain lesson commit.
+
+        Under the single-daemon writer contract, a batch commits all handled
+        acknowledgements together. Changed/missing/partly acknowledged inputs
+        cannot establish either outcome and must not authorize a replay.
+        """
+        cols = ("id",) + _SIGNAL_COLS + ("used_ids",)
+        rows = self.conn.execute(
+            f"SELECT {', '.join(cols)}, consumed_at FROM outcome_signals "
+            "WHERE id = ANY(%s) ORDER BY id" + (" FOR UPDATE" if lock else ""),
+            ([s["id"] for s in signals],),
+        ).fetchall()
+        expected = {s["id"]: s for s in signals}
+        if len(rows) != len(expected):
+            return "changed"
+        if any(dict(zip(cols, row[:-1])) != expected[row[0]] for row in rows):
+            return "changed"
+        if all(row[-1] is None for row in rows):
+            return "pending"
+        handled = set(handled_ids)
+        if handled and all((row[-1] is not None) == (row[0] in handled)
+                           for row in rows):
+            return "consumed"
+        return "changed"
+
+    @contextmanager
+    def lesson_synthesis_transaction(self, signals: list[dict], *,
+                                     source_status: dict[int, bool] | None = None):
+        """Lock/recheck the selected input rows and pin one connection until
+        lesson, graph and acknowledgement writes commit or roll back.
+
+        Extraction happens before this short transaction. A concurrent drain
+        or signal retargeting invalidates that extraction before any write.
+        The caller holds the service lock and publishes staged RAM only after
+        this context exits successfully.
+
+        ``source_status`` requests per-signal contributor checks for its keys;
+        values are filled under the source locks. This lets the caller omit
+        rejected inputs and preserve independent valid derivations. Without
+        it, every selected signal must still have a credited source that
+        exists (:func:`signal_sources_survive`). A superseded source exists as
+        history and still counts; a signal is blocked only when every entry
+        it credits has been deleted. Signal snapshots are always revalidated
+        for the entire selected batch.
+        """
+        if self._lesson_transaction_connection is not None:
+            raise RuntimeError("lesson synthesis transaction is already active")
+        self._lesson_transaction_connection = self.conn
+        try:
+            with self._txn():
+                contributors = (signals if source_status is None else
+                                [s for s in signals if s["id"] in source_status])
+                ids = sorted(set().union(*(signal_source_ids(s) for s in contributors)))
+                existing = {r[0] for r in self.conn.execute(
+                    "SELECT id FROM entries WHERE id = ANY(%s) "
+                    "ORDER BY id FOR UPDATE", (ids,)).fetchall()} if ids else set()
+                supported = {s["id"]: signal_sources_survive(signal_source_ids(s), existing)
+                             for s in contributors}
+                if source_status is not None:
+                    source_status.update(supported)
+                yield ((source_status is not None or all(supported.values()))
+                       and self.lesson_batch_status(signals, [], lock=True) == "pending")
+        finally:
+            self._lesson_transaction_connection = None
 
     def prune_signals(self, older_than_ts: float) -> int:
         """Delete signals (consumed or not) older than the cutoff, so the log
@@ -666,11 +2175,15 @@ class PostgresStorage:
     def record_retrieval_use(self, entry_id: int, session_id: str | None,
                              used_via: str, window_s: float,
                              now: float | None = None) -> int:
-        """Implicit relevance label: the most recent event in this session's
-        window that served ``entry_id`` gains a use row. Session match is
-        strict (``IS NOT DISTINCT FROM`` — a None session only labels
-        None-session events, never another session's). Idempotent per
-        (event, entry, via). Returns rows written (0 or 1)."""
+        """Implicit relevance label for a dereference (``get`` /
+        ``reinforce``): the most recent event in this session's window that
+        served ``entry_id`` gains a use row. Session match is strict
+        (``IS NOT DISTINCT FROM`` — a None session only labels None-session
+        events, never another session's). Idempotent per (event, entry,
+        via). Returns rows written (0 or 1). The asserted label
+        (``memory_outcome(used_ids=...)``) goes through
+        :meth:`credit_retrieval_uses` instead, which credits every serving
+        event in the window."""
         return self.credit_retrieval_use(
             entry_id, session_id, used_via, window_s, now=now)[1]
 
@@ -681,9 +2194,8 @@ class PostgresStorage:
         None, rows written)``.
 
         The two halves differ: a repeat label writes no row but the entry
-        WAS served, so a caller reporting "this id matched no event" back to
-        an agent (``memory_outcome(used_ids=...)``) must read the event id,
-        not the rowcount."""
+        WAS served, so a caller reporting "this id matched no event" must
+        read the event id, not the rowcount."""
         t = time.time() if now is None else float(now)
         with self._txn():
             row = self.conn.execute(
@@ -703,6 +2215,98 @@ class PostgresStorage:
                 (int(row[0]), int(entry_id), used_via, t),
             )
         return int(row[0]), cur.rowcount
+
+    def credit_retrieval_uses(self, entry_ids: list[int],
+                              session_id: str | None, used_via: str,
+                              window_s: float,
+                              now: float | None = None) -> dict[int, dict]:
+        """The asserted label (``memory_outcome(used_ids=...)``), batched:
+        EVERY event in the window that served an id under this session gains
+        a use row — not only the most recent one, which is what
+        :meth:`credit_retrieval_use` does for a dereference.
+
+        Why all of them (2026-09-08): the agent names the ids it used, not
+        the query that surfaced each one, so the signal is session-scoped by
+        construction. Under most-recent-wins an entry served by two searches
+        left the earlier event unlabelled: the replay
+        (``evals/retrieval_replay.py``, labels keyed per event) dropped that
+        event entirely, or — if it carried any other label — scored the id
+        as an implicit negative the agent never asserted. Measured on the
+        live log that day (``evals/results/retrieval-uses-multiserve-
+        20260908.json``): 29% of (session, entry) pairs are served by more
+        than one event in their session, 87% of those inside the default
+        window.
+
+        The rule is conditional on an identity: with ``session_id=None``
+        (44% of logged events that day) "same session" would mean every
+        other NULL-session event in the window — other sessions, possibly
+        other agents — so a None-session call keeps the dereference rule and
+        credits only the most recent NULL-session serving event per id.
+
+        One statement, one transaction, for the whole list (fifty ids used to
+        be fifty round trips under the service lock). Session match stays
+        strict (``IS NOT DISTINCT FROM``); the insert is idempotent per
+        (event, entry, via).
+
+        Returns ``{entry_id: {"events": [credited event ids, ascending],
+        "written": rows inserted, "elsewhere": bool}}`` for every id that
+        SOME event in the window served. ``elsewhere`` is True when an event
+        in the window served the id under a DIFFERENT session id — the
+        tier-3 pointer vs the ``X-PL-Session`` header, or a pointer TTL
+        lapse, can put the search and the outcome under different
+        identities, and a caller must not report that id as never served.
+        An id nothing in the window served is absent. The probe is bounded
+        to the window on purpose: it rides ``retrieval_events_created_idx``
+        (0.05 ms on the 2026-09-08 bank against 3.9 ms for the unbounded
+        scan, which grows with retention; same artifact)."""
+        ids = sorted({int(x) for x in entry_ids})
+        if not ids:
+            return {}
+        t = time.time() if now is None else float(now)
+        # ``eligible`` = same-session hits that get a row: all of them under
+        # an identity, only the most recent per id (rn = 1) without one.
+        all_events = session_id is not None
+        with self._txn():
+            rows = self.conn.execute(
+                """
+                WITH ids AS (SELECT unnest(%s::bigint[]) AS entry_id),
+                hit AS (
+                  SELECT i.entry_id, e.id AS event_id,
+                         (e.session_id IS NOT DISTINCT FROM %s) AS same_session,
+                         row_number() OVER (
+                           PARTITION BY i.entry_id,
+                                        (e.session_id IS NOT DISTINCT FROM %s)
+                           ORDER BY e.created_at DESC, e.id DESC) AS rn
+                  FROM ids i
+                  JOIN retrieval_events e
+                    ON e.created_at >= %s
+                   AND e.served @> jsonb_build_array(
+                         jsonb_build_object('entry_id', i.entry_id))
+                ),
+                ins AS (
+                  INSERT INTO retrieval_uses
+                    (event_id, entry_id, used_via, created_at)
+                  SELECT event_id, entry_id, %s, %s FROM hit
+                  WHERE same_session AND (%s OR rn = 1)
+                  ON CONFLICT DO NOTHING
+                  RETURNING event_id, entry_id
+                )
+                SELECT h.entry_id,
+                       COALESCE(array_agg(h.event_id ORDER BY h.event_id)
+                                FILTER (WHERE h.same_session
+                                        AND (%s OR h.rn = 1)), '{}'),
+                       (SELECT count(*) FROM ins
+                        WHERE ins.entry_id = h.entry_id),
+                       bool_or(NOT h.same_session)
+                FROM hit h GROUP BY h.entry_id
+                """,
+                (ids, session_id, session_id, t - float(window_s),
+                 used_via, t, all_events, all_events),
+            ).fetchall()
+        return {int(r[0]): {"events": [int(x) for x in r[1]],
+                            "written": int(r[2]),
+                            "elsewhere": bool(r[3])}
+                for r in rows}
 
     def attach_served_facts(self, event_id: int,
                             served_facts: list[dict]) -> int:
@@ -794,6 +2398,35 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    def add_lesson_search_event(self, query_text: str, served: list[dict],
+                                session_id: str | None = None,
+                                episode_id: str | None = None,
+                                now: float | None = None) -> int:
+        """One row per ``memory_lesson_search`` call (schema v44), in its own
+        table so nothing that replays ``retrieval_events`` as a
+        ``memory_search`` ever sees a lesson query. ``served`` names each
+        lesson by slot key (``entity_norm`` / ``attribute_norm``) with its
+        rank and score; an empty list records a search that found none."""
+        t = time.time() if now is None else float(now)
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO lesson_search_events "
+                "(query_text, session_id, episode_id, served, created_at) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (query_text, session_id, episode_id, Jsonb(served), t),
+            ).fetchone()
+        return int(row[0])
+
+    def prune_lesson_search_events(self, older_than_ts: float) -> int:
+        """Delete lesson-search rows older than the cutoff (the retrieval
+        log's retention)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "DELETE FROM lesson_search_events WHERE created_at < %s",
+                (float(older_than_ts),),
+            )
+        return cur.rowcount
+
     def retrieval_events_window(self, since_ts: float = 0.0,
                                 limit: int = 1000) -> list[dict]:
         """Events (oldest first) with use labels aggregated — the training
@@ -819,8 +2452,9 @@ class PostgresStorage:
     def retrieval_log_health(self) -> dict:
         """Row counts + newest event timestamp for ``memory_stats``.
 
-        Both log-write paths are exception-guarded, so a broken log is
-        otherwise invisible (zero rows, green /health). Two aggregate
+        Every log-write path is exception-guarded, so a broken log is
+        otherwise invisible (zero rows, green /health). ``lesson_searches``
+        counts the v44 ``memory_lesson_search`` log. Three aggregate
         queries, computed on demand rather than cached: the MAX is O(1) off
         ``retrieval_events_created_idx``, but the COUNTs are honestly
         O(rows) (an index-only scan at best — PG has no cheap exact count).
@@ -836,10 +2470,13 @@ class PostgresStorage:
         ).fetchone()
         uses = self.conn.execute(
             "SELECT COUNT(*) FROM retrieval_uses").fetchone()
+        lessons = self.conn.execute(
+            "SELECT COUNT(*) FROM lesson_search_events").fetchone()
         return {
             "events": int(ev[0]),
             "last_event_at": None if ev[1] is None else float(ev[1]),
             "uses": int(uses[0]),
+            "lesson_searches": int(lessons[0]),
         }
 
     def read_audit(self, now: float | None = None) -> dict:
@@ -925,14 +2562,28 @@ class PostgresStorage:
             },
         }
 
-    def loop_health(self, window_s: float, now: float | None = None) -> dict:
+    def loop_health(self, window_s: float, now: float | None = None,
+                    pending_since_ts: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
-        immediately preceding window of stores + outcome signals, session
-        episodes (parent_id IS NULL), pending signals, lesson recency.
-        Read-only, all on indexed timestamp columns. Consumed signals still
+        immediately preceding window of stores + outcome signals, client
+        sessions, pending signals, lesson recency. Read-only.
+
+        ``sessions`` counts client sessions started in the window
+        (:func:`count_client_sessions` over keyed root episodes, activity
+        from :meth:`_active_roots`); ``root_episodes`` is the raw count of
+        root episodes started in the window, which the tile divided by
+        until 2026-09-25, when the live bank held 166 keyed roots in 24 h
+        against 34 client sessions by the bench's first count. Neither
+        counts a session whose root was
+        pruned because it stored nothing (an explicit end prunes at once,
+        the reaper after the resume window), so ``sessions`` still
+        undercounts sessions that ended without storing, and the
+        per-session rates lean high. Consumed signals still
         count as outcomes — consumption is the dream's drain cursor, not a
         judgement; the caveat is upstream retention (signal_retention_days)
-        deleting rows older than its cutoff."""
+        deleting rows older than its cutoff. ``pending_since_ts`` splits the
+        unconsumed signals at the synthesis retry window: older ones are
+        reported as ``pending_signals_expired`` (kept, never offered)."""
         t = time.time() if now is None else float(now)
         cutoff, prev_cutoff = t - window_s, t - 2 * window_s
 
@@ -949,19 +2600,66 @@ class PostgresStorage:
             o: n for o, n in self.conn.execute(
                 "SELECT outcome, COUNT(*) FROM outcome_signals "
                 "WHERE created_at >= %s GROUP BY outcome", (cutoff,))}
-        sessions = self.conn.execute(
-            "SELECT COUNT(*) FROM episodes "
-            "WHERE started_at >= %s AND parent_id IS NULL",
-            (cutoff,)).fetchone()[0]
-        pending = self.conn.execute(
-            "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
-        ).fetchone()[0]
+        roots = self.conn.execute(
+            "SELECT id, session_key, started_at FROM episodes "
+            "WHERE started_at >= %s AND parent_id IS NULL "
+            "ORDER BY started_at, id", (cutoff,)).fetchall()
+        keyed = [r for r in roots if r[1] is not None]
+        sessions = count_client_sessions(
+            keyed, self._active_roots(keyed, cutoff))
+        if pending_since_ts is None:
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
+            ).fetchone()[0], 0
+        else:
+            since = float(pending_since_ts)
+            pending, expired = self.conn.execute(
+                "SELECT COUNT(*) FILTER (WHERE created_at >= %s), "
+                "COUNT(*) FILTER (WHERE created_at < %s) "
+                "FROM outcome_signals WHERE consumed_at IS NULL",
+                (since, since)).fetchone()
         last_lesson, lessons_current = self.conn.execute(
             "SELECT MAX(asserted_at), COUNT(*) FILTER (WHERE status = 'current') "
             "FROM lessons").fetchone()
         return {"stores": stores, "outcomes": outcomes, "sessions": sessions,
-                "pending_signals": pending, "last_lesson_at": last_lesson,
+                "root_episodes": len(roots),
+                "pending_signals": pending,
+                "pending_signals_expired": expired,
+                "last_lesson_at": last_lesson,
                 "lessons_current": lessons_current}
+
+    def _active_roots(self, roots, since: float) -> set[str]:
+        """Ids of ``roots`` (``(id, session_key, started_at)``) with memory
+        activity since ``since``: an entry or outcome signal stamped with an
+        episode in the root's subtree, or a search logged under the root's
+        session key. A search row's ``episode_id`` is the daemon's
+        process-wide current episode, not the caller's, so it is used only
+        for a row with no session id. The attribution evals/capture_metrics.py
+        uses; a later root wins a reused key, as there."""
+        if not roots:
+            return set()
+        root_of = dict(self.conn.execute(
+            "WITH RECURSIVE tree AS ("
+            "  SELECT id, id AS root_id FROM episodes WHERE id = ANY(%s)"
+            "  UNION ALL"
+            "  SELECT e.id, t.root_id FROM episodes e"
+            "  JOIN tree t ON e.parent_id = t.id"
+            ") SELECT id, root_id FROM tree",
+            ([r[0] for r in roots],)).fetchall())
+        root_of_key = {key: rid for rid, key, _ in roots}
+        active = {root_of[ep] for (ep,) in self.conn.execute(
+            "SELECT DISTINCT episode_id FROM entries "
+            "WHERE ts >= %s AND episode_id IS NOT NULL "
+            "UNION SELECT DISTINCT episode_id FROM outcome_signals "
+            "WHERE created_at >= %s AND episode_id IS NOT NULL",
+            (since, since)) if ep in root_of}
+        for ep, sid in self.conn.execute(
+                "SELECT DISTINCT episode_id, session_id FROM retrieval_events "
+                "WHERE created_at >= %s", (since,)):
+            root = root_of_key.get(sid) if sid else root_of.get(ep)
+            if root is not None:
+                active.add(root)
+        return active
 
     # ── meta ────────────────────────────────────────────────────────────
 
@@ -974,6 +2672,42 @@ class PostgresStorage:
                 """,
                 (key, Jsonb(value)),
             )
+
+    def advance_dream_cursor(self, value: float) -> float:
+        """Persist display-only dream metadata without moving it backward.
+
+        A response-lost acknowledgement deliberately leaves RAM conservative.
+        Later generic cortex snapshots must not overwrite the committed display
+        value with that stale copy.
+        """
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("invalid_legacy_dream_cursor: cursor must be finite")
+        conn = self.conn
+        with conn.transaction() as tx, conn.cursor() as cur:
+            cur.execute(
+                "SELECT value FROM meta WHERE key = 'cortex_dream_cursor' "
+                "FOR UPDATE"
+            )
+            row = cur.fetchone()
+            current = float(row[0] if row else 0.0)
+            if not math.isfinite(current):
+                raise ValueError(
+                    "invalid_legacy_dream_cursor: stored cursor must be finite"
+                )
+            persisted = max(current, value)
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES "
+                "('cortex_dream_cursor', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (json.dumps(persisted),),
+            )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost while advancing dream display metadata"
+            )
+        return persisted
 
     def meta_get(self, key: str, default: Any = None) -> Any:
         row = self.conn.execute(
@@ -994,319 +2728,15 @@ class PostgresStorage:
                 (key, json.dumps(value)),
             )
 
-    # ── reverse-engineering evidence (v34-rehub extension) ────────────
+    def re_evidence_archive_storage(self):
+        """Open a proof-only auxiliary connection for daemon archive I/O.
 
-    def _lock_re_evidence_scope(self, project: str, binary_id: str) -> None:
-        """Serialize every proof-store mutation for one project/build.
-
-        Import relies on this cooperative transaction lock to keep its
-        empty-scope check true until the complete restore commits. Reacquiring
-        it inside an import's nested savepoints is safe and releases only when
-        the outer transaction ends.
+        The caller first ensures this primary owns the bank. The auxiliary
+        never touches the canonical resident stores or their lease epoch.
         """
-        from pseudolife_memory.re_evidence import _archive_scope_lock_key
+        from pseudolife_memory.storage.re_evidence import ReEvidenceArchiveStorage
 
-        self.conn.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-            (_archive_scope_lock_key(project, binary_id),))
-
-    def insert_re_evidence(self, artifact: dict) -> int:
-        """Insert one immutable artifact, returning the existing id on replay."""
-        from pseudolife_memory.re_evidence import EvidenceInputError
-
-        required = ("project", "binary_id", "kind", "locator", "source_path",
-                    "content_hash", "raw_bytes", "payload", "payload_keys")
-        missing = [key for key in required if artifact.get(key) in (None, "")]
-        if missing:
-            raise EvidenceInputError(f"evidence artifact missing fields: {missing}")
-        now = time.time()
-        with self._txn():
-            self._lock_re_evidence_scope(
-                str(artifact["project"]), str(artifact["binary_id"]))
-            row = self.conn.execute(
-                """
-                INSERT INTO re_evidence_artifacts
-                  (project, binary_id, kind, locator, source_path, content_hash,
-                   raw_bytes, payload, payload_keys, summary, addresses, ingested_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (project, binary_id, content_hash, locator) DO NOTHING
-                RETURNING id
-                """,
-                (artifact["project"], artifact["binary_id"], artifact["kind"],
-                 artifact["locator"], artifact["source_path"],
-                 artifact["content_hash"], bytes(artifact["raw_bytes"]),
-                 Jsonb(artifact["payload"]), artifact["payload_keys"],
-                 artifact.get("summary"), artifact.get("addresses") or [], now),
-            ).fetchone()
-            if row is not None:
-                return int(row[0])
-            existing = self.conn.execute(
-                "SELECT id, kind, summary, addresses, payload_keys "
-                "FROM re_evidence_artifacts WHERE project = %s AND binary_id = %s "
-                "AND content_hash = %s AND locator = %s",
-                (artifact["project"], artifact["binary_id"],
-                 artifact["content_hash"], artifact["locator"]),
-            ).fetchone()
-            if existing is None:
-                raise EvidenceInputError(
-                    "concurrent replay conflict disappeared before the stored "
-                    "artifact could be verified; retry the ingest")
-            expected = (
-                artifact["kind"], artifact.get("summary"),
-                list(artifact.get("addresses") or []),
-                list(artifact.get("payload_keys") or []),
-            )
-            actual = (existing[1], existing[2], list(existing[3] or []),
-                      list(existing[4] or []))
-            if actual != expected:
-                raise EvidenceInputError(
-                    "immutable evidence replay metadata conflicts with stored "
-                    f"artifact {existing[0]}")
-            return int(existing[0])
-
-    @staticmethod
-    def _re_artifact_dict(row, *, include_payload: bool) -> dict:
-        cols = (
-            "id", "project", "binary_id", "kind", "locator", "source_path",
-            "content_hash", "summary", "addresses", "ingested_at", "payload_keys",
-        )
-        if include_payload:
-            cols += ("payload",)
-        result = dict(zip(cols, row))
-        result["addresses"] = list(result.get("addresses") or [])
-        result["payload_keys"] = list(result.get("payload_keys") or [])
-        return result
-
-    def query_re_evidence(
-        self, *, project: str, binary_id: str, address: str | None = None,
-        text: str | None = None, limit: int | None = 50,
-        include_payload: bool = False,
-    ) -> list[dict]:
-        from pseudolife_memory.re_evidence import normalize_address
-
-        where = ["project = %s", "binary_id = %s"]
-        values: list[Any] = [project.strip(), binary_id.strip()]
-        if address:
-            where.append("addresses @> ARRAY[%s]::text[]")
-            values.append(normalize_address(address))
-        if text:
-            where.append(
-                "(locator ILIKE %s OR source_path ILIKE %s OR "
-                "COALESCE(summary, '') ILIKE %s OR COALESCE(binary_id, '') ILIKE %s "
-                "OR array_to_string(addresses, ' ') ILIKE %s)")
-            needle = f"%{text.strip()}%"
-            values.extend([needle] * 5)
-        limit_sql = ""
-        if limit is not None:
-            values.append(max(1, min(int(limit), 500)))
-            limit_sql = " LIMIT %s"
-        projection = (
-            "id, project, binary_id, kind, locator, source_path, content_hash, "
-            "summary, addresses, ingested_at, payload_keys")
-        if include_payload:
-            projection += ", payload"
-        rows = self.conn.execute(
-            "SELECT " + projection + " "
-            "FROM re_evidence_artifacts WHERE " + " AND ".join(where) +
-            " ORDER BY ingested_at DESC, id DESC" + limit_sql, values,
-        ).fetchall()
-        return [self._re_artifact_dict(row, include_payload=include_payload)
-                for row in rows]
-
-    def upsert_re_claim(
-        self, *, project: str, binary_id: str, subject: str, claim: str, status: str,
-        evidence_ids: list[int] | None = None,
-        confidence: float | None = None,
-    ) -> int:
-        from pseudolife_memory.re_evidence import EvidenceInputError, validate_claim
-
-        preserve_links = evidence_ids is None
-        project, binary_id, subject, claim, ids, confidence = validate_claim(
-            project=project, binary_id=binary_id, subject=subject, claim=claim, status=status,
-            evidence_ids=evidence_ids, confidence=confidence,
-            require_evidence=not preserve_links)
-        now = time.time()
-        with self._txn():
-            self._lock_re_evidence_scope(project, binary_id)
-            if preserve_links and status.strip().lower() in (
-                    "observed", "verified", "rejected"):
-                linked = self.conn.execute(
-                    "SELECT count(*) FROM re_claims c "
-                    "JOIN re_claim_evidence l ON l.claim_id = c.id "
-                    "WHERE c.project = %s AND c.binary_id = %s "
-                    "AND c.subject = %s AND c.claim = %s",
-                    (project, binary_id, subject, claim),
-                ).fetchone()[0]
-                if not linked:
-                    raise EvidenceInputError(
-                        f"claim status {status.strip().lower()!r} requires "
-                        "linked evidence")
-            if ids:
-                rows = self.conn.execute(
-                    "SELECT id FROM re_evidence_artifacts "
-                    "WHERE project = %s AND binary_id = %s AND id = ANY(%s)",
-                    (project, binary_id, ids),
-                ).fetchall()
-                found = {int(row[0]) for row in rows}
-                missing = sorted(set(ids) - found)
-                if missing:
-                    raise EvidenceInputError(
-                        "linked evidence not found in project/build "
-                        f"{project!r}/{binary_id!r}: {missing}")
-            row = self.conn.execute(
-                """
-                INSERT INTO re_claims
-                  (project, binary_id, subject, claim, status, confidence,
-                   created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (project, binary_id, subject, claim) DO UPDATE SET
-                  status = EXCLUDED.status,
-                  confidence = EXCLUDED.confidence,
-                  updated_at = EXCLUDED.updated_at
-                RETURNING id
-                """,
-                (project, binary_id, subject, claim, status, confidence, now, now),
-            ).fetchone()
-            claim_id = int(row[0])
-            if not preserve_links:
-                self.conn.execute(
-                    "DELETE FROM re_claim_evidence WHERE claim_id = %s", (claim_id,))
-                for evidence_id in ids:
-                    self.conn.execute(
-                        "INSERT INTO re_claim_evidence "
-                        "(claim_id, evidence_id, linked_at) VALUES (%s, %s, %s) "
-                        "ON CONFLICT (claim_id, evidence_id) DO NOTHING",
-                        (claim_id, evidence_id, now),
-                    )
-        return claim_id
-
-    def query_re_claims(
-        self, *, project: str, binary_id: str, subject: str | None = None,
-        status: str | None = None, text: str | None = None,
-        limit: int | None = 100,
-    ) -> list[dict]:
-        from pseudolife_memory.re_evidence import CLAIM_STATUSES, normalize_subject
-
-        where = ["c.project = %s", "c.binary_id = %s"]
-        values: list[Any] = [project.strip(), binary_id.strip()]
-        if subject:
-            normalized = normalize_subject(subject)
-            where.append("c.subject = %s")
-            values.append(normalized)
-        if status:
-            normalized_status = status.strip().lower()
-            if normalized_status not in CLAIM_STATUSES:
-                raise ValueError(f"invalid claim status: {status!r}")
-            where.append("c.status = %s")
-            values.append(normalized_status)
-        if text:
-            where.append("(c.subject ILIKE %s OR c.claim ILIKE %s)")
-            needle = f"%{text.strip()}%"
-            values.extend([needle, needle])
-        limit_sql = ""
-        if limit is not None:
-            values.append(max(1, min(int(limit), 500)))
-            limit_sql = " LIMIT %s"
-        rows = self.conn.execute(
-            "SELECT c.id, c.project, c.binary_id, c.subject, c.claim, "
-            "c.status, c.confidence, "
-            "c.created_at, c.updated_at, "
-            "COALESCE(array_agg(l.evidence_id ORDER BY l.evidence_id) "
-            "FILTER (WHERE l.evidence_id IS NOT NULL), '{}') AS evidence_ids "
-            "FROM re_claims c LEFT JOIN re_claim_evidence l ON l.claim_id = c.id "
-            "WHERE " + " AND ".join(where) +
-            " GROUP BY c.id ORDER BY c.updated_at DESC, c.id DESC" + limit_sql,
-            values,
-        ).fetchall()
-        cols = ("id", "project", "binary_id", "subject", "claim", "status",
-                "confidence", "created_at", "updated_at", "evidence_ids")
-        result = []
-        for row in rows:
-            item = dict(zip(cols, row))
-            item["evidence_ids"] = list(item["evidence_ids"] or [])
-            result.append(item)
-        return result
-
-    def re_evidence_stats(self, project: str, binary_id: str | None = None) -> dict:
-        binary_where = " AND binary_id = %s" if binary_id else ""
-        params = (project.strip(), binary_id.strip()) if binary_id else (project.strip(),)
-        artifacts = self.conn.execute(
-            "SELECT count(*) FROM re_evidence_artifacts WHERE project = %s" +
-            binary_where, params).fetchone()[0]
-        rows = self.conn.execute(
-            "SELECT status, count(*) FROM re_claims WHERE project = %s "
-            + binary_where + " GROUP BY status ORDER BY status", params).fetchall()
-        return {
-            "project": project.strip(),
-            "binary_id": binary_id.strip() if binary_id else None,
-            "artifacts": int(artifacts),
-            "claims": {status: int(count) for status, count in rows},
-        }
-
-    def re_evidence_scopes(self) -> list[dict]:
-        """Return every project/build scope with read-only dashboard totals."""
-        scopes: dict[tuple[str, str], dict] = {}
-        artifact_rows = self.conn.execute(
-            "SELECT project, binary_id, count(*), max(ingested_at) "
-            "FROM re_evidence_artifacts GROUP BY project, binary_id",
-        ).fetchall()
-        for project, binary_id, count, last_activity in artifact_rows:
-            scopes[(project, binary_id)] = {
-                "project": project,
-                "binary_id": binary_id,
-                "artifacts": int(count),
-                "claims": {},
-                "last_activity": float(last_activity or 0),
-            }
-
-        claim_rows = self.conn.execute(
-            "SELECT project, binary_id, status, count(*), max(updated_at) "
-            "FROM re_claims GROUP BY project, binary_id, status",
-        ).fetchall()
-        for project, binary_id, status, count, last_activity in claim_rows:
-            scope = scopes.setdefault((project, binary_id), {
-                "project": project,
-                "binary_id": binary_id,
-                "artifacts": 0,
-                "claims": {},
-                "last_activity": 0.0,
-            })
-            scope["claims"][status] = int(count)
-            scope["last_activity"] = max(
-                scope["last_activity"], float(last_activity or 0))
-
-        return sorted(
-            scopes.values(),
-            key=lambda item: (
-                -item["last_activity"], item["project"], item["binary_id"]),
-        )
-
-    def re_evidence_export_ids(self, *, project: str, binary_id: str) -> list[int]:
-        rows = self.conn.execute(
-            "SELECT id FROM re_evidence_artifacts "
-            "WHERE project = %s AND binary_id = %s ORDER BY id",
-            (project.strip(), binary_id.strip())).fetchall()
-        return [int(row[0]) for row in rows]
-
-    def get_re_evidence_for_export(
-        self, *, artifact_id: int, project: str, binary_id: str,
-    ) -> dict | None:
-        row = self.conn.execute(
-            "SELECT id, project, binary_id, kind, locator, source_path, "
-            "content_hash, summary, addresses, ingested_at, payload_keys, raw_bytes "
-            "FROM re_evidence_artifacts WHERE id = %s AND project = %s "
-            "AND binary_id = %s", (artifact_id, project.strip(), binary_id.strip()),
-        ).fetchone()
-        if row is None:
-            return None
-        cols = ("id", "project", "binary_id", "kind", "locator", "source_path",
-                "content_hash", "summary", "addresses", "ingested_at",
-                "payload_keys", "raw_bytes")
-        item = dict(zip(cols, row))
-        item["addresses"] = list(item["addresses"] or [])
-        item["payload_keys"] = list(item["payload_keys"] or [])
-        item["raw_bytes"] = bytes(item["raw_bytes"])
-        return item
+        return ReEvidenceArchiveStorage(self._connect())
 
     # ── graph: entities / aliases ───────────────────────────────────────
 
@@ -1622,7 +3052,8 @@ class PostgresStorage:
         self, src_id: int, relation: str, dst_id: int, *,
         confidence: float = 0.8, origin: str | None = None,
         revive: bool = True,
-    ) -> dict:
+        source_entry_ids=None,
+    ) -> dict | None:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
         capped 0.99) and keeps the higher-ranked origin claim
         (user > action > agent > none): a dream re-extraction
@@ -1633,8 +3064,22 @@ class PostgresStorage:
         (explicit/human assertion) clears a prior supersession;
         ``revive=False`` (agent re-extraction, e.g. the dream) leaves a
         superseded edge superseded — a human removal must be sticky
-        against the extractor re-planting the same triple."""
-        with self._txn():
+        against the extractor re-planting the same triple. Captured evidence
+        must still have a current source; otherwise return None without
+        publishing or strengthening an edge."""
+        with self.transaction():
+            ids = sorted({int(i) for i in (source_entry_ids or [])})
+            if ids:
+                # Lock current support before publication. A forget or
+                # supersession must serialize with edge/evidence insertion;
+                # reconnect cannot split this pinned transaction either.
+                ids = [int(r[0]) for r in self.conn.execute(
+                    "SELECT id FROM entries WHERE id = ANY(%s) "
+                    "AND superseded_at IS NULL ORDER BY id FOR UPDATE",
+                    (ids,),
+                ).fetchall()]
+                if not ids:
+                    return None
             row = self.conn.execute(
                 """
                 INSERT INTO edges
@@ -1660,6 +3105,14 @@ class PostgresStorage:
                 (src_id, relation, dst_id, confidence, origin, time.time(),
                  bool(revive)),
             ).fetchone()
+            if ids:
+                self.conn.execute(
+                    "INSERT INTO edge_evidence (edge_id, entry_id) "
+                    "SELECT %s, e.id FROM entries e "
+                    "WHERE e.id = ANY(%s) AND e.superseded_at IS NULL "
+                    "ON CONFLICT DO NOTHING",
+                    (int(row[0]), ids),
+                )
         return {"id": int(row[0]), "confidence": float(row[1])}
 
     def bless_edge(self, src_id: int, relation: str, dst_id: int, *,
@@ -1711,14 +3164,34 @@ class PostgresStorage:
         """Link a cortex slot to a source episode. Idempotent on the PK; returns
         True iff a NEW row was inserted (so the caller bumps reinforcements only on
         genuine new formation, never on a re-assert)."""
-        with self._txn():
-            row = self.conn.execute(
+        conn = self.conn
+        with conn.transaction() as tx:
+            source = conn.execute(
+                "SELECT superseded_at FROM entries "
+                "WHERE id = %s FOR UPDATE",
+                (entry_id,),
+            ).fetchone()
+            row = conn.execute(
                 "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
                 "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
                 "RETURNING entry_id",
                 (entity_norm, attribute_norm, entry_id, now),
             ).fetchone()
+            if source is not None and source[0] is not None:
+                conn.execute(
+                    "INSERT INTO memory_trace_invalidations "
+                    "(entity_norm, attribute_norm, source_entry_id, "
+                    " invalidated_at, cause) "
+                    "VALUES (%s, %s, %s, %s, 'source_superseded') "
+                    "ON CONFLICT (entity_norm, attribute_norm, "
+                    "             source_entry_id) DO NOTHING",
+                    (entity_norm, attribute_norm, entry_id, source[0]),
+                )
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
         return row is not None
 
     # ── dream-run audit + pre-image journal (schema v27) ─────────────────
@@ -2100,13 +3573,115 @@ class PostgresStorage:
     def set_proposal_status(self, proposal_id: int, status: str, *,
                             decided_by: str | None = None,
                             decided_at: float | None = None) -> bool:
-        with self._txn():
+        with self.transaction():
+            proposal = self.conn.execute(
+                "SELECT p.source, s.canonical, d.canonical "
+                "FROM edge_proposals p "
+                "JOIN entities s ON s.id = p.src_id "
+                "JOIN entities d ON d.id = p.dst_id "
+                "WHERE p.id = %s FOR UPDATE", (proposal_id,)).fetchone()
+            if proposal is None:
+                return False
             cur = self.conn.execute(
                 "UPDATE edge_proposals SET status = %s, "
                 "decided_by = COALESCE(%s, decided_by), "
-                "decided_at = COALESCE(%s, decided_at) WHERE id = %s",
+                "decided_at = COALESCE(%s, decided_at) WHERE id = %s AND status = 'pending'",
                 (status, decided_by, decided_at, proposal_id))
+            if (cur.rowcount > 0 and proposal[0] == "analyzer"
+                    and status in ("accepted", "rejected", "retyped")
+                    and proposal[1] and proposal[2]
+                    and proposal[1] != proposal[2]):
+                a, b = sorted((proposal[1], proposal[2]))
+                self.conn.execute(
+                    "INSERT INTO dismissed_pairs "
+                    "(a_norm, b_norm, dismissed_at) VALUES (%s, %s, %s) "
+                    "ON CONFLICT DO NOTHING",
+                    (a, b, decided_at if decided_at is not None else time.time()))
         return cur.rowcount > 0
+
+    def reconcile_analyzer_proposals(self, *, limit: int = 100) -> dict[str, int]:
+        """Close legacy terminal analyzer pairs once, in decision order.
+
+        The cursor is a high-water mark rather than a query for every missing
+        dismissal. That distinction preserves an explicit later removal of a
+        pair: a restart does not reinterpret an old proposal and resurrect it.
+        Pair insertion and cursor advancement commit together.
+        """
+        cap = max(1, int(limit))
+        key = "analyzer_pair_reconcile_cursor"
+        with self.transaction():
+            row = self.conn.execute(
+                "SELECT value FROM meta WHERE key = %s FOR UPDATE", (key,)
+            ).fetchone()
+            mark = row[0] if row and isinstance(row[0], dict) else {}
+            mark_at = float(mark.get("at", 0.0))
+            mark_id = int(mark.get("id", 0))
+            rows = self.conn.execute(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), "
+                "s.canonical, d.canonical "
+                "FROM edge_proposals p "
+                "JOIN entities s ON s.id = p.src_id "
+                "JOIN entities d ON d.id = p.dst_id "
+                "WHERE p.source = 'analyzer' "
+                "AND p.status IN ('accepted', 'rejected', 'retyped') "
+                "AND (COALESCE(p.decided_at, p.created_at), p.id) > (%s, %s) "
+                "ORDER BY COALESCE(p.decided_at, p.created_at), p.id "
+                "LIMIT %s", (mark_at, mark_id, cap)).fetchall()
+            closed = 0
+            for _pid, at, left, right in rows:
+                if left and right and left != right:
+                    a, b = sorted((left, right))
+                    inserted = self.conn.execute(
+                        "INSERT INTO dismissed_pairs "
+                        "(a_norm, b_norm, dismissed_at) VALUES (%s, %s, %s) "
+                        "ON CONFLICT DO NOTHING RETURNING a_norm",
+                        (a, b, at)).fetchone()
+                    closed += inserted is not None
+            if rows:
+                last_id, last_at = rows[-1][0], rows[-1][1]
+                self.conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (key, json.dumps({"at": float(last_at), "id": int(last_id)})))
+                mark_at, mark_id = float(last_at), int(last_id)
+            remaining = self.conn.execute(
+                "SELECT count(*) FROM edge_proposals p "
+                "WHERE p.source = 'analyzer' "
+                "AND p.status IN ('accepted', 'rejected', 'retyped') "
+                "AND (COALESCE(p.decided_at, p.created_at), p.id) > (%s, %s)",
+                (mark_at, mark_id)).fetchone()[0]
+        # Entity analyzer rejections predate atomic pair closure too. Keep
+        # their own cursor so upgrades preserve the already-reconciled edge
+        # decisions, sharing the caller's single work budget.
+        entity_key = "analyzer_entity_reconcile_cursor"
+        with self.transaction():
+            mark = self.get_meta(entity_key) or {}
+            entity_at, entity_id = float(mark.get("at", 0)), int(mark.get("id", 0))
+            entity_rows = self.conn.execute(
+                "SELECT p.id, COALESCE(p.decided_at, p.created_at), s.canonical, d.canonical "
+                "FROM entity_proposals p JOIN entities s ON s.id=p.entity_id "
+                "JOIN entities d ON d.id=p.into_id "
+                "WHERE p.kind='merge' AND p.status='rejected' "
+                "AND p.reason LIKE 'analyzer-duplicate%%' "
+                "AND (COALESCE(p.decided_at,p.created_at),p.id)>(%s,%s) "
+                "ORDER BY COALESCE(p.decided_at,p.created_at),p.id LIMIT %s",
+                (entity_at, entity_id, max(0, cap-len(rows)))).fetchall()
+            for pid, at, left, right in entity_rows:
+                a, b = sorted((left, right))
+                closed += self.conn.execute(
+                    "INSERT INTO dismissed_pairs (a_norm,b_norm,dismissed_at) "
+                    "VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING a_norm",
+                    (a, b, at)).fetchone() is not None
+                entity_at, entity_id = float(at), int(pid)
+            if entity_rows:
+                self.set_meta(entity_key, {"at": entity_at, "id": entity_id})
+            remaining += self.conn.execute(
+                "SELECT count(*) FROM entity_proposals p WHERE p.kind='merge' "
+                "AND p.status='rejected' AND p.reason LIKE 'analyzer-duplicate%%' "
+                "AND (COALESCE(p.decided_at,p.created_at),p.id)>(%s,%s)",
+                (entity_at, entity_id)).fetchone()[0]
+        return {"considered": len(rows) + len(entity_rows), "closed": closed,
+                "remaining": int(remaining)}
 
     def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
                                score: float | None, reason: str | None, now: float) -> int | None:
@@ -2137,6 +3712,26 @@ class PostgresStorage:
             else:
                 out.add((kind, eid))
         return out
+
+    def review_proposal_states(self) -> dict[str, dict[tuple, str]]:
+        """All-status proposal keys for read-only queue accounting."""
+        links = {
+            (int(src), relation, int(dst)): status
+            for src, relation, dst, status in self.conn.execute(
+                "SELECT src_id, relation, dst_id, status FROM edge_proposals"
+            ).fetchall()
+        }
+        entities: dict[tuple, str] = {}
+        for kind, entity_id, into_id, status in self.conn.execute(
+                "SELECT kind, entity_id, into_id, status FROM entity_proposals"
+        ).fetchall():
+            if kind == "merge" and into_id is not None:
+                key = ("merge", min(int(entity_id), int(into_id)),
+                       max(int(entity_id), int(into_id)))
+            else:
+                key = (kind, int(entity_id))
+            entities[key] = status
+        return {"links": links, "entities": entities}
 
     def dump_graph_tables(self) -> dict[str, list[dict]]:
         """Plain-dict dump of the five graph tables the deep dream mutates —
@@ -2310,6 +3905,26 @@ class PostgresStorage:
             (int(entity_id),)).fetchone()
         return int(row[0])
 
+    def review_queue_counts(self) -> dict:
+        """Pending rows per review queue plus the ``created_at`` of the
+        oldest pending merge and of the oldest one no judge has recorded a
+        verdict on (None when there is none): two aggregate queries, cheap
+        enough for every ``dream_status`` and session start."""
+        merge, junk, oldest, unjudged = self.conn.execute(
+            "SELECT count(*) FILTER (WHERE kind = 'merge'), "
+            "       count(*) FILTER (WHERE kind = 'junk'), "
+            "       min(created_at) FILTER (WHERE kind = 'merge'), "
+            "       min(created_at) FILTER (WHERE kind = 'merge' "
+            "                               AND judge_verdict IS NULL) "
+            "FROM entity_proposals WHERE status = 'pending'").fetchone()
+        link = self.conn.execute(
+            "SELECT count(*) FROM edge_proposals WHERE status = 'pending'"
+        ).fetchone()[0]
+        return {"merge": int(merge), "junk": int(junk), "link": int(link),
+                "oldest_merge_at": float(oldest) if oldest is not None else None,
+                "oldest_unjudged_merge_at":
+                    float(unjudged) if unjudged is not None else None}
+
     def merge_decision_stats(self) -> dict:
         """Accept/reject tallies over merge_decisions — the direct measure of
         the dedup detector's precision (the 2026-08-11 triage ran 38/153 and
@@ -2378,6 +3993,31 @@ class PostgresStorage:
                 "ORDER BY t.entity_norm, t.attribute_norm, t.entry_id",
                 ([k[0] for k in keys], [k[1] for k in keys])).fetchall():
             out.setdefault((e, a), []).append(int(eid))
+        return out
+
+    def trace_invalidations_for_slots(
+        self, slot_keys,
+    ) -> dict[tuple[str, str], list[dict]]:
+        """Durable source-supersession events for normalized cortex slots."""
+        keys = list(dict.fromkeys((str(e), str(a)) for e, a in (slot_keys or [])))
+        if not keys:
+            return {}
+        out: dict[tuple[str, str], list[dict]] = {}
+        rows = self.conn.execute(
+            "SELECT i.entity_norm, i.attribute_norm, i.source_entry_id, "
+            "       i.invalidated_at, i.cause "
+            "FROM memory_trace_invalidations i "
+            "JOIN unnest(%s::text[], %s::text[]) AS k(e, a) "
+            "  ON i.entity_norm = k.e AND i.attribute_norm = k.a "
+            "ORDER BY i.entity_norm, i.attribute_norm, i.source_entry_id",
+            ([k[0] for k in keys], [k[1] for k in keys]),
+        ).fetchall()
+        for entity, attribute, source_id, invalidated_at, cause in rows:
+            out.setdefault((entity, attribute), []).append({
+                "source_entry_id": int(source_id),
+                "invalidated_at": float(invalidated_at),
+                "cause": cause,
+            })
         return out
 
     def superseded_evidence(self, entry_ids) -> dict[int, float]:
@@ -2587,11 +4227,10 @@ class PostgresStorage:
 
     def get_entry(self, entry_id: int) -> dict | None:
         cols = ("id", "text", "source", "ts", "reinforcements",
-                "explicit_reinforcements", "access_count")
+                "explicit_reinforcements", "access_count", "superseded_at",
+                "superseded_by_text")
         row = self.conn.execute(
-            "SELECT id, text, source, ts, reinforcements, "
-            "explicit_reinforcements, access_count "
-            "FROM entries WHERE id = %s",
+            f"SELECT {', '.join(cols)} FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
 

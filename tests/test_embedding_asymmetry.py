@@ -38,6 +38,9 @@ class _CountingST:
     pinned without downloading the real model.
     """
 
+    def float(self):
+        return self
+
     def __init__(self, model_name: str, device: str | None = None, **kwargs) -> None:
         self.encoded: list[list[str]] = []
         self.max_seq_length = 8192  # simulate a long-context model's default

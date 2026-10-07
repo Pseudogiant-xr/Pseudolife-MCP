@@ -77,6 +77,7 @@ def _stage_link_pair(svc, a, b):
                   source="noise-leads-test")
 
 
+@pytest.mark.real_model
 def test_deep_dream_candidates_exclude_lesson_entities(svc):
     _stage_link_pair(svc, "gadget relay", "widget beacon")
     out1 = svc.deep_dream(apply=False, include_snippets=False)
@@ -113,6 +114,7 @@ def _seed_and_signal(svc):
                        detail="a pending signal so synthesis runs")
 
 
+@pytest.mark.real_model
 def test_synthesis_skips_cross_key_near_duplicate(svc):
     _seed_and_signal(svc)
     out = svc.synthesize_lessons(_LessonStub([
@@ -134,6 +136,7 @@ def test_synthesis_skips_cross_key_near_duplicate(svc):
     assert not any("deploy daemon changes" in e for e, a in keys)
 
 
+@pytest.mark.real_model
 def test_synthesis_never_suppresses_opposite_polarity(svc):
     _seed_and_signal(svc)
     out = svc.synthesize_lessons(_LessonStub([
@@ -146,6 +149,7 @@ def test_synthesis_never_suppresses_opposite_polarity(svc):
     assert out["lessons"] == 1 and out.get("deduped", 0) == 0
 
 
+@pytest.mark.real_model
 def test_synthesis_same_key_still_supersedes(svc):
     _seed_and_signal(svc)
     out = svc.synthesize_lessons(_LessonStub([

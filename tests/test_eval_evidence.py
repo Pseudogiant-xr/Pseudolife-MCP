@@ -613,6 +613,48 @@ CLAIMS.append(Claim(
     value=_mcnemar_p("Qwen3-Embedding-0.6B (instructed)", 10),
     stated=0.004, places=3))
 
+# ── the CPU bf16 embedder (daemon OOM fix, 2026-09-23) ────────────────────
+BF16_PROBE = RESULTS + "embedder-cpu-bf16-probe-20260923.json"
+_BF16_PARITY = ("parity_branch_embedding_pipeline", "auto-query vs stored")
+
+for _id, _doc, _needle, _path, _stated, _places in [
+    ("bf16-parity-top8", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-rank0", CONFIG_GUIDE, "top-8 overlap 0.994 and rank-0 60/60",
+     _BF16_PARITY + ("rank0_agree",), 60, 0),
+    ("bf16-parity-top8-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_mean",), 0.994, 3),
+    ("bf16-parity-min-changelog", CHANGELOG,
+     "vectors kept top-8 overlap 0.994 (min 0.875) and rank-0 60/60 (max score",
+     _BF16_PARITY + ("top8_overlap_min",), 0.875, 3),
+    ("bf16-gate-cortex", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "cortex", "mean"), 0.6923, 4),
+    ("bf16-gate-rag", CHANGELOG,
+     "every arm identical to its fp32 baseline (rag 0.5897, cortex 0.6923,",
+     ("regression_gate_bf16", "arms", "rag", "mean"), 0.5897, 4),
+    ("bf16-load-peak-fp32", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "fp32", "loaded", "hwm_mb"),
+     3808, 0),
+    ("bf16-load-peak-bf16", CHANGELOG, "while loading 537 MB vs 3,808 MB",
+     ("memory_probe_raw_sentence_transformers", "bf16_loaded_directly",
+      "loaded", "hwm_mb"), 537, 0),
+    ("ingest-old-transient", CHANGELOG,
+     "A 104-chunk document peaked +2,565 MB over",
+     ("ingest_probe_branch", "fp32", "old_ingest", "transient_mb"), 2565, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_id, doc=_doc, needle=_needle, artifacts=(BF16_PROBE,),
+        value=(lambda path: lambda d: _dig(d, path))(_path),
+        stated=_stated, places=_places))
+
+
+def _dig(d, path):
+    for key in path:
+        d = d[key]
+    return d
+
 
 # ── the cortex-BM25 opt-in decision (2026-07-30) ─────────────────────────
 # The channel ships OFF because a pre-registered A/B measured no benefit;
@@ -3139,6 +3181,17 @@ def test_claim_text_still_appears_in_its_doc(claim: Claim):
 # accept precision they replace; all three come from the scrubbed panel
 # artifact (labels + votes), never from the private evidence pack.
 PANEL_0902 = "evals/results/queue-judge-panel-20260902.json"
+LADDER_0914 = "evals/results/queue-judge-terra-high-20260914.json"
+for _cid, _val, _stated in [
+    ("queue-terra-0914-calls", lambda d: d["calls_completed"], 54),
+    ("queue-terra-0914-categories", lambda d: len(d["queues"]), 5),
+    ("queue-terra-0914-failures", lambda d: d["calls_failed"], 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG,
+        needle="54 calls across five review categories",
+        artifacts=(LADDER_0914,), value=_val, stated=_stated, places=0))
+
 for _cid, _needle, _val, _stated, _places in [
     ("queue-judge-two-vote-reject-n", "two-vote rejects 8/8",
      lambda d: d["merge_gate_table"]["R2_two_vote_reject_mean_ge0.7"]["n"], 8, 0),
@@ -3221,11 +3274,314 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# The merge judge's relate (2026-09-30): a reject may name a relation.
+# The shipped design (reject + optional relation) against the 2026-09-29
+# baseline scored by the same script, Opus 5.5 first opinion and Sonnet 5.5
+# second; and the retired first design (relate as its own verdict).
+RELATE_CROSS = "evals/results/queue-judge-cross-20260930-relate.json"
+ANNOT_OPUS = "evals/results/queue-judge-ladder-20260930-relate-annot-opus55.json"
+ANNOT_SONNET = "evals/results/queue-judge-ladder-20260930-relate-annot-sonnet55.json"
+ANNOT_CROSS = "evals/results/queue-judge-cross-20260930-relate-annot.json"
+RELATE_BASE = "evals/results/queue-judge-cross-20260929-relate-baseline.json"
+OPUS55_BASE = "evals/results/queue-judge-ladder-20260929-opus55.json"
+SONNET55_BASE = "evals/results/queue-judge-ladder-20260929-sonnet55.json"
+
+
+def _relate_arm(arm, *path):
+    def get(d):
+        v = d["arms"][arm]["queues"]["merges"]
+        for key in path:
+            v = v[key]
+        return v
+    return get
+
+
+def _relate_cross(rep, gate, field):
+    return lambda d: d["replicates"][rep][gate][field]
+
+
+def _path(rep, field):
+    return lambda d: d["production_path"][rep][field]
+
+
+def _splits(rep):
+    return lambda d: d["replicates"][rep]["splits"]["n"]
+
+
+def _conf(arm, verdict, field):
+    return lambda d: d["vote_confidence"][arm][verdict][field]
+
+
+def _named(arm, relation):
+    return lambda d: d["relations"][arm][relation]
+
+
+_RC = "two_vote_reject_class"
+_AC = "two_vote_accept_not_lowdiff"
+_ANNOT_O, _ANNOT_S = "opus-5-5-relate-annot", "sonnet-5-5-relate-annot"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("annot-path-r1-applied", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(0, "applied"), 18, 0),
+    ("annot-path-r1-bad", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(0, "bad"), 0, 0),
+    ("annot-path-r2-applied", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(1, "applied"), 21, 0),
+    ("annot-path-r2-bad", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(1, "bad"), 0, 0),
+    ("annot-base-path-r1", "against the baseline's 18 and", RELATE_BASE, _path(0, "applied"), 18, 0),
+    ("annot-base-path-r2", "17. Of the rows both models rejected", RELATE_BASE, _path(1, "applied"), 17, 0),
+    ("annot-links-r1", "rejected, 17 and 21 carry a relation", ANNOT_CROSS, _relate_cross(0, _RC, "links_filed"), 17, 0),
+    ("annot-links-r2", "rejected, 17 and 21 carry a relation", ANNOT_CROSS, _relate_cross(1, _RC, "links_filed"), 21, 0),
+    ("annot-links-r1-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
+     _relate_cross(0, _RC, "links_on_panel_relate"), 12, 0),
+    ("annot-links-r2-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
+     _relate_cross(1, _RC, "links_on_panel_relate"), 16, 0),
+    ("annot-opus-relate-mean", "average 0.70 (Opus 5.5) and", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "mean"), 0.70, 2),
+    ("annot-sonnet-relate-mean", "0.71 (Sonnet 5.5) confidence", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "mean"), 0.71, 2),
+    ("annot-opus-relate-at-gate", "confidence, and 12 and 23 of them", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "ge_reject_gate"), 12, 0),
+    ("annot-sonnet-relate-at-gate", "confidence, and 12 and 23 of them", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "ge_reject_gate"), 23, 0),
+    ("annot-opus-relation-match", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-opus-panel-relate-votes", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "on_panel_verdict", "relate"), 41, 0),
+    ("annot-sonnet-relation-match", "relate votes (Opus 5.5) and 21 of 44", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-sonnet-panel-relate-votes", "relate votes (Opus 5.5) and 21 of 44", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "on_panel_verdict", "relate"), 44, 0),
+    ("annot-opus-related-to", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _named(_ANNOT_O, "related-to"), 29, 0),
+    ("annot-opus-relate-votes", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "n"), 61, 0),
+    ("annot-sonnet-related-to", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _named(_ANNOT_S, "related-to"), 35, 0),
+    ("annot-sonnet-relate-votes", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "n"), 68, 0),
+    ("annot-path-r1-single", "(7 and 6, against the", ANNOT_CROSS, _path(0, "single"), 7, 0),
+    ("annot-path-r2-single", "(7 and 6, against the", ANNOT_CROSS, _path(1, "single"), 6, 0),
+    ("annot-base-path-r1-single", "baseline's 8 and 9)", RELATE_BASE, _path(0, "single"), 8, 0),
+    ("annot-base-path-r2-single", "baseline's 8 and 9)", RELATE_BASE, _path(1, "single"), 9, 0),
+    ("annot-cross-accept-r1-n", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r1-bad", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "bad"), 1, 0),
+    ("annot-cross-accept-r2-n", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r2-bad", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "bad"), 0, 0),
+    ("annot-base-accept-r1-n", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(0, _AC, "n"), 7, 0),
+    ("annot-base-accept-r1-bad", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(0, _AC, "bad"), 1, 0),
+    ("annot-base-accept-r2-n", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(1, _AC, "n"), 7, 0),
+    ("annot-base-accept-r2-bad", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(1, _AC, "bad"), 1, 0),
+    ("annot-opus-accept-n", "precision per arm is 19/23", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "accept_precision", "n"), 23, 0),
+    ("annot-opus-accept-bad", "precision per arm is 19/23", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "accept_precision", "bad"), 4, 0),
+    ("annot-sonnet-accept-n", "precision per arm is 19/23", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "accept_precision", "n"), 23, 0),
+    ("annot-sonnet-accept-bad", "precision per arm is 19/23", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "accept_precision", "bad"), 4, 0),
+    ("annot-base-opus-accept-n", "the baseline's 20/24 and 19/24", OPUS55_BASE,
+     _relate_arm("opus-5-5", "accept_precision", "n"), 24, 0),
+    ("annot-base-opus-accept-bad", "the baseline's 20/24 and 19/24", OPUS55_BASE,
+     _relate_arm("opus-5-5", "accept_precision", "bad"), 4, 0),
+    ("annot-base-sonnet-accept-n", "the baseline's 20/24 and 19/24", SONNET55_BASE,
+     _relate_arm("sonnet-5-5", "accept_precision", "n"), 24, 0),
+    ("annot-base-sonnet-accept-bad", "the baseline's 20/24 and 19/24", SONNET55_BASE,
+     _relate_arm("sonnet-5-5", "accept_precision", "bad"), 5, 0),
+    ("annot-sonnet-reject-n", "majority rejects are 29/34 correct", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "reject_precision", "n"), 34, 0),
+    ("annot-sonnet-reject-bad", "majority rejects are 29/34 correct", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "reject_precision", "bad"), 5, 0),
+    ("annot-base-sonnet-reject-n", "baseline's 32/35:", SONNET55_BASE,
+     _relate_arm("sonnet-5-5", "reject_precision", "n"), 35, 0),
+    ("annot-base-sonnet-reject-bad", "baseline's 32/35:", SONNET55_BASE,
+     _relate_arm("sonnet-5-5", "reject_precision", "bad"), 3, 0),
+    ("annot-sonnet-relate-on-accept", "relation on 8 votes", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "on_label", "accept"), 8, 0),
+    ("annot-base-splits-r1", "rise from 5 and 5 to 6 and 7", RELATE_BASE, _splits(0), 5, 0),
+    ("annot-base-splits-r2", "rise from 5 and 5 to 6 and 7", RELATE_BASE, _splits(1), 5, 0),
+    ("annot-splits-r1", "rise from 5 and 5 to 6 and 7", ANNOT_CROSS, _splits(0), 6, 0),
+    ("annot-splits-r2", "rise from 5 and 5 to 6 and 7", ANNOT_CROSS, _splits(1), 7, 0),
+    # The retired first design, kept as the record.
+    ("relate-cross-reject-r1-n", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "n"), 5, 0),
+    ("relate-cross-reject-r1-bad", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "bad"), 0, 0),
+    ("relate-cross-reject-r2-n", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "n"), 9, 0),
+    ("relate-cross-reject-r2-bad", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "bad"), 0, 0),
+    ("relate-votes-total", "none of the 85 relate votes", RELATE_CROSS,
+     lambda d: sum(a["relate"]["n"] for a in d["vote_confidence"].values()), 85, 0),
+    ("relate-votes-at-gate", "none of the 85 relate votes", RELATE_CROSS,
+     lambda d: sum(a["relate"]["ge_reject_gate"] for a in d["vote_confidence"].values()), 0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+
+# The 2026-09-29 merge-detector replay: the dream-alias screen's filing
+# numbers under the merge veto and the recalibrated cosine threshold.
+REPLAY_0929 = "evals/results/merge-detector-replay-20260929.json"
+
+
+def _alias(block, field):
+    return lambda d: d["by_detector"]["dream-alias"][block][field]
+
+
+def _alias_at(t, field):
+    def pick(d):
+        (row,) = [c for c in d["dream_alias_threshold_curve_after_veto"]
+                  if c["min_cosine"] == t]
+        return row["filed"]["n"] if field == "filed" else row[field]
+    return pick
+
+
+for _cid, _needle, _val, _stated, _places in [
+    ("replay-alias-filed", "had filed 574 proposals", _alias("all", "n"), 574, 0),
+    ("replay-alias-accepted", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "accept"), 16, 0),
+    ("replay-alias-rejected", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "reject"), 524, 0),
+    ("replay-alias-left", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "leave"), 34, 0),
+    ("replay-alias-vetoed", "vetoes 36 of its rejected proposals and none",
+     _alias("vetoed", "reject"), 36, 0),
+    ("replay-alias-vetoed-accepts", "vetoes 36 of its rejected proposals and none",
+     _alias("vetoed", "accept"), 0, 0),
+    ("replay-alias-after-veto", "keeps 420 of the remaining 538",
+     _alias("passes_veto", "n"), 538, 0),
+    ("replay-alias-at-07", "keeps 420 of the remaining 538",
+     _alias_at(0.7, "filed"), 420, 0),
+    ("replay-alias-lost-at-07", "loses one accepted paraphrase (cosine 0.655)",
+     _alias_at(0.7, "accepts_lost"), 1, 0),
+    ("replay-alias-lost-score", "loses one accepted paraphrase (cosine 0.655)",
+     lambda d: min(r["similarity"] for r in d["rows"]
+                   if r["detector"] == "dream-alias" and not r["veto"]
+                   and r["verdict"] == "accept"), 0.655, 3),
+    ("replay-alias-at-08", "0.8 would keep 194 but lose 6",
+     _alias_at(0.8, "filed"), 194, 0),
+    ("replay-alias-lost-at-08", "0.8 would keep 194 but lose 6",
+     _alias_at(0.8, "accepts_lost"), 6, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(REPLAY_0929,),
+        value=_val, stated=_stated, places=_places))
+
 CLAIMS.append(Claim(
     id="queue-ladder-curation-keep-precision", doc=CHANGELOG,
     needle="precision was 0.5625", artifacts=(LADDER_0902,),
     value=_ladder("curation", "duplicate_keep_precision", "precision"),
     stated=0.5625, places=4))
+
+# The 2026-09-29 judge swap (Opus 5.5 first, Sonnet 5.5 second): the
+# cross-model gates come from evals/cross_judge_gates.py's artifact, the
+# per-queue numbers from the Opus 5.5 ladder arm, the contested row's panel
+# confidence from the scrubbed panel.
+CROSS_0929 = "evals/results/queue-judge-cross-20260929.json"
+OPUS55_0929 = "evals/results/queue-judge-ladder-20260929-opus55.json"
+
+
+def _pair(arm, rep, gate, field):
+    return lambda d: d["pairs"][arm]["replicates"][rep][gate][field]
+
+
+def _opus55(queue, metric, field):
+    return lambda d: d["arms"]["opus-5-5"]["queues"][queue][metric][field]
+
+
+LADDERS_0929 = tuple(
+    f"evals/results/queue-judge-ladder-20260929-{t}.json"
+    for t in ("opus55", "sonnet55", "fable51", "astra", "sol", "luna"))
+
+
+def _arms_accepting(rid):
+    def count(*docs):
+        return sum(
+            1 for d in docs for a in d["arms"].values()
+            for r in a["queues"]["merges"]["per_row"]
+            if r["id"] == rid and r["votes"][0]
+            and r["votes"][0]["verdict"] == "accept")
+    return count
+
+
+CLAIMS.append(Claim(
+    id="cross-contested-row-accepting-arms", doc=CHANGELOG,
+    needle="accepted by five of the six arms", artifacts=LADDERS_0929,
+    value=_arms_accepting(2016), stated=5, places=0))
+
+for _cid, _needle, _art, _val, _stated in [
+    ("cross-sonnet-reject-n", "two-vote rejects 18/18", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_reject", "n"), 18),
+    ("cross-sonnet-reject-bad", "two-vote rejects 18/18", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_reject", "bad"), 0),
+    ("cross-sonnet-reject-r2-n", "(17/17 on the second replicate)", CROSS_0929,
+     _pair("sonnet55", 1, "two_vote_reject", "n"), 17),
+    ("cross-sonnet-reject-r2-bad", "(17/17 on the second replicate)", CROSS_0929,
+     _pair("sonnet55", 1, "two_vote_reject", "bad"), 0),
+    ("cross-sonnet-accept-n", "non-low-differential accepts 6/7", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_accept_not_lowdiff", "n"), 7),
+    ("cross-sonnet-accept-bad", "non-low-differential accepts 6/7", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_accept_not_lowdiff", "bad"), 1),
+    ("cross-sonnet-accept-miss-row", "panel row 2016", CROSS_0929,
+     lambda d: d["pairs"]["sonnet55"]["replicates"][0]
+     ["two_vote_accept_not_lowdiff"]["bad_ids"][0], 2016),
+    ("cross-contested-panel-confidence", "panel confidence 0.62", PANEL_0902,
+     lambda d: next(r["panel_confidence"] for r in d["merges"] if r["id"] == 2016),
+     0.62),
+    ("cross-astra-reject-n", "Astra 25/26", CROSS_0929,
+     _pair("astra", 0, "two_vote_reject", "n"), 26),
+    ("cross-astra-reject-bad", "Astra 25/26", CROSS_0929,
+     _pair("astra", 0, "two_vote_reject", "bad"), 1),
+    ("cross-sol-reject-n", "Sol 27/30", CROSS_0929,
+     _pair("sol", 0, "two_vote_reject", "n"), 30),
+    ("cross-sol-reject-bad", "Sol 27/30", CROSS_0929,
+     _pair("sol", 0, "two_vote_reject", "bad"), 3),
+    ("cross-luna-reject-n", "Luna 25/28", CROSS_0929,
+     _pair("luna", 0, "two_vote_reject", "n"), 28),
+    ("cross-luna-reject-bad", "Luna 25/28", CROSS_0929,
+     _pair("luna", 0, "two_vote_reject", "bad"), 3),
+    ("cross-astra-calibration-at-gate", "55 of 55 Astra reject votes", CROSS_0929,
+     lambda d: d["calibration"]["astra"]["at_or_above_reject_gate"], 55),
+    ("cross-astra-calibration-total", "55 of 55 Astra reject votes", CROSS_0929,
+     lambda d: d["calibration"]["astra"]["reject_votes"], 55),
+    ("cross-opus55-calibration-at-gate", "Opus 5.5: 17 of 67", CROSS_0929,
+     lambda d: d["calibration"]["opus55"]["at_or_above_reject_gate"], 17),
+    ("cross-opus55-calibration-total", "Opus 5.5: 17 of 67", CROSS_0929,
+     lambda d: d["calibration"]["opus55"]["reject_votes"], 67),
+    ("cross-splits-n", "On the 7 rows where", CROSS_0929,
+     lambda d: d["splits"]["n"], 7),
+    ("cross-splits-fable", "Fable 5.1 matched the label 6 times", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["fable51"], 6),
+    ("cross-splits-opus", "(Opus 5.5 4, Sonnet 5.5 3)", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["opus55"], 4),
+    ("cross-splits-sonnet", "(Opus 5.5 4, Sonnet 5.5 3)", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["sonnet55"], 3),
+    ("opus55-link-accept-n", "link auto-accept 3/3", OPUS55_0929,
+     _opus55("links", "auto_accept", "n"), 3),
+    ("opus55-link-accept-bad", "link auto-accept 3/3", OPUS55_0929,
+     _opus55("links", "auto_accept", "bad"), 0),
+    ("opus55-link-reject-n", "3/3 and auto-reject 5/5,", OPUS55_0929,
+     _opus55("links", "auto_reject", "n"), 5),
+    ("opus55-link-reject-bad", "3/3 and auto-reject 5/5,", OPUS55_0929,
+     _opus55("links", "auto_reject", "bad"), 0),
+    ("opus55-junk-keep-n", "junk auto-keep 8/8", OPUS55_0929,
+     _opus55("junk", "auto_keep", "n"), 8),
+    ("opus55-junk-keep-bad", "junk auto-keep 8/8", OPUS55_0929,
+     _opus55("junk", "auto_keep", "bad"), 0),
+    ("opus55-junk-delete-n", "auto-delete under the bar 6/6", OPUS55_0929,
+     _opus55("junk", "auto_delete_under_bar", "n"), 6),
+    ("opus55-junk-delete-bad", "auto-delete under the bar 6/6", OPUS55_0929,
+     _opus55("junk", "auto_delete_under_bar", "bad"), 0),
+    ("opus55-curation-distinct-n", "curation auto-distinct 25/25", OPUS55_0929,
+     _opus55("curation", "auto_distinct", "n"), 25),
+    ("opus55-curation-distinct-bad", "curation auto-distinct 25/25", OPUS55_0929,
+     _opus55("curation", "auto_distinct", "bad"), 0),
+    ("opus55-curation-keep-n", "keep-side precision 8/11", OPUS55_0929,
+     _opus55("curation", "duplicate_keep_precision", "n"), 11),
+    ("opus55-curation-keep-bad", "keep-side precision 8/11", OPUS55_0929,
+     _opus55("curation", "duplicate_keep_precision", "bad"), 3),
+    ("opus55-candidate-dismiss-n", "candidate auto-dismiss 20/24", OPUS55_0929,
+     _opus55("candidates", "auto_dismiss", "n"), 24),
+    ("opus55-candidate-dismiss-bad", "candidate auto-dismiss 20/24", OPUS55_0929,
+     _opus55("candidates", "auto_dismiss", "bad"), 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=2 if isinstance(_stated, float) else 0))
 
 
 # ── docs-currency pass (2026-09-04, v0.15.0): the same review-queue judge
@@ -8724,19 +9080,6 @@ for _doc, _slug in ((SHIM_LAUNCH_PS1, "ps1"), (SHIM_LAUNCH_SH, "sh")):
             id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
             artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
             places=1 if isinstance(_stated, float) else 0))
-    # "on every run" = the worst run: min gold, max stale, min AND max claims
-    for _cid, _val, _stated in [
-        ("gold-lo", lambda *r: min(x["gold_recoverable"] for x in r), 1.0),
-        ("stale-hi", lambda *r: max(x["stale_leak"] for x in r), 0.0),
-        ("claims-lo", lambda *r: min(x["consolidation"]["claims"] for x in r), 16),
-        ("claims-hi", lambda *r: max(x["consolidation"]["claims"] for x in r), 16),
-        ("inserted-lo", lambda *r: min(x["consolidation"]["inserted"] for x in r), 16),
-        ("inserted-hi", lambda *r: max(x["consolidation"]["inserted"] for x in r), 16),
-    ]:
-        CLAIMS.append(Claim(
-            id=f"shim5-launcher-{_slug}-{_cid}", doc=_doc, needle=_SHIM5_QUALITY,
-            artifacts=SHIM5_GATE_RUNS, value=_val, stated=_stated,
-            places=1 if isinstance(_stated, float) else 0))
 
 
 def test_the_shim_launchers_cite_the_gate_that_validated_their_default():
@@ -8896,6 +9239,80 @@ def test_the_v5_gate_budget_clause_holds():
     runs = [_load_artifact(r) for r in SHIM5_GATE_RUNS]
     budget = _load_artifact(SP5_THRESH)["naive"]["token_budget"]
     assert _tok_max(*runs) / budget < 0.45
+
+
+# ── claude-opus-5-5 against claude-opus-5 on the shim (2026-09-28) ─────────
+#
+# The gate the Claude-shim default moved on (maintainer decision 2026-09-29).
+# The arm files cannot say which model the shim served (rung `opus-5`, the
+# daemon's alias `extractor`), so the verdict carries `served_model` from the
+# shim's serving lines, recorded by the operator at run time; it is pinned
+# here with the table, the gate and the no-regression predicate.
+O55_PRE = RESULTS + "opus-5-opus55-pre.json"
+O55_PRE2 = RESULTS + "opus-5-opus55-pre-rep2.json"
+O55_POST = RESULTS + "opus-5-opus55-post.json"
+O55_POST2 = RESULTS + "opus-5-opus55-post-rep2.json"
+O55_THRESH = RESULTS + "ladder-opus55-paired-verdict-threshold.json"
+_O55_ROW_PRE = ("| pre | claude-opus-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                "`opus-5-opus55-pre.json` |")
+_O55_ROW_PRE2 = ("| pre, rep 2 | claude-opus-5 | 1.0 | 0.0 | 13.9 | 16 / 16 | "
+                 "`opus-5-opus55-pre-rep2.json` |")
+_O55_ROW_POST = ("| post | claude-opus-5-5 | 1.0 | 0.0 | 13.7 | 17 / 17 | "
+                 "`opus-5-opus55-post.json` |")
+_O55_ROW_POST2 = ("| post, rep 2 | claude-opus-5-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                  "`opus-5-opus55-post-rep2.json` |")
+_O55_GATE = ("`ladder-opus55-paired-verdict-threshold.json` reads `gate: PASS` and "
+             "`no_regression_gate: PASS`")
+_O55_SERVED = ("its `served_model` field reads `claude-opus-5` for the pre arm and "
+               "`claude-opus-5-5` for the post arm")
+_O55_SPREAD = "the token ranges (pre 13.9–14.8, post 13.7–14.8) overlap"
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    *[(f"o55-{_arm}-{_key}", EVALS, _row, _run, _fn, _n, _p)
+      for _arm, _row, _run, _tok, _claims in (
+          ("pre", _O55_ROW_PRE, O55_PRE, 14.8, 16),
+          ("pre2", _O55_ROW_PRE2, O55_PRE2, 13.9, 16),
+          ("post", _O55_ROW_POST, O55_POST, 13.7, 17),
+          ("post2", _O55_ROW_POST2, O55_POST2, 14.8, 16))
+      for _key, _fn, _n, _p in (
+          ("gold", lambda d: d["gold_recoverable"], 1.0, 1),
+          ("stale", lambda d: d["stale_leak"], 0.0, 1),
+          ("tokens", lambda d: d["tokens_per_query"], _tok, 1),
+          ("claims", _sp_tally("claims"), _claims, 0),
+          ("inserted", _sp_tally("inserted"), _claims, 0))],
+    ("o55-gate", EVALS, _O55_GATE, O55_THRESH,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("o55-no-regression-gate", EVALS, _O55_GATE, O55_THRESH,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("o55-cleared", EVALS, _O55_GATE, O55_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("o55-no-regression", EVALS, _O55_GATE, O55_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("o55-served-pre", EVALS, _O55_SERVED, O55_THRESH,
+     lambda d: float(d["served_model"]["pre"] == "claude-opus-5"), 1, 0),
+    ("o55-served-post", EVALS, _O55_SERVED, O55_THRESH,
+     lambda d: float(d["served_model"]["post"] == "claude-opus-5-5"), 1, 0),
+    ("o55-spread-pre-lo", EVALS, _O55_SPREAD, O55_PRE2,
+     lambda d: d["tokens_per_query"], 13.9, 1),
+    ("o55-spread-pre-hi", EVALS, _O55_SPREAD, O55_PRE,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("o55-spread-post-lo", EVALS, _O55_SPREAD, O55_POST,
+     lambda d: d["tokens_per_query"], 13.7, 1),
+    ("o55-spread-post-hi", EVALS, _O55_SPREAD, O55_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+def test_the_opus55_verdict_says_which_model_each_arm_served():
+    """The arm files record the rung, not the model; without this field the
+    gate the default moved on could not show it compared 5.5 against 5."""
+    served = _load_artifact(O55_THRESH)["served_model"]
+    assert served["pre"] == "claude-opus-5"
+    assert served["post"] == "claude-opus-5-5"
+    assert "serving lines" in served["source"]
 
 
 # docs/guide/benchmarks.md — the third honest limit.
@@ -9333,3 +9750,847 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# ── used_ids credits every serving search (2026-09-08) ───────────────────
+# The read-only live-log measurement that sized the change: how often one
+# (session, entry) pair is served by more than one event, i.e. how often
+# most-recent-wins left an earlier serving event unlabelled. The 29% is the
+# whole justification for the semantic change, so it is the one number in
+# that entry a reader most needs to re-derive. Same artifact carries the
+# window-bounded vs unbounded probe cost that justifies bounding the
+# served-elsewhere probe.
+MULTISERVE = RESULTS + "retrieval-uses-multiserve-20260908.json"
+_MS = "session_entry_multiplicity"
+for _cid, _doc, _needle, _val, _stated, _places in [
+    ("multiserve-events", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["totals"]["events"], 2648, 0),
+    ("multiserve-sessions", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["totals"]["sessions"], 74, 0),
+    ("multiserve-labels-total", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["labels_on_record"]["labels_total"], 13, 0),
+    ("multiserve-labels-none-multi", CHANGELOG,
+     "read-only, 2,648 events / 74 sessions): none of the 13 labels on record",
+     lambda d: d["labels_on_record"][
+         "labels_with_another_serving_event_in_window"], 0, 0),
+    ("multiserve-pairs-multi", CHANGELOG, "but 720 of 2,487 (session,",
+     lambda d: d[_MS]["pairs_served_more_than_once"], 720, 0),
+    ("multiserve-pairs-total", CHANGELOG, "but 720 of 2,487 (session,",
+     lambda d: d[_MS]["pairs_total"], 2487, 0),
+    ("multiserve-pairs-pct", CHANGELOG,
+     "entry) pairs — 29% — are served by more than one event in their session,",
+     lambda d: d[_MS]["pairs_served_more_than_once_pct"], 29, 0),
+    ("multiserve-pairs-in-window", CHANGELOG, "628 of them within the hour",
+     lambda d: d[_MS]["pairs_served_more_than_once_within_window"], 628, 0),
+    ("multiserve-null-session-pct", CHANGELOG,
+     "with no session id (44% of logged events that day)",
+     lambda d: 100.0 * d["totals"]["null_session_events"]
+     / d["totals"]["events"], 44, 0),
+    ("multiserve-probe-bounded-ms", CHANGELOG,
+     "index-backed at 0.05 ms against a 3.9 ms",
+     lambda d: d["session_less_probe"]["bounded_to_window_ms"], 0.05, 2),
+    ("multiserve-probe-unbounded-ms", CHANGELOG,
+     "index-backed at 0.05 ms against a 3.9 ms",
+     lambda d: d["session_less_probe"]["unbounded_ms"], 3.9, 1),
+    ("multiserve-evals-pairs-multi", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_served_more_than_once"], 720, 0),
+    ("multiserve-evals-pairs-total", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_total"], 2487, 0),
+    ("multiserve-evals-pairs-pct", EVALS,
+     "720 of 2,487 (session, entry) pairs — 29% — were served by more than one",
+     lambda d: d[_MS]["pairs_served_more_than_once_pct"], 29, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(MULTISERVE,),
+        value=_val, stated=_stated, places=_places))
+
+
+# ── the serving-policy replay (2026-09-25) ───────────────────────────────
+# evals/serving_policy_replay.py scores logged served lists against the
+# used_ids labels agents record through memory_outcome. Its artifact backs
+# the retrieval guide's abstention section (what low_confidence means and
+# what the retired 0.70/0.65 pair would flag), the configuration guide's
+# restatement of it, and the CHANGELOG entry (the width simulation's check
+# against real narrower searches, the top_k report, the digest report).
+SERVING_REPLAY = RESULTS + "serving-policy-replay-20260925-r3.json"
+_ABST = "abstention"
+_SIM = "width_simulation_check"
+
+
+def _floor_cell(floor: float, guard: float, key: str, scale: float = 1.0):
+    def read(d):
+        cell = next(c for c in d[_ABST]["floor_grid"]
+                    if c["search_confidence_floor"] == floor
+                    and c["guard_min_score"] == guard)
+        return scale * float(cell[key])
+    return read
+
+
+def _policy(stratum: str, policy: str, key: str, scale: float = 1.0,
+            index: int | None = None):
+    def read(d):
+        row = next(p for p in d["strata"][stratum]["policies"]
+                   if p["policy"] == policy)
+        v = row[key] if index is None else row[key][index]
+        return scale * float(v)
+    return read
+
+
+def _default_width_reach(d) -> float:
+    total = sum(x["searches"] for x in d["requested_top_k"])
+    width8 = next(x["searches"] for x in d["requested_top_k"]
+                  if x["top_k"] == 8)
+    return 100.0 * width8 / total
+
+
+_CL_SIM = ("list is not a prefix of a wider one. Checked against 146 real "
+           "narrower")
+_CL_K6 = "would keep 85.4% of the hits agents reported using (Wilson 95%"
+_CL_K6B = "79.6-89.8) at 75% of the rows, and 7 would keep 93.0%."
+_CL_DIG = ("Digests are 15% of the rows unfiltered searches serve, but 9% "
+           "of the hits")
+for _cid, _doc, _needle, _val, _stated, _places in [
+    ("replay-abst-searches", RETRIEVAL_GUIDE,
+     "Over 1,072 real agent searches",
+     lambda d: d[_ABST]["searches"], 1072, 0),
+    ("replay-abst-fired", RETRIEVAL_GUIDE,
+     "it fired on none of them: all but one served",
+     lambda d: d[_ABST]["served_nothing"], 0, 0),
+    ("replay-abst-no-entries", RETRIEVAL_GUIDE,
+     "it fired on none of them: all but one served",
+     lambda d: d[_ABST]["served_no_entries"], 1, 0),
+    ("replay-abst-probe-low", RETRIEVAL_GUIDE,
+     "0.43-0.64, inside the range of real hits",
+     lambda d: min(d[_ABST]["absent_answer_probes"]["top_dense_cosine"]),
+     0.43, 2),
+    ("replay-abst-probe-high", RETRIEVAL_GUIDE,
+     "0.43-0.64, inside the range of real hits",
+     lambda d: max(d[_ABST]["absent_answer_probes"]["top_dense_cosine"]),
+     0.64, 2),
+    ("replay-abst-top-cosine-median", RETRIEVAL_GUIDE,
+     "(median top cosine 0.61 across",
+     lambda d: d[_ABST]["top_dense_cosine"]["p50"], 0.61, 2),
+    ("replay-abst-old-pair-flags", RETRIEVAL_GUIDE,
+     "that pair would flag 26% of searches",
+     _floor_cell(0.70, 0.65, "flagged_share", 100.0), 26, 0),
+    ("replay-abst-old-pair-false", RETRIEVAL_GUIDE,
+     "including 20% of the searches whose",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
+    ("replay-abst-old-pair-probes", RETRIEVAL_GUIDE,
+     "it caught 3 of the 4 absent-answer",
+     _floor_cell(0.70, 0.65, "absent_probes_flagged"), 3, 0),
+    ("replay-abst-probes-found", RETRIEVAL_GUIDE,
+     "it caught 3 of the 4 absent-answer",
+     lambda d: d[_ABST]["absent_answer_probes"]["found"], 4, 0),
+    ("replay-abst-dense-p01", RETRIEVAL_GUIDE,
+     "same agent searches the weakest served dense hit was at cosine 0.39 at",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["p01"], 0.39, 2),
+    ("replay-abst-dense-below-030", RETRIEVAL_GUIDE,
+     "the 1st percentile, and below 0.30 in one search of 1,064, so today the",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["below_0.30"], 1, 0),
+    ("replay-abst-dense-searches", RETRIEVAL_GUIDE,
+     "the 1st percentile, and below 0.30 in one search of 1,064, so today the",
+     lambda d: d[_ABST]["lowest_served_dense_cosine"]["searches"], 1064, 0),
+    ("replay-abst-config-fifth", CONFIG_GUIDE,
+     "embedder, and the pair this guide used to recommend would flag a fifth",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share"), 0.2, 1),
+    # The CHANGELOG entry restates the same artifact.
+    ("replay-cl-abst-searches", CHANGELOG,
+     "nothing matched, meaning no entry and no cortex fact; over 1,072 agent",
+     lambda d: d[_ABST]["searches"], 1072, 0),
+    ("replay-cl-abst-fired", CHANGELOG, "searches it fired on none.",
+     lambda d: d[_ABST]["served_nothing"], 0, 0),
+    ("replay-cl-old-pair-flags", CHANGELOG,
+     "on current agent traffic it would flag 26% of",
+     _floor_cell(0.70, 0.65, "flagged_share", 100.0), 26, 0),
+    ("replay-cl-old-pair-false", CHANGELOG,
+     "searches, including 20% of the searches whose hits the agent then used.",
+     _floor_cell(0.70, 0.65, "flagged_labelled_share", 100.0), 20, 0),
+    ("replay-cl-sim-pairs", CHANGELOG, _CL_SIM,
+     lambda d: d[_SIM]["pairs"], 146, 0),
+    ("replay-cl-sim-ledger-pairs", CHANGELOG,
+     "searches (142 of them the token ledger's 8 -> 3 runs of 2026-09-03/04),",
+     lambda d: d[_SIM]["widths"]["8->3"], 142, 0),
+    ("replay-cl-sim-exact", CHANGELOG,
+     "the simulation reproduced the exact served set in 98 and the prefix in",
+     lambda d: d[_SIM]["simulate_exact_set"], 98, 0),
+    ("replay-cl-prefix-exact", CHANGELOG,
+     "20. It reads the bank in a read-only transaction and writes an",
+     lambda d: d[_SIM]["prefix_exact_set"], 20, 0),
+    ("replay-cl-default-width-searches", CHANGELOG,
+     "Reported, not changed: the default `top_k` stays 8. Over 276",
+     lambda d: d["strata"]["default_width"]["searches"], 276, 0),
+    ("replay-cl-k6-kept", CHANGELOG, _CL_K6,
+     _policy("default_width", "top_k=6", "used_kept_share", 100.0), 85.4, 1),
+    ("replay-cl-k6-wilson-lo", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 0),
+     79.6, 1),
+    ("replay-cl-k6-wilson-hi", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "used_kept_wilson95", 100.0, 1),
+     89.8, 1),
+    ("replay-cl-k6-rows", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=6", "rows_kept_share", 100.0), 75, 0),
+    ("replay-cl-k7-kept", CHANGELOG, _CL_K6B,
+     _policy("default_width", "top_k=7", "used_kept_share", 100.0), 93.0, 1),
+    ("replay-cl-k6-prefix", CHANGELOG,
+     "one; that method gives 90.3% on the same searches. At most 25.7% of",
+     _policy("default_width", "top_k=6 (prefix)", "used_kept_share", 100.0),
+     90.3, 1),
+    ("replay-cl-default-reach", CHANGELOG,
+     "one; that method gives 90.3% on the same searches. At most 25.7% of",
+     _default_width_reach, 25.7, 1),
+    ("replay-cl-digest-ratio", CHANGELOG,
+     "- Digests, reported and left unchanged: served digests are used at 0.51x",
+     lambda d: d["digests"]["rank_matched_all_rows"]["rank_matched_ratio"],
+     0.51, 2),
+    ("replay-cl-digest-ratio-lo", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
+     lambda d: d["digests"]["rank_matched_all_rows"][
+         "rank_matched_ratio_session_bootstrap95"][0], 0.38, 2),
+    ("replay-cl-digest-ratio-hi", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
+     lambda d: d["digests"]["rank_matched_all_rows"][
+         "rank_matched_ratio_session_bootstrap95"][1], 0.64, 2),
+    ("replay-cl-digest-reach", CHANGELOG,
+     "0.38-0.64). 53% of unfiltered agent searches serve at least one digest.",
+     lambda d: 100.0 * d["digests"]["presence"][
+         "searches_serving_a_digest_share"], 53, 0),
+    ("replay-cl-digest-rows", CHANGELOG, _CL_DIG,
+     lambda d: 100.0 * d["digests"]["presence"]["digest_row_share"], 15, 0),
+    ("replay-cl-digest-used", CHANGELOG, _CL_DIG,
+     lambda d: 100.0 * d["digests"]["presence"]["digest_used_share"], 9, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(SERVING_REPLAY,),
+        value=_val, stated=_stated, places=_places))
+
+
+# ── the lazy reference-bank client (2026-09-23) ──────────────────────────
+# A ChromaDB client per service start leaked ~19 threads and ~3 MB for the
+# life of the process. The per-start numbers come from 50 isolated starts on
+# each code path, the slice numbers from the same 218 PG-backed tests under
+# each, run back to back on the same host at the same system load.
+INIT_EAGER = RESULTS + "service-init-reference-bank-eager-master.json"
+INIT_LAZY = RESULTS + "service-init-reference-bank-lazy.json"
+SLICE_EAGER = RESULTS + "suite-cost-reference-bank-slice-eager-master.json"
+SLICE_LAZY = RESULTS + "suite-cost-reference-bank-slice-lazy.json"
+_START = "a service start drops from 0.068 s to 0.002 s,"
+_STARTS = "and 50 starts leave 34 threads instead of 988"
+_SLICE = "a slice of 218 PG-backed tests runs in 91.2 s instead of 107.5 s"
+_PEAK = "and peaks at 61 threads instead of 3,743 and 3.92 GB instead of 4.54 GB"
+_PER = "process-wide cache until the process exits, each with about 19 threads and"
+_PER_MB = "~3 MB on a 16-CPU host, so a process that builds many services, like the"
+for _cid, _needle, _arts, _val, _stated, _places in [
+    ("refbank-start-eager-s", _START, (INIT_EAGER,),
+     lambda d: d["mean_start_s"], 0.068, 3),
+    ("refbank-start-lazy-s", _START, (INIT_LAZY,),
+     lambda d: d["mean_start_s"], 0.002, 3),
+    ("refbank-starts-n", _STARTS, (INIT_LAZY,), lambda d: d["n"], 50, 0),
+    ("refbank-starts-threads-lazy", _STARTS, (INIT_LAZY,),
+     lambda d: d["threads_after"], 34, 0),
+    ("refbank-starts-threads-eager", _STARTS, (INIT_EAGER,),
+     lambda d: d["threads_after"], 988, 0),
+    ("refbank-threads-per-start", _PER, (INIT_EAGER, INIT_LAZY),
+     lambda e, l: (e["threads_after"] - l["threads_after"]) / e["n"], 19, 0),
+    ("refbank-mb-per-start", _PER_MB, (INIT_EAGER, INIT_LAZY),
+     lambda e, l: (e["private_mb_after"] - l["private_mb_after"]) / e["n"],
+     3, 0),
+    ("refbank-slice-tests", _SLICE, (SLICE_LAZY,),
+     lambda d: d["counts"]["passed"], 218, 0),
+    ("refbank-slice-wall-lazy", _SLICE, (SLICE_LAZY,),
+     lambda d: d["wall_s"], 91.2, 1),
+    ("refbank-slice-wall-eager", _SLICE, (SLICE_EAGER,),
+     lambda d: d["wall_s"], 107.5, 1),
+    ("refbank-slice-threads-lazy", _PEAK, (SLICE_LAZY,),
+     lambda d: d["peak_pytest_threads"], 61, 0),
+    ("refbank-slice-threads-eager", _PEAK, (SLICE_EAGER,),
+     lambda d: d["peak_pytest_threads"], 3743, 0),
+    ("refbank-slice-gb-lazy", _PEAK, (SLICE_LAZY,),
+     lambda d: d["peak_pytest_private_gb"], 3.92, 2),
+    ("refbank-slice-gb-eager", _PEAK, (SLICE_EAGER,),
+     lambda d: d["peak_pytest_private_gb"], 4.54, 2),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=_arts,
+        value=_val, stated=_stated, places=_places))
+
+
+
+# ── the daemon's idle heap trim (2026-09-23) ─────────────────────────────
+# The CHANGELOG and the configuration guide publish how much memory glibc
+# kept after encode bursts, what trimming cost, and why the fixed mmap
+# threshold was not shipped. Every number is recomputed from the raw
+# per-run data of the three artifacts, not from their summaries.
+ALLOC_POOL = RESULTS + "allocator-trim-pool-20260923.json"
+ALLOC_SWEEP = RESULTS + "allocator-trim-probe-20260923.json"
+ALLOC_PAIRS = RESULTS + "allocator-trim-latency-20260923.json"
+
+
+def _alloc_runs(art, dtype=None, workload=None, arm=None):
+    return [r["result"] for r in art["runs"]
+            if dtype in (None, r["dtype"]) and workload in (None, r["workload"])
+            and arm in (None, r["arm"])]
+
+
+def _alloc_pool_kept(pool, dtype, arm):
+    """Worst growth over base a burst left resident: the settled reading,
+    or what remained after the trim in a trimming arm."""
+    return max((s["trim"]["anon_after_mb"] if "trim" in s else s["anon_settled_mb"])
+               - res["base"]["anon_mb"]
+               for res in _alloc_runs(pool, dtype, "pool4", arm)
+               for s in res["steps"])
+
+
+def _alloc_pool_idle(pool, dtype, arm):
+    """(lowest, highest) resident growth over base at idle, per run."""
+    idle = [res["idle_after_gc"]["anon_mb"] - res["base"]["anon_mb"]
+            for res in _alloc_runs(pool, dtype, "pool4", arm)]
+    return min(idle), max(idle)
+
+
+def _alloc_trims(sweep):
+    """Every trim of the sweep's trim-after-every-burst arm."""
+    return [s["trim"] for res in _alloc_runs(sweep, arm="trim")
+            for s in res["steps"]]
+
+
+def _alloc_median(values):
+    values = sorted(values)
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def _alloc_peak_cut(sweep):
+    """(smallest, largest) drop in the worst burst peak, ctrl -> mmap128k."""
+    cuts = [max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "ctrl")
+                for s in res["steps"])
+            - max(s["peak_hwm_mb"] for res in _alloc_runs(sweep, d, w, "mmap128k")
+                  for s in res["steps"])
+            for d in ("fp32", "auto") for w in ("single", "threads4")]
+    return min(cuts), max(cuts)
+
+
+def _alloc_none(pairs, dtype, arm, metric):
+    return pairs["pairs_summary"][f"{dtype}/pairs/{arm}"][metric]["none_median"]
+
+
+_ALLOC_KEPT = ("encodes left up to 3,158 MiB of freed\n  memory resident with "
+               "the fp32 embedder (1,693 MiB bf16)")
+_ALLOC_IDLE = ("1,007-1,433 MiB of it (bf16 897-1,476 MiB) was still resident "
+               "at idle;\n  with glibc's default arenas, 2,616-2,739 MiB (bf16 "
+               "1,462-1,523 MiB)")
+_ALLOC_IDLE_GUIDE = ("1,007-1,433 MiB of it was still resident at idle with the "
+                     "fp32 embedder (897-1,476 MiB bf16)")
+_ALLOC_TRIMMED = ("stayed at or below its starting level (within 14 MiB above it "
+                  "with\n  default arenas)")
+_ALLOC_TRIM_COST = ("a trim took a median\n  7 ms (at most 141 ms, returning 1,381 MiB)")
+_ALLOC_POOL_TRIM = ("Trims returning 1,387-3,030 MiB after a concurrent\n"
+                    "  burst took 21-54 ms")
+
+
+def _alloc_pool_big_trims(pool):
+    """Trims after a concurrent burst that returned at least 1 GiB."""
+    return [s["trim"] for res in _alloc_runs(pool, workload="pool4")
+            for s in res["steps"]
+            if "trim" in s and s["trim"]["freed_mb"] >= 1024]
+
+
+_ALLOC_ENCODE = "(+0.01 s against a 0.23 s noise floor)"
+_ALLOC_MMAP = "removes the retention and cuts burst peaks by 228-1,238 MiB"
+_ALLOC_SLOWDOWN = "slows a bf16 encode\n  ~26% (fp32 ~10%)"
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("alloc-pool-kept-fp32", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "fp32", "ctrl"), 3158, 0),
+    ("alloc-pool-kept-bf16", CHANGELOG, _ALLOC_KEPT, ALLOC_POOL,
+     lambda a: _alloc_pool_kept(a, "auto", "ctrl"), 1693, 0),
+    ("alloc-pool-idle-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-idle-defarena-fp32-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[0], 2616, 0),
+    ("alloc-pool-idle-defarena-fp32-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "defarena")[1], 2739, 0),
+    ("alloc-pool-idle-defarena-bf16-lo", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[0], 1462, 0),
+    ("alloc-pool-idle-defarena-bf16-hi", CHANGELOG, _ALLOC_IDLE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "defarena")[1], 1523, 0),
+    ("alloc-pool-idle-guide-fp32-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[0], 1007, 0),
+    ("alloc-pool-idle-guide-fp32-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "fp32", "ctrl")[1], 1433, 0),
+    ("alloc-pool-idle-guide-bf16-lo", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[0], 897, 0),
+    ("alloc-pool-idle-guide-bf16-hi", CONFIG_GUIDE, _ALLOC_IDLE_GUIDE, ALLOC_POOL,
+     lambda a: _alloc_pool_idle(a, "auto", "ctrl")[1], 1476, 0),
+    ("alloc-pool-trimmed-arena2", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(0, max(_alloc_pool_kept(a, d, "trim") for d in ("fp32", "auto"))),
+     0, 0),
+    ("alloc-pool-trimmed-defarena", CHANGELOG, _ALLOC_TRIMMED, ALLOC_POOL,
+     lambda a: max(_alloc_pool_kept(a, d, "defarena_trim") for d in ("fp32", "auto")),
+     14, 0),
+    ("alloc-pool-trim-ms-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["ms"] for t in _alloc_pool_big_trims(a)), 21, 0),
+    ("alloc-pool-trim-ms-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["ms"] for t in _alloc_pool_big_trims(a)), 54, 0),
+    ("alloc-pool-trim-freed-lo", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: min(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 1387, 0),
+    ("alloc-pool-trim-freed-hi", CHANGELOG, _ALLOC_POOL_TRIM, ALLOC_POOL,
+     lambda a: max(t["freed_mb"] for t in _alloc_pool_big_trims(a)), 3030, 0),
+    ("alloc-trim-median-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-median-ms-guide", CONFIG_GUIDE, "a trim took a median 7 ms",
+     ALLOC_SWEEP, lambda a: _alloc_median(t["ms"] for t in _alloc_trims(a)), 7, 0),
+    ("alloc-trim-max-ms", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(t["ms"] for t in _alloc_trims(a)), 141, 0),
+    ("alloc-trim-max-freed", CHANGELOG, _ALLOC_TRIM_COST, ALLOC_SWEEP,
+     lambda a: max(_alloc_trims(a), key=lambda t: t["ms"])["freed_mb"], 1381, 0),
+    ("alloc-trim-encode-delta", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["median_delta"], 0.01, 2),
+    ("alloc-trim-encode-noise", CHANGELOG, _ALLOC_ENCODE, ALLOC_PAIRS,
+     lambda a: a["pairs_summary"]["fp32/pairs/ctrl"]["encode_4x512_s"]
+     ["noise_floor"], 0.23, 2),
+    ("alloc-mmap-peak-cut-min", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[0], 228, 0),
+    ("alloc-mmap-peak-cut-max", CHANGELOG, _ALLOC_MMAP, ALLOC_SWEEP,
+     lambda a: _alloc_peak_cut(a)[1], 1238, 0),
+    ("alloc-mmap-faults-fp32", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "fp32", "mmap128k", "minflt")
+     / _alloc_none(a, "fp32", "ctrl", "minflt"), 3.4, 1),
+    ("alloc-mmap-faults-bf16", CHANGELOG,
+     "multiplies the embedder's page faults 3.4-4.9x", ALLOC_PAIRS,
+     lambda a: _alloc_none(a, "auto", "mmap128k", "minflt")
+     / _alloc_none(a, "auto", "ctrl", "minflt"), 4.9, 1),
+    ("alloc-mmap-slowdown-bf16", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "auto", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "auto", "ctrl", "encode_4x512_s") - 1),
+     26, 0),
+    ("alloc-mmap-slowdown-fp32", CHANGELOG, _ALLOC_SLOWDOWN, ALLOC_PAIRS,
+     lambda a: 100 * (_alloc_none(a, "fp32", "mmap128k", "encode_4x512_s")
+                      / _alloc_none(a, "fp32", "ctrl", "encode_4x512_s") - 1),
+     10, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# -- the board audit log's cost (2026-09-24) -------------------------------
+# One synthetic night at the recorded scale of the 2026-09-23/24
+# fifteen-session trial. The retention default
+# (CoordinationConfig.audit_retention_days) and both docs rest on it.
+AUDIT_VOLUME = RESULTS + "coordination-audit-volume-20260924.json"
+
+
+def _audit_overhead(bound: Callable) -> Callable[[dict], float]:
+    """The append's paired median cost on send, receive and acknowledgment:
+    each audit arm against the control arm that ran just before it."""
+    def value(d):
+        arms = d["arms"]
+        return bound(arms[audit]["latency"][kind]["p50_ms"]
+                     - arms[control]["latency"][kind]["p50_ms"]
+                     for audit, control in (("audit", "control"),
+                                            ("audit-repeat", "control-repeat"))
+                     for kind in ("send", "receive", "ack"))
+    return value
+
+
+for _doc, _prefix in ((CONFIG_GUIDE, "config-guide"), (CHANGELOG, "changelog")):
+    for _cid, _needle, _val, _stated, _places in [
+        ("audit-events", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["events_total"], 2671, 0),
+        ("audit-mb", "left 2,671 events in 1.6 MB",
+         lambda d: d["arms"]["audit"]["table_total_bytes"] / 1e6, 1.6, 1),
+        ("audit-overhead-min", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(min), 1.3, 1),
+        ("audit-overhead-max", "the append added 1.3 to 2.2 ms",
+         _audit_overhead(max), 2.2, 1),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"{_prefix}-{_cid}", doc=_doc, needle=_needle,
+            artifacts=(AUDIT_VOLUME,), value=_val, stated=_stated,
+            places=_places))
+
+
+def _control_spread(kinds) -> Callable[[dict], float]:
+    """How far the two control runs' medians drifted apart: the noise floor
+    the append's cost is read against."""
+    def value(d):
+        arms = d["arms"]
+        return max(abs(arms["control"]["latency"][k]["p50_ms"]
+                       - arms["control-repeat"]["latency"][k]["p50_ms"])
+                   for k in kinds)
+    return value
+
+
+for _doc, _prefix, _needle in (
+        (CONFIG_GUIDE, "config-guide", "own two runs differed by up to 0.6 ms"),
+        (CHANGELOG, "changelog", "whose own runs differed by up to 0.6 ms")):
+    CLAIMS.append(Claim(
+        id=f"{_prefix}-audit-control-spread", doc=_doc, needle=_needle,
+        artifacts=(AUDIT_VOLUME,), value=_control_spread(("send", "receive", "ack")),
+        stated=0.6, places=1))
+CLAIMS.append(Claim(
+    id="config-guide-audit-update-control-spread", doc=CONFIG_GUIDE,
+    needle="its two control runs were 1.8 ms apart", artifacts=(AUDIT_VOLUME,),
+    value=_control_spread(("update",)), stated=1.8, places=1))
+CLAIMS.append(Claim(
+    id="config-guide-audit-90-nights", doc=CONFIG_GUIDE,
+    needle="144.5 MB if every one of 90 nights",
+    artifacts=(AUDIT_VOLUME,),
+    value=lambda d: d["if_every_night_were_a_trial_mb"]["90"],
+    stated=144.5, places=1))
+
+
+# -- the coordination report's trial baseline (2026-09-26) -----------------
+# evals/coordination_report.py over the 2026-09-23/24 trial's final board
+# export; every later coordination change is judged against it.
+COORD_BASELINE = RESULTS + "coordination-baseline-20260924.json"
+
+
+def _coord_window(label: str, principal: str, stat: str) -> Callable[[dict], float]:
+    return lambda d: (d["metrics"]["ack_latency"]["windows"][label]
+                      ["by_principal"][principal][stat])
+
+
+for _cid, _needle, _val, _stated, _places in [
+    ("coord-baseline-messages", "Over 816 messages",
+     lambda d: d["volume"]["messages"], 816, 0),
+    ("coord-baseline-evening-median", "median 296.8 s (p90 5261.2 s)",
+     _coord_window("16:00-21:30 AEST", "claude-code", "median_s"), 296.8, 1),
+    ("coord-baseline-evening-p90", "median 296.8 s (p90 5261.2 s)",
+     _coord_window("16:00-21:30 AEST", "claude-code", "p90_s"), 5261.2, 1),
+    ("coord-baseline-night-median", "31.7 s (p90 140.2 s)",
+     _coord_window("01:00-07:05 AEST", "claude-code", "median_s"), 31.7, 1),
+    ("coord-baseline-night-p90", "31.7 s (p90 140.2 s)",
+     _coord_window("01:00-07:05 AEST", "claude-code", "p90_s"), 140.2, 1),
+    ("coord-baseline-never-acked", "12 messages were never",
+     lambda d: d["metrics"]["ack_latency"]["overall"]["all"]["never_acked"], 12, 0),
+    ("coord-baseline-batch-share", "32.7% of acknowledgements came in batches",
+     lambda d: 100 * d["metrics"]["batch_acks"]["messages_in_batches"]
+     / d["metrics"]["batch_acks"]["acked_messages"], 32.7, 1),
+    ("coord-baseline-bursts", "39 fan-out bursts covered 22.8% of messages",
+     lambda d: d["metrics"]["fanout_bursts"]["bursts"], 39, 0),
+    ("coord-baseline-burst-share", "39 fan-out bursts covered 22.8% of messages",
+     lambda d: 100 * d["metrics"]["fanout_bursts"]["messages"] / d["volume"]["messages"],
+     22.8, 1),
+    ("coord-baseline-baton-passes", "39 baton passes",
+     lambda d: d["metrics"]["suite_baton"]["baton_passes"], 39, 0),
+]:
+    CLAIMS.append(Claim(id=_cid, doc=CHANGELOG, needle=_needle,
+                        artifacts=(COORD_BASELINE,), value=_val, stated=_stated,
+                        places=_places))
+
+
+# ── the memory-policy bench sanity check (2026-09-25) ────────────────────
+# evals/README.md reports that the bench could not separate no policy from
+# the full policy at 3 replicates. The regraded artifact is the one the
+# README cites; the run's own artifact predates the review's grader fixes.
+MPB_SANITY = RESULTS + "memory-policy-bench-sanity-20260925-regraded.json"
+
+
+def _mpb_arm(arm, metric):
+    return lambda d: d["summary"]["per_arm"][arm]["metrics"][metric]["mean"]
+
+
+for _cid, _needle, _value, _stated, _places in (
+        ("mpb-sanity-score-gain", "The full policy moved the score +0.19 over no policy",
+         lambda d: d["comparisons"]["full_separate_hook - none"]["score"]["delta"], 0.19, 2),
+        ("mpb-sanity-aa-noise", "inside the A/A noise floor of 0.24",
+         lambda d: d["aa_noise"]["score"], 0.24, 2),
+        ("mpb-sanity-spend", "72 valid runs, $7.04 at list prices",
+         lambda d: d["totals"]["usd"], 7.04, 2),
+        ("mpb-sanity-valid-runs", "72 valid runs, $7.04 at list prices",
+         lambda d: d["summary"]["valid_runs"], 72, 0),
+        ("mpb-sanity-calls-none", "0.4 (none) to 1.0 (full) memory calls per run",
+         _mpb_arm("none", "memory_tool_calls"), 0.4, 1),
+        ("mpb-sanity-calls-full", "0.4 (none) to 1.0 (full) memory calls per run",
+         _mpb_arm("full_separate_hook", "memory_tool_calls"), 1.0, 1)):
+    CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(MPB_SANITY,),
+                        value=_value, stated=_stated, places=_places))
+
+
+# ── the coordination check-in rules (evals/README.md + CHANGELOG, 2026-09-28) ──
+# evals/coordination_checkin_bench.py: seven runs. The -final run carries the
+# shipped wording on all three scenario sets; the others explain the three
+# cut rules and the shared-resource rule's three wordings. Send-side figures
+# are computed from the runs themselves, never from ``per_rule`` (which mixes
+# send and no-send situations: the review of #435 caught a doc that did).
+_CCB = RESULTS + "coordination-checkin-bench-checkin-rules-20260928"
+CCB_BOARD, CCB_TASK = _CCB + ".json", _CCB + "-task.json"
+CCB_ABL, CCB_ABL2 = _CCB + "-ablation.json", _CCB + "-ablation2.json"
+CCB_V2, CCB_HELD, CCB_FINAL = _CCB + "-shipped.json", _CCB + "-heldout.json", _CCB + "-final.json"
+CCB_CODEX, CCB_CODEX4 = _CCB + "-codex.json", _CCB + "-codex4.json"
+
+
+def _ccb_delta(key, field="delta", i=None, part=None):
+    def value(d):
+        comps = d["by_set"][part]["comparisons"] if part else d["comparisons"]
+        v = comps[key][field]
+        return v if i is None else v[i]
+    return value
+
+
+def _ccb_arm(arm, metric, rule=None, part=None):
+    def value(d):
+        a = (d["by_set"][part]["summary"] if part else d["summary"])["per_arm"][arm]
+        return a[metric] if rule is None else a[metric][rule]
+    return value
+
+
+def _ccb_runs(arm, rule, expect, part=None):
+    """Accuracy over one arm's runs of one rule and expectation."""
+    def value(d):
+        xs = [r["grade"]["correct"] for r in d["runs"]
+              if r["arm"] == arm and r["rule"] == rule and r["expect"] == expect
+              and (part is None or r.get("set", "main") == part)]
+        return sum(xs) / len(xs)
+    return value
+
+
+_USD = lambda d: d["total_usd"]  # noqa: E731
+
+for _cid, _doc, _needle, _art, _value, _stated, _places in (
+        # 1. board frame
+        ("ccb-board-spend", EVALS, "(no suffix, $2.01)", CCB_BOARD, _USD, 2.01, 2),
+        ("ccb-board-new-old", EVALS, "+0.000 over 120 pairs. Every arm", CCB_BOARD,
+         _ccb_delta("new - old"), 0.0, 3),
+        # 2. task frame, five rules
+        ("ccb-task-spend", EVALS, "(`-task`, $2.32): new minus old", CCB_TASK, _USD, 2.32, 2),
+        ("ccb-task-new-old", EVALS, "+0.100 [+0.025, +0.200], all of it", CCB_TASK,
+         _ccb_delta("new - old"), 0.100, 3),
+        ("ccb-task-rule2", EVALS, "(+0.375) and keep-your-status-true (+0.125)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["shared_resource"]["delta"],
+         0.375, 3),
+        ("ccb-task-rule5", EVALS, "(+0.375) and keep-your-status-true (+0.125)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["status_true"]["delta"],
+         0.125, 3),
+        ("ccb-task-waiting-none", EVALS, "(no check-in: 0.92)", CCB_TASK,
+         _ccb_arm("none", "per_rule", "waiting"), 0.92, 2),
+        ("ccb-task-waiting-old", EVALS, "(no check-in: 0.92)", CCB_TASK,
+         _ccb_arm("old", "per_rule", "waiting"), 1.0, 2),
+        # 3-4. ablations
+        ("ccb-ablation-cut13", EVALS, "decided exactly like the full text (+0.000 over 120 pairs)",
+         CCB_ABL, _ccb_delta("cut13 - new"), 0.0, 3),
+        ("ccb-ablation-codex", EVALS, "form carrying only them scored 0.90", CCB_ABL,
+         _ccb_arm("codex", "accuracy"), 0.90, 2),
+        ("ccb-ablation2-cut134", EVALS, "changed nothing (+0.000 over 120 pairs)", CCB_ABL2,
+         _ccb_delta("cut134 - cut13"), 0.0, 3),
+        ("ccb-ablation2-codex2", EVALS, "shared-resource rule instead scored 0.97", CCB_ABL2,
+         _ccb_arm("codex2", "accuracy"), 0.97, 2),
+        # 5. wording 2 with the two kept rules
+        ("ccb-v2-spend", EVALS, "(`-shipped`, $2.23;", CCB_V2, _USD, 2.23, 2),
+        ("ccb-v2-new-old", EVALS, "+0.108 [+0.025, +0.208] over", CCB_V2,
+         _ccb_delta("new - old"), 0.108, 3),
+        ("ccb-v2-rule2-send-old", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("old", "shared_resource", "send"), 0.25, 2),
+        ("ccb-v2-rule2-send-new", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("new", "shared_resource", "send"), 1.0, 2),
+        ("ccb-v2-rule5-send-old", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("old", "status_true", "send"), 0.67, 2),
+        ("ccb-v2-rule5-send-new", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("new", "status_true", "send"), 1.0, 2),
+        # 6. first held-out set
+        ("ccb-held-spend", EVALS, "(`-heldout`, $0.46)", CCB_HELD, _USD, 0.46, 2),
+        ("ccb-held-new-old", EVALS, "old -0.208 [-0.500, +0.000] over 24 pairs", CCB_HELD,
+         _ccb_delta("new - old"), -0.208, 3),
+        ("ccb-held-hold-new", EVALS, "(no-send held 0.50 against the old", CCB_HELD,
+         _ccb_arm("new", "no_send_specificity"), 0.50, 2),
+        ("ccb-held-hold-old", EVALS, "text's 0.92)", CCB_HELD,
+         _ccb_arm("old", "no_send_specificity"), 0.92, 2),
+        # 7. the shipped wording on every set
+        ("ccb-final-spend", EVALS, "(`-final`, $4.74, 960 runs)", CCB_FINAL, _USD, 4.74, 2),
+        ("ccb-final-valid", EVALS, "(`-final`, $4.74, 960 runs)", CCB_FINAL,
+         lambda d: d["summary"]["valid_runs"], 960, 0),
+        *((f"ccb-final-{_part}-{_arm}", EVALS, _row, CCB_FINAL,
+           _ccb_arm(_arm, "accuracy", part=_part), _v, 2)
+          for _part, _row, _vals in (
+              ("main", "| main (40 situations) | 0.87 | 0.91 | 0.98 | 0.98 |",
+               (0.87, 0.91, 0.98, 0.98)),
+              ("heldout", "| first held-out (8, used for wording 3) | 0.88 | 0.92 | 0.83 | 1.00 |",
+               (0.88, 0.92, 0.83, 1.00)),
+              ("heldout2", "| second held-out (16, frozen first) | 0.96 | 0.92 | 0.81 | 0.98 |",
+               (0.96, 0.92, 0.81, 0.98)))
+          for _arm, _v in zip(("none", "old", "v2", "new"), _vals)),
+        ("ccb-final-main-delta", EVALS, "main +0.075 [-0.008, +0.175] (120 pairs)", CCB_FINAL,
+         _ccb_delta("new - old", part="main"), 0.075, 3),
+        ("ccb-final-held-delta", EVALS, "first held-out +0.083 [+0.000, +0.292] (24)", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout"), 0.083, 3),
+        ("ccb-final-held2-delta", EVALS, "held-out +0.062", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout2"), 0.062, 3),
+        ("ccb-final-held2-lo", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new - old", "ci95", 0, part="heldout2"), -0.062, 3),
+        ("ccb-final-held2-hi", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new - old", "ci95", 1, part="heldout2"), 0.208, 3),
+        ("ccb-final-held2-aa", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new@aa - new", part="heldout2"), -0.021, 3),
+        ("ccb-final-held2-v2", EVALS, "held-out set: +0.167 [+0.000, +0.375]", CCB_FINAL,
+         _ccb_delta("new - v2", part="heldout2"), 0.167, 3),
+        ("ccb-final-held2-none", EVALS, "over no check-in at all (0.96)", CCB_FINAL,
+         _ccb_arm("none", "accuracy", part="heldout2"), 0.96, 2),
+        ("ccb-final-held2-r2-send-old", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("old", "shared_resource", "send", "heldout2"), 0.75, 2),
+        ("ccb-final-held2-r2-send-new", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("new", "shared_resource", "send", "heldout2"), 1.0, 2),
+        ("ccb-final-held2-r2-hold-new", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("new", "shared_resource", "no_send", "heldout2"), 0.92, 2),
+        ("ccb-final-held2-r2-hold-old", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("old", "shared_resource", "no_send", "heldout2"), 0.92, 2),
+        # 8-9. the Codex forms, and two re-scorings of the frozen set
+        ("ccb-codex-spend", EVALS, "(`-codex`, $2.54)", CCB_CODEX, _USD, 2.54, 2),
+        ("ccb-codex-main", EVALS, "+0.067 [-0.017,", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="main"), 0.067, 3),
+        ("ccb-codex-held", EVALS, "-0.167 [-0.417, +0.000], no-send", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="heldout"), -0.167, 3),
+        ("ccb-codex-held-hold", EVALS, "held 0.50.", CCB_CODEX,
+         _ccb_arm("codex3", "no_send_specificity", part="heldout"), 0.50, 2),
+        ("ccb-codex4-spend", EVALS, "(`-codex4`, $2.56)", CCB_CODEX4, _USD, 2.56, 2),
+        ("ccb-codex4-main", EVALS, "(+0.000 [-0.058, +0.058])", CCB_CODEX4,
+         _ccb_delta("codex4 - old", part="main"), 0.0, 3),
+        ("ccb-codex4-held", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout"), 0.083, 3),
+        ("ccb-codex4-held2", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout2"), 0.062, 3),
+        *((f"ccb-codex4-hold-{_part}", EVALS, "holding every no-send situation", CCB_CODEX4,
+           _ccb_arm("codex4", "no_send_specificity", part=_part), 1.0, 2)
+          for _part in ("main", "heldout", "heldout2")),
+        ("ccb-rescore-codex", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-rescore-codex4", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX4, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-changelog-rescore", CHANGELOG, "frozen set at +0.042 each", CCB_CODEX4,
+         _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        # CHANGELOG
+        ("ccb-changelog-held", CHANGELOG, "over-sent on held-out ones (-0.208 against the", CCB_HELD,
+         _ccb_delta("new - old"), -0.208, 3),
+        ("ccb-changelog-held2", CHANGELOG, "[-0.062, +0.208] over 48 pairs", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout2"), 0.062, 3),
+        ("ccb-changelog-main", CHANGELOG, "+0.075 [-0.008, +0.175] over 120 pairs", CCB_FINAL,
+         _ccb_delta("new - old", part="main"), 0.075, 3),
+        ("ccb-changelog-v2", CHANGELOG, "by +0.167 [+0.000, +0.375] on the frozen set", CCB_FINAL,
+         _ccb_delta("new - v2", part="heldout2"), 0.167, 3)):
+    CLAIMS.append(Claim(id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+                        value=_value, stated=_stated, places=_places))
+
+
+# ── the check-in subagent rewording (evals/README.md, 2026-10-02) ──────────
+# The closing subagent sentence reworded after schema v50: arms v3 (served
+# text), new and new@aa on all three sets.
+CCB_SUB = RESULTS + "coordination-checkin-bench-checkin-rules-20261002-subagents.json"
+for _cid, _needle, _value, _stated, _places in (
+        ("ccb-sub-spend", "run valid, $4.29)", _USD, 4.29, 2),
+        ("ccb-sub-valid", "3 replicates, 576 runs", lambda d: d["summary"]["valid_runs"], 576, 0),
+        ("ccb-sub-new-v3", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3"), 0.005, 3),
+        ("ccb-sub-new-v3-lo", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 0), -0.021, 3),
+        ("ccb-sub-new-v3-hi", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 1), 0.036, 3),
+        ("ccb-sub-aa", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new"), -0.016, 3),
+        ("ccb-sub-aa-lo", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 0), -0.057, 3),
+        ("ccb-sub-aa-hi", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 1), 0.021, 3),
+        ("ccb-sub-held2", "second held-out +0.021",
+         _ccb_delta("new - v3", part="heldout2"), 0.021, 3)):
+    CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(CCB_SUB,),
+                        value=_value, stated=_stated, places=_places))
+
+
+# ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
+# evals/seed_bench.py before and after the _mentions boundary change, plus
+# a control that patches the old matcher back in on the new tree (it
+# reproduces "before" exactly, so the bench is deterministic). The June
+# figure is the canonical seed_bench.json, left as that decision's record.
+_SEED = RESULTS + "seed_bench-2026-09-27-mentions-"
+SEED_BEFORE, SEED_AFTER = _SEED + "before.json", _SEED + "after.json"
+SEED_CONTROL = _SEED + "control-oldmatcher.json"
+SEED_JUNE = RESULTS + "seed_bench.json"
+
+
+def _seed_p(variant: str, metric: str = "seed_precision") -> Callable[[dict], float]:
+    return lambda d: d[variant][metric]
+
+
+for _cid, _art, _variant, _metric, _needle, _stated in (
+        ("seed-mentions-shipped-precision", SEED_AFTER, "A", "seed_precision",
+         "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-shipped-recall", SEED_AFTER, "A", "seed_recall",
+         "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-shipped-precision-before", SEED_BEFORE, "A",
+         "seed_precision", "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-v0-before", SEED_BEFORE, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.28),
+        ("seed-mentions-v0-control", SEED_CONTROL, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.28),
+        ("seed-mentions-v0-after", SEED_AFTER, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.295),
+        ("seed-mentions-v0-june", SEED_JUNE, "v0", "seed_precision",
+         "(its June figure was 0.262)", 0.262),
+        ("seed-mentions-c-before", SEED_BEFORE, "C", "seed_precision",
+         "0.75 → 0.625", 0.75),
+        ("seed-mentions-c-control", SEED_CONTROL, "C", "seed_precision",
+         "0.75 → 0.625", 0.75),
+        ("seed-mentions-c-after", SEED_AFTER, "C", "seed_precision",
+         "0.75 → 0.625", 0.625)):
+    CLAIMS.append(Claim(id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+                        value=_seed_p(_variant, _metric), stated=_stated, places=3))
+
+
+SEED_MARKS = RESULTS + "seed_bench-2026-09-27-combining-marks.json"
+
+
+def test_seed_bench_combining_mark_rerun_scores_the_same():
+    """The combining-mark fix to _mentions says the seed bench scored the
+    same as the boundary fix's after run on every metric but latency."""
+    assert "scored the same as that fix's after run" in _read_doc(CHANGELOG)
+    assert SEED_MARKS in _tracked()
+    after, marks = _load_artifact(SEED_AFTER), _load_artifact(SEED_MARKS)
+
+    def scores(d):
+        return {k: {m: x for m, x in v.items() if m != "mean_latency_ms"}
+                for k, v in d.items() if k != "embedder"}
+    assert scores(marks) == scores(after)
+    assert marks["embedder"] == after["embedder"]
+
+
+# -- the live Codex doorbell probe (2026-09-28) ------------------------------
+# One run of evals/codex_doorbell_probe.py against a real Codex home; the
+# Codex validation record states its timeline.
+CODEX_SPEC = "docs/specs/2026-09-12-codex-coordination.md"
+DOORBELL_PROBE = RESULTS + "codex-doorbell-probe-20260928.json"
+
+
+def _probe_delta(field: str) -> Callable[[dict], float]:
+    def value(d):
+        line = d["timeline"]
+        if field == "bell":
+            return line["bell_at"] - line["sent_at"]
+        return line[field] - line["sent_at"]
+    return value
+
+
+for _cid, _needle, _field, _stated in (
+        ("codex-doorbell-probe-bell", "| Bell queued (`codex queue`, ledger `bell` line) | 15.966 |",
+         "bell", 15.966),
+        ("codex-doorbell-probe-read", "| Thread's first board event (its `read`) | 26.842 |",
+         "read_at", 26.842),
+        ("codex-doorbell-probe-ack", "| Acknowledgment | 30.804 |", "ack_at", 30.804)):
+    CLAIMS.append(Claim(id=_cid, doc=CODEX_SPEC, needle=_needle, artifacts=(DOORBELL_PROBE,),
+                        value=_probe_delta(_field), stated=_stated, places=3))
+
+
+def test_codex_doorbell_probe_record_backs_its_outcome():
+    record = _load_artifact(DOORBELL_PROBE)
+    assert record["harness"] == "evals/codex_doorbell_probe.py"
+    assert record["timeline"]["outcome"] == "rung, turn taken, acknowledged"
+    assert '"rung, turn taken,\nacknowledged"' in _read_doc(CODEX_SPEC)

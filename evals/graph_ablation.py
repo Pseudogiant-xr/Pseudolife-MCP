@@ -51,6 +51,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import embedder_stamp  # noqa: E402
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -112,14 +114,18 @@ def guard_dsn(dsn: str) -> None:
     The 2026-09-04 pre-merge review found the original matched only a
     lower-case URI path segment: ``dbname=pseudolife_memory``, a trailing
     slash, and an upper-cased name each walked through onto the live bank.
+    Its regex replacement still missed a ``?dbname=`` query override and a
+    percent-encoded name (2026-09-23), so the name now comes from libpq's
+    own parser, shared with the test/bench resets (storage/schema.py).
     """
-    text = re.sub(r"\?.*$", "", dsn.strip())
-    names = {text.rstrip("/").rsplit("/", 1)[-1].lower()}
-    names.update(m.group(1).lower() for m in re.finditer(
-        r"\bdbname\s*=\s*['\"]?([^\s'\"]+)", text, re.IGNORECASE))
-    hit = sorted(names & {d.lower() for d in FORBIDDEN_DBS})
-    if hit:
-        sys.exit(f"refusing to run against {hit[0]!r} — restore a dedicated "
+    from pseudolife_memory.storage.schema import (
+        dsn_database_name, is_production_database,
+    )
+
+    db = dsn_database_name(dsn)
+    if db is None or is_production_database(db, extra=FORBIDDEN_DBS):
+        target = repr(db) if db else "a database the DSN leaves implicit"
+        sys.exit(f"refusing to run against {target} — restore a dedicated "
                  "replay copy instead (see the module docstring)")
 
 
@@ -520,6 +526,7 @@ def main(argv: list[str] | None = None) -> int:
                         else "(dataclass defaults)"),
         "top_k": args.top_k,
         "hub_degree_p95": hub_threshold,
+        "embedder": embedder_stamp.describe(svc),
         "graph_shape": shape,
         "ablation": {
             "relational_questions": {

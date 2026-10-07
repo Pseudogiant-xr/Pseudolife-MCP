@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 
 logger = logging.getLogger("pseudolife-mcp.daemon")
 
@@ -28,11 +29,71 @@ DEFAULT_PORT = 8765
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+# The near-limit memory warning fires at most once per interval: the image's
+# Docker healthcheck polls /health every 15 s.
+_MEMORY_WARNING_INTERVAL_S = 600.0
+_last_memory_warning: float | None = None
+_monotonic = time.monotonic
+
 
 # (AuthHealthASGI and its _json_response helper were removed in the
 # 2026-07-02 zombie sweep: run_daemon has served the composed Console app
 # from web/api.py — which owns /health and the token gate — since the
 # Cortex Console landed, leaving this wrapper dead code.)
+
+
+def _last_backup(svc) -> dict | None:
+    """How old the newest backup is, read from the record ops/backup.ps1|.sh
+    copy into ``<data_dir>/last-backup.json`` (that dump's manifest).
+
+    The host's backup folder is invisible to the container, and an age no
+    one can see is how 2026-09-14..20 went six days without a dump
+    unnoticed. ``None`` (key omitted) when no backup has been recorded or
+    the record is unreadable: /health must never fail on this, and a
+    half-parsed age would be worse than none.
+    """
+    data_dir = getattr(svc, "data_dir", None)
+    if data_dir is None:
+        return None
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    try:
+        record = json.loads(
+            (Path(data_dir) / "last-backup.json").read_text(encoding="utf-8-sig"))
+        at = str(record["created_at"])
+        created = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    age = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+    return {"at": at, "age_hours": round(age, 1),
+            "rotation": str(record.get("rotation", "unknown"))}
+
+
+def _build_stamp() -> dict | None:
+    """The commit this daemon image was built from, baked in by
+    ``ops/Dockerfile.daemon`` from build args ``ops/update.ps1|.sh`` fill.
+
+    /health could not name the deployed commit (2026-09-23 review): the
+    package version only moves with a release. ``None`` (key omitted) when
+    the process is not running from a stamped image, i.e. a pip install.
+    An image built without the args carries the Dockerfile's ``unknown``
+    defaults and reports them as such.
+    """
+    sha = os.environ.get("PSEUDOLIFE_BUILD_GIT_SHA")
+    if not sha:
+        return None
+    dirty = {"true": True, "false": False}.get(
+        os.environ.get("PSEUDOLIFE_BUILD_DIRTY", "").strip().lower())
+    # "checkout" (ops/docker-compose.yml) or "release" (the release
+    # workflow): a release image carries a commit too, and a checkout build
+    # still reports the last release's version, so the update notices need
+    # to know which built this image (2026-09-29).
+    return {"git_sha": sha, "dirty": dirty,
+            "built_at": os.environ.get("PSEUDOLIFE_BUILD_TIME", "unknown"),
+            "source": os.environ.get("PSEUDOLIFE_BUILD_SOURCE") or "unknown"}
 
 
 def _extractor_status(svc) -> str | None:
@@ -44,6 +105,10 @@ def _extractor_status(svc) -> str | None:
     ``memory_fact_set`` is the only cortex writer. The daemon logs that at
     startup, but the shim spawns it with ``stderr=DEVNULL``, so ``/health``
     is the only place a lite user can actually read it.
+
+    ``"stalled"`` is a configured extractor that live dreams stopped
+    reaching (the service's dream-stall record, 2026-09-28): read from
+    memory, not probed.
 
     Returns ``None`` — key omitted — when the service carries no resolvable
     dream config, so the bare stubs this builder is called with elsewhere
@@ -66,7 +131,101 @@ def _extractor_status(svc) -> str | None:
     # extract, so calling it "none" would be a lie.
     configured = (r.get("primary_url") and r.get("primary_model")) or (
         r.get("fallback_url") and r.get("fallback_model"))
-    return "configured" if configured else "none"
+    if not configured:
+        return "none"
+    # A configured extractor that live dreams have stopped reaching. The
+    # fallback serving for the primary is a warning, not a stall: dreams
+    # still land, so it stays "configured" with the ``stall`` sub-object.
+    stall = _dream_stall(svc)
+    if stall is not None and stall.get("reason") != "served_by_fallback":
+        return "stalled"
+    return "configured"
+
+
+def reserved_principal_warnings(allowed_principals, token_map) -> list[str]:
+    """Startup warnings for a configured principal named ``daemon``: the
+    board reserves that name for the daemon's own notices, so such a caller
+    silently loses the board. Names the principal, never a token."""
+    from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
+
+    out = []
+    if DAEMON_PRINCIPAL in (allowed_principals or []):
+        out.append(f"coordination.allowed_principals lists {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; no client can use the "
+                   "board as it. Rename the principal.")
+    if DAEMON_PRINCIPAL in (token_map or {}).values():
+        out.append(f"PSEUDOLIFE_MCP_TOKENS maps a token to {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; that caller cannot use "
+                   "the board. Rename the principal.")
+    return out
+
+
+def start_stored_principals(svc, token_map, *, auth_configured: bool):
+    """Install the stored-principal snapshot (schema v53) and start its
+    refresh thread, or ``None`` on a daemon without Postgres, which has no
+    store. The snapshot ignores rows whose name the environment already
+    uses. The refresher gets the DSN, never the service, so it cannot take
+    the service or coordination lock."""
+    from pseudolife_memory.principal_store import PrincipalRefresher, PrincipalSnapshot
+    from pseudolife_memory.principals import install_store
+
+    dsn = getattr(svc, "_db_url", None)
+    if not dsn:
+        return None
+    snapshot = PrincipalSnapshot(shadowed=set((token_map or {}).values()))
+    install_store(snapshot)
+    PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured).start()
+    return snapshot
+
+
+def _dream_stall(svc) -> dict | None:
+    """The service's open dream-stall record, or ``None`` (none open, or a
+    stand-in without a tracker). Lock-free; never raises."""
+    tracker = getattr(svc, "_dream_stall_tracker", None)
+    if tracker is None:
+        return None
+    try:
+        return tracker.snapshot()["stall"]
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
+
+
+def _bank_fingerprint(svc) -> str | None:
+    """The first 16 hex characters of the SHA-256 of the coordination bank
+    id, or ``None`` while it is unknown: before storage has started (this
+    never starts it), on file-mode storage, or before the board has created
+    the id. Called only after the storage ping succeeded. Not secret; it
+    tells two daemons' banks apart, which ``version`` and ``schema``
+    cannot. Never raises."""
+    read = getattr(getattr(svc, "_storage", None), "cached_bank_id", None)
+    if read is None:
+        return None
+    try:
+        bank_id = read()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
+    if not isinstance(bank_id, str) or not bank_id:
+        return None
+    import hashlib
+
+    return hashlib.sha256(bank_id.encode("utf-8")).hexdigest()[:16]
+
+
+def _warn_near_memory_limit(memory: dict) -> None:
+    global _last_memory_warning
+    now = _monotonic()
+    if (_last_memory_warning is not None
+            and now - _last_memory_warning < _MEMORY_WARNING_INTERVAL_S):
+        return
+    _last_memory_warning = now
+    events = memory.get("events") or {}
+    logger.warning(
+        "daemon memory is near its limit: working set %.0f%% of %d MiB "
+        "(memory.events max=%s oom_kill=%s). An OOM kill restarts the "
+        "daemon; raise PSEUDOLIFE_DAEMON_MEM_LIMIT or find the growth.",
+        100 * memory["used_fraction"], memory["limit_bytes"] // 2**20,
+        events.get("max", "n/a"), events.get("oom_kill", "n/a"),
+    )
 
 
 def _build_health_payload(svc, token_present: bool) -> dict:
@@ -77,23 +236,70 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     constructs anything (storage stays lazily-unbuilt until the first real
     tool call, exactly as before).
     """
+    from pseudolife_memory import __version__
+    from pseudolife_memory.plugin_hooks import daemon_hooks_digest
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     payload = {
         "status": "ok",
+        # The package version, so the shim, the plugin hooks and `doctor`
+        # can tell when they are not the daemon's release (2026-09-21: a
+        # stale plugin cache ran an hour against a newer daemon unnoticed).
+        "version": __version__,
         "schema": SCHEMA_META_VERSION,
         "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
         "auth": token_present,
+        # Which bank this is (see _bank_fingerprint); null means unknown.
+        # Filled in after the storage ping below succeeds.
+        "bank": None,
         # Durable-save failures since start (see service.PersistenceError);
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
     }
+    build = _build_stamp()
+    if build is not None:
+        payload["build"] = build
+    # Whether the board is on and the wake caps in force (config.yaml
+    # `coordination.wake`), so `pseudolife-mcp doctor` can report them
+    # beside each client's wake path (2026-09-28: wake on by default).
+    # Absent when the service carries no config (stand-ins).
+    coordination = getattr(getattr(svc, "config", None), "coordination", None)
+    if coordination is not None:
+        from dataclasses import asdict
+        payload["coordination"] = {"enabled": bool(coordination.enabled),
+                                   "wake": asdict(coordination.wake)}
+    # The newest release the daemon knows of (config.yaml `updates`, read
+    # from PyPI on a background thread) and whether a shim may take the
+    # client half of an update unattended; the shim and the briefing read
+    # this. Absent when the service carries no config (stand-ins).
+    updates = getattr(getattr(svc, "config", None), "updates", None)
+    if updates is not None:
+        from pseudolife_memory import release_check
+        known = release_check.snapshot()
+        payload["updates"] = {"check_releases": bool(known["enabled"]),
+                              "latest_release": known["latest_release"],
+                              "checked_at": known["checked_at"],
+                              "unattended_clients": bool(updates.unattended_clients),
+                              "unattended_daemon": bool(updates.unattended_daemon)}
     # Deliberately does NOT touch `status`: a bank with no extractor is
     # serving correctly, and web/api.py turns any non-ok payload into a
     # 503 that the Docker healthcheck and ops/update.* treat as fatal.
     extractor = _extractor_status(svc)
     if extractor is not None:
         payload["extractor"] = extractor
+    # The dream-stall record behind "stalled" (or the fallback warning),
+    # same refusal to touch `status`. This probe is unauthenticated, so
+    # only the reason and times: the error string stays in dream_status.
+    stall = _dream_stall(svc) if extractor in ("stalled", "configured") else None
+    if stall is not None:
+        payload["stall"] = {key: stall.get(key) for key in (
+            "since", "reason", "consecutive_failures", "last_success_at")}
+    # The hook scripts this daemon was built with, so a cached plugin at the
+    # same version but with different hooks can be told apart (2026-09-21).
+    # Absent from a bare pip install, which ships no plugin tree.
+    hooks_digest = daemon_hooks_digest()
+    if hooks_digest:
+        payload["hooks_digest"] = hooks_digest
     # Schema v25's dim-mismatch refusal is otherwise invisible here: it
     # fires lazily on the first tool call, so a daemon whose every memory
     # tool is dead would still report "ok" without this (2026-07-28 review).
@@ -101,6 +307,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if init_refusal:
         payload["status"] = "degraded"
         payload["init_refusal"] = init_refusal
+    # The retryable counterpart (2026-09-23): a failed store build backing
+    # off, or the bank writer lease held by another process. Degraded, so
+    # the Docker healthcheck and ops/update.* see a daemon that serves
+    # nothing yet, but under its own key: the shim exits on init_refusal,
+    # and a client that starts during a retry window must still attach.
+    not_ready = getattr(svc, "_not_ready", None)
+    if not_ready:
+        payload["status"] = "degraded"
+        payload["not_ready"] = not_ready
     # A legacy .pt import that stopped part-way leaves a bank that serves
     # normally but is SHORT (#187). Nothing else on this payload would show
     # it, so it surfaces here — but deliberately WITHOUT touching `status`:
@@ -112,6 +327,61 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     migration_partial = getattr(svc, "_migration_partial", None)
     if migration_partial:
         payload["migration_partial"] = migration_partial
+    # A failed dream-tracking initialization disables the dream alone —
+    # pull/commit/status refuse while every other tool serves normally —
+    # so it was visible only in the boot logs, and consolidation could be
+    # stopped for days with nothing to see it by. Named here for the same
+    # reason migration_partial is, and with the same deliberate refusal to
+    # touch `status`: a dream-only degradation must not become the 503 the
+    # healthcheck and ops/update.* treat as fatal. Only the code, not the
+    # detail — the message can carry a DSN.
+    dream_tracking_error = getattr(svc, "_dream_tracking_error", None)
+    if dream_tracking_error:
+        payload["dream_tracking_error"] = dream_tracking_error.split(":", 1)[0]
+    # The bank is within 20% of the capacity where every new memory
+    # permanently deletes an old one. A flag only: this probe is
+    # unauthenticated, so the counts stay in memory_stats. Same deliberate
+    # choice as migration_partial — NOT `degraded`, which would have the
+    # healthcheck restart a daemon that is serving correctly.
+    capacity_warning = getattr(getattr(svc, "_cms", None),
+                               "capacity_warning", None)
+    if capacity_warning is not None:
+        try:
+            if capacity_warning():
+                payload["capacity_warning"] = True
+        except Exception:  # noqa: BLE001 — /health must never fail on this
+            pass
+    # An uncertain lesson commit latches until a durable recheck resolves it
+    # (service._recover_lesson_synthesis): lesson reads and the lesson
+    # snapshot fail meanwhile, and nothing else here would show it. Same
+    # deliberate choice as migration_partial above — NOT `degraded`. A
+    # restart IS the documented recovery, so a degraded payload would have
+    # the Docker healthcheck take one automatically, discarding every
+    # unsaved change the running daemon still holds (weights, access
+    # counts, dirty cortex/world slots) for a latch that a human should
+    # look at. The loudness lives in the ERROR log this flag mirrors.
+    if getattr(svc, "_lesson_synthesis_recovery", None) is not None:
+        payload["lesson_reconciliation_required"] = True
+    # Memory headroom (2026-09-23 OOM kill): the daemon lived at ~95% of its
+    # cgroup cap for weeks while this payload said "ok". Same deliberate
+    # choice as migration_partial: near_limit never touches `status`, since
+    # a 503 would have the healthcheck and ops/update.* treat a daemon that
+    # is still serving as dead. The loudness is the rate-limited WARNING.
+    from pseudolife_memory.utils import memory_headroom
+
+    try:
+        memory = memory_headroom.read_memory_headroom()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        logger.debug("memory headroom read failed", exc_info=True)
+        memory = {"source": "unavailable"}
+    payload["memory"] = memory
+    if memory.get("near_limit"):
+        _warn_near_memory_limit(memory)
+    # What is actually embedding (backend, device, resident dtype), so a
+    # deploy can be verified live. Absent until the embedder is built.
+    embedder = getattr(svc, "_embedder", None)
+    if embedder is not None and hasattr(embedder, "describe"):
+        payload["embedder"] = embedder.describe()
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't
@@ -123,15 +393,92 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         try:
             storage.ping()
             payload["db"] = "ok"
+            # Only after a successful ping: a stalled database has already
+            # cost this probe one connect timeout, never a second.
+            payload["bank"] = _bank_fingerprint(svc)
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"
+    # The newest backup's age and rotation state (2026-09-23 review), with
+    # the same deliberate refusal to touch `status` as migration_partial: an
+    # old backup is no reason for the 503 that has the Docker healthcheck
+    # restart a daemon that is serving fine.
+    last_backup = _last_backup(svc)
+    if last_backup is not None:
+        payload["last_backup"] = last_backup
     return payload
+
+
+MOVED_MARKER = "moved.json"
+MOVE_MARKER = "move.json"
+
+
+def moved_refusal(environ) -> str | None:
+    """Why this daemon must not start because of ``pseudolife-mcp move``:
+    the message, else ``None``.
+
+    On the old host, ``move`` fences the database (``ALLOW_CONNECTIONS
+    false``) and writes ``moved.json`` into the stopped daemon's data dir.
+    The fence is what stops the old host; the file is the readable reason, so
+    an operator who starts the old container hears where the bank went
+    instead of a refused database connection. On the new host, ``move.json``
+    marks a restored bank whose move has not started this daemon yet.
+    Presence is the refusal: a file that cannot be read still refuses."""
+    data_dir = environ.get("PSEUDOLIFE_MCP_DATA_DIR")
+    if not data_dir:
+        return None
+    import json
+    from pathlib import Path
+
+    incoming = Path(data_dir) / MOVE_MARKER
+    if incoming.exists():
+        # The other end of a move: the bank was restored here and the move
+        # that restored it has not started this daemon yet. Starting now
+        # (a reboot, an unattended update) could serve a half-moved bank
+        # beside a source that still runs.
+        try:
+            record = json.loads(incoming.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            record = None
+        move_id = record.get("move_id") if isinstance(record, dict) else None
+        return (f"an unfinished pseudolife-mcp move{' ' + move_id if isinstance(move_id, str) else ''} "
+                f"is restoring into this bank ({incoming}); refusing to start. The bank here is a clone "
+                f"of the move's source, which may still be serving it. Let the move finish (it starts "
+                f"this daemon itself), or rerun it with --resume. To abandon the move, restore this "
+                f"host's own pre-move safety dump from data/backups with ops/restore.sh --apply "
+                f"--backup-file <dump> --state-archive <archive>, which replaces /data and this gate "
+                f"with it. Remove the gate by hand only to finish the move deliberately, with the "
+                f"source stopped and fenced: docker run --rm --volumes-from pseudolife-mcp-daemon "
+                f"<image> rm -f /data/move.json")
+    marker = Path(data_dir) / MOVED_MARKER
+    if not marker.exists():
+        return None
+    try:
+        record = json.loads(marker.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        record = None
+    where = record.get("moved_to") if isinstance(record, dict) else None
+    when = record.get("moved_at") if isinstance(record, dict) else None
+    if isinstance(where, str) and where:
+        head = f"this bank moved to {where}" + (f" on {when}" if isinstance(when, str) and when else "")
+    else:
+        head = "this bank moved to another host"
+    return (f"{head} ({marker}); refusing to start. Point clients at the new daemon "
+            f"(pseudolife-mcp connect <its url>). To roll the move back instead, stop the new "
+            f"daemon first, lift the database fence (ALTER DATABASE <db> WITH ALLOW_CONNECTIONS "
+            f"true) and remove {marker}.")
 
 
 def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
+
+    # Before storage, the model and the bind: a moved bank's old daemon
+    # never starts (see moved_refusal).
+    moved = moved_refusal(os.environ)
+    if moved is not None:
+        print(f"pseudolife-mcp serve: {moved}", file=sys.stderr, flush=True)
+        sys.exit(2)
 
     # Logging must be configured BEFORE storage resolution: mcp_server's
     # basicConfig (the process's usual configurer) is only imported
@@ -197,7 +544,16 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
             "\"token:principal,...\") — continuing with the singular "
             "PSEUDOLIFE_MCP_TOKEN only; no named principals are active.")
+    try:
+        allowed = mcp_server.service.config.coordination.allowed_principals
+    except AttributeError:
+        allowed = []
+    for warning in reserved_principal_warnings(allowed, token_map):
+        logger.warning("%s", warning)
     auth_configured = token is not None or bool(token_map)
+    # Invited machines (pseudolife-mcp invite / pair): resolved after the
+    # environment from an in-memory view of the bank's principals table.
+    start_stored_principals(mcp_server.service, token_map, auth_configured=auth_configured)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
     )
@@ -233,6 +589,16 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
     mcp_server.start_session_reaper()
+    # The newest-release check (config.yaml `updates.check_releases`): its
+    # own thread, so a daemon with no route to PyPI answers /health as fast
+    # as one with.
+    from pseudolife_memory import release_check
+
+    release_check.start(getattr(mcp_server.service.config, "updates", None))
+    # Returns what glibc keeps resident after encode bursts (Linux only).
+    from pseudolife_memory.utils import heap_trim
+
+    heap_trim.start()
 
     # DNS-rebinding policy for /mcp (see mcp_server.transport_security_for).
     # MUST precede streamable_http_app() below — the SDK caches these settings

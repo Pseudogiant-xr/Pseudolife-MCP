@@ -1,0 +1,337 @@
+{
+  "bench": "memory-policy",
+  "bench_version": 1,
+  "tag": "codex-plumbing-20260925",
+  "created_at": "2026-09-25T05:14:54Z",
+  "git_head": "a0b1f533c12bc4dc9524a6bb6da368267a15ae21-dirty",
+  "client": "codex",
+  "client_version": "codex-cli 0.156.1",
+  "model": "gpt-6-astra",
+  "effort": "low",
+  "tool_search": "true",
+  "arms": [
+    {
+      "label": "compact",
+      "variant": "compact"
+    }
+  ],
+  "scenarios": [
+    "d_continue"
+  ],
+  "replicates": 1,
+  "seed": 20260925,
+  "rotate": false,
+  "cost_lambda": 0.1,
+  "fixture_digest": "9616603a31ba",
+  "planted": {
+    "entries": {
+      "release_note": 1,
+      "migration_status_1": 21,
+      "migration_status_2": 22,
+      "export_cause": 2,
+      "d01": 3,
+      "d02": 4,
+      "d03": 5,
+      "d04": 6,
+      "d05": 7,
+      "d06": 8,
+      "d07": 9,
+      "d08": 10,
+      "d09": 11,
+      "d10": 12,
+      "d11": 13,
+      "d12": 14,
+      "d13": 15,
+      "d14": 16,
+      "d15": 17,
+      "d16": 18,
+      "d17": 19,
+      "d18": 20
+    },
+    "lessons": {
+      "test_command": {
+        "task": "run the lanternfish test suite",
+        "aspect": "command",
+        "action": "inserted"
+      },
+      "quill_ndk": {
+        "task": "build the quillmate android app",
+        "aspect": "pitfall",
+        "action": "inserted"
+      },
+      "harbor_token": {
+        "task": "configure harborview ci dashboards",
+        "aspect": "pitfall",
+        "action": "inserted"
+      },
+      "tide_queue": {
+        "task": "run a tidepool backfill",
+        "aspect": "pitfall",
+        "action": "inserted"
+      }
+    }
+  },
+  "constant_surfaces": [
+    "MCP server instructions (pseudolife_memory.mcp_server._MCP_INSTRUCTIONS)",
+    "memory tool names and descriptions (deferred behind ToolSearch in Claude Code)",
+    "the SessionStart episode-handle line",
+    "the session briefing (identical bank in every arm)",
+    "the plugin's slash-command descriptions"
+  ],
+  "held_off": [
+    "UserPromptSubmit per-turn reminder",
+    "coordination hooks and daemon coordination",
+    "Claude Code auto memory (a file-based memory policy of its own)",
+    "dream / extractor"
+  ],
+  "summary": {
+    "per_arm": {
+      "compact": {
+        "runs": 1,
+        "metrics": {
+          "score": {
+            "mean": 0.4674694,
+            "ci95": [
+              0.4674694,
+              0.4674694
+            ],
+            "n": 1
+          },
+          "compliance": {
+            "mean": 0.5,
+            "ci95": [
+              0.5,
+              0.5
+            ],
+            "n": 1
+          },
+          "task_success": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 1
+          },
+          "used_ids_precision": {
+            "mean": 0.6666666666666666,
+            "ci95": [
+              0.6666666666666666,
+              0.6666666666666666
+            ],
+            "n": 1
+          },
+          "used_ids_recall": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "searched_before_acting": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "lesson_search_used": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "outcome_logged": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "session_titled": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "cost_bite": {
+            "mean": 32530.6,
+            "ci95": [
+              32530.6,
+              32530.6
+            ],
+            "n": 1
+          },
+          "input_tokens": {
+            "mean": 128974.0,
+            "ci95": [
+              128974.0,
+              128974.0
+            ],
+            "n": 1
+          },
+          "output_tokens": {
+            "mean": 687.0,
+            "ci95": [
+              687.0,
+              687.0
+            ],
+            "n": 1
+          },
+          "tool_calls": {
+            "mean": 4.0,
+            "ci95": [
+              4.0,
+              4.0
+            ],
+            "n": 1
+          },
+          "memory_tool_calls": {
+            "mean": 4.0,
+            "ci95": [
+              4.0,
+              4.0
+            ],
+            "n": 1
+          },
+          "wall_s": {
+            "mean": 39.0,
+            "ci95": [
+              39.0,
+              39.0
+            ],
+            "n": 1
+          }
+        },
+        "per_scenario": {
+          "d_continue": {
+            "compliance": 0.5,
+            "task_success": 0.0
+          }
+        }
+      }
+    },
+    "valid_runs": 1,
+    "invalid_runs": 0
+  },
+  "comparisons": {},
+  "aa_noise": null,
+  "acceptance": {},
+  "totals": {
+    "input_tokens": 128974.0,
+    "output_tokens": 687.0,
+    "cache_read": 110976.0,
+    "cache_creation": 0.0,
+    "bite": 32530.6
+  },
+  "runs": [
+    {
+      "run_id": "codex-plumbing-20260925-compact-d_continue-r0",
+      "arm": "compact",
+      "variant": "compact",
+      "scenario": "d_continue",
+      "replicate": 0,
+      "client": "codex",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "bench_version": 1,
+      "errors": [],
+      "total_s": 56.2,
+      "client_rc": 0,
+      "timed_out": false,
+      "wall_s": 39.0,
+      "cost": {
+        "input_tokens": 128974,
+        "output_tokens": 687,
+        "cache_read": 110976,
+        "cache_creation": 0,
+        "bite": 32530.6,
+        "usd": null,
+        "turns": null,
+        "tool_calls": 4,
+        "models": [],
+        "reasoning_tokens": 21
+      },
+      "grade": {
+        "rules": {
+          "searched_before_acting": false,
+          "other_session_served": true
+        },
+        "compliance": 0.5,
+        "task_success": 0.0,
+        "files": {
+          "ok": false,
+          "files": [
+            {
+              "path": "NEXT_STEPS.md",
+              "exists": false,
+              "ok": false,
+              "missing": [
+                "toml"
+              ],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 3,
+          "relevant": 2,
+          "hits": 2,
+          "credited": 3,
+          "unmatched": 0,
+          "precision": 0.6666666666666666,
+          "recall": 1.0
+        },
+        "generic": {
+          "searched_before_acting": true,
+          "lesson_search_used": true,
+          "outcome_logged": true,
+          "outcome_signals": 1,
+          "session_titled": true,
+          "memory_tool_calls": 4,
+          "tool_counts": {
+            "memory_lesson_search": 1,
+            "memory_outcome": 1,
+            "memory_search": 1,
+            "memory_session_title": 1
+          },
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "01a0d6fc-494b-75e2-bb13-e2eb8006c53a"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 1
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "policy_found": {
+          "core": true,
+          "gaps": false,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "source": "codex rollout"
+      }
+    }
+  ]
+}

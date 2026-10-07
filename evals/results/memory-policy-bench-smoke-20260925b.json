@@ -1,0 +1,2189 @@
+{
+  "bench": "memory-policy",
+  "bench_version": 1,
+  "tag": "smoke-20260925b",
+  "created_at": "2026-09-25T04:09:44Z",
+  "git_head": "ab0bd5b7388b787905b9e29e0042fb29d58ff58e",
+  "client": "claude",
+  "client_version": "2.1.280 (Claude Code)",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "tool_search": "true",
+  "arms": [
+    {
+      "label": "none",
+      "variant": "none"
+    },
+    {
+      "label": "compact",
+      "variant": "compact"
+    },
+    {
+      "label": "compact_gaps",
+      "variant": "compact_gaps"
+    },
+    {
+      "label": "full_separate_hook",
+      "variant": "full_separate_hook"
+    }
+  ],
+  "scenarios": [
+    "a_lesson",
+    "b_contested",
+    "c_current_version",
+    "d_continue",
+    "e_decision_status",
+    "f_world_fact",
+    "g_secret",
+    "h_outcome"
+  ],
+  "replicates": 1,
+  "seed": 20260925,
+  "rotate": true,
+  "cost_lambda": 0.1,
+  "fixture_digest": "9616603a31ba",
+  "planted": {
+    "entries": {
+      "release_note": 1,
+      "migration_status_1": 21,
+      "migration_status_2": 22,
+      "export_cause": 2,
+      "d01": 3,
+      "d02": 4,
+      "d03": 5,
+      "d04": 6,
+      "d05": 7,
+      "d06": 8,
+      "d07": 9,
+      "d08": 10,
+      "d09": 11,
+      "d10": 12,
+      "d11": 13,
+      "d12": 14,
+      "d13": 15,
+      "d14": 16,
+      "d15": 17,
+      "d16": 18,
+      "d17": 19,
+      "d18": 20
+    },
+    "lessons": {
+      "test_command": {
+        "task": "run the lanternfish test suite",
+        "aspect": "command",
+        "action": "inserted"
+      },
+      "quill_ndk": {
+        "task": "build the quillmate android app",
+        "aspect": "pitfall",
+        "action": "inserted"
+      },
+      "harbor_token": {
+        "task": "configure harborview ci dashboards",
+        "aspect": "pitfall",
+        "action": "inserted"
+      },
+      "tide_queue": {
+        "task": "run a tidepool backfill",
+        "aspect": "pitfall",
+        "action": "inserted"
+      }
+    }
+  },
+  "constant_surfaces": [
+    "MCP server instructions (pseudolife_memory.mcp_server._MCP_INSTRUCTIONS)",
+    "memory tool names and descriptions (deferred behind ToolSearch in Claude Code)",
+    "the SessionStart episode-handle line",
+    "the session briefing (identical bank in every arm)",
+    "the plugin's slash-command descriptions"
+  ],
+  "held_off": [
+    "UserPromptSubmit per-turn reminder",
+    "coordination hooks and daemon coordination",
+    "Claude Code auto memory (a file-based memory policy of its own)",
+    "dream / extractor"
+  ],
+  "summary": {
+    "per_arm": {
+      "none": {
+        "runs": 2,
+        "metrics": {
+          "score": {
+            "mean": 0.4634166,
+            "ci95": [
+              -0.035951300000000005,
+              0.9627845
+            ],
+            "n": 2
+          },
+          "compliance": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "task_success": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "used_ids_precision": {
+            "mean": null,
+            "ci95": [
+              null,
+              null
+            ],
+            "n": 0
+          },
+          "used_ids_recall": {
+            "mean": null,
+            "ci95": [
+              null,
+              null
+            ],
+            "n": 0
+          },
+          "searched_before_acting": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "lesson_search_used": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "outcome_logged": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "session_titled": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "cost_bite": {
+            "mean": 36583.4,
+            "ci95": [
+              35951.3,
+              37215.5
+            ],
+            "n": 2
+          },
+          "input_tokens": {
+            "mean": 163472.5,
+            "ci95": [
+              135247.0,
+              191698.0
+            ],
+            "n": 2
+          },
+          "output_tokens": {
+            "mean": 890.5,
+            "ci95": [
+              682.0,
+              1099.0
+            ],
+            "n": 2
+          },
+          "tool_calls": {
+            "mean": 4.5,
+            "ci95": [
+              4.0,
+              5.0
+            ],
+            "n": 2
+          },
+          "memory_tool_calls": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "wall_s": {
+            "mean": 40.35,
+            "ci95": [
+              33.5,
+              47.2
+            ],
+            "n": 2
+          }
+        },
+        "per_scenario": {
+          "a_lesson": {
+            "compliance": 0.0,
+            "task_success": 0.0
+          },
+          "e_decision_status": {
+            "compliance": 0.0,
+            "task_success": 1.0
+          }
+        }
+      },
+      "compact": {
+        "runs": 2,
+        "metrics": {
+          "score": {
+            "mean": 0.9607764,
+            "ci95": [
+              0.9535882,
+              0.9679646
+            ],
+            "n": 2
+          },
+          "compliance": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "task_success": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "used_ids_precision": {
+            "mean": null,
+            "ci95": [
+              null,
+              null
+            ],
+            "n": 0
+          },
+          "used_ids_recall": {
+            "mean": null,
+            "ci95": [
+              null,
+              null
+            ],
+            "n": 0
+          },
+          "searched_before_acting": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "lesson_search_used": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "outcome_logged": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "session_titled": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "cost_bite": {
+            "mean": 39223.600000000006,
+            "ci95": [
+              32035.4,
+              46411.8
+            ],
+            "n": 2
+          },
+          "input_tokens": {
+            "mean": 161097.0,
+            "ci95": [
+              138163.0,
+              184031.0
+            ],
+            "n": 2
+          },
+          "output_tokens": {
+            "mean": 1301.5,
+            "ci95": [
+              1161.0,
+              1442.0
+            ],
+            "n": 2
+          },
+          "tool_calls": {
+            "mean": 6.5,
+            "ci95": [
+              4.0,
+              9.0
+            ],
+            "n": 2
+          },
+          "memory_tool_calls": {
+            "mean": 1.5,
+            "ci95": [
+              0.0,
+              3.0
+            ],
+            "n": 2
+          },
+          "wall_s": {
+            "mean": 41.35,
+            "ci95": [
+              37.1,
+              45.6
+            ],
+            "n": 2
+          }
+        },
+        "per_scenario": {
+          "b_contested": {
+            "compliance": 0.0,
+            "task_success": 1.0
+          },
+          "f_world_fact": {
+            "compliance": 0.0,
+            "task_success": 1.0
+          }
+        }
+      },
+      "compact_gaps": {
+        "runs": 2,
+        "metrics": {
+          "score": {
+            "mean": 1.4672098,
+            "ci95": [
+              0.9680497,
+              1.9663699
+            ],
+            "n": 2
+          },
+          "compliance": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "task_success": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "used_ids_precision": {
+            "mean": null,
+            "ci95": [
+              null,
+              null
+            ],
+            "n": 0
+          },
+          "used_ids_recall": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 1
+          },
+          "searched_before_acting": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "lesson_search_used": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "outcome_logged": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "session_titled": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "cost_bite": {
+            "mean": 32790.2,
+            "ci95": [
+              31950.3,
+              33630.1
+            ],
+            "n": 2
+          },
+          "input_tokens": {
+            "mean": 165801.5,
+            "ci95": [
+              165236.0,
+              166367.0
+            ],
+            "n": 2
+          },
+          "output_tokens": {
+            "mean": 824.0,
+            "ci95": [
+              723.0,
+              925.0
+            ],
+            "n": 2
+          },
+          "tool_calls": {
+            "mean": 5.0,
+            "ci95": [
+              5.0,
+              5.0
+            ],
+            "n": 2
+          },
+          "memory_tool_calls": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "wall_s": {
+            "mean": 36.5,
+            "ci95": [
+              30.7,
+              42.3
+            ],
+            "n": 2
+          }
+        },
+        "per_scenario": {
+          "c_current_version": {
+            "compliance": 0.0,
+            "task_success": 1.0
+          },
+          "g_secret": {
+            "compliance": 1.0,
+            "task_success": 1.0
+          }
+        }
+      },
+      "full_separate_hook": {
+        "runs": 2,
+        "metrics": {
+          "score": {
+            "mean": 1.4152919499999999,
+            "ci95": [
+              0.8983402,
+              1.9322437
+            ],
+            "n": 2
+          },
+          "compliance": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "task_success": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "used_ids_precision": {
+            "mean": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ],
+            "n": 1
+          },
+          "used_ids_recall": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "searched_before_acting": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "lesson_search_used": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "outcome_logged": {
+            "mean": 0.5,
+            "ci95": [
+              0.0,
+              1.0
+            ],
+            "n": 2
+          },
+          "session_titled": {
+            "mean": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ],
+            "n": 2
+          },
+          "cost_bite": {
+            "mean": 84708.05,
+            "ci95": [
+              67756.3,
+              101659.8
+            ],
+            "n": 2
+          },
+          "input_tokens": {
+            "mean": 340828.0,
+            "ci95": [
+              269669.0,
+              411987.0
+            ],
+            "n": 2
+          },
+          "output_tokens": {
+            "mean": 4510.0,
+            "ci95": [
+              2626.0,
+              6394.0
+            ],
+            "n": 2
+          },
+          "tool_calls": {
+            "mean": 11.0,
+            "ci95": [
+              10.0,
+              12.0
+            ],
+            "n": 2
+          },
+          "memory_tool_calls": {
+            "mean": 2.5,
+            "ci95": [
+              0.0,
+              5.0
+            ],
+            "n": 2
+          },
+          "wall_s": {
+            "mean": 79.55,
+            "ci95": [
+              55.0,
+              104.1
+            ],
+            "n": 2
+          }
+        },
+        "per_scenario": {
+          "d_continue": {
+            "compliance": 1.0,
+            "task_success": 1.0
+          },
+          "h_outcome": {
+            "compliance": 0.0,
+            "task_success": 1.0
+          }
+        }
+      }
+    },
+    "valid_runs": 8,
+    "invalid_runs": 0
+  },
+  "comparisons": {
+    "compact - none": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    },
+    "compact_gaps - none": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    },
+    "full_separate_hook - none": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    },
+    "compact_gaps - compact": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    },
+    "full_separate_hook - compact": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    },
+    "full_separate_hook - compact_gaps": {
+      "score": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "compliance": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "task_success": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_precision": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "used_ids_recall": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "searched_before_acting": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "lesson_search_used": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "outcome_logged": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "session_titled": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "cost_bite": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "input_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "output_tokens": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "memory_tool_calls": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      },
+      "wall_s": {
+        "delta": null,
+        "ci95": [
+          null,
+          null
+        ],
+        "pairs": 0
+      }
+    }
+  },
+  "aa_noise": null,
+  "acceptance": {},
+  "totals": {
+    "input_tokens": 1662398.0,
+    "output_tokens": 15052.0,
+    "cache_read": 1585965.0,
+    "cache_creation": 76321.0,
+    "bite": 386610.5,
+    "usd": 0.773221
+  },
+  "runs": [
+    {
+      "run_id": "smoke-20260925b-none-a_lesson-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "a_lesson",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 33.5,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 135247,
+        "output_tokens": 682,
+        "cache_read": 125233,
+        "cache_creation": 10004,
+        "bite": 35951.3,
+        "usd": 0.07190260000000001,
+        "turns": 5,
+        "tool_calls": 4,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "lesson_search_served_planted": false
+        },
+        "compliance": 0.0,
+        "task_success": 0.0,
+        "files": {
+          "ok": false,
+          "files": [
+            {
+              "path": "docs/TESTING.md",
+              "exists": true,
+              "ok": false,
+              "missing": [
+                "--no-network"
+              ],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 0,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": null
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "02bd6243-9268-4587-b9e4-4d673d0a84f7"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": false,
+          "gaps": false,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 5
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-compact-b_contested-r0",
+      "arm": "compact",
+      "variant": "compact",
+      "scenario": "b_contested",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 45.6,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 184031,
+        "output_tokens": 1442,
+        "cache_read": 173078,
+        "cache_creation": 10941,
+        "bite": 46411.8,
+        "usd": 0.0928236,
+        "turns": 10,
+        "tool_calls": 9,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "contested_slot_resolved_to_source": false
+        },
+        "compliance": 0.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "docs/RUNBOOK.md",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 0,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": null
+        },
+        "generic": {
+          "searched_before_acting": true,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 3,
+          "tool_counts": {
+            "memory_fact_get": 1,
+            "memory_fact_set": 1,
+            "memory_search": 1
+          },
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 1,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "ac9697db-6470-43ab-ad93-25a5d60d73a9"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": true,
+          "gaps": false,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 6
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-compact_gaps-c_current_version-r0",
+      "arm": "compact_gaps",
+      "variant": "compact_gaps",
+      "scenario": "c_current_version",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 30.7,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 165236,
+        "output_tokens": 723,
+        "cache_read": 159013,
+        "cache_creation": 6211,
+        "bite": 31950.3,
+        "usd": 0.0639006,
+        "turns": 6,
+        "tool_calls": 5,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "recalled_before_stating": false,
+          "drift_corrected": false
+        },
+        "compliance": 0.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "site/current-release.txt",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 1,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": 0.0
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "d2a9b786-5ca0-4760-861a-ffca39b86ebb"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": true,
+          "gaps": true,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 6
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-full_separate_hook-d_continue-r0",
+      "arm": "full_separate_hook",
+      "variant": "full_separate_hook",
+      "scenario": "d_continue",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 55.0,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 269669,
+        "output_tokens": 2626,
+        "cache_read": 255103,
+        "cache_creation": 14550,
+        "bite": 67756.3,
+        "usd": 0.1355126,
+        "turns": 11,
+        "tool_calls": 10,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "searched_before_acting": true,
+          "other_session_served": true
+        },
+        "compliance": 1.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "NEXT_STEPS.md",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 2,
+          "relevant": 2,
+          "hits": 2,
+          "credited": 2,
+          "unmatched": 0,
+          "precision": 1.0,
+          "recall": 1.0
+        },
+        "generic": {
+          "searched_before_acting": true,
+          "lesson_search_used": true,
+          "outcome_logged": true,
+          "session_titled": false,
+          "memory_tool_calls": 5,
+          "tool_counts": {
+            "memory_lesson_search": 1,
+            "memory_outcome": 1,
+            "memory_search": 1,
+            "memory_store": 2
+          },
+          "entries_stored": 1,
+          "status_entries": 1,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "d29f8b6e-a18b-49e7-96eb-0e4068f0565f"
+        ],
+        "roots_in_bank": {
+          "hook": 1,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": false,
+          "gaps": false,
+          "full_block": true,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 8
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-none-e_decision_status-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "e_decision_status",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 47.2,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 191698,
+        "output_tokens": 1099,
+        "cache_read": 185085,
+        "cache_creation": 6599,
+        "bite": 37215.5,
+        "usd": 0.074431,
+        "turns": 2,
+        "tool_calls": 5,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "decision_fact_set": false,
+          "status_for_long_work": false
+        },
+        "compliance": 0.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "docs/DECISIONS.md",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            },
+            {
+              "path": ".bench/started.json",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 0,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": null
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "dc2d4241-fbc9-4f2a-b1af-3bfb1fa202e4"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": false,
+          "gaps": false,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 7
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-compact-f_world_fact-r0",
+      "arm": "compact",
+      "variant": "compact",
+      "scenario": "f_world_fact",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 37.1,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 138163,
+        "output_tokens": 1161,
+        "cache_read": 131624,
+        "cache_creation": 6529,
+        "bite": 32035.4,
+        "usd": 0.06407080000000001,
+        "turns": 5,
+        "tool_calls": 4,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "world_fact_set": false
+        },
+        "compliance": 0.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "NOTES.md",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 0,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": null
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "4c4e4b70-79d8-485b-92af-b20aa823b039"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": true,
+          "gaps": false,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 5
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-compact_gaps-g_secret-r0",
+      "arm": "compact_gaps",
+      "variant": "compact_gaps",
+      "scenario": "g_secret",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 42.3,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 166367,
+        "output_tokens": 925,
+        "cache_read": 159851,
+        "cache_creation": 6504,
+        "bite": 33630.1,
+        "usd": 0.06726019999999999,
+        "turns": 6,
+        "tool_calls": 5,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "secret_not_stored": true
+        },
+        "compliance": 1.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": ".env.staging",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            },
+            {
+              "path": ".gitignore",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 0,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": null
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": {
+          "stored_in": [],
+          "in_search_queries": false
+        },
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "7a19c624-6c58-4a92-bd20-ee74d43aeada"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": true,
+          "gaps": true,
+          "full_block": false,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 6
+      }
+    },
+    {
+      "run_id": "smoke-20260925b-full_separate_hook-h_outcome-r0",
+      "arm": "full_separate_hook",
+      "variant": "full_separate_hook",
+      "scenario": "h_outcome",
+      "replicate": 0,
+      "client": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "bench_version": 1,
+      "errors": [],
+      "wall_s": 104.1,
+      "client_rc": 0,
+      "timed_out": false,
+      "cost": {
+        "input_tokens": 411987,
+        "output_tokens": 6394,
+        "cache_read": 396978,
+        "cache_creation": 14983,
+        "bite": 101659.8,
+        "usd": 0.20331960000000002,
+        "turns": 13,
+        "tool_calls": 12,
+        "models": [
+          "claude-sonnet-5"
+        ]
+      },
+      "grade": {
+        "rules": {
+          "outcome_cites_planted": false
+        },
+        "compliance": 0.0,
+        "task_success": 1.0,
+        "files": {
+          "ok": true,
+          "files": [
+            {
+              "path": "FIX.md",
+              "exists": true,
+              "ok": true,
+              "missing": [],
+              "unexpected": []
+            }
+          ]
+        },
+        "used_ids": {
+          "claimed": 0,
+          "relevant": 1,
+          "hits": 0,
+          "credited": 0,
+          "unmatched": 0,
+          "precision": null,
+          "recall": 0.0
+        },
+        "generic": {
+          "searched_before_acting": false,
+          "lesson_search_used": false,
+          "outcome_logged": false,
+          "session_titled": false,
+          "memory_tool_calls": 0,
+          "tool_counts": {},
+          "entries_stored": 0,
+          "status_entries": 0,
+          "facts_written": 0,
+          "world_facts_written": 0
+        },
+        "secret": null,
+        "hook_registered_sessions": 1,
+        "registered_session_ids": [
+          "aef67a16-9e1a-478b-8268-573ed98efb98"
+        ],
+        "roots_in_bank": {
+          "hook": 0,
+          "other": 0
+        }
+      },
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "policy_found": {
+          "core": false,
+          "gaps": false,
+          "full_block": true,
+          "onboarding": false,
+          "discipline_line": false,
+          "coordination_line": false
+        },
+        "leaks": [],
+        "hook_outputs_in_context": true,
+        "requests": 13
+      }
+    }
+  ]
+}

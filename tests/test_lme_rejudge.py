@@ -388,3 +388,15 @@ def test_pairing_argv_refuses_a_run_without_the_rag_control():
     out = Path("evals/results/x-raglite.rejudge-opus5.jsonl")
     with pytest.raises(SystemExit):
         lme_rejudge.pairing_argv(out, ("hybrid", "cortex"), TAG)
+
+
+def test_rejudge_row_carries_the_embedder_stamp():
+    """A re-judged row judges the same contexts, so it keeps the stamp of
+    the embedder that built them; a legacy row stays legacy."""
+    stamp = {"extract": {"backend": "torch", "device": "cpu", "dtype": "bf16"}}
+    judge = lambda *a, **k: "yes"                         # noqa: E731
+    out = lme_rejudge.rejudge_row({**_row(), "embedder": stamp}, ("rag",),
+                                  TAG, judge)
+    assert out["embedder"] == stamp
+    assert "embedder" not in lme_rejudge.rejudge_row(_row(), ("rag",), TAG,
+                                                     judge)

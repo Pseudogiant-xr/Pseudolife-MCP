@@ -1,8 +1,8 @@
 """Daemon integration: health, token auth, tool round-trip, concurrency.
 
-Spawns the real ``pseudolife-mcp serve`` process against the test DB so
-the module-level singletons in ``mcp_server`` don't leak between tests.
-Skips cleanly when no Postgres is reachable.
+Spawns the real ``pseudolife-mcp serve`` process, on a private bank on the
+test server, so the module-level singletons in ``mcp_server`` don't leak
+between tests. Skips cleanly when no Postgres is reachable.
 """
 
 from __future__ import annotations
@@ -12,34 +12,18 @@ import json
 import os
 import subprocess
 import sys
-import time
-
-# Keep spawned daemons off the desktop: without this flag, a child
-# python.exe launched from a hidden/detached parent (pytest under an
-# agent harness or CI wrapper) allocates its OWN console window and
-# steals foreground focus on Windows.
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 import urllib.error
 import urllib.request
 
 import pytest
 
-from tests.helpers import free_port as _free_port, pg_reachable as _pg_reachable
+from tests.helpers import (free_port as _free_port,
+                           serve_on_private_bank as _serve_on_private_bank)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
 
 _TOKEN = "test-secret-token"
-
-
-def _health(port: int, timeout: float = 1.0) -> dict | None:
-    try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/health", timeout=timeout
-        ) as r:
-            return json.loads(r.read().decode())
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _post_mcp_with_host(port: int, host_header: str,
@@ -83,42 +67,10 @@ def _post_mcp_with_host(port: int, host_header: str,
 
 @pytest.fixture(scope="module")
 def daemon(tmp_path_factory):
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    data_dir = tmp_path_factory.mktemp("daemon_data")
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
-        "PSEUDOLIFE_MCP_TOKEN": _TOKEN,
-    }
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=_NO_WINDOW,
-    )
-    deadline = time.time() + 60  # torch import is slow on a cold cache
-    health = None
-    while time.time() < deadline:
-        health = _health(port)
-        if health is not None:
-            break
-        if proc.poll() is not None:
-            pytest.fail(f"daemon exited early ({proc.returncode})")
-        time.sleep(0.5)
-    if health is None:
-        proc.terminate()
-        pytest.fail("daemon never became healthy")
-    yield {"port": port, "url": f"http://127.0.0.1:{port}", "health": health}
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with _serve_on_private_bank(
+            "daemonhttp", tmp_path_factory.mktemp("daemon_data"),
+            env_extra={"PSEUDOLIFE_MCP_TOKEN": _TOKEN}) as d:
+        yield d
 
 
 def test_health_unauthenticated(daemon):
@@ -161,6 +113,65 @@ def test_health_flags_a_partial_legacy_import_without_going_degraded():
     clean = _build_health_payload(_Clean(), token_present=False)
     assert clean["status"] == "ok"
     assert "migration_partial" not in clean
+
+
+def test_health_names_a_dream_tracking_failure_without_going_degraded():
+    """A failed dream-tracking initialization disables the dream alone —
+    pull/commit/status refuse while every other tool serves normally. It
+    was invisible outside the boot logs, so an operator had no way to see
+    why consolidation had stopped. Same treatment as ``migration_partial``:
+    named on the payload, ``status`` deliberately untouched (web/api.py
+    turns any non-ok payload into a 503 the healthcheck treats as fatal)."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 0
+        _init_refusal = None
+        _storage = None
+        _migration_partial = None
+        _dream_tracking_error = (
+            "dream_ack_initialization_failed: connection lost")
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["dream_tracking_error"] == "dream_ack_initialization_failed"
+
+    class _Clean(_Stub):
+        _dream_tracking_error = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "dream_tracking_error" not in clean
+
+
+def test_health_flags_pending_lesson_reconciliation_without_going_degraded():
+    """An uncertain lesson commit latches the service until a durable recheck
+    resolves it: lesson reads and the lesson snapshot fail meanwhile, and
+    nothing else on this payload says so. It must stay ``status: "ok"`` for
+    the same reason ``migration_partial`` does — web/api.py serves a non-ok
+    payload as HTTP 503, and the Docker healthcheck would restart the
+    container, discarding the unsaved state a restart cannot recover."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 1
+        _init_refusal = None
+        _storage = None
+        _migration_partial = None
+        _lesson_synthesis_recovery = ([{"id": 7}], [7])
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["lesson_reconciliation_required"] is True
+
+    class _Clean(_Stub):
+        _lesson_synthesis_recovery = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "lesson_reconciliation_required" not in clean
 
 
 def test_tool_call_requires_token(daemon):
@@ -206,6 +217,64 @@ def test_store_and_search_roundtrip(daemon):
         url, "memory_search", {"query": "what port does vextra use?"},
     ))
     assert "9931" in _result_text(found)
+
+
+def test_unknown_parameter_is_refused_over_http(daemon):
+    """Over the daemon's streamable-HTTP transport (what every shim forwards
+    to), an unknown argument name is an isError result naming the right one,
+    and the served schema says so up front."""
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
+
+    result = asyncio.run(_call(
+        daemon["url"], "memory_search", {"query": "vextra", "limit": 3}))
+    assert result.is_error, _result_text(result)
+    assert "did you mean 'top_k'?" in _result_text(result)
+
+    async def _schema():
+        headers = {"Authorization": f"Bearer {_TOKEN}"}
+        async with create_mcp_http_client(headers=headers) as http:
+            async with streamable_http_client(
+                    daemon["url"] + "/mcp", http_client=http) as (r, w):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    tools = (await s.list_tools()).tools
+                    return {t.name: t.input_schema for t in tools}
+
+    schemas = asyncio.run(_schema())
+    assert schemas["memory_search"]["additionalProperties"] is False
+
+
+def test_daemon_serves_a_bank_of_its_own(daemon):
+    """A test daemon never takes the writer lease on the run's database.
+
+    In-process tests build PG-backed services on that database without all
+    closing them, and a dropped one keeps the lease until Python's cyclic
+    GC frees it. A daemon booted there in that gap came up degraded for its
+    whole module (see ``tests.helpers.serve_on_private_bank``), so every
+    daemon fixture serves a private bank. One tool call makes the daemon
+    take its lease; then the run's database must show no daemon holding
+    one, and the daemon's own bank must.
+    """
+    import psycopg
+
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    stats = asyncio.run(_call(daemon["url"], "memory_stats", {}))
+    assert "bands" in _result_text(stats), _result_text(stats)
+
+    def lease_holders(dsn: str) -> list[str]:
+        with psycopg.connect(dsn, autocommit=True, connect_timeout=10) as c:
+            return [app or "" for _, app in PostgresStorage._lease_holders(c)]
+
+    # A daemon names itself "... serve" (PostgresStorage._application_name);
+    # the run's database may still hold this process's own leaked writers.
+    assert [app for app in lease_holders(resolve_test_db_url())
+            if app.endswith(" serve")] == []
+    # Nothing but the daemon ever opens its private bank.
+    assert lease_holders(daemon["db"]), (
+        "the daemon holds no writer lease on its own bank")
 
 
 def test_two_clients_no_lost_writes(daemon):
@@ -271,45 +340,15 @@ def trust_bind_daemon(tmp_path_factory):
     exposure boundary is external (compose publishes the port to 127.0.0.1
     only), so the bind guard lets it start without a token. Module-scoped:
     a daemon spawn costs a cold torch import, and two tests need this shape.
+    Like the module's ``daemon``, it gets a bank of its own.
     """
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    data_dir = tmp_path_factory.mktemp("trust_bind_data")
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_HOST": "0.0.0.0",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
-        "PSEUDOLIFE_MCP_TRUST_BIND": "1",
-    }
-    env.pop("PSEUDOLIFE_MCP_TOKEN", None)
-    env.pop("PSEUDOLIFE_MCP_TOKENS", None)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=_NO_WINDOW,
-    )
-    deadline = time.time() + 60
-    health = None
-    while time.time() < deadline:
-        health = _health(port)
-        if health is not None:
-            break
-        if proc.poll() is not None:
-            pytest.fail(f"daemon exited early ({proc.returncode})")
-        time.sleep(0.5)
-    if health is None:
-        proc.terminate()
-        pytest.fail("trust-bind daemon never became healthy")
-    yield {"port": port, "health": health}
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with _serve_on_private_bank(
+            "trustbind", tmp_path_factory.mktemp("trust_bind_data"),
+            env_extra={"PSEUDOLIFE_MCP_HOST": "0.0.0.0",
+                       "PSEUDOLIFE_MCP_TRUST_BIND": "1",
+                       "PSEUDOLIFE_MCP_TOKEN": None,
+                       "PSEUDOLIFE_MCP_TOKENS": None}) as d:
+        yield d
 
 
 def test_non_loopback_with_trust_bind_allowed(trust_bind_daemon):

@@ -1013,11 +1013,19 @@ def serve_arms(svc, question: str) -> dict[str, Served]:
 # ─────────────────────────────────────────────────────────────────────────
 # Bench database lifecycle
 # ─────────────────────────────────────────────────────────────────────────
+def _run_suffix() -> str:
+    # The test fixtures' suffix: the pid, tagged "wsl<pid>" inside WSL, whose
+    # pids Windows cannot see; a bare WSL pid would read to a Windows run's
+    # pruner as a dead run's database (tests/pg_defaults.py, PID_NAMESPACE).
+    from tests.pg_defaults import run_suffix
+    return run_suffix()
+
+
 def _bench_db_name() -> str:
     """Private per-run database, named the way the test fixtures name
-    theirs — ``pseudolife_memory_bench_<pid>``, which
+    theirs — ``pseudolife_memory_bench_<run suffix>``, which
     ``tests/pg_fixtures.py`` also knows how to prune after a hard kill."""
-    return f"pseudolife_memory_bench_{os.getpid()}"
+    return f"pseudolife_memory_bench_{_run_suffix()}"
 
 
 def _admin_url() -> str:
@@ -1034,7 +1042,7 @@ def drop_bench_db(name: str) -> None:
     database it did not create is one typo away from dropping a bank.
     """
     if not (name.startswith("pseudolife_memory_bench_")
-            and name.endswith(f"_{os.getpid()}")):
+            and name.endswith(f"_{_run_suffix()}")):
         raise SystemExit(f"refusing to drop {name!r}: this run did not "
                          "create it")
     import psycopg
@@ -1186,6 +1194,7 @@ def run_synthetic(args) -> int:
                 raise SystemExit(f"refusing to overwrite {p}; tag the run "
                                  "differently or pass --force")
 
+    import embedder_stamp
     import longmemeval_bench as lmb                      # noqa: F401
     from ladder_sweep import build_service
 
@@ -1257,6 +1266,7 @@ def run_synthetic(args) -> int:
             "cortex_top_k": lmb.CORTEX_TOP_K,
             "cortex_min_score": lmb.CORTEX_MIN_SCORE,
             "selectivity": selectivity,
+            "embedder": embedder_stamp.describe(svc),
             "wall_seconds": round(time.perf_counter() - t0, 1),
             **corpus.meta,
         },
@@ -1335,6 +1345,7 @@ def run_lme(args) -> int:
 
     import tempfile
 
+    import embedder_stamp
     import longmemeval_bench as lmb
     from ladder_sweep import build_service
 
@@ -1378,6 +1389,7 @@ def run_lme(args) -> int:
             consolidation=tally, cortex_slots_in_bank=slots,
             stale_policy=stale_policy,
             wall_seconds=round(time.perf_counter() - t_q, 1)))
+        embedder_stamp.stamp_row(row, "extract", svc)
         # Appended per question: this IS the resume point.
         with rows_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -1448,6 +1460,10 @@ def run_lme(args) -> int:
         "arms": per_arm,
     }
     payload["caveats"].update(LME_CAVEATS)
+    # Per-question rows can come from several resumed processes.
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        payload["meta"]["embedder"] = embedder
     # Only the summary is written here — deliberately NOT through
     # write_artifact, which also rewrites the rows file. That file is this
     # run's append-only resume log: rewriting it from the summarised slice
@@ -1644,6 +1660,12 @@ def run_rescore(args) -> int:
         "rescore path is verified by reproducing the source run's own "
         "summary exactly when it is run against the source derivation "
         "(tests/test_epistemic_bench.py).")
+    # The contexts rescored here were built by the source run's embedder;
+    # each rescored row is a copy of its source row, stamp included.
+    import embedder_stamp
+    embedder = embedder_stamp.merge_rows(rows)
+    if embedder:
+        payload["meta"]["embedder"] = embedder
     write_artifact(out, payload, rows, force=args.force)
     _print_table(payload)
     print(f"\nrescored {len(rows)} of {len(source_rows)} persisted rows "

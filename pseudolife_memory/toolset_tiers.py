@@ -114,14 +114,17 @@ class PrincipalTierState:
 
 def resolve_tier(principal: str | None, *,
                  state: PrincipalTierState, tier_map: dict[str, str],
-                 default_tier: str) -> str:
-    """Principal override → tier map → default (spec 2026-08-10; the
-    session axis no longer participates)."""
+                 default_tier: str, stored_tier=None) -> str:
+    """Principal override → tier map → stored tier → default (spec
+    2026-08-10; the session axis no longer participates). ``stored_tier``
+    maps a principal to the tier its stored row sets (spec 2026-10-02), or
+    ``None``; the environment's map always comes first."""
     override = state.get(principal)
     if override is not None:
         return override
     if principal:
-        mapped = tier_map.get(principal.strip().lower())
+        key = principal.strip().lower()
+        mapped = tier_map.get(key) or (stored_tier(key) if stored_tier else None)
         if mapped:
             return mapped
     return default_tier

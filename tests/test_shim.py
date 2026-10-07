@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 
 from pseudolife_memory import shim as _shim
 from tests.helpers import (free_port as _free_port,
                            pg_reachable as _pg_reachable,
-                           spawn_serve as _spawn_serve,
-                           stop_daemon as _stop_daemon)
+                           private_bank as _private_bank,
+                           serve_on_private_bank as _serve_on_private_bank)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
@@ -32,13 +34,20 @@ _OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
 
 def _shim_env(port: int, data_dir, **extra) -> dict:
     """The environment a shim subprocess is driven with: point it at a daemon
-    URL/port and a data dir, and drop the token (loopback needs none)."""
+    URL/port and a data dir, and drop the token (loopback needs none). The
+    runner's host identity is dropped too: run from a Claude Code session,
+    the shim would otherwise key its calls by that live session's id. Its
+    agent state dir, which holds the handshake cache, sits under ``data_dir``,
+    so a test shim never pushes the real daemon's entry out of the user's."""
+    inherited = {name: value for name, value in os.environ.items()
+                 if name not in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID")}
     env = {
-        **os.environ,
+        **inherited,
         "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
         "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
         "PSEUDOLIFE_MCP_PORT": str(port),
         "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
+        "PSEUDOLIFE_AGENT_STATE_DIR": os.path.join(str(data_dir), "agent-state"),
         **extra,
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
@@ -56,58 +65,167 @@ def shared_daemon(tmp_path_factory):
     daemon boot per module instead of one per test (~7.7 s each). Same shape
     as tests/test_daemon_http.py's module fixture.
 
-    ``test_shim_autostarts_daemon_and_proxies`` deliberately does NOT use
-    this: spawning is its subject. Neither does the ``TOOLSET=minimal`` test,
-    which needs a daemon booted with a different toolset tier.
+    ``test_shim_forwards_list_changed_on_toolset_expand`` deliberately does
+    NOT use this: it needs a daemon booted at the minimal toolset tier, and
+    the shim's own spawn of that daemon is also the autostart test.
+
+    Its bank is private, never the run's database: see
+    ``tests.helpers.serve_on_private_bank`` for the writer-lease failure
+    that sharing it caused here.
+    """
+    # Token removed rather than blanked: the shims below send no Authorization
+    # header, so a daemon that inherited PSEUDOLIFE_MCP_TOKEN would 401 them.
+    with _serve_on_private_bank(
+            "shimdaemon", tmp_path_factory.mktemp("shim_daemon"),
+            env_extra={"PSEUDOLIFE_MCP_TOKEN": None}) as d:
+        yield d
+
+
+@pytest.fixture()
+def own_bank():
+    """A private bank for a test whose shim autostarts its own daemon.
+
+    A bank has one writer (the writer lease): on the run's database this
+    daemon would contend with in-process tests' services (see
+    ``tests.helpers.serve_on_private_bank``), and a daemon that outlives
+    its test (an interrupted run skips ``_reap_daemon``) would keep holding
+    that database. Dropping the private bank cuts it off instead.
     """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
         pytest.skip("no test Postgres reachable")
-    port = _free_port()
-    data_dir = tmp_path_factory.mktemp("shim_daemon")
-    # Token removed rather than blanked: the shims below send no Authorization
-    # header, so a daemon that inherited PSEUDOLIFE_MCP_TOKEN would 401 them.
-    proc, _ = _spawn_serve(port, data_dir, url,
-                           env_extra={"PSEUDOLIFE_MCP_TOKEN": None})
-    try:
-        yield {"port": port, "data_dir": data_dir}
-    finally:
-        _stop_daemon(proc)
+    with _private_bank(url, "shim") as bank_url:
+        yield bank_url
 
 
-def test_shim_autostarts_daemon_and_proxies(tmp_path):
-    """Keeps its own free port and lets the shim START the daemon — that
-    spawn is the subject, so this one must never see ``shared_daemon``."""
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
+def test_shim_forwards_initialize_instructions_and_tool_annotations(shared_daemon):
+    """Compare actual wire handshakes; a healthy /health cannot prove this."""
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from mcp.client.streamable_http import streamable_http_client
 
-    port = _free_port()
-    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url)
+        url = f"http://127.0.0.1:{shared_daemon['port']}/mcp"
+        async with streamable_http_client(url) as (r, w):
+            async with ClientSession(r, w) as direct:
+                upstream = await direct.initialize()
+                direct_tools = (await direct.list_tools()).tools
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_shim_env(shared_daemon["port"], shared_daemon["data_dir"]),
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                downstream = await client.initialize()
+                assert upstream.instructions and "memory_search" in upstream.instructions
+                assert len(upstream.instructions) <= 512
+                # The board check-in is the shim's to add, and only with an
+                # adapter up (tests/test_shim_channel.py); this open daemon
+                # admits none, so the daemon's text passes through as is.
+                assert "memory_agents" not in upstream.instructions
+                assert downstream.instructions == upstream.instructions
+                proxied = {t.name: t.annotations for t in (await client.list_tools()).tools}
+                assert proxied == {t.name: t.annotations for t in direct_tools}
+                assert all(a is not None for a in proxied.values())
 
-    async def _drive():
+    import asyncio
+    asyncio.run(asyncio.wait_for(drive(), timeout=60))
+
+
+def test_doctor_checks_registered_runtime_handshake_without_bank_writes(shared_daemon):
+    proc = subprocess.run(
+        [sys.executable, "-m", "pseudolife_memory.cli", "doctor"],
+        env=_shim_env(shared_daemon["port"], shared_daemon["data_dir"]),
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    assert result["ok"] is True
+    assert result["instructions_present"] is True
+    assert result["tools_missing_annotations"] == []
+    assert result["interpreter"] == sys.executable
+
+
+@pytest.mark.parametrize("initial_failure", ["refused", "stalled"])
+def test_shim_initializes_after_instruction_fetch_refused_and_recovers(tmp_path, initial_failure):
+    """An optional briefing fetch must not prevent downstream initialize.
+
+    A fixture HTTP server refuses or stalls the first handshake, then accepts the next
+    one. The same stdio process must remain usable for subsequent tool lists.
+    """
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        initializations = 0
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = request["method"]
+            if method == "initialize":
+                Handler.initializations += 1
+                if Handler.initializations == 1:
+                    if initial_failure == "stalled":
+                        time.sleep(12)
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                result = {"protocolVersion": request["params"]["protocolVersion"],
+                          "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "fixture", "version": "1"}}
+            elif method == "tools/list":
+                result = {"tools": [{"name": "fixture_tool", "inputSchema": {"type": "object"}}]}
+            else:
+                self.send_response(202)
+                self.end_headers()
+                return
+            body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self.send_response(405)
+            self.end_headers()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
-            env=env,
-        )
-        async with stdio_client(params) as (r, w):
-            async with ClientSession(r, w) as s:
-                await s.initialize()
-                tools = {t.name for t in (await s.list_tools()).tools}
-                assert "memory_store" in tools and "memory_stats" in tools
-                res = await s.call_tool("memory_stats", {})
-                text = " ".join(getattr(c, "text", "") for c in res.content)
-                assert "bands" in text
+        params = StdioServerParameters(command=sys.executable, args=["-c",
+            "import asyncio, sys; from pseudolife_memory.shim import _proxy; "
+            "asyncio.run(_proxy(sys.argv[1], 'fixture-secret', 'fixture-session'))",
+            f"http://127.0.0.1:{http.server_port}"])
+        with (tmp_path / "shim-stderr.txt").open("w", encoding="utf-8") as errlog:
+            async with stdio_client(params, errlog=errlog) as (read, write):
+                async with ClientSession(read, write) as client:
+                    # Leave margin around the shim's optional-fetch deadline,
+                    # but remain well below the upstream transport's 300s read.
+                    initialized = await asyncio.wait_for(client.initialize(), timeout=9)
+                    assert not initialized.instructions
+                    assert [t.name for t in (await client.list_tools()).tools] == ["fixture_tool"]
+        errors = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
+        assert "instructions unavailable" in errors
+        assert "fixture-secret" not in errors
+        assert "Traceback" not in errors
 
-    import asyncio
     try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+        asyncio.run(asyncio.wait_for(drive(), timeout=20))
+        assert Handler.initializations == 2
     finally:
-        _reap_daemon(port)
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
 
 
 def test_shim_survives_idle_gap(shared_daemon):
@@ -156,24 +274,21 @@ def test_shim_survives_idle_gap(shared_daemon):
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
-def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
+def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
     """The 2026-07-16 morning-brief regression: a tier expansion must reach
     the REAL client. The shim's per-call upstream design means the daemon's
     tools/list_changed lands on an ephemeral session and dies there — the
     shim itself must (a) advertise tools.listChanged downstream and (b) emit
     the notification when memory_toolset reports changed=true. The final
     list_tools also proves the session override survives per-call reconnects
-    (X-PL-Session keying)."""
+    (X-PL-Session keying). The shim spawns its own daemon here, so this is
+    also the autostart test: it proxies memory_stats through that daemon."""
     import asyncio
 
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    # Its own daemon on purpose: the tier expansion needs one booted at the
-    # minimal toolset, which ``shared_daemon`` is not.
+    # Its own daemon (and bank) on purpose: the tier expansion needs one
+    # booted at the minimal toolset, which ``shared_daemon`` is not.
     port = _free_port()
-    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url,
+    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=own_bank,
                     PSEUDOLIFE_MCP_TOOLSET="minimal")  # world tools hidden
     env.pop("PSEUDOLIFE_MCP_TIER_MAP", None)
 
@@ -211,11 +326,18 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
 
                 tools = {t.name for t in (await s.list_tools()).tools}
                 assert "memory_world_search" in tools  # core tier now
+                assert "memory_store" in tools and "memory_stats" in tools
+                res = await s.call_tool("memory_stats", {})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert "bands" in text  # proxied through the spawned daemon
 
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
-        _reap_daemon(port)
+        survivors = _reap_daemon(tmp_path)
+    # The spawned daemon is detached on purpose, so nothing but the reap ends
+    # it: off Windows it once outlived every run, one ~2.8 GB daemon each.
+    assert survivors == [], f"the autostarted daemon outlived its test: {survivors}"
 
 
 def test_shim_forwards_stringified_list_param(shared_daemon):
@@ -311,6 +433,90 @@ def test_shim_surfaces_the_daemons_real_error_message(shared_daemon):
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
+def test_shim_passes_a_tool_refusal_through_unchanged(shared_daemon):
+    """A refusal raised inside a tool body reaches the client through the
+    shim as the daemon's MCP tool error: ``isError`` with the JSON
+    ``{error, message}`` contract, not a success-shaped dict carrying a
+    Python class name (review 2026-10-04, M1). A call refused at argument
+    binding, before any tool body runs, arrives in the same shape."""
+    import asyncio
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                # Valid arguments by the schema; the body refuses a scalar
+                # write to a set-valued slot.
+                await s.call_tool("memory_set_add", {
+                    "entity": "shim-error-probe", "attribute": "tags",
+                    "member": "rust"})
+                res = await s.call_tool("memory_fact_set", {
+                    "entity": "shim-error-probe", "attribute": "tags",
+                    "value": "go"})
+                text = res.content[0].text
+                assert res.is_error, f"refusal came back success-shaped: {text}"
+                payload = json.loads(text)
+                assert payload["error"] == "invalid_argument", payload
+                assert "memory_set_add" in payload["message"]
+                assert "ValueError" not in text
+                # Refused at binding: same shape, the parameter named, no
+                # echo of the value or pydantic's framing.
+                res = await s.call_tool("memory_search", {
+                    "query": "probe", "top_k": "PROBE" + "VALUE"})
+                text = res.content[0].text
+                assert res.is_error, text
+                payload = json.loads(text)
+                assert payload["error"] == "invalid_argument", payload
+                assert payload["param"] == "top_k", payload
+                for leak in ("PROBEVALUE", "input_value", "errors.pydantic.dev"):
+                    assert leak not in text, text
+
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+
+
+def test_shim_forwards_the_daemons_unknown_parameter_refusal(shared_daemon):
+    """The served schema now says ``additionalProperties: false``; the shim
+    must still forward the call (it does not validate input) so the client
+    gets the daemon's refusal with its suggestion, not a proxy-side schema
+    message or a silent success."""
+    import asyncio
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                tools = {t.name: t for t in (await s.list_tools()).tools}
+                assert tools["memory_search"].input_schema[
+                    "additionalProperties"] is False
+                res = await s.call_tool("memory_search",
+                                        {"query": "probe", "limit": 3})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert res.is_error, text
+                assert "did you mean 'top_k'?" in text, text
+
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+
+
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
 
 
@@ -327,13 +533,154 @@ def test_session_headers_include_writer_and_session(monkeypatch):
 def test_post_episode_is_best_effort(monkeypatch):
     from pseudolife_memory import shim
 
-    def boom(*a, **k):
-        raise OSError("daemon down")
+    class BrokenOpener:
+        def open(self, *a, **k):
+            raise OSError("daemon down")
 
-    monkeypatch.setattr(shim.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(shim.urllib.request, "build_opener", lambda *a: BrokenOpener())
     # Must NOT raise — episode bookkeeping can never break a session.
     shim._post_episode("http://127.0.0.1:8765", None, "/api/episode/start",
                        {"session_key": "x", "title": "t"})
+
+
+# One client session, one root episode (2026-09-25). The shim used to open a
+# root of its own at launch, keyed by a fresh uuid, beside the root the
+# plugin's SessionStart hook registers under the client's session id. On the
+# live bank that day, 189 of the 193 shim-keyed roots opened in 24 h held no
+# entry: 154 were titled after the shared shim runtime directory that Codex
+# launches from, and Codex keys every call by its thread anyway.
+
+_CLAUDE_SESSION = "0b9c5f3e-7a1d-4c2e-9f8a-2d4e6b8c0a1f"
+
+
+def _run_shim_lifecycle(monkeypatch, env: dict):
+    """Run ``run_shim`` with the daemon and the proxy stubbed out. Returns the
+    session key the proxy was given, the episode POSTs made before the proxy
+    started, and every episode POST by the time ``run_shim`` returned."""
+    from pseudolife_memory import shim
+
+    for name in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: {"status": "ok"})
+    posts = []
+    monkeypatch.setattr(
+        shim, "_post_episode",
+        lambda url, token, path, payload, **kwargs: posts.append((path, payload)))
+    seen = {}
+
+    async def proxy(url, token, session_uid, **kwargs):
+        seen["session_uid"] = session_uid
+        seen["posts_before_proxy"] = list(posts)
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    return seen["session_uid"], seen["posts_before_proxy"], posts
+
+
+@pytest.mark.parametrize("writer", [None, "claude-code"])
+def test_claude_code_shim_joins_the_host_session_and_leaves_its_lifecycle_to_it(
+        monkeypatch, writer):
+    """Claude Code exports its session id to the MCP servers it launches, and
+    the plugin hook registers the session's root under that same id. The shim
+    keys its calls by it, so a write without ``episode=`` and a
+    ``memory_session_title`` land on the hook's root, and it neither opens
+    nor closes that root: a shim exit is not a session end (a reconnect
+    restarts the shim mid-session), and an explicit end prunes an empty root
+    outright, which would orphan the handle the hook advertised."""
+    env = {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION}
+    if writer:
+        env["PSEUDOLIFE_WRITER_ID"] = writer
+    session_uid, _, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid == _CLAUDE_SESSION
+    assert posts == []
+
+
+@pytest.mark.parametrize("env", [
+    {},
+    {"CLAUDE_CODE_SESSION_ID": "not-a-session"},
+    # Claude Code's ids are lowercase; the hook registers the raw string.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION.upper()},
+    # Any other host started from a Claude Code Bash tool inherits the outer
+    # session's id and would forward it if it passes its environment through
+    # to MCP servers. Codex keys each call by its own thread instead.
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "codex"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION, "PSEUDOLIFE_WRITER_ID": "gemini"},
+    {"CLAUDE_CODE_SESSION_ID": _CLAUDE_SESSION,
+     "PSEUDOLIFE_WRITER_ID": "claude-desktop"},
+], ids=["no-host-session", "not-a-uuid", "not-canonical", "codex-nested-in-claude",
+        "gemini-nested-in-claude", "claude-desktop"])
+def test_shim_without_a_host_session_opens_no_root_and_closes_only_its_own(
+        monkeypatch, env):
+    """Without a usable host session id the shim keeps a key of its own. It
+    opens nothing at launch: the daemon opens that key's root on the first
+    write that needs it, so an idle shim, or one that only searched, leaves
+    no episode behind. At exit it closes its own key (a no-op when nothing
+    was opened; prune-on-empty otherwise)."""
+    session_uid, before_proxy, posts = _run_shim_lifecycle(monkeypatch, env)
+    assert session_uid != _CLAUDE_SESSION
+    assert re.fullmatch(r"[0-9a-f]{32}", session_uid)
+    assert before_proxy == []
+    assert posts == [("/api/episode/end", {"session_key": session_uid})]
+
+
+def test_claude_code_session_through_the_shim_keeps_one_root_episode(shared_daemon):
+    """End to end on a real daemon: the hook registers the session, then the
+    real shim, launched with the same CLAUDE_CODE_SESSION_ID, stores once
+    with the advertised handle and once without. Both writes land on the
+    hook's root, no other root appears, and the shim's exit leaves the
+    host's session open."""
+    import asyncio
+    import urllib.request
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    base = f"http://127.0.0.1:{shared_daemon['port']}"
+    session = str(uuid.uuid4())
+
+    def roots() -> dict:
+        with urllib.request.urlopen(base + "/api/episodes?limit=100000",
+                                    timeout=30) as response:
+            episodes = json.loads(response.read())["episodes"]
+        return {e["id"]: e for e in episodes if not e.get("parent_id")}
+
+    before = set(roots())
+    with urllib.request.urlopen(
+            f"{base}/api/hook/session-start?session_id={session}&source=startup",
+            timeout=60) as response:
+        handle = re.search(r'episode="([0-9a-f]+)"',
+                           response.read().decode("utf-8")).group(1)
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"],
+                    CLAUDE_CODE_SESSION_ID=session)
+
+    async def drive():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"], env=env)
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                await client.initialize()
+                for arguments in (
+                        {"text": f"Fixture session {session} chose the blue "
+                                 "migration plan for the harbour database.",
+                         "source": "shim-root-test", "episode": handle},
+                        {"text": f"Fixture session {session} measured the "
+                                 "harbour replica lag at forty seconds.",
+                         "source": "shim-root-test"}):
+                    result = await client.call_tool("memory_store", arguments)
+                    assert not result.is_error, result
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=_OUTER_TIMEOUT_S))
+    after = roots()
+    new = [after[i] for i in set(after) - before]
+    assert [e["session_key"] for e in new] == [session], new
+    assert new[0]["entry_count"] == 2
+    # Holds only if the shim's exit ran inside the client's termination grace;
+    # the lifecycle unit test above is the strict guard on the exit.
+    assert new[0]["ended_at"] is None
 
 
 def test_spawn_daemon_never_allocates_a_console_window(monkeypatch):
@@ -410,22 +757,92 @@ def test_shipped_package_never_spawns_with_detached_process():
         f"CREATE_NO_WINDOW so no console window is ever allocated")
 
 
-def _reap_daemon(port: int) -> None:
-    """Best-effort cleanup of the detached daemon the shim auto-spawned."""
-    import urllib.request
+def _spawned_procs(data_dir) -> list:
+    """Live processes whose environment names ``data_dir``.
+
+    The shim hands its own environment to the daemon it spawns, and
+    ``data_dir`` is the test's own ``tmp_path``, so this matches the test's
+    shim and daemon and nothing else: never another session's daemon or the
+    live one. Matching by environment, not by port, also finds a daemon that
+    never bound its port, and needs no system-wide socket table (which macOS
+    only lists for root).
+    """
+    import psutil
+
+    found = []
+    for proc in psutil.process_iter():
+        try:
+            if (proc.pid != os.getpid() and proc.environ().get(
+                    "PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir)):
+                found.append(proc)
+        except psutil.Error:
+            continue
+    return found
+
+
+def _spawned_by(data_dir) -> list[str]:
+    """:func:`_spawned_procs` as ``pid argv`` lines, for assertions."""
+    import psutil
+
+    lines = []
+    for proc in _spawned_procs(data_dir):
+        try:
+            lines.append(f"{proc.pid} {' '.join(proc.cmdline())}")
+        except psutil.Error:
+            continue
+    return lines
+
+
+def _reap_daemon(data_dir) -> list[str]:
+    """Kill what the shim auto-spawned for this test; return what survived.
+
+    The shim detaches its daemon on purpose (its own session off Windows,
+    its own process group on Windows) so that it outlives the shim, and so
+    it outlives the test too unless killed here. This reaper used to act on
+    Windows only: off Windows every run left one ~2.8 GB daemon behind
+    (2026-10-03: 14 in WSL, and 5 on the second machine, which exhausted
+    its memory and swap). Dropping the test's private bank cuts the daemon
+    off from Postgres but does not end the process.
+    """
+    import psutil
+
+    procs = _spawned_procs(data_dir)
+    for proc in procs:
+        try:
+            proc.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(procs, timeout=10)
+    return _spawned_by(data_dir)
+
+
+def test_reap_daemon_kills_only_the_daemon_this_test_started(tmp_path):
+    listen = ("import socket, time; s = socket.socket(); "
+              "s.bind(('127.0.0.1', 0)); s.listen(); "
+              "print(s.getsockname()[1], flush=True); time.sleep(60)")
+
+    def listener(data_dir):
+        # Detached as shim.spawn_daemon detaches the daemon: its own session
+        # off Windows, so no signal to this test's group reaches it.
+        detach = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+                  if sys.platform == "win32" else {"start_new_session": True})
+        proc = subprocess.Popen(
+            [sys.executable, "-c", listen], stdout=subprocess.PIPE, text=True,
+            env={**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir)},
+            **detach)
+        return proc, int(proc.stdout.readline())
+
+    theirs, _ = listener(tmp_path / "another-session")
+    ours, _ = listener(tmp_path)
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
-    except Exception:  # noqa: BLE001
-        pass
-    if sys.platform == "win32":
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"Get-NetTCPConnection -LocalPort {port} -State Listen "
-             f"-ErrorAction SilentlyContinue | "
-             f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force "
-             f"-ErrorAction SilentlyContinue }}"],
-            capture_output=True,
-        )
+        assert _reap_daemon(tmp_path) == []
+        ours.wait(timeout=10)
+        assert theirs.poll() is None, "killed another session's listener"
+    finally:
+        for proc in (theirs, ours):
+            proc.kill()
+            proc.wait(timeout=10)
+            proc.stdout.close()
 
 
 # ── Spawn hardening (2026-08-29 port-shadowing incident) ─────────────────────
@@ -522,11 +939,13 @@ def test_no_spawn_env_waits_for_the_daemon_instead_of_spawning(monkeypatch):
     assert health["status"] == "ok"
 
 
-def test_no_spawn_env_times_out_loudly_with_the_docker_remedy(
+def test_no_spawn_env_starts_without_the_daemon_and_names_the_docker_remedy(
         monkeypatch, capsys):
-    """When the daemon never appears, the no-spawn path must exit 1 with a
-    message that names the env var (so the reader knows why nothing was
-    spawned) and the Docker recovery command."""
+    """When the external daemon never appears, the no-spawn path starts the
+    session without it (``None``: the proxy then serves the last handshake
+    and retries) instead of exiting before the MCP handshake, which a client
+    marks failed for the session's whole life (2026-10-03). Its stderr still
+    names the env var (why nothing was spawned) and the Docker command."""
     from pseudolife_memory import shim
 
     monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "true")
@@ -535,12 +954,11 @@ def test_no_spawn_env_times_out_loudly_with_the_docker_remedy(
         lambda: pytest.fail("must never spawn under PSEUDOLIFE_MCP_NO_SPAWN"))
     monkeypatch.setattr(shim, "probe_health", lambda url, timeout=0.25: None)
     monkeypatch.setattr(shim, "_NO_SPAWN_WAIT_S", 0.0, raising=False)
-    with pytest.raises(SystemExit) as exc:
-        shim.ensure_daemon("http://127.0.0.1:8765")
-    assert exc.value.code == 1
+    assert shim.ensure_daemon("http://127.0.0.1:8765") is None
     err = capsys.readouterr().err
     assert "PSEUDOLIFE_MCP_NO_SPAWN" in err
     assert "docker compose" in err
+    assert "retr" in err  # says the session keeps trying
 
 
 def test_no_spawn_env_falsy_value_still_spawns(monkeypatch, tmp_path):
@@ -720,3 +1138,764 @@ def test_sdk_guard_survives_a_fully_absent_mcp(monkeypatch, capsys):
         shim._require_mcp_sdk_v2()
     assert exc.value.code == 1
     assert "mcp>=2.1" in capsys.readouterr().err
+
+
+# -- startup credential check ------------------------------------------------
+# 2026-09-19 incident: the daemon had bearer auth on, the token lived only in
+# the Windows User environment, and Claude Desktop launches MCP servers with a
+# sanitized env — so every Desktop session 401'd on tools/list for four days
+# behind "unhandled errors in a TaskGroup (1 sub-exception)". /health already
+# says ``auth: true``; the shim can tell at startup that it holds no
+# credential and say so in one line instead of failing every call.
+
+def _no_credential(monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+
+
+def test_startup_exits_when_the_daemon_needs_a_credential_and_none_is_set(
+        monkeypatch, capsys):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    _no_credential(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        shim._require_credential_for_auth(
+            "http://127.0.0.1:8765", {"status": "ok", "auth": True},
+            CredentialProvider.from_environment())
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err
+    assert "PSEUDOLIFE_MCP_TOKEN" in err
+    # The gotcha that made the incident opaque: OS-level env is not enough.
+    assert "Claude Desktop" in err and "env" in err
+    # Never a token value — there is none, and the message must not invite one.
+    assert "Bearer " not in err
+
+
+@pytest.mark.parametrize("health", [
+    {"status": "ok", "auth": False},
+    {"status": "ok"},            # a daemon predating the field
+    {"status": "degraded", "auth": False, "db": "error"},
+])
+def test_startup_credential_check_is_silent_when_auth_is_off(
+        monkeypatch, capsys, health):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    _no_credential(monkeypatch)
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_startup_credential_check_passes_with_a_token_or_a_usable_token_file(
+        monkeypatch, tmp_path):
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import (CredentialProvider,
+                                               _write_token_file)
+
+    health = {"status": "ok", "auth": True}
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "x" * 32)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE", raising=False)
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+    token_file = tmp_path / "claude-desktop.token"
+    _write_token_file(token_file, "y" * 32)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(token_file))
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", health,
+        CredentialProvider.from_environment()) is None
+
+
+def test_startup_exits_when_the_configured_token_file_is_unusable(
+        monkeypatch, tmp_path, capsys):
+    """A token file that is set but missing (or not owner-only) would fail
+    every call with credential_unavailable — which Claude Desktop renders
+    as the same opaque TaskGroup wrapper. Name the file and the fault once,
+    at startup, and exit (review finding, 2026-09-20)."""
+    from pseudolife_memory import shim
+    from pseudolife_memory.credentials import CredentialProvider
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    missing = tmp_path / "missing.token"
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(missing))
+    with pytest.raises(SystemExit) as exc:
+        shim._require_credential_for_auth(
+            "http://127.0.0.1:8765", {"status": "ok", "auth": True},
+            CredentialProvider.from_environment())
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert "missing" in err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err
+    # Auth off: the file is not even read.
+    assert shim._require_credential_for_auth(
+        "http://127.0.0.1:8765", {"status": "ok", "auth": False},
+        CredentialProvider.from_environment()) is None
+
+
+def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
+        monkeypatch, capsys):
+    """The check is load-bearing in run_shim: it fires after ensure_daemon
+    and before the proxy's first upstream call (which would be the first
+    401) and the exit's episode-end POST."""
+    from pseudolife_memory import shim
+
+    _no_credential(monkeypatch)
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon",
+                        lambda url: {"status": "ok", "auth": True})
+    monkeypatch.setattr(
+        shim, "_post_episode",
+        lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
+    monkeypatch.setattr(
+        shim, "_run_session_proxy",
+        lambda *a, **k: pytest.fail("must exit before any daemon traffic"))
+    with pytest.raises(SystemExit) as exc:
+        shim.run_shim()
+    assert exc.value.code == 1
+    assert "auth" in capsys.readouterr().err.lower()
+
+
+def test_non_loopback_daemon_url_never_spawns_a_local_daemon(monkeypatch):
+    """A daemon URL that is not loopback names a daemon on ANOTHER machine
+    (a tailnet or LAN address, a reverse-proxy name). A host-side fallback
+    could never be that daemon: it would bind 127.0.0.1 with an empty bank
+    while the shim kept probing the remote URL, and give up three minutes
+    later having spawned a process for nothing (2026-09-28 remote-client
+    dogfood). So the shim waits briefly for the remote daemon and never
+    spawns, whether or not PSEUDOLIFE_MCP_NO_SPAWN is set."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+
+    calls = {"n": 0}
+
+    def fake_probe(url, timeout=0.25):
+        calls["n"] += 1
+        return {"status": "ok"} if calls["n"] >= 3 else None
+
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+    for url in ("http://100.64.0.2:8765", "https://daemon.example.invalid"):
+        calls["n"] = 0
+        health = shim.ensure_daemon(url)
+        assert health["status"] == "ok"
+
+
+def test_non_loopback_daemon_url_starts_without_the_daemon_and_names_the_remote_remedy(
+        monkeypatch, capsys):
+    """When the remote daemon never answers, the shim starts the session
+    without it rather than exiting before the MCP handshake: the 2026-10-03
+    morning, the box's tailscaled was down for minutes and every session
+    started then ran without memory tools for its whole life, because Claude
+    Code and Desktop never retry a stdio server that failed to start. Its
+    stderr says the daemon is on another machine and what to check, not
+    the local Docker remedy that cannot apply."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    monkeypatch.setattr(shim, "probe_health", lambda url, timeout=0.25: None)
+    monkeypatch.setattr(shim, "_REMOTE_WAIT_S", 0.0, raising=False)
+    assert shim.ensure_daemon("http://100.64.0.2:8765") is None
+    err = capsys.readouterr().err
+    assert "100.64.0.2:8765" in err
+    assert "another machine" in err
+    assert "docker compose" not in err
+    assert "retr" in err
+
+
+def test_external_daemon_waits_fit_the_host_startup_budget():
+    """A shim waiting on a daemon it cannot start blocks the MCP handshake,
+    and the hosts time that out: Claude Code at 30 s, Codex at 10 s by
+    default (the budget ``_proxy``'s instruction fetch already reserves room
+    in). Past the wait the session starts without the daemon and recovers by
+    itself, so waiting longer buys nothing but a failed handshake. The old
+    15 s remote and 180 s no-spawn waits each blew a budget."""
+    from pseudolife_memory import shim
+
+    assert shim._REMOTE_WAIT_S + shim._REMOTE_PROBE_TIMEOUT_S < 10
+    assert shim._NO_SPAWN_WAIT_S + 0.5 < 10
+
+
+def test_run_shim_starts_the_proxy_without_a_daemon_it_could_not_reach(monkeypatch):
+    """``ensure_daemon`` returning ``None`` hands the proxy an unreachable
+    daemon: no /health was read, so there is no credential or version
+    verdict to apply, and the proxy must not spend the startup budget
+    asking the daemon again."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: None)
+    monkeypatch.setattr(
+        shim, "_require_credential_for_auth",
+        lambda *a, **k: pytest.fail("no health to check a credential against"))
+    monkeypatch.setattr(shim, "_post_episode", lambda *a, **k: None)
+    seen = {}
+
+    async def proxy(url, token, session_uid, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    assert seen.get("daemon_unreachable") is True
+    assert not seen.get("instructions_note")
+
+
+# -- handshake cache ----------------------------------------------------------
+# A shim whose daemon is unreachable at start still answers initialize and
+# tools/list, from the last handshake this machine saw from that daemon URL.
+
+
+def test_handshake_cache_round_trips_per_daemon_url(monkeypatch, tmp_path):
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
+    tool = {"name": "memory_search", "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": True}}
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="Use it.")
+    shim._store_handshake_cache("http://100.64.0.2:8765", tools=[tool])
+    shim._store_handshake_cache("http://127.0.0.1:8765", instructions="Other.")
+    cached = shim._load_handshake_cache("http://100.64.0.2:8765")
+    assert cached == {"instructions": "Use it.", "tools": [tool]}
+    assert shim._load_handshake_cache("http://127.0.0.1:8765") == {
+        "instructions": "Other."}
+    assert shim._load_handshake_cache("http://10.0.0.9:8765") == {}
+
+
+def test_handshake_cache_is_best_effort(monkeypatch, tmp_path):
+    """An unreadable cache is no cache, and an unwritable one is no error: a
+    cache must never be what stops a session."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")
+    path = shim._handshake_cache_path("http://100.64.0.2:8765")
+    path.write_text("{not json", encoding="utf-8")
+    assert shim._load_handshake_cache("http://100.64.0.2:8765") == {}
+    blocked = tmp_path / "file-not-dir"
+    blocked.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(blocked))
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")  # no raise
+
+
+def test_handshake_cache_lives_under_the_agent_state_dir(monkeypatch, tmp_path):
+    """Under ``PSEUDOLIFE_AGENT_STATE_DIR`` when set (the installers give each
+    client its own, so clients with different tool tiers keep their own
+    lists), else under ``~/.pseudolife-mcp``. Test shims set it, so a test
+    run never evicts the user's real entry."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agents"))
+    path = shim._handshake_cache_path("http://100.64.0.2:8765")
+    assert path.parent == tmp_path / "agents" / "handshake-cache"
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_STATE_DIR")
+    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path / "home-state")
+    path = shim._handshake_cache_path("http://100.64.0.2:8765")
+    assert path.parent == tmp_path / "home-state" / "handshake-cache"
+    assert _shim_env(1, tmp_path)["PSEUDOLIFE_AGENT_STATE_DIR"].startswith(str(tmp_path))
+
+
+def test_handshake_cache_leaves_no_scratch_file_when_the_replace_fails(
+        monkeypatch, tmp_path):
+    """On Windows ``os.replace`` fails while another shim has the target open
+    for reading; the scratch file must not pile up beside the cache."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
+
+    def refuse(src, dst):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(shim.os, "replace", refuse)
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")
+    assert list((tmp_path / "handshake-cache").iterdir()) == []
+
+
+def test_remote_startup_wait_is_bounded_from_the_first_probe(monkeypatch):
+    """The whole wait, first probe included, ends inside ``_REMOTE_WAIT_S``
+    plus one sleep step, however slowly an unreachable link fails each probe
+    (a silently dropped packet costs the full probe timeout). Counting from
+    after the first probe, with full-length probes past the deadline, it
+    reached ~9.5 s against Codex's 10 s handshake budget (review, 2026-10-03)."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(shim.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(shim.time, "sleep",
+                        lambda s: clock.__setitem__("now", clock["now"] + s))
+
+    def dropped(url, timeout=0.25):
+        clock["now"] += timeout  # every probe times out
+        return None
+
+    monkeypatch.setattr(shim, "probe_health", dropped)
+    assert shim.ensure_daemon("http://100.64.0.2:8765") is None
+    assert clock["now"] - 1000.0 <= shim._REMOTE_WAIT_S + 0.5
+
+
+def test_handshake_cache_keeps_only_the_most_recent_urls(monkeypatch, tmp_path):
+    """One file per daemon URL, pruned to the most recently written few:
+    every test shim on a random port would otherwise leave one behind."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
+    for port in range(shim._HANDSHAKE_CACHE_KEEP + 5):
+        shim._store_handshake_cache(f"http://127.0.0.1:{9000 + port}", instructions="x")
+        os.utime(shim._handshake_cache_path(f"http://127.0.0.1:{9000 + port}"),
+                 (1_000_000 + port, 1_000_000 + port))
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="kept")
+    files = list(shim._handshake_cache_path("http://100.64.0.2:8765").parent.iterdir())
+    assert len(files) == shim._HANDSHAKE_CACHE_KEEP
+    assert shim._load_handshake_cache("http://100.64.0.2:8765") == {"instructions": "kept"}
+    assert shim._load_handshake_cache("http://127.0.0.1:9000") == {}
+
+
+def _fixture_daemon(tool_name: str, instructions: str):
+    """A minimal daemon double: /health plus enough of /mcp for a shim to
+    initialize, list tools and call one. Returns its handler class."""
+    from http.server import BaseHTTPRequestHandler
+
+    class Handler(BaseHTTPRequestHandler):
+        calls = []
+
+        def log_message(self, *args):
+            pass
+
+        def _json(self, payload, status=200):
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._json({"status": "ok"})
+                return
+            self.send_response(405)
+            self.end_headers()
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = request.get("method")  # a client response carries none
+            if method == "initialize":
+                result = {"protocolVersion": request["params"]["protocolVersion"],
+                          "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "fixture", "version": "1"},
+                          "instructions": instructions}
+            elif method == "tools/list":
+                result = {"tools": [{"name": tool_name,
+                                     "inputSchema": {"type": "object"}}]}
+            elif method == "tools/call":
+                Handler.calls.append(request["params"]["name"])
+                result = {"content": [{"type": "text", "text": "live answer"}],
+                          "isError": False}
+            else:
+                self.send_response(202)
+                self.end_headers()
+                return
+            self._json({"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+    return Handler
+
+
+def _degraded_shim_env(port: int, home) -> dict:
+    """A real shim aimed at an external (no-spawn) daemon on ``port``, with
+    its agent state dir, and so its handshake cache, under ``home``."""
+    env = _shim_env(port, home / "data", PSEUDOLIFE_MCP_NO_SPAWN="1",
+                    PSEUDOLIFE_AGENT_COORDINATION="0",
+                    PSEUDOLIFE_AGENT_STATE_DIR=str(home / "agent-state"))
+    env.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+    return env
+
+
+def test_shim_caches_the_handshake_of_a_healthy_daemon(tmp_path, monkeypatch):
+    """A session against a reachable daemon leaves the daemon's own
+    instructions and tool list behind for a later start that cannot reach
+    it."""
+    import asyncio
+    from http.server import ThreadingHTTPServer
+    from threading import Thread
+
+    from pseudolife_memory import shim
+
+    handler = _fixture_daemon("cached_tool", "Daemon instructions.")
+    http = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+    url = f"http://127.0.0.1:{http.server_port}"
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(http.server_port, tmp_path))
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as client:
+                init = await client.initialize()
+                assert init.instructions == "Daemon instructions."
+                assert [t.name for t in (await client.list_tools()).tools] == ["cached_tool"]
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=60))
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agent-state"))
+    cached = shim._load_handshake_cache(url)
+    assert cached["instructions"] == "Daemon instructions."
+    assert [t["name"] for t in cached["tools"]] == ["cached_tool"]
+
+
+@pytest.mark.parametrize("cached", [True, False], ids=["cache", "no-cache"])
+def test_shim_starts_without_its_daemon_and_recovers_when_it_answers(
+        tmp_path, monkeypatch, cached):
+    """The 2026-10-03 outage, end to end with a real shim process: its
+    external daemon is down at start, so the shim completes initialize from
+    the cached handshake (or a minimal one, with no tools, when it has none),
+    refuses calls with an error that says the daemon is unreachable and being
+    retried, and stays up. When the daemon comes up, the shim notices by
+    itself, emits tools/list_changed, and the same session lists the live
+    tools and calls through to the daemon."""
+    import asyncio
+    from http.server import ThreadingHTTPServer
+    from threading import Thread
+
+    import mcp.types as types
+    from pseudolife_memory import shim
+
+    port = _free_port()
+    url = f"http://127.0.0.1:{port}"
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agent-state"))
+    if cached:
+        shim._store_handshake_cache(
+            url, instructions="Cached daemon instructions.",
+            tools=[{"name": "cached_tool", "inputSchema": {"type": "object"}}])
+    handler = _fixture_daemon("live_tool", "Live daemon instructions.")
+    started = []
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        list_changed = asyncio.Event()
+
+        async def on_message(message) -> None:
+            root = getattr(message, "root", message)
+            if isinstance(root, types.ToolListChangedNotification):
+                list_changed.set()
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(port, tmp_path))
+        with (tmp_path / "shim-stderr.txt").open("w", encoding="utf-8") as errlog:
+            async with stdio_client(params, errlog=errlog) as (r, w):
+                async with ClientSession(r, w, message_handler=on_message) as client:
+                    init = await asyncio.wait_for(client.initialize(), timeout=20)
+                    assert init.capabilities.tools.list_changed is True
+                    assert "did not answer" in init.instructions
+                    tools = [t.name for t in (await client.list_tools()).tools]
+                    if cached:
+                        assert "Cached daemon instructions." in init.instructions
+                        assert tools == ["cached_tool"]
+                    else:
+                        assert tools == []
+                    with pytest.raises(Exception) as refused:
+                        await asyncio.wait_for(
+                            client.call_tool("cached_tool", {}), timeout=15)
+                    assert "unreachable" in str(refused.value)
+                    assert "retr" in str(refused.value)
+
+                    http = ThreadingHTTPServer(("127.0.0.1", port), handler)
+                    worker = Thread(target=http.serve_forever, daemon=True)
+                    worker.start()
+                    started.append((http, worker))
+
+                    await asyncio.wait_for(list_changed.wait(), timeout=30)
+                    tools = [t.name for t in (await client.list_tools()).tools]
+                    assert tools == ["live_tool"]
+                    res = await client.call_tool("live_tool", {})
+                    assert not res.is_error
+                    assert "live answer" in res.content[0].text
+        # The shim writes stderr in its console encoding (cp1252 on Windows
+        # without UTF-8 mode, where its em dashes are not UTF-8), and only
+        # the absence of a traceback is checked here.
+        errors = (tmp_path / "shim-stderr.txt").read_text(
+            encoding="utf-8", errors="replace")
+        assert "Traceback" not in errors
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=90))
+    finally:
+        for http, worker in started:
+            http.shutdown()
+            http.server_close()
+            worker.join(timeout=2)
+    assert handler.calls == ["live_tool"]
+    # The live list replaced the cached one for the next start.
+    assert [t["name"] for t in shim._load_handshake_cache(url)["tools"]] == ["live_tool"]
+
+
+def test_loopback_daemon_url_forms_still_spawn(monkeypatch, tmp_path):
+    """The refusal is keyed on the URL's host, not on its spelling: every
+    loopback form keeps today's autostart, so a local install is unchanged."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "_spawn_lock_path", lambda url: tmp_path / "spawn.lock",
+        raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+    for url in ("http://127.0.0.1:8765", "http://localhost:8765",
+                "http://[::1]:8765"):
+        spawned = []
+
+        class _Child:
+            returncode = None
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(shim, "spawn_daemon",
+                            lambda: (spawned.append(1), _Child())[1])
+        monkeypatch.setattr(
+            shim, "probe_health",
+            lambda url, timeout=0.25: {"status": "ok"} if spawned else None)
+        assert shim.ensure_daemon(url)["status"] == "ok"
+        assert len(spawned) == 1, url
+
+
+def test_shim_mcp_dependency_stays_on_the_daemon_line():
+    """The shim and the daemon are installed separately, and a shim on mcp
+    2.2.0 fails every tools/list against a daemon on 2.1.x (its upstream
+    initialize gets an error response; the same bearer over curl succeeds).
+    The 2026-09-28 remote-client dogfood hit this on a fresh pipx install.
+    pyproject caps the range at the lock's minor line; raise both together."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+    mcp_spec = next(d for d in deps if re.match(r"mcp\s*(?:[<>=~!]|$)", d))
+    assert "<2.2" in mcp_spec, mcp_spec
+    lock = (Path(__file__).resolve().parents[1] / "ops" / "requirements.lock.txt"
+            ).read_text(encoding="utf-8")
+    locked = re.search(r"^mcp==(\d+)\.(\d+)\.", lock, re.M)
+    assert locked and (locked.group(1), locked.group(2)) == ("2", "1"), lock
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://127.0.0.1:8765", True),
+    ("http://127.0.0.2:8765", True),
+    ("http://localhost:8765", True),
+    ("http://LOCALHOST:8765", True),
+    ("http://[::1]:8765", True),
+    ("http://[::ffff:127.0.0.1]:8765", True),
+    ("http://0.0.0.0:8765", False),
+    ("http://100.64.0.2:8765", False),
+    ("https://daemon.example.invalid", False),
+    ("http://myhost.local:8765", False),
+])
+def test_is_loopback_url_is_keyed_on_the_host_only(url, expected):
+    """Loopback is the address family's loopback range or the literal name
+    ``localhost``; any other name is treated as another machine WITHOUT
+    resolving it (a name that happens to resolve to loopback is remote to
+    the shim, which then never spawns for it: that is the safe direction)."""
+    from pseudolife_memory.daemon_url import _is_loopback_url
+
+    assert _is_loopback_url(url) is expected
+
+
+def test_remote_daemon_probes_use_the_remote_timeout(monkeypatch):
+    """Every probe of a daemon on another machine carries the remote
+    timeout: the loopback default (0.25 s) is shorter than a relayed
+    tailnet round trip, so with it the shim could give up on a daemon that
+    is up. Reverting _REMOTE_PROBE_TIMEOUT_S to the loopback value, or
+    passing the default on any probe, turns this red."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    timeouts = []
+
+    def fake_probe(url, timeout=0.25):
+        timeouts.append(timeout)
+        return {"status": "ok"} if len(timeouts) >= 3 else None
+
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+    shim.ensure_daemon("http://100.64.0.2:8765")
+    assert len(timeouts) == 3
+    assert min(timeouts) >= 2.0, timeouts
+
+
+def test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list(tmp_path):
+    """/health answering is not the daemon answering: a proxy that passes
+    plain GETs but resets every /mcp POST makes each re-list fail again. The
+    watcher's backoff must keep growing across those false recoveries, not
+    restart at 1 s, or the client re-lists every second or two for as long as
+    it lasts (review, 2026-10-03). Here the schedule allows 3 notices in 12 s
+    (after 1, 2 and 5 s); a restarting backoff sends one every ~1.5 s."""
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import mcp.types as types
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            body = json.dumps({"status": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.close_connection = True  # drop it: no response at all
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        changed = asyncio.Event()
+
+        async def on_message(message) -> None:
+            if isinstance(getattr(message, "root", message),
+                          types.ToolListChangedNotification):
+                changed.set()
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(http.server_port, tmp_path))
+        notices = 0
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w, message_handler=on_message) as client:
+                await asyncio.wait_for(client.initialize(), timeout=20)
+                assert (await client.list_tools()).tools == []  # nothing cached
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + 12
+                while (left := deadline - loop.time()) > 0:
+                    try:
+                        await asyncio.wait_for(changed.wait(), timeout=left)
+                    except (TimeoutError, asyncio.TimeoutError):
+                        break
+                    changed.clear()
+                    notices += 1
+                    await client.list_tools()  # what a real client does
+        return notices
+
+    try:
+        notices = asyncio.run(asyncio.wait_for(drive(), timeout=60))
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+    assert 1 <= notices <= 4, notices
+
+
+def test_a_call_that_gets_through_announces_the_recovery_itself(tmp_path, monkeypatch):
+    """The /health watcher is not the only way back: a tool call that reaches
+    the daemon proves it answers, and the shim must say so (list_changed)
+    rather than leave the client on the cached list until the next probe. The
+    fixture's /health never answers, so only the call can flip the link."""
+    import asyncio
+    from http.server import ThreadingHTTPServer
+    from threading import Thread
+
+    import mcp.types as types
+
+    base = _fixture_daemon("live_tool", "Live daemon instructions.")
+
+    class Handler(base):
+        def do_GET(self):  # /health is broken; /mcp works
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        changed = asyncio.Event()
+
+        async def on_message(message) -> None:
+            if isinstance(getattr(message, "root", message),
+                          types.ToolListChangedNotification):
+                changed.set()
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(http.server_port, tmp_path))
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w, message_handler=on_message) as client:
+                init = await asyncio.wait_for(client.initialize(), timeout=20)
+                assert "did not answer" in init.instructions
+                assert (await client.list_tools()).tools == []
+                res = await client.call_tool("live_tool", {})
+                assert "live answer" in res.content[0].text
+                await asyncio.wait_for(changed.wait(), timeout=5)
+                assert [t.name for t in (await client.list_tools()).tools] == ["live_tool"]
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=60))
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+
+
+def test_degraded_start_still_names_an_unusable_token_file(monkeypatch, tmp_path, capsys):
+    """With no /health there is no ``auth`` verdict, so the startup credential
+    check cannot decide to exit; but a configured token file that is missing
+    or unsafe fails every call later behind an opaque error, so the one line a
+    human can read still names it. The session starts regardless."""
+    from pseudolife_memory import shim
+
+    missing = tmp_path / "missing.token"
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(missing))
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: None)
+    monkeypatch.setattr(shim, "_post_episode", lambda *a, **k: None)
+    started = []
+
+    async def proxy(url, token, session_uid, **kwargs):
+        started.append(kwargs.get("daemon_unreachable"))
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    assert started == [True]
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err

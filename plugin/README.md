@@ -8,13 +8,19 @@ separately, and so is the MCP transport; see the
 
 ## Install
 
+The repo installer (`ops/install.sh` / `ops\install.ps1`) installs the
+plugin whenever Claude Code is a selected client, adding the marketplace
+first if needed, and reports the result on its wiring ladder
+(`--claude-plugin skip` / `-ClaudePlugin skip` opts out). By hand, inside
+Claude Code:
+
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
 Then register the MCP transport (the plugin deliberately doesn't bundle one —
-see below). Either re-run the installer, which wires the stdio shim
+see below). Either run the installer, which wires the stdio shim
 (recommended: per-session identity for concurrent sessions):
 
 ```
@@ -31,6 +37,119 @@ Restart Claude Code (or `/reload-plugins`). If the daemon is running you'll
 see the memory briefing at the top of each session; if not, the session tells
 you how to start it.
 
+## Codex compatibility
+
+When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
+same events. On Windows, Codex runs each entry's `commandWindows`, a native
+PowerShell 7 helper (`lifecycle.ps1`); Claude Code has no such field and
+runs the Bash `command` through Git Bash (see [Windows](#windows)). With the
+daemon running, use
+`python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
+to approve the PseudoLife hook definitions and verify their lifecycle (the
+`Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
+the park gate, and the `SubagentStop` entry runs that gate for a Codex child
+thread under the child's own address, doing nothing in Claude Code; the
+`PreToolUse` entry is Claude Code's subagent board guard, which in Codex
+allows every call, and setup approves it with the rest). The same consent
+approves the `memory_message` tool, unless you chose its approval yourself,
+so a task woken by board mail does not stall on a prompt (the plugin's hook
+definitions are unchanged by it).
+Automatic detection reuses a recognized, enabled plugin bundle. If the
+runtime cannot support automatic trust, setup gives `/hooks` review guidance
+and uses standing instructions when approved. A plugin installation or a
+passing script fixture alone does not establish readiness.
+
+Use one hook source so the same event does not run twice; the setup helper
+checks for known duplicates. Keep a single MCP transport registration, and follow the
+[Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
+for startup budgets, standing instructions and runtime diagnostics.
+
+## Windows
+
+**Git for Windows is a requirement of this plugin.** Claude Code runs every
+hook command through Git Bash on Windows and finds it itself:
+`CLAUDE_CODE_GIT_BASH_PATH` when set, else `C:\Program Files\Git\bin\bash.exe`
+or its `(x86)` twin, else `bin\bash.exe` of the Git whose `cmd\git.exe` is on
+PATH ([Claude Code docs](https://code.claude.com/docs/en/troubleshoot-install.md)).
+It never looks `bash` up on PATH, so a PATH whose `bash` is the WSL launcher
+in `System32` does not affect it: verified on Claude Code 2.1.280 on
+2026-09-27 with every Git directory removed from PATH, the hooks still ran
+under `C:\Program Files\Git\bin\bash.exe`. Without Git Bash, Claude Code runs
+hook commands in PowerShell, where every command here fails (`bash` is not
+found, or opens WSL, which cannot read the plugin's Windows paths), and the
+session gets no briefing, no per-turn note and no episode close.
+`pseudolife-mcp doctor` reports the bash.exe Claude Code would use
+(`git_bash`, reading `CLAUDE_CODE_GIT_BASH_PATH` from the settings `env`
+block too) and fails with `GitBashMissing` when there is none; it also
+warns when `bash` on PATH is the WSL launcher, which breaks tools that do
+look it up.
+
+The `commandWindows` field on each hook entry is for Codex (above); Claude
+Code ignores it and never runs `lifecycle.ps1`. Two limits of the Bash hooks
+under Claude Code on Windows: SessionEnd hooks from a plugin get 1.5 s in
+total, whatever `timeout` hooks.json sets (a settings.json hook can raise
+the budget, a plugin's cannot; measured 2026-09-27), so the `/clear` and
+`/resume` digest handoff is written before the episode-close request and
+reads the process identity SessionStart recorded instead of measuring it,
+while that record says it still holds (`ps -W` prints a process's start
+time differently after its first 24 hours, and a DST change shifts it);
+and the Stop hook (on by default) checks that Claude Code is still running through
+`ps -W` at arm time, once a minute for the first hour and every five minutes
+after (a Windows PID is invisible to `kill -0`), so a watcher orphaned by a
+crash usually ends within that interval; if the PID is reused, or `ps -W`
+never lists it, it lasts until its digest is swept as stale, about a day.
+
+## Startup check-in and per-turn coordination
+
+Memory and coordination have separate SessionStart and UserPromptSubmit
+handlers. The coordination startup handler asks the agent to update its
+project, task and status with `memory_agents`, list relevant peers, and read
+pending `memory_message` mail. It runs independently of the daemon briefing;
+neither handler depends on the other running first. Coordination identity
+and credentials remain owned by the existing shim adapter.
+
+Coordination is on by default, behind bearer authentication. The startup
+handler makes one bounded request (`GET /api/hook/coordination-start`, two
+seconds, no retry) with the same connection and credential settings as the
+memory handler, and prints the check-in only when the daemon serves it, which
+it does where the board is on for that bearer (the daemon cannot see whether
+the client has an adapter). A disabled board
+(`coordination.enabled: false`), an open install, an unlisted principal, or
+a daemon that does not answer adds nothing, and neither does a client that
+sets `PSEUDOLIFE_AGENT_COORDINATION` to anything but `1`/`true`/`yes`/`on` in
+the hook's environment.
+
+When the shim's coordination adapter is up (the default for a shim holding a
+bearer token the daemon serves the board to; `PSEUDOLIFE_AGENT_COORDINATION=0`
+in the MCP server's env block turns it off), it keeps a small digest file per
+session under
+`~/.pseudolife-mcp/digests/` — the pending addressed messages, rendered once,
+behind a watermark that moves only when they change. The coordination UserPromptSubmit hook
+reads that file by the `session_id` it receives and prints the digest only when
+the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
+context and a change appears once. The same marker gates the hint the shim
+appends to tool results, so the two paths never repeat each other. SessionStart
+on `resume`, `compact` or `clear` keeps `.seen` and writes a `<key>.reprint`
+flag naming the marker it found, so the next prompt prints the current digest
+again unless a wake or a hint showed it since. Under Claude Code, `/clear` and an
+in-session `/resume` give the hooks a new `session_id` while the shim keeps
+the one it was launched with, so the session hooks keep the shim's key once
+per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).
+The prompt hook reads through it while it is confirmed for the current
+session. It passes to the next session only through a SessionEnd handoff bound
+to the process's creation time, so a record a dead process left is never
+followed.
+Override the directory with `PSEUDOLIFE_DIGEST_DIR` in *both* the MCP env block
+and the hook's environment; they must agree. `ledger.log` in that directory
+records one line per hook firing (time, session prefix, watermark, bytes added)
+for measuring the cost.
+
+The hook carries bounded previews, not complete handoffs. Use
+`memory_message(action="receive")` for full messages and acknowledge only
+after reading. A message can contain up to 8,192 UTF-8 bytes; larger handoffs
+should reference an artifact the recipient can access. Delivery hints and
+acknowledgments do not establish that requested work is complete.
+
 ## Why no bundled MCP server?
 
 Earlier versions shipped an HTTP server entry in the plugin. Claude Code
@@ -43,43 +162,129 @@ the plugin stays hooks-only.
 
 ## What it replaces
 
-The plugin supersedes two of the wiring steps of `ops/install.sh` /
-`ops/install.ps1`:
+The plugin replaces installer hook wiring and provides concise startup
+guidance. Keep the full standing memory policy when detailed guidance is needed:
 
 | Installer step | Plugin equivalent |
 |---|---|
 | Session hooks in `settings.json` | bundled hooks (curl, no pip package needed) |
-| Memory-loop block appended to `~/.claude/CLAUDE.md` | served as session context by the same hook |
+| Memory-loop block appended to `~/.claude/CLAUDE.md` | concise core served at startup; full standing policy remains a separate reference |
 
-The third step — `claude mcp add` — is **not** replaced: the installer (or
+The transport step — `claude mcp add` — is **not** replaced: the installer (or
 the one-liner above) still owns the MCP transport.
 
 **Migrating from installer hook wiring?** Remove the old pieces so they
-don't double up:
+don't double up. Rerunning the installer with Claude Code selected offers to
+do this for you once the plugin is installed and enabled for all projects:
+it lists the entries, backs up `~/.claude/settings.json`, and removes only
+the exact commands the installers wrote (`--claude-legacy-hooks remove` /
+`-ClaudeLegacyHooks remove` for an unattended run;
+`ops/install-hook.sh --remove-legacy` or `ops\install-hook.ps1 -RemoveLegacy`
+on their own, `--dry-run` / `-DryRun` to list first). An entry you edited is
+listed for review and left alone. By hand:
 
-1. Delete the `pseudolife-mcp briefing` SessionStart entry from
-   `~/.claude/settings.json`
-2. Delete the `mid-session discipline` UserPromptSubmit entry from
-   `~/.claude/settings.json` (the plugin echoes the same line — keeping
-   both injects it twice per turn)
-3. Remove the "Memory — use it every session" block from `~/.claude/CLAUDE.md`
+1. Delete the `pseudolife-mcp briefing` SessionStart entries from
+   `~/.claude/settings.json`: the briefing, and the `--coordination`
+   check-in that installers write since 2026-09-25
+2. Delete the `pseudolife-mcp prompt-hook` UserPromptSubmit entry (or, from
+   installs before 2026-09-26, the `mid-session discipline` echo) from
+   `~/.claude/settings.json`: the plugin's own prompt hook serves the same
+   memory-change note
+3. Remove any installer-added `Pseudolife coordination:` SessionStart echo
+   (2026-09-24 installs) from `~/.claude/settings.json`; the plugin supplies
+   its own check-in hook.
+   Keep the full standing memory policy if you rely on its detailed guidance.
+4. Delete any `pseudolife-mcp episode-start` SessionStart or
+   `pseudolife-mcp episode-end` SessionEnd entry (installs from before
+   2026-07-14); the daemon owns episodes now.
 
 (Keep your `claude mcp` registration — the plugin doesn't provide one.)
 
 ## Contents
 
-- **SessionStart hook** — curls the daemon's `/api/hook/session-start` for
-  the memory-loop instructions + briefing (lessons, unsure-abouts, world
-  facts), and registers the session's episode identity. Needs `bash` on PATH
-  (Git Bash on Windows) and `curl` — both ship with git / the OS.
-- **UserPromptSubmit hook** — echoes a one-line mid-session memory
-  discipline on every turn (recall before reviewing code/docs/PRs, then
-  compare memory against the files; status questions are memory questions;
-  log outcomes). Static — no daemon call, works offline.
+- **Memory SessionStart hook** — curls the daemon's `/api/hook/session-start`
+  for concise memory guidance and a bounded briefing, and registers the
+  session's episode identity. On a resume or compaction it serves only the
+  episode-handle line and a pointer to the full briefing. Needs `bash` and
+  `curl`; on Windows that is Git for Windows, which Claude Code finds
+  without PATH help (see [Windows](#windows)).
+- **Memory-policy SessionStart hook** — curls `/api/hook/memory-policy`,
+  which returns the full memory-loop block only when the daemon's
+  `memory_policy.variant` is `full_separate_hook` (an output of its own, so
+  it never shares the briefing's budget); otherwise it adds nothing. See
+  [Configuration](../docs/guide/configuration.md#startup-memory-policy-memory_policy).
+- **Coordination SessionStart hook** — preserves the local digest mapping
+  across supported session changes, then prints the agent check-in the
+  daemon serves where the board works (one bounded request).
+- **Memory UserPromptSubmit hook** — the memory-change note. One bounded
+  request per turn (at most about 2 s; silent when the daemon does not
+  answer) prints a short note only when memory changed since this session's
+  last note: new lessons, or new status notes from other sessions, each with
+  its newest one-line excerpt and a one-line memory-loop reminder (recall
+  before reviewing code/docs/PRs, then compare memory against the files;
+  status notes for long work; log outcomes). Quiet turns add nothing. The
+  hook keeps its cursor in `~/.pseudolife-mcp/digests/<sha256>.mark`
+  (`PSEUDOLIFE_DIGEST_DIR` moves it) and saves it only after printing.
+- **Coordination UserPromptSubmit hook** — reads changed local mailbox previews
+  independently of the memory reminder, without a daemon call.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
+- **Stop hook** (on by default since 2026-09-28; `PSEUDOLIFE_AGENT_WAKE_HOOK=0`
+  turns it off, `PSEUDOLIFE_AGENT_COORDINATION=0` turns off the board) — waits
+  in the background after each turn and wakes the idle session when board
+  mail arrives that clears its declared need, is urgent, or is a maintainer
+  message; policy-gated and capped. See
+  [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
+- **Subagent board guard** (PreToolUse, since 2026-09-30; off with the board,
+  `PSEUDOLIFE_AGENT_COORDINATION=0`) — a subagent runs in its parent's shim,
+  so its board calls carry the parent's identity. For a subagent's call
+  (Claude Code marks it with `agent_id` in the hook input) the hook denies
+  `memory_agents` update, claim and release and `memory_message` send and
+  ack on any server name, with a reason telling it to ask its parent; list,
+  receive, the read-only `memory_message` history and every other tool
+  pass, and so does everything the parent calls. No daemon request. A
+  payload it cannot read is let through. Codex lists this entry too; there
+  it allows every call, because a Codex child has a board address of its
+  own. See
+  [Configuration](../docs/guide/configuration.md#delivery-and-recovery).
+- **Subagent board hooks** (SubagentStart / SubagentStop, schema v50; off
+  with the board, `PSEUDOLIFE_AGENT_COORDINATION=0`) — list a Claude Code
+  session's running subagents on its board row, so peers see them as its
+  children rather than as peers. Each start or stop sends one async
+  `POST /api/hook/subagent` that adds or removes an
+  `<agent_type>#<first 8 of agent_id>` entry in the session's `children`;
+  the answer is ignored and every failure is silent. From start to stop the
+  hook also keeps a `<key>.sub-<agent_id>` marker beside the session's
+  digest, so the shim holds back the parent's tool-result mail hint instead
+  of letting a subagent's call spend it. A no-op in Codex, whose subagents
+  have board addresses of their own.
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
+
+## Updating
+
+The plugin lives in a cache Claude Code refreshes only on request, so it
+does not move when the daemon is redeployed. The updater moves it with the
+daemon: `pseudolife-mcp update` (from a checkout, `ops\update.ps1 -All` /
+`ops/update.sh --all`, or `python ops/update_clients.py` on its own)
+refreshes the marketplace clone, compares the plugin tree byte for byte
+against the cache, and runs `claude plugin update` only when they differ.
+The manifest carries no version, so Claude Code names each marketplace
+commit's copy by its commit and installs the new one beside the one
+running sessions use; nothing is uninstalled, and no session has to close.
+By hand:
+
+```
+/plugin marketplace update pseudolife-mcp
+/plugin update pseudolife-memory@pseudolife-mcp
+```
+
+Either way, sessions already running keep the copy they loaded; a session
+started afterwards runs the new one. The SessionStart hook sends
+the plugin's version and a digest of its hook scripts to the daemon; when
+the version differs, or the version matches but the hooks do not, the
+session briefing opens with a one-line notice naming the command that
+moves it, so a stale cache no longer runs silently.
 
 ## Non-default setups
 

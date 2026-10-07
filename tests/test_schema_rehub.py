@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
@@ -15,7 +17,58 @@ from pseudolife_memory.storage.schema import (
 
 def test_rehub_schema_has_an_independent_namespaced_version():
     assert REHUB_SCHEMA_VERSION == "v34-rehub"
-    assert SCHEMA_META_VERSION >= 34
+
+
+def test_populated_v37_rehub_bank_upgrades_without_changing_proof(pg_conn):
+    from psycopg import sql
+    from pseudolife_memory.re_evidence import parse_evidence_bytes
+    from pseudolife_memory.storage.re_evidence import ReEvidenceArchiveStorage
+
+    # Frozen from the fork's pre-upgrade 1d1129d5 schema initializer. Use
+    # actual historical DDL, rather than resetting a current bank's number.
+    historical = {}
+    fixture = Path(__file__).parent / "fixtures" / "schema_v37_rehub.py.txt"
+    exec(compile(fixture.read_text(encoding="utf-8"), str(fixture), "exec"), historical)
+    assert historical["SCHEMA_META_VERSION"] == 37
+    tables = [row[0] for row in pg_conn.execute(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()]
+    pg_conn.execute(sql.SQL("DROP TABLE {} CASCADE").format(
+        sql.SQL(", ").join(sql.Identifier(name) for name in tables)))
+    pg_conn.commit()
+    try:
+        historical["ensure_schema"](pg_conn)
+        raw = b'{ "address": "00B72870", "value": 1.00 }\r\n'
+        artifact = parse_evidence_bytes(raw, source_path="evidence/original.json")
+        artifact.update(project="upgrade-proof", binary_id="client:test", kind="function")
+        store = ReEvidenceArchiveStorage(pg_conn)
+        evidence_id = store.insert_re_evidence(artifact)
+        claim_id = store.upsert_re_claim(
+            project="upgrade-proof", binary_id="client:test", subject="00b72870",
+            claim="calls the indexed function", status="verified", evidence_ids=[evidence_id])
+        before = store.get_re_evidence_for_export(
+            artifact_id=evidence_id, project="upgrade-proof", binary_id="client:test")
+        assert pg_conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == 37
+
+        ensure_schema(pg_conn)
+        after = store.get_re_evidence_for_export(
+            artifact_id=evidence_id, project="upgrade-proof", binary_id="client:test")
+        assert after == before
+        assert after["raw_bytes"] == raw
+        assert after["content_hash"] == artifact["content_hash"]
+        claims = store.query_re_claims(project="upgrade-proof", binary_id="client:test")
+        assert [(row["id"], row["status"], row["evidence_ids"]) for row in claims] == [
+            (claim_id, "verified", [evidence_id])]
+        versions = dict(pg_conn.execute(
+            "SELECT key, value FROM meta WHERE key IN "
+            "('schema_version', 'rehub_schema_version')").fetchall())
+        assert versions == {
+            "schema_version": SCHEMA_META_VERSION,
+            "rehub_schema_version": REHUB_SCHEMA_VERSION,
+        }
+    finally:
+        pg_conn.rollback()
+        ensure_schema(pg_conn)
 
 
 def test_rehub_evidence_tables_and_address_index_exist(pg_conn):

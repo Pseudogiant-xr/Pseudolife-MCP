@@ -101,7 +101,10 @@ def run_replicate(ex: OpenAICompatExtractor, rows: list[dict],
             print(f"  batch {start // batch}: FAILED ({exc}) — rows skipped")
             continue
         for v in out:
-            verdicts[start + v["n"] - 1] = (v["verdict"], v["confidence"])
+            # "relate" (2026-09-30) is reject-class: this ladder's labels
+            # are accept / reject, and the sweep gates relate as a reject.
+            verdict = "reject" if v["verdict"] == "relate" else v["verdict"]
+            verdicts[start + v["n"] - 1] = (verdict, v["confidence"])
     return verdicts
 
 

@@ -12,7 +12,7 @@ Claude Code plugin marketplace (`.claude-plugin/marketplace.json` +
 them in this order (first done 2026-07-16, v0.8.0; GHCR images added
 2026-08-14).
 
-0. **Docs currency pass before the cut** — two checks, and (a) is the one
+0. **Docs currency pass before the cut** — three checks, and (a) is the one
    that gets skipped because nothing fails when you miss it.
 
    **(a) Absence — is the new behavior documented at all?** List the
@@ -47,17 +47,27 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    retrieval, dreaming, episodes, memory-model, benchmarks; they carry the
    same drift-prone claims the README used to),
    CONTRIBUTING, SECURITY, evals/README, examples/ (CLAUDE.memory.md is
-   injected into user CLAUDE.mds — its tool surface must match exactly),
+   injected into user CLAUDE.md / AGENTS.md files — its tool surface must match exactly),
    docs/runbooks, ops/.env.example comments. The README is the PyPI
    description, so its fixes only reach PyPI at the next version.
+
+   **(c) Setup — does any change since the last tag leave the user a manual
+   step?** For each behavior change, ask what a user must do by hand after
+   `pseudolife-mcp update` or a fresh install: a config edit, a login, a
+   serve, a command to run once. If the answer is anything, the release
+   waits until the installer or update does it (CLAUDE.md, "Install and
+   update experience"). The 2026-10-04 passkey and test-login changes held
+   the release after 0.16.1 this way.
 
 1. **Version cut touches six files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the compose daemon image tag, **both** version fields in `server.json`,
-   `plugin/.claude-plugin/plugin.json` (pinned to pyproject by
-   `tests/test_plugin_packaging.py`; the plugin marketplace serves from
-   this repo, so bumping it is also what ships plugin updates), and
+   `plugin/release.json` (pinned to pyproject by
+   `tests/test_plugin_packaging.py`; the release the hooks report for the
+   version handshake. `plugin/.claude-plugin/plugin.json` carries no
+   version: Claude Code keys its cache by it, and the marketplace ships the
+   plugin from every master commit), and
    `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
    re-verify the map's claims, don't just renumber it — update
    `meta.verified` to the date you actually checked). `server.json` (both
@@ -67,7 +77,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    field fails in the suite rather than mid-CI.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
-   then open the wheel — Console static assets present (33 files under
+   then open the wheel — Console build present (index.html, assets/ and vendor/ under
    `web/static/`), no stray top-level dirs, the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers

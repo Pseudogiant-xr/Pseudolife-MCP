@@ -365,6 +365,19 @@ _EVENTS_SYSTEM_PROMPT = (
     '{"events":[]} if nothing qualifies.'
 )
 
+# The typed-edge vocabulary the graph judges name relations from: the link
+# and candidate judges, and since 2026-09-30 the merge judge's "relate".
+_RELATION_VOCAB = (
+    "depends-on (src needs dst), part-of (src is a component of dst), "
+    "runs-on (src executes on host/platform dst), hosts (src serves dst), "
+    "uses (src makes use of dst), configures (src sets up dst), "
+    "stores-data-in, tests (src is a test of dst), implements (src code "
+    "realizes concept dst), superseded-by (src replaced by dst), related-to "
+    "(untyped; weakest)")
+# The bare relation names: the only relations a merge "relate" may carry.
+_RELATION_NAMES = tuple(part.split(" (")[0].strip()
+                        for part in _RELATION_VOCAB.split(", "))
+
 # Merge-proposal judge (autonomous Step C, 2026-08-16 design). The rules are
 # the distilled house judgment brief the 2026-08-16 Opus panel ran with,
 # grounded in 761 recorded verdicts (23% accept rate — hence the skeptical
@@ -386,16 +399,22 @@ _JUDGE_SYSTEM_PROMPT = (
     "3. A dated run/session slug paired with a broader name (a project, a "
     "process) is one event vs a category — reject.\n"
     "4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool "
-    "pairs are related but distinct — reject.\n"
+    "pairs are related but distinct — reject, and name the relation that "
+    "holds from FROM to INTO in \"relation\" when one below fits.\n"
     "5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the "
     "same file, bare-vs-qualified name, abbreviation-vs-full name — when "
     "the evidence agrees.\n"
     "6. Use \"leave\" only when the evidence is genuinely insufficient to "
     "decide; do not use it to avoid judging.\n"
+    "\"relation\" is optional and only annotates a reject (src is FROM, "
+    "dst is INTO): " + _RELATION_VOCAB + ". Null when none fits. It never "
+    "changes the verdict or its confidence.\n"
     'Return JSON only: {"verdicts":[{"id":<proposal number>,'
     '"verdict":"accept"|"reject"|"leave","confidence":<0..1>,'
+    '"relation":<vocab or null, with reject only>,'
     '"note":"<reason, max 25 words>"}]} — one entry per proposal, '
-    "confidence is your honest probability that the verdict is correct."
+    "confidence is your honest probability that the verdict is correct "
+    "(for a reject: that FROM and INTO are different things)."
 )
 
 
@@ -439,14 +458,6 @@ def format_judge_proposal(p: dict) -> str:
 # junk, 40 slot pairs, every verdict ratified and applied). SHARED with
 # evals/queue_judge_ladder.py so measured arms and the shipped judges are
 # byte-identical; change them only through a new ladder run.
-
-_RELATION_VOCAB = (
-    "depends-on (src needs dst), part-of (src is a component of dst), "
-    "runs-on (src executes on host/platform dst), hosts (src serves dst), "
-    "uses (src makes use of dst), configures (src sets up dst), "
-    "stores-data-in, tests (src is a test of dst), implements (src code "
-    "realizes concept dst), superseded-by (src replaced by dst), related-to "
-    "(untyped; weakest)")
 
 _LINK_JUDGE_SYSTEM_PROMPT = (
     "You judge LINK PROPOSALS for a knowledge graph. Each numbered proposal "
@@ -899,6 +910,77 @@ _LESSON_SYSTEM_PROMPT = (
 )
 
 
+# Rule mode (2026-09-08): the opposite contract to the clustering prompt above,
+# for a store that keeps ONE situation-specific rule per episode with its
+# decision-critical values intact (the "Learning on the Job" protocol, arXiv
+# 2607.22157). One signal in, exactly one rule out; the slot key is the
+# situation, not a task type, so rules coexist instead of superseding each
+# other. Generic on purpose: no benchmark or domain wording lives here.
+_RULE_LESSON_SYSTEM_PROMPT = (
+    "You turn ONE outcome signal from an agent's episode into ONE "
+    "situation-specific RULE. Reply with JSON only: "
+    '{"lessons":[{"task":..,"aspect":"rule","lesson":..,"about":..,'
+    '"polarity":"+"|"-","outcome":"success"|"failure"|"correction",'
+    '"confidence":0..1}]} containing exactly one lesson.\n'
+    "- task = a short name for the SITUATION: the request and the observable "
+    "behaviour that distinguishes it from look-alike situations, taken from "
+    "the signal's detail. Specific to this situation, never a generic task "
+    "type.\n"
+    "- lesson = one sentence. A success: \"WHEN <situation> THEN <the exact "
+    "action(s) that produced the outcome>\". A correction (the detail carries "
+    "a CORRECT SOLUTION): \"WHEN <situation> THEN <the exact correct "
+    "action(s), copied verbatim from the correct solution>\"; if an ACTION "
+    "DIFF is given, add one clause naming the decisive divergence. A failure "
+    "with no correct solution: \"WHEN <situation> do NOT <the exact action(s) "
+    "taken> — verified wrong against the outcome\"; never invent the right "
+    "answer.\n"
+    "- Copy decision-critical values (names of things, options, amounts, "
+    "reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, "
+    "or add conditions, alternatives or exceptions the signal does not "
+    "contain. Identifiers of people become placeholders. If the detail lists "
+    "MUST INCLUDE values, every one of them appears verbatim in the lesson.\n"
+    '- polarity = "+" for a THEN rule, "-" for a do-NOT rule. outcome = the '
+    "signal's class. about = the tool or action the rule concerns. "
+    "confidence = 0..1.\n"
+    "Do not cluster and do not skip: this signal yields exactly one rule."
+)
+
+_RULE_PREFIX = "rule:"
+
+
+def is_rule_signal(signal: dict, rule_mode: bool) -> bool:
+    """A signal synthesised under the rule contract: globally when
+    ``memory.lessons.rule_mode`` is on, or per signal when its ``about``
+    starts with ``rule:`` (the routing prefix is stripped from the stored
+    lesson's ``about``)."""
+    if rule_mode:
+        return True
+    return str(signal.get("about") or "").strip().lower().startswith(_RULE_PREFIX)
+
+
+def _strip_rule_prefix(about: str | None) -> str | None:
+    text = str(about or "").strip()
+    if text.lower().startswith(_RULE_PREFIX):
+        text = text[len(_RULE_PREFIX):].strip()
+    return text or None
+
+
+def _must_include(detail: str | None) -> list[str]:
+    """Values a rule must carry verbatim: the ``MUST INCLUDE: a; b`` line the
+    outcome's ``detail`` may carry (the harness lists decision-critical
+    values it verified)."""
+    for line in str(detail or "").splitlines():
+        if line.strip().upper().startswith("MUST INCLUDE:"):
+            body = line.split(":", 1)[1]
+            return [v.strip() for v in body.split(";") if v.strip()]
+    return []
+
+
+def _missing_values(lesson: str, must: list[str]) -> list[str]:
+    low = lesson.lower()
+    return [v for v in must if v.lower() not in low]
+
+
 _OUTCOME_INFER_SYSTEM_PROMPT = (
     "You review the stored record of one work session and infer what "
     "OUTCOMES it reached. Reply with JSON only: {\"outcomes\": [{\"task\": "
@@ -943,6 +1025,19 @@ _DIGEST_SYSTEM_PROMPT = (
     "- No headings, no bullet lists — one compact narrative paragraph "
     "(two at most)."
 )
+
+# These instruction-specific phrases are not session events unless the stored
+# record itself discusses them. Reject their unsupported appearance as
+# malformed output so the digest stage's existing bounded retry applies.
+_DIGEST_PROMPT_ECHO = tuple(re.compile(pattern, re.IGNORECASE | re.DOTALL)
+                            for pattern in (
+    r"\bmissing detail\b.{0,100}\bcheap\b.{0,100}\binvented one\b.{0,100}\bpoison",
+    (r"\bone compact narrative paragraph\b.{0,100}\bno headings\b.{0,40}\bbullet lists\b"
+     r"|\bno headings\b.{0,40}\bbullet lists\b.{0,100}\bone compact narrative paragraph\b"),
+    r"\bpast tense anchored to the session\b",
+    r"\bhistory,? never as a claim about the present\b",
+    r"\bwhat the session set out to do\b.{0,100}\bphases or steps\b",
+))
 
 
 _RELATIONS_PROMPT_HEAD = (
@@ -1024,7 +1119,7 @@ def _parse_outcome_claims(content: str, cap: int) -> list[dict] | None:
     return out
 
 
-def _parse_digest(content: str) -> str | None:
+def _parse_digest(content: str, *, context_text: str | None = None) -> str | None:
     """Parse a summarize_session reply. ``None`` = malformed (retryable);
     a digest is mandatory prose, so an empty/blank string is malformed
     too — there is no valid nothing-found for a non-empty session."""
@@ -1042,6 +1137,12 @@ def _parse_digest(content: str) -> str | None:
     digest = parsed.get("digest")
     if not isinstance(digest, str) or not digest.strip():
         return None
+    if context_text is not None:
+        digest_words = " ".join(digest.split())
+        context_words = " ".join(context_text.split())
+        if any(pattern.search(digest_words) and not pattern.search(context_words)
+               for pattern in _DIGEST_PROMPT_ECHO):
+            return None
     return digest.strip()
 
 
@@ -1082,7 +1183,42 @@ class ExtractorError(Exception):
     """An extractor call failed (network, timeout, HTTP error, malformed
     response) — as opposed to succeeding with zero claims. Callers use this to
     distinguish a transient failure (don't advance the dream cursor / leave
-    signals pending, retry next sweep) from a genuine empty result."""
+    signals pending, retry next sweep) from a genuine empty result.
+
+    ``auth_failure`` is True when the endpoint's answer said its login or
+    credential failed (see :func:`classify_extractor_error`); the answer
+    itself is never kept."""
+
+    auth_failure = False
+
+
+# Words that mark an authentication failure in an extractor's error: the
+# CLI shims answer a failed call with HTTP 500 and the CLI's own error text
+# (2026-08-11: "OAuth session expired and could not be refreshed"). Whole
+# words only: a bare "auth" matched "author" and psycopg's "password
+# authentication failed", and "log ?in" matched "catalog in" (PR #456 review).
+_AUTH_WORDS_RE = re.compile(
+    r"\b(?:oauth|session expired|not logged in|log ?in|unauthori[sz]ed|401)\b",
+    re.IGNORECASE)
+# How much of an HTTP error body is read to look for those words.
+_AUTH_BODY_PEEK = 4096
+
+
+def _http_auth_failure(exc: BaseException) -> bool:
+    """Whether an HTTP error answer reports a failed login: 401/403, or the
+    auth words in the first bytes of its body. The body is read only here
+    and discarded; nothing of it leaves this function but the boolean."""
+    import urllib.error
+
+    if not isinstance(exc, urllib.error.HTTPError):
+        return False
+    if exc.code in (401, 403):
+        return True
+    try:
+        body = exc.read(_AUTH_BODY_PEEK) or b""
+    except Exception:  # noqa: BLE001 — a classification hint, never an error
+        return False
+    return bool(_AUTH_WORDS_RE.search(body.decode("utf-8", "replace")))
 
 
 class OpenAICompatExtractor:
@@ -1146,6 +1282,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1179,7 +1317,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             # Chatty/reasoning models often wrap the object in ```json fences or
@@ -1196,7 +1334,9 @@ class OpenAICompatExtractor:
         except Exception as exc:  # noqa: BLE001
             # Signal failure (vs genuine empty) so the dream doesn't advance its
             # cursor past these memories on a transient timeout/network blip.
-            raise ExtractorError(f"extract failed: {exc}") from exc
+            err = ExtractorError(f"extract failed: {exc}")
+            err.auth_failure = _http_auth_failure(exc)
+            raise err from exc
         claims: list[Claim] = []
         for c in raw if isinstance(raw, list) else []:
             if not isinstance(c, dict):
@@ -1251,6 +1391,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         texts = [t for t in (texts or []) if t]
         if not texts:
             return []
@@ -1274,7 +1416,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1285,15 +1427,16 @@ class OpenAICompatExtractor:
             raise ExtractorError(f"events pass failed: {exc}") from exc
         return events_from_parsed(parsed, len(texts))
 
-    def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
-        """Synthesise procedural lessons from outcome signals via the same
-        endpoint. Returns ``[]`` on any failure (single-writer: the dream then
-        writes no lessons this cycle and the signals stay pending)."""
+    def _lessons_completion(self, system: str, user: str) -> list:
+        """One JSON chat completion under ``system``; returns the reply's raw
+        ``lessons`` list. Raises :class:`ExtractorError` on any transport or
+        parse failure so the caller leaves the signals pending and retries,
+        rather than consuming them on a failed call."""
         import json
         import urllib.request
 
-        if not signals:
-            return []
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1301,8 +1444,8 @@ class OpenAICompatExtractor:
             body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": _LESSON_SYSTEM_PROMPT},
-                    {"role": "user", "content": _format_signals(signals)},
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
                 ],
                 "response_format": {"type": "json_object"},
                 "max_tokens": self.max_tokens,
@@ -1313,7 +1456,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1322,19 +1465,30 @@ class OpenAICompatExtractor:
             parsed = json.loads(content)
             raw = parsed.get("lessons", []) if isinstance(parsed, dict) else []
         except Exception as exc:  # noqa: BLE001
-            # Raise (vs return []) so synthesize_lessons leaves the signals
-            # pending and retries, rather than consuming them on a failed call.
             raise ExtractorError(f"extract_lessons failed: {exc}") from exc
+        return raw if isinstance(raw, list) else []
+
+    @staticmethod
+    def _lesson_claims(raw: list, *,
+                       force_aspect: str | None = None) -> list[LessonClaim]:
+        """Coerce the model's lesson dicts into :class:`LessonClaim`s —
+        clustering repairs enum violations; rules reject them."""
         out: list[LessonClaim] = []
-        for c in raw if isinstance(raw, list) else []:
+        for c in raw:
             if not isinstance(c, dict):
                 continue
             task = str(c.get("task", "")).strip()
             lesson = str(c.get("lesson", "")).strip()
             if not (task and lesson):
                 continue
-            aspect = str(c.get("aspect", "") or "lesson").strip() or "lesson"
+            aspect = force_aspect or (
+                str(c.get("aspect", "") or "lesson").strip() or "lesson")
             about = str(c.get("about", "") or "").strip() or None
+            if force_aspect == "rule" and (
+                    str(c.get("outcome", "")).strip() not in (
+                        "success", "failure", "correction")
+                    or str(c.get("polarity", "")).strip() not in ("+", "-")):
+                raise ExtractorError("rule has invalid outcome or polarity")
             polarity = "-" if str(c.get("polarity", "+")).strip() == "-" else "+"
             outcome = str(c.get("outcome", "success")).strip()
             if outcome not in ("success", "failure", "correction"):
@@ -1346,6 +1500,89 @@ class OpenAICompatExtractor:
             out.append(LessonClaim(
                 task=task, aspect=aspect, lesson=lesson, about=about,
                 polarity=polarity, outcome=outcome, confidence=conf))
+            if force_aspect == "rule":
+                break  # Only the first rule can belong to this signal.
+        return out
+
+    def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
+        """Synthesise procedural lessons from outcome signals via the same
+        endpoint: one batched call under the clustering prompt. Raises on
+        failure (single-writer: the dream then writes no lessons this cycle
+        and the signals stay pending)."""
+        if not signals:
+            return []
+        return self._lesson_claims(self._lessons_completion(
+            _LESSON_SYSTEM_PROMPT, _format_signals(signals)))
+
+    def extract_rules(self, signals: list[dict]) -> list[LessonClaim]:
+        """Rule mode (2026-09-08): ONE call per signal under
+        :data:`_RULE_LESSON_SYSTEM_PROMPT`, exactly one rule kept per signal,
+        ``aspect`` forced to ``rule`` and the ``rule:`` routing prefix
+        stripped from ``about``. When the signal's detail lists ``MUST
+        INCLUDE`` values and the rule drops one, the call is retried once
+        naming the missing values (the paper bounces such rules up to twice);
+        an empty or still-incomplete retry fails closed. Rules must preserve
+        the source verdict and explicit polarity, never repair malformed
+        model enums to success.
+
+        Failure is per signal, not per batch: a trial-boundary batch is
+        ~100 calls, and a transient failure on the last one must not
+        discard the rules already extracted. The signals whose call failed
+        are listed in ``last_rule_failed_ids`` (reset per call) so the
+        caller leaves exactly those pending; ``last_rule_failures`` counts
+        them. Valid-but-empty responses are listed separately in
+        ``last_rule_empty_ids`` and also stay pending. Only a batch with NO
+        successful call raises."""
+        out: list[LessonClaim] = []
+        self.last_rule_failed_ids: list = []
+        self.last_rule_empty_ids: list = []
+        self.last_rule_failures = 0
+        first_error: Exception | None = None
+        for s in signals:
+            user = _format_signals([s])
+            must = _must_include(s.get("detail"))
+            try:
+                claims = self._lesson_claims(
+                    self._lessons_completion(_RULE_LESSON_SYSTEM_PROMPT, user),
+                    force_aspect="rule")
+                if must and claims:
+                    missing = _missing_values(claims[0]["lesson"], must)
+                    if missing:
+                        nudge = (user + "\n\nYour previous rule omitted these "
+                                 "values, which must appear verbatim: "
+                                 + "; ".join(missing)
+                                 + ". Reply again with the complete rule.")
+                        claims = self._lesson_claims(self._lessons_completion(
+                            _RULE_LESSON_SYSTEM_PROMPT, nudge),
+                            force_aspect="rule")
+                        if not claims:
+                            raise ExtractorError("rule retry returned no rule")
+                if claims:
+                    if _missing_values(claims[0]["lesson"], must):
+                        raise ExtractorError("rule omitted required values")
+                    outcome = s.get("outcome")
+                    polarity = (s.get("polarity")
+                                or {"success": "+", "failure": "-"}.get(outcome))
+                    if (claims[0]["outcome"] != outcome
+                            or (polarity and claims[0]["polarity"] != polarity)):
+                        raise ExtractorError("rule contradicts the source verdict")
+            except ExtractorError as exc:
+                self.last_rule_failed_ids.append(s.get("id"))
+                self.last_rule_failures += 1
+                first_error = first_error or exc
+                logger.warning("extract_rules: signal %s failed (%s); "
+                               "left pending", s.get("id"), exc)
+                continue
+            if not claims:
+                self.last_rule_empty_ids.append(s.get("id"))
+            for c in claims[:1]:
+                c["about"] = (_strip_rule_prefix(c.get("about"))
+                              or _strip_rule_prefix(s.get("about")))
+                out.append(c)
+        if signals and self.last_rule_failures == len(signals):
+            raise ExtractorError(
+                f"extract_rules failed for every signal: {first_error}"
+            ) from first_error
         return out
 
     def extract_relations(self, texts: list[str],
@@ -1355,6 +1592,8 @@ class OpenAICompatExtractor:
         vocabulary. Raises ExtractorError on failure (vs a genuine empty [])."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         texts = [t for t in (texts or []) if t]
         if not texts:
@@ -1377,7 +1616,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
             s, e = content.find("{"), content.rfind("}")
@@ -1409,10 +1648,16 @@ class OpenAICompatExtractor:
         carries ``n`` (1-based number), ``from``/``into`` sides (display,
         degree, scopes, snippets), ``reason`` and ``score`` — see
         :func:`format_judge_proposal`. Returns validated verdict dicts
-        ``{"n", "verdict", "confidence", "note"}``; proposals the model
-        skipped are simply absent. Raises :class:`ExtractorError` on
-        transport/parse failure so the caller can tell failure from a
-        genuine empty result."""
+        ``{"n", "verdict", "confidence", "note", "relation"}``; proposals
+        the model skipped are simply absent. A reject naming a relation from
+        the link judge's vocabulary (distinct, but related FROM -> INTO) is
+        returned as the internal ``relate`` verdict with ``relation`` set;
+        any other reject, or a relate naming no vocabulary relation, is a
+        plain ``reject`` with ``relation`` None, since the pair is still
+        distinct. Only ``relate`` carries a relation.
+        Raises :class:`ExtractorError` on transport/parse failure so the
+        caller can tell failure from a genuine empty result."""
+        from pseudolife_memory.graph import norm_name
         proposals = [p for p in (proposals or []) if p]
         if not proposals:
             return []
@@ -1430,15 +1675,26 @@ class OpenAICompatExtractor:
             except (TypeError, ValueError):
                 continue
             verdict = str(v.get("verdict", "")).strip().lower()
-            if n not in known or verdict not in ("accept", "reject", "leave"):
+            if n not in known or verdict not in ("accept", "reject", "relate", "leave"):
                 continue
             try:
                 conf = max(0.0, min(1.0, float(v.get("confidence", 0.5))))
             except (TypeError, ValueError):
                 conf = 0.5
             note = str(v.get("note", "")).strip()[:200]
+            relation = None
+            if verdict in ("reject", "relate"):
+                # The prompt asks for reject + an optional relation, so the
+                # confidence stays about distinctness (2026-09-30: a separate
+                # relate verdict averaged 0.58 and starved the reject gates).
+                # A vocabulary relation makes it the internal relate verdict.
+                relation = norm_name(str(v.get("relation") or ""))
+                if relation in _RELATION_NAMES:
+                    verdict = "relate"
+                else:
+                    verdict, relation = "reject", None
             out.append({"n": n, "verdict": verdict, "confidence": conf,
-                        "note": note})
+                        "note": note, "relation": relation})
         return out
 
     def infer_outcomes(self, context_text: str, *,
@@ -1449,6 +1705,8 @@ class OpenAICompatExtractor:
         nothing-found."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1469,7 +1727,7 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
@@ -1485,6 +1743,8 @@ class OpenAICompatExtractor:
         transport/parse failure so a failed batch marks nothing."""
         import json
         import urllib.request
+
+        from pseudolife_memory.utils import no_redirect
 
         headers = {"content-type": "application/json"}
         if self.api_key:
@@ -1527,7 +1787,7 @@ class OpenAICompatExtractor:
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             # The model the endpoint actually SERVED (OpenAI-compatible
             # responses echo it). A name-agnostic endpoint (llama-server
@@ -1687,6 +1947,8 @@ class OpenAICompatExtractor:
         import json
         import urllib.request
 
+        from pseudolife_memory.utils import no_redirect
+
         headers = {"content-type": "application/json"}
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
@@ -1708,12 +1970,12 @@ class OpenAICompatExtractor:
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with no_redirect.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
             raise ExtractorError(f"summarize_session failed: {exc}") from exc
-        return _parse_digest(content)
+        return _parse_digest(content, context_text=context_text)
 
 
 _EXTRACTOR_MODES = ("auto", "primary", "fallback")
@@ -1934,18 +2196,24 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     probes the primary per invocation — recovery is automatic at the next
     sweep. Raises ValueError for mode "fallback" with no fallback URL.
     The bench/eval harness never calls this — it constructs extractors
-    directly so runs stay pinned to one endpoint."""
+    directly so runs stay pinned to one endpoint.
+
+    The fallback authenticates with its own key
+    (``PSEUDOLIFE_DREAM_FALLBACK_API_KEY`` / ``fallback_api_key``) or none —
+    never the primary's, which would otherwise ride every fallback dream to
+    a different host (2026-09-25)."""
     import os
 
     r = resolve_endpoints(cfg)
-    api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
+    fallback_key = (os.environ.get("PSEUDOLIFE_DREAM_FALLBACK_API_KEY")
+                    or getattr(cfg, "fallback_api_key", None))
     if r["mode"] == "fallback":
         if not (r["fallback_url"] and r["fallback_model"]):
             raise ValueError(
                 "extractor_mode=fallback but no fallback endpoint is "
                 "configured (fallback_base_url/fallback_model)")
         return OpenAICompatExtractor(
-            r["fallback_url"], r["fallback_model"], api_key=api_key,
+            r["fallback_url"], r["fallback_model"], api_key=fallback_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
             extra_body=_cache_extra_body(cfg),
         ), "fallback"
@@ -1958,7 +2226,7 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     logger.warning("dream primary extractor %s unreachable — using fallback %s",
                    r["primary_url"], r["fallback_url"])
     return OpenAICompatExtractor(
-        r["fallback_url"], r["fallback_model"], api_key=api_key,
+        r["fallback_url"], r["fallback_model"], api_key=fallback_key,
         max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
         extra_body=_cache_extra_body(cfg),
     ), "fallback"
@@ -1990,6 +2258,94 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
                             if has_fallback and r["primary_url"] else None),
         "last_dream_extractor": last_dream_extractor,
     }
+
+
+def classify_extractor_error(exc: BaseException) -> tuple[str, str]:
+    """``(reason, error)`` for a failed extraction, for the dream-stall
+    record. ``reason`` is ``extractor_unreachable`` (connection refused,
+    timeout, DNS), ``login_expired`` (HTTP 401/403, or an answer or message
+    naming a failed login) or ``extractor_error`` (any other failure).
+    ``error`` is built from a fixed vocabulary, an HTTP status and an
+    exception type name only, never from exception text or a response body,
+    which can carry prompts, hostnames or credentials (the ``AdapterError``
+    rule)."""
+    import socket
+    import urllib.error
+
+    chain: list[BaseException] = []
+    cur: BaseException | None = exc
+    while cur is not None and len(chain) < 8 and all(cur is not c for c in chain):
+        chain.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    auth = any(getattr(e, "auth_failure", False)
+               or _AUTH_WORDS_RE.search(str(e)) for e in chain)
+    for e in chain:
+        if isinstance(e, urllib.error.HTTPError):
+            return ("login_expired" if auth else "extractor_error"), f"HTTP {e.code}"
+    for e in chain:
+        inner = e.reason if isinstance(e, urllib.error.URLError) else e
+        if isinstance(inner, (socket.timeout, TimeoutError)):
+            return "extractor_unreachable", "timed out"
+        if isinstance(inner, ConnectionRefusedError):
+            return "extractor_unreachable", "connection refused"
+        if isinstance(e, urllib.error.URLError) or isinstance(inner, OSError):
+            return "extractor_unreachable", f"unreachable ({type(inner).__name__})"
+    return ("login_expired" if auth else "extractor_error"), type(chain[-1]).__name__
+
+
+# What the operator does about each stall reason: one clause each, shared by
+# the session-start line, the briefing and the board notice.
+_STALL_REMEDIES = {
+    "login_expired": ("the extractor CLI's login expired; re-run `claude auth login` "
+                      "(or `codex login`) on the daemon host"),
+    "extractor_unreachable": "check the extractor endpoint is up and reachable from the daemon",
+    "extractor_error": "the extractor answers with errors; check its log",
+    "served_by_fallback": ("the primary is down and the fallback is serving; check the "
+                           "primary extractor"),
+}
+
+
+def stall_remedy(reason: str) -> str:
+    return _STALL_REMEDIES.get(reason, _STALL_REMEDIES["extractor_error"])
+
+
+def _stall_reason(record: dict) -> str:
+    reason = str(record.get("reason") or "")
+    return reason if reason in _STALL_REMEDIES else "extractor_error"
+
+
+def _local_minute(ts) -> str:
+    from datetime import datetime
+    return datetime.fromtimestamp(float(ts)).astimezone().isoformat(
+        sep=" ", timespec="minutes")
+
+
+def dream_stall_line(stall: dict | None) -> str:
+    """The one line a session start and the briefing show while dreams are
+    stalled (or the fallback is serving), else ''. Never raises."""
+    if not stall:
+        return ""
+    try:
+        since = _local_minute(stall["since"])
+    except Exception:  # noqa: BLE001 — a display line, never an error
+        return ""
+    reason = _stall_reason(stall)
+    head = ("dream primary extractor down" if reason == "served_by_fallback"
+            else "dreams stalled")
+    return f"Pseudolife-MCP: {head} since {since} ({reason}): {stall_remedy(reason)}."
+
+
+def dream_stall_notice_text(kind: str, record: dict) -> str:
+    """The board text for a stall notice: ``begin``/``repeat`` while it
+    lasts, ``clear`` once it is over."""
+    reason = _stall_reason(record)
+    since = _local_minute(record["since"])
+    if kind == "clear":
+        return (f"Dream extraction recovered at {_local_minute(record['recovered_at'])} "
+                f"(was {reason} since {since}).")
+    head = "degraded" if reason == "served_by_fallback" else "stalled"
+    remedy = stall_remedy(reason)
+    return f"Dream extraction {head} since {since}: {reason}. {remedy[0].upper()}{remedy[1:]}."
 
 
 def build_extractor(cfg) -> DreamExtractor:
@@ -2088,6 +2444,15 @@ def run_sweep_once(service) -> dict:
         return _done({"fired": False, "reason": "disabled",
                       "compacted": compacted, "runs_pruned": runs_pruned,
                       "retrieval_pruned": retrieval_pruned})
+    # The analyzer's regular bounded filing pass is independent of the deep
+    # apply threshold. Run it before the judges so proposals discovered on
+    # this tick are eligible for the same tick's bounded review.
+    analyzer_tick = getattr(service, "analyzer_duplicate_tick", None)
+    analyzer = _timed(
+        "analyzer_tick",
+        lambda: analyzer_tick() if analyzer_tick is not None else None)
+    if analyzer and (analyzer.get("filed") or analyzer.get("error")):
+        logger.info("analyzer duplicate tick: %s", analyzer)
     # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
     # timer, independent of the shallow trigger — a quiet bank can still be
     # overdue for consolidation. getattr-guarded for older fakes/tests.
@@ -2097,6 +2462,8 @@ def run_sweep_once(service) -> dict:
     if deep and deep.get("fired"):
         logger.info("deep-dream tick fired: %s", deep)
     extra = {"deep_tick": deep} if deep is not None else {}
+    if analyzer is not None:
+        extra["analyzer_tick"] = analyzer
     # Autonomous Step-C judge rides the same timer (2026-08-16 design):
     # shadow-judges a bounded batch of unjudged pending merge proposals,
     # auto-applying only what the configured mode allows. getattr-guarded
@@ -2104,7 +2471,15 @@ def run_sweep_once(service) -> dict:
     judge = getattr(service, "deep_dream_judge", None)
     judged = _timed("judge",
                     lambda: judge() if judge is not None else None)
-    if judged and judged.get("judged"):
+    # Also log a tick that only took second opinions, refused a same-model
+    # reject, saw an endpoint serve another model or lost its second
+    # endpoint: judged == 0 on each, and they were otherwise invisible.
+    if judged and (judged.get("judged")
+                   or (judged.get("reconsideration") or {}).get("reopened")
+                   or judged.get("second_opinions")
+                   or judged.get("auto_reject_refused_same_model")
+                   or judged.get("served_model_mismatch")
+                   or judged.get("second_opinion_error")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged
@@ -2118,11 +2493,18 @@ def run_sweep_once(service) -> dict:
         fn = getattr(service, name, None)
         res = _timed(key, lambda fn=fn: fn() if fn is not None else None)
         if res and (res.get("judged") or res.get("applied")
-                    or res.get("proposed") or res.get("error")):
+                    or res.get("proposed") or res.get("error")
+                    or (res.get("reconsideration") or {}).get("reopened")):
             logger.info("deep-dream %s: %s", key, res)
         if res is not None:
             extra[f"deep_{key}"] = res
     status = service.dream_status()
+    # Dream-stall signal (2026-09-28): flags a due backlog that no dream has
+    # served for three sweeps and posts the board notices a stall owes.
+    # getattr-guarded like the ticks above; never raises into the sweep.
+    stall_tick = getattr(service, "dream_stall_tick", None)
+    if stall_tick is not None:
+        _timed("stall_tick", lambda: stall_tick(status))
     if not status["would_fire"]:
         return _done({"fired": False, "reason": "below_threshold",
                       "backlog": status["backlog"], "compacted": compacted,

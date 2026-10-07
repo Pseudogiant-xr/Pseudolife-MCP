@@ -216,6 +216,7 @@ def test_history_stays_raw_under_quarantine():
 
 # ── compact search block propagation (mcp_server) ────────────────────────
 
+@pytest.mark.real_model
 def test_compact_search_block_propagates_policy_fields(tmp_path, monkeypatch):
     """memory_search's cortex-first block re-selects keys from cortex_search
     output; the quarantine fields must survive that selection, or the
@@ -272,6 +273,7 @@ def test_world_search_compact_projection_carries_policy_fields(tmp_path,
         "stale — re-verify before relying on this value")
 
 
+@pytest.mark.real_model
 def test_search_restatement_dedup_keys_on_underlying_value(tmp_path,
                                                            monkeypatch):
     """Finding 2: memory_search suppresses recall hits that restate a

@@ -476,7 +476,7 @@ def test_file_mode_band_snapshot_round_trips_labels(tmp_path):
     assert (e.authority, e.distortion_tolerance) == ("directive", "constraint")
 
 
-def test_labels_round_trip_through_postgres(pg_url):  # noqa: F811
+def test_labels_round_trip_through_postgres(pg_conn, pg_url):  # noqa: F811
     from pseudolife_memory.storage.postgres import PostgresStorage
     storage = PostgresStorage(pg_url)
     fact = {

@@ -36,6 +36,28 @@ This view reads the isolated proof tables directly. Its records deliberately
 do not appear in the Console's Stream, Cortex, World, Lessons, Episodes, or
 Graph views, and the Console cannot create or mutate RE evidence.
 
+## Upgrading the fork
+
+This fork includes upstream **v0.17.0**, with the upstream **v55** schema and
+the independent **`v34-rehub`** extension. Follow the ordinary upgrade and
+backup instructions for the chosen durable or lite installation; use this
+fork's checkout when rebuilding so the RE extension remains installed.
+Startup applies upstream's additive migrations to an existing v37 RE bank
+and keeps its proof rows, original-byte hashes and claim links. It still
+refuses incompatible unpublished pilot table shapes.
+
+The `re_evidence` tool is in the **core** tier. If the client does not list
+it, expand with `memory_toolset` and rediscover tools. The Svelte Console
+continues to serve **RE Evidence** at `/ui/#/re-evidence`; the installed wheel
+includes the compiled view, so Node is needed only to rebuild its source.
+
+Ingest paths are resolved on the daemon's filesystem. With Docker, mount
+the directory containing the Evidence Hub export into the daemon and pass
+the container path. Keep the existing archive-root volume and
+`PSEUDOLIFE_RE_EVIDENCE_ARCHIVE_ROOT` setting when rebuilding. General
+memory transfer still excludes all three proof tables; use the RE archive
+workflow below when moving them to another bank.
+
 ## Evidence Hub workflow
 
 First capture JSON using the project's existing terminal-only evidence helper.
@@ -122,6 +144,9 @@ which defaults to `<data_dir>/re_evidence_archives` (and to
 absolute paths, `..`, and symlinks cannot escape that root. Export reads from a
 consistent PostgreSQL snapshot, and both export and import use a dedicated
 database connection so ZIP file I/O does not block unrelated MCP requests.
+The auxiliary adapter exposes proof-store operations and does not initialize
+or mutate canonical stores or their writer lease. Every proof
+mutation takes a transaction-scoped project/build lock, including imports.
 The archive root is trusted daemon state and should be writable only by the
 daemon account; path confinement is not a sandbox against another local
 process that can replace files in that directory while an operation is open.

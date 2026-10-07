@@ -101,12 +101,16 @@ def entity_context_vectors(entities: list[dict], entries: list[dict],
                            traces_by_entity: dict[str, list[int]], *,
                            min_mentions: int = 2,
                            max_fallback_mentions: int | None = None,
+                           with_vectors: bool = True,
                            ) -> tuple[dict[int, np.ndarray], dict[int, frozenset[int]]]:
     """Per-entity context vector = L2-normalized mean of its mentioning entries'
     embeddings, plus the set of those entry ids. Trace entries are the primary
     source; entities without traces fall back to a token-mention scan. An entity is
     included only if it has >= min_mentions DISTINCT mentioning entries (with
     embeddings) — a centroid-of-one isn't a context. Returns (vectors, mentions).
+    Each entity is resolved independently of the others in ``entities``.
+    ``with_vectors=False`` returns the mentions alone (vectors ``{}``), so
+    the entries need no ``embedding``.
 
     ``max_fallback_mentions`` caps the SCAN branch only: a trace-less entity
     whose token set subset-matches more entries than the cap is excluded
@@ -131,28 +135,32 @@ def entity_context_vectors(entities: list[dict], entries: list[dict],
         valid = {i for i in ids if i in by_id}      # distinct entries with embeddings
         if len(valid) < min_mentions:
             continue
-        embs = [by_id[i]["embedding"] for i in valid]
-        vectors[ent["id"]] = _l2(np.mean(np.stack(embs), axis=0))
+        if with_vectors:
+            embs = [by_id[i]["embedding"] for i in valid]
+            vectors[ent["id"]] = _l2(np.mean(np.stack(embs), axis=0))
         mentions[ent["id"]] = frozenset(valid)
     return vectors, mentions
 
 
 def shared_mention_entries(entries: list[dict], a_display: str, b_display: str,
-                           limit: int = 4) -> list[str]:
+                           limit: int = 4, *,
+                           tokens: list[frozenset[str]] | None = None) -> list[str]:
     """Texts of the entries naming BOTH entities, in order, capped at ``limit``.
 
     The evidence a retype judgement needs: an untyped edge exists because two
     names co-occurred, so "what relation actually holds?" is only answerable
     from the notes where they co-occur — not from everything mentioning either
     one. Token-subset matching mirrors :func:`entity_context_vectors`'
-    fallback scan."""
+    fallback scan. ``tokens`` are the entries' ``_token_set``s, index-aligned
+    with ``entries``, for a caller scanning the same entries once per row
+    (tokenizing 2,239 entries took ~140 ms, live bank, 2026-09-23)."""
     wa, wb = _token_set(a_display), _token_set(b_display)
     if not wa or not wb:
         return []
     cap = max(0, int(limit))
     out: list[str] = []
-    for e in entries:
-        toks = _token_set(e.get("text", ""))
+    for i, e in enumerate(entries):
+        toks = tokens[i] if tokens is not None else _token_set(e.get("text", ""))
         if wa <= toks and wb <= toks:
             out.append(e.get("text", ""))
             if len(out) >= cap:

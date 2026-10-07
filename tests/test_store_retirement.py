@@ -222,6 +222,7 @@ def test_curation_auto_forget_retires_through_the_same_path(svc):
         model = "stub-slot-judge"
 
         def judge_slot_pairs(self, rows):
+            self.served_model = self.model
             return [{"n": r["n"], "verdict": "duplicate", "keep": "a",
                      "fold": None, "confidence": 0.95, "note": "same rule"}
                     for r in rows

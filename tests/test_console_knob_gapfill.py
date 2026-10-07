@@ -183,6 +183,28 @@ def test_registry_paths_all_resolve_against_appconfig():
             cur = getattr(cur, part)
 
 
+def test_registry_defaults_match_appconfig():
+    # The Console shows each knob's "default" beside its live value, and that
+    # copy is hand-kept apart from the dataclass. A drifted copy tells the
+    # operator the wrong shipped behaviour (both moved together when
+    # signal_retention_days went 30 -> 3650, 2026-09-23). An unset string
+    # knob is None here and "" on some dataclass fields: both mean unset.
+    from pseudolife_memory.utils.config import AppConfig
+    cfg = AppConfig()
+    for knob in KNOBS:
+        if "default" not in knob:
+            continue
+        cur = cfg
+        for part in knob["path"].split("."):
+            cur = getattr(cur, part)
+        want = knob["default"]
+        if knob["type"] == "string":
+            want, cur = want or None, cur or None
+        assert cur == want, (
+            f"{knob['path']}: registry default {knob['default']!r} "
+            f"!= AppConfig {cur!r}")
+
+
 def test_extractor_reasoning_effort_knob():
     # Applies at the next dream (build_extractor constructs fresh from
     # config per invocation), hence restart False; provider-specific extras
@@ -234,3 +256,23 @@ def test_judge_second_model_knob():
     assert knob["restart"] is False and knob["group"] == "Deep dream"
     assert "claude-fable-5" in knob["suggestions"]
     assert "different" in knob["help"].lower()   # says why it exists
+
+
+def test_judge_endpoint_knobs():
+    # 2026-09-30: pointing the judges at another endpoint needed a hand edit
+    # of config.yaml and a daemon restart, and the merge judge's second
+    # opinion could not leave the first opinion's endpoint at all. Every
+    # judge builds its endpoint from service.config per call, so all three
+    # are live URL/string knobs beside judge_second_model.
+    for path in ("memory.deep_dream.judge_url",
+                 "memory.deep_dream.judge_second_url"):
+        knob = _knob(path)
+        assert knob["type"] == "string" and knob["format"] == "url", path
+        assert knob["default"] is None and knob["restart"] is False, path
+        assert knob["group"] == "Deep dream", path
+    model = _knob("memory.deep_dream.judge_model")
+    assert model["type"] == "string" and model["default"] is None
+    assert model["restart"] is False and model["group"] == "Deep dream"
+    second = _knob("memory.deep_dream.judge_second_url")
+    assert "PSEUDOLIFE_JUDGE_SECOND_API_KEY" in second["help"]
+    assert "PSEUDOLIFE_JUDGE_API_KEY" in _knob("memory.deep_dream.judge_url")["help"]

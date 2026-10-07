@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from pseudolife_memory.principals import DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL
 
 
 @dataclass
@@ -16,7 +19,8 @@ class EmbeddingConfig:
     batch_size: int = 64
     # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
     # native backend (needs optimum[onnxruntime]). ~3x faster single-text
-    # encode on CPU with bit-identical embeddings; falls back to torch with
+    # encode on CPU with parity-checked embeddings (min cosine vs torch
+    # 1.00000 over 20 texts, 2026-07-12); falls back to torch with
     # a warning when the backend can't load.
     backend: str = "torch"
     # Which ONNX file inside the model repo to load. Explicit because the
@@ -48,6 +52,22 @@ class EmbeddingConfig:
     # with), never a raise: a model whose native default is already shorter
     # is left alone.
     max_seq_length: int = 512
+    # Precision of the torch embedder on a CPU device: "auto" / "fp32" /
+    # "bf16". GPU and ONNX backends ignore it. "auto" = bf16 only when the
+    # CPU reports native bf16 (x86 AVX512_BF16 / AMX_BF16), fp32 otherwise;
+    # bf16 on a CPU without it is slow (the 2026-09-20 CI diagnostics).
+    # Measured 2026-09-23, Qwen3-Embedding-0.6B in a throwaway container from
+    # the 0.15.0 daemon image on a Ryzen 7 9800X3D (avx512_bf16), bf16 loaded
+    # directly vs fp32: steady RSS ~1.4 GB vs ~2.85 GB, peak RSS while
+    # loading 537 MB vs 3,808 MB (bf16 weights page in on first use), a
+    # single short query encode ~88 ms vs ~160 ms. Parity through this
+    # pipeline on 400 live bank entries + 60 real queries: bf16 queries
+    # against the stored fp32 vectors keep top-8 overlap 0.994 (min 0.875),
+    # rank-0 60/60, max score delta 0.0058; the regression gate scored every
+    # arm identically to its fp32 baseline. Evidence:
+    # evals/results/embedder-cpu-bf16-probe-20260923.json.
+    # PSEUDOLIFE_EMBEDDING_CPU_DTYPE overrides this.
+    cpu_dtype: str = "auto"
 
 
 @dataclass
@@ -193,8 +213,9 @@ class RerankerConfig:
     can have low cosine similarity while a less-relevant one wins on
     surface tokens. A cross-encoder attends over (query, candidate)
     jointly and re-scores them at the cost of one transformer pass per
-    pair. We run it on the top-N candidates only (default 20) so the
-    cost stays bounded.
+    pair. We score the entire combined pool when its size is at most
+    top_n (default 20); larger pools keep their original ranking. This
+    bounds cost without mixing scored and unscored candidates.
 
     Off by default — install with ``pip install .[rerank]`` (which just
     pulls a slightly newer sentence-transformers anyway), set
@@ -220,8 +241,8 @@ class RerankerConfig:
     # Skip the cross-encoder pass when the gap between the two best
     # bi-encoder-adjusted scores is >= this margin — a decisively
     # separated head can only be reshuffled, not fixed, by reranking.
-    # 0.0 (default) disables the gate: the reranker fires whenever
-    # enabled, exactly the pre-gate behavior.
+    # 0.0 (default) disables this margin gate; the candidate budget
+    # and availability checks still apply.
     # CAUTION: a skip returns raw bi-encoder scores, which sit lower than
     # fused (0.7*sigmoid(ce)) scores for strong matches — don't combine a
     # nonzero margin with a search_confidence_floor tuned to the fused
@@ -280,6 +301,16 @@ class DreamConfig:
     idle_seconds: float = 600.0
     max_batch: int = 40
     sweep_interval_seconds: float = 600.0   # used by the Phase 3 daemon sweep
+    # Dream-stall board notices (2026-09-28). On 2026-08-11 the primary
+    # extractor's CLI login had been expired for over a day and ten dream
+    # runs served from the fallback with nothing on the board or at session
+    # start. When dreams stall (or the fallback serves for the primary), the
+    # daemon posts one notice to every attached, non-idle session and one
+    # when it clears; stall_repeat_hours bounds the repeats while it lasts.
+    # 6 h is a starting value, not a measurement: a stall that outlives a
+    # working day is re-announced about twice, not once per 600 s sweep.
+    stall_notice: bool = True
+    stall_repeat_hours: float = 6.0
     # Consolidation quarantine — the two-man rule for low-trust claims
     # (spec 2026-08-09-consolidation-quarantine-design.md; MAFIA-informed:
     # the defense keys on WHO wrote, never on what the text says). When on,
@@ -369,6 +400,12 @@ class DreamConfig:
     # Timeout/max_tokens are shared with the primary — no fallback copies.
     fallback_base_url: str | None = None
     fallback_model: str | None = None
+    # The fallback's own bearer key (env PSEUDOLIFE_DREAM_FALLBACK_API_KEY,
+    # honoured in both settings-source modes like extractor_api_key). Unset =
+    # the fallback sends no key: the primary's key is never shared, since it
+    # belongs to the primary's provider and the usual fallback (the in-stack
+    # sidecar, plain HTTP) needs none.
+    fallback_api_key: str | None = None
     extractor_mode: str = "auto"
     # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
     # into the graph (separate extract_relations call — the bench winner). Edges
@@ -406,7 +443,14 @@ class DreamConfig:
     # "Pseudolife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
-    alias_candidate_min_cosine: float = 0.5
+    # 0.7 since 2026-09-29: the 0.5 above was calibrated on MiniLM and went
+    # stale with the Qwen3-Embedding-0.6B swap, which scores that paraphrase
+    # 0.750 and the unrelated 'ship pipeline' / 'release train' 0.558. In the
+    # 2026-09-29 triage of 1,016 merge proposals this screen had filed 574
+    # (16 accepted, 524 rejected, 34 left); past the merge veto, 0.7 keeps
+    # 420 of the remaining 538 and loses one accepted paraphrase (0.655) —
+    # the scrubbed replay is evals/results/merge-detector-replay-20260929.json.
+    alias_candidate_min_cosine: float = 0.7
     # TiMem-inspired known-facts window
     # (docs/specs/2026-07-10-known-facts-window-design.md): when > 0, the dream
     # prompt also shows the CURRENT VALUES of the top-N relevance-ranked slots
@@ -456,6 +500,14 @@ class DreamConfig:
     # Requires PG; an events-pass failure is non-fatal to claims.
     chronicle: bool = True
 
+    def __post_init__(self) -> None:
+        # Zero or a negative window would post a stall notice on every dream.
+        hours = self.stall_repeat_hours
+        if (isinstance(hours, bool) or not isinstance(hours, (int, float))
+                or not math.isfinite(hours) or hours <= 0):
+            raise ValueError("memory.dream.stall_repeat_hours must be a number of "
+                             "hours greater than 0")
+
 
 @dataclass
 class DeepDreamConfig:
@@ -489,17 +541,37 @@ class DeepDreamConfig:
     auto_tick: bool = True               # False disables the tick entirely
     auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
     auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
+    # Review-queue health (dream_status["review_queue"], and one briefing
+    # line while it needs attention). Measured on the live bank: a full
+    # triage settled the merge queue on 2026-09-02 (63 rows); by 2026-09-29
+    # it held 1,016 pending (~38 a day over 27 days, the merge judge in
+    # shadow from 09-11) and nothing reported it until a human looked.
+    # Any judge mode: 500 is about twice the largest backlog ever cleared by
+    # hand (239 merges, 2026-08-05); that episode crossed it around day 13.
+    # 0 disables.
+    review_queue_alert_pending: int = 500
+    # While no judge applies merge verdicts (judge_mode off/shadow, or
+    # judges_enabled false), alert once the oldest pending merge is older
+    # than this AND at least review_queue_alert_min_pending rows wait. In
+    # auto-reject/auto the same rule reads the oldest merge no judge has
+    # recorded a verdict on, which catches a judge that is configured but
+    # not running (no endpoint). The floor is about one routine hand triage
+    # (109 merges on 2026-08-21), so a handful of old rows on a small bank
+    # stays quiet. 0 disables the age rule.
+    review_queue_alert_age_days: float = 14.0
+    review_queue_alert_min_pending: int = 100
     # Autonomous Step-C judge (2026-08-16 design, extended 2026-09-02): the
     # sweep sends pending merge proposals to the configured extractor.
     # "off" = never; "shadow" = record the verdict on the proposal, apply
     # nothing; "auto-reject" = additionally apply reject verdicts at/above
     # judge_reject_min_confidence (decided_by='dream-judge', pair
     # dismissed — and, with judge_second_opinion on, two agreeing rejects
-    # at mean >= judge_reject_min_confidence_2); "auto" = additionally
+    # from DIFFERENT models (since 2026-09-30) at mean >=
+    # judge_reject_min_confidence_2); "auto" = additionally
     # fold a pair on two agreeing accepts from DIFFERENT models on
     # non-low-differential evidence (the only path that applies an
-    # accept). Note a wrong auto-reject also writes dismissed_pairs, which
-    # has no expiry. Mode gates per the judge ladders
+    # accept). Automatic rejections are bound to their evidence and policy;
+    # human decisions remain closed. Mode gates per the judge ladders
     # (evals/judge_ladder.py, evals/queue_judge_ladder.py).
     judge_mode: str = "shadow"           # off | shadow | auto-reject | auto
     judge_batch: int = 8                 # proposals judged per sweep (one model call)
@@ -517,14 +589,15 @@ class DeepDreamConfig:
     # the cap also moves the auto-accept gate's precondition.
     judge_snippet_max_chars: int = 240
     judge_reject_min_confidence: float = 0.8
-    judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
-    judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # str | None like judge_second_model: both are Console knobs since
+    # 2026-09-30, and the Console clears a string knob to None.
+    judge_url: str | None = ""           # optional OpenAI-compatible override endpoint; empty = the dream extractor
+    judge_model: str | None = ""         # model name for judge_url (ignored when judge_url is empty)
     # One switch for every judge stage below (merge, link, junk, curation,
     # candidates): False makes each return {"skipped": "judges_disabled"}
-    # without reading a queue — the documented "turn it all off" for an
-    # operator who wants the mechanical tick but no model verdicts. The
-    # two apply-time mechanics have their own switches
-    # (analyzer_file_duplicates, orphan_sweep).
+    # without reading a queue. Also stops ordinary-sweep analyzer filing
+    # and terminal reconciliation. Explicit deep apply mechanics retain
+    # their own switches (analyzer_file_duplicates, orphan_sweep).
     judges_enabled: bool = True
     # Review-queue autonomy (2026-09-02 design, docs/superpowers/specs/
     # 2026-09-02-review-queue-autonomy-design.md). Every gate below is
@@ -540,16 +613,30 @@ class DeepDreamConfig:
     # >= 0.6 — while single-vote accept precision on the same rows was 0.74
     # and 9 of 10 two-vote accepts on low-differential rows were right but
     # the tenth folded the wrong way. A wrong fold deletes an entity, so
-    # accepts additionally require judge_mode "auto".
+    # accepts additionally require judge_mode "auto". Since 2026-09-30 the
+    # pass is skipped (no call) when the configuration makes the second
+    # opinion the first model again: no judge_second_url, and
+    # judge_second_model empty or the first endpoint's configured name.
     judge_second_opinion: bool = True
     # A same-model second vote (temperature 0) is independent only through
     # batch composition — 2/129 flips on the 2026-08-16 ladder — which is
-    # enough to double-check a reject but not to authorize a fold: "auto"
-    # accepts require a DIFFERENT model here (with claude-fable-5 as the
-    # second model the same 63 rows gave 6/6 accepts, 8/8 rejects).
+    # not enough to authorize a fold, nor (since 2026-09-30, after one
+    # model's two votes authorized rejects from 2026-09-03 to 09-11) a
+    # reject: both two-vote gates require a DIFFERENT model here (with
+    # claude-fable-5 as the second model the same 63 rows gave 6/6
+    # accepts, 8/8 rejects). A same-model second opinion by configuration
+    # is not asked at all (judge_second_opinion above); one whose sameness
+    # only the served name reveals is recorded and authorizes nothing.
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch
+    # Where the second opinion is asked (2026-09-30): empty = the first
+    # opinion's endpoint (judge_url, else the dream extractor) with
+    # judge_second_model swapped in; set = an OpenAI-compatible endpoint of
+    # its own, serving judge_second_model (empty = its launch default), so
+    # the two opinions can come from different providers. Its bearer key is
+    # env-only, PSEUDOLIFE_JUDGE_SECOND_API_KEY, and never goes anywhere else.
+    judge_second_url: str | None = ""
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
     # Link judge over pending edge_proposals. Edges are reversible
@@ -637,8 +724,8 @@ class CortexConfig:
     # vs 28% at 0.2, with identical end-to-end accuracy. 0.1 was tried and served
     # more gold facts but measurably hurt: the extra weak facts dilute the context
     # and the consumer abstains ("distractor-induced under-confidence").
-    # Abstention-on deployments still override upward (see
-    # docs/guide/retrieval.md: the 0.65 pairing).
+    # The 0.65 pairing the docs once recommended for abstention-on
+    # deployments is retired (2026-09-25; see search_confidence_floor).
     guard_min_score: float = 0.2
     # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
@@ -669,9 +756,28 @@ class LessonsConfig:
     min_confidence: float = 0.0
     # Unconsumed (and consumed) signals older than this are pruned on the dream
     # sweep so the append-only log can't grow unbounded when no extractor drains it.
-    signal_retention_days: int = 30
-    # When False, the dream skips signal drain / lesson synthesis (signals still
-    # pruned by retention).
+    # 3650 (was 30) since 2026-09-23: signals are the only evidence behind a
+    # lesson, and on the live bank 760 of 1,618 current lessons predated every
+    # retained signal, with ~14-21 more rows deleted a day. The log grows
+    # ~800 rows a month (the 30-day window held 787 rows in 792 kB on disk,
+    # indexes included). Retries are bounded separately, below.
+    signal_retention_days: int = 3650
+    # How long a PENDING signal stays eligible for synthesis. A batch that
+    # lands no lesson stays pending, and the dream reads pending signals
+    # oldest-first under synthesis_max_signals. Bounded only by retention, a
+    # cap-full batch of permanent failures was re-offered every sweep and no
+    # newer signal was ever synthesised (Codex review of PR #337, 2026-09-23).
+    # Past this age a pending signal is kept as evidence but no longer
+    # offered. 30 is a CHOSEN bound, not a measured one: the retry lifetime
+    # the old 30-day retention implied. 0 retries for the whole retention.
+    # The age counts from when the signal was recorded, not from its first
+    # attempt: signals never offered (synthesis off, an extractor outage or
+    # backlog longer than this) age out of eligibility too. They stay in
+    # the table, and raising this value offers them again.
+    signal_retry_days: int = 30
+    # When False (or enabled=False), the dream skips signal drain / lesson
+    # synthesis and the retention prune with it: signals are kept, not pruned.
+    # Only those younger than signal_retry_days are offered once it is back on.
     synthesize_in_dream: bool = True
     # Auto-outcome inference (spec 2026-07-18): infer signals for episodes
     # that close with entries but zero explicit outcomes. origin="inferred";
@@ -688,6 +794,25 @@ class LessonsConfig:
     # Opposite-polarity near-matches are NEVER gated (an "avoid" inversion
     # of a "do" lesson is new information). 0 disables.
     synthesis_dedup_min_similarity: float = 0.88
+    # Most signals one synthesis sweep drains. The batch writes its lessons,
+    # graph edges and acknowledgements in one transaction under the service
+    # lock, so an undrained backlog otherwise sets the length of a single
+    # daemon pause. 200 is a CHOSEN bound, not a measured one: it is roughly
+    # one extractor batch, and whatever it leaves behind is picked up by the
+    # next sweep. 0 disables the cap (drain everything pending).
+    synthesis_max_signals: int = 200
+    # Rule mode (2026-09-08, the "Learning on the Job" delta, arXiv
+    # 2607.22157): synthesise ONE situation-specific rule per signal — keyed
+    # (situation, "rule"), decision-critical values copied verbatim, no
+    # clustering, no trivia skip, and exempt from the cross-key dedup gate
+    # above (two look-alike situations with different actions must both
+    # survive). Per-signal opt-in is an ``about`` starting with ``rule:``;
+    # this flag makes EVERY signal a rule. A ``MUST INCLUDE: a; b`` line in
+    # the signal's detail is checked with a plain case-insensitive substring
+    # test (no example-marker exclusion) and the call retried once. Default
+    # off: the shipped clustering prompt and slot semantics are unchanged
+    # for existing banks.
+    rule_mode: bool = False
 
 
 @dataclass
@@ -703,7 +828,9 @@ class RetrievalLogConfig:
     no retrieval behaviour changes, and nothing is computed for the log
     that ranking did not already compute. Requires Postgres storage (file
     mode skips silently); ``memory_stats`` reports the row counts and
-    write-failure count."""
+    write-failure count. The same switch and retention cover the v44
+    records: one ``lesson_search_events`` row per ``memory_lesson_search``
+    and the ``outcome_signals.used_ids`` partition."""
     enabled: bool = True
     # Events older than this are pruned on the dream-sweep tick (labels
     # CASCADE), bounding growth. Generous by default: the log IS the
@@ -716,6 +843,16 @@ class RetrievalLogConfig:
     # A get/reinforce this many seconds after a search still counts as a
     # use of it. Bounds the implicit-label lookback so a stale id fetched
     # much later doesn't credit an ancient query.
+    #
+    # The same window bounds the asserted label, memory_outcome(used_ids=),
+    # and is an INVARIANT for any harness that relies on it (2026-09-08):
+    # an outcome credits only searches made under the same session
+    # identity within this window, so keep one session per episode and log
+    # the outcome before the window lapses — an end-of-episode outcome
+    # cannot credit a search older than this. get/reinforce credit the
+    # most recent serving search; an outcome credits every serving search
+    # in the window (it names ids, not queries). Default kept at 1 h
+    # deliberately; the tool's param description states the invariant.
     use_window_seconds: int = 3600
 
 
@@ -977,6 +1114,22 @@ class SearchConfig:
     # evals/README.md. Ships "weighted_sum" for that reason, not for want
     # of measurement.
     fusion: str = "weighted_sum"
+    # Dense relevance floor: a dense candidate whose (recency-modified)
+    # cosine is below it never enters the pool. A per-call ``min_score``
+    # overrides it and, unlike this default, also bounds the slot and BM25
+    # injections, which carry their own scales. 0.25 is the initial-release
+    # literal (2026-05-27, MiniLM era), never recalibrated for the
+    # 2026-07-28 Qwen3-Embedding switch — and it stays put: measured
+    # 2026-09-25 over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r3.json,
+    # abstention.lowest_served_dense_cosine), the weakest served dense hit
+    # had cosine p01 0.39 and fell below 0.30 in one search of 1,064, so
+    # today the floor rarely binds on a real search; it does on off-domain
+    # ones (the 2026-09-23 review's zebra probe served hits at 0.28-0.29,
+    # abstention.off_domain_probes). Raising it would not make it an
+    # abstention signal: in-domain absent-answer probes topped out at
+    # 0.43-0.64, the range of real hits (abstention.absent_answer_probes).
+    min_score: float = 0.25
 
     def __post_init__(self) -> None:
         # Fail at LOAD, not once per query. ``cms.retrieve`` also rejects
@@ -990,6 +1143,15 @@ class SearchConfig:
             raise ValueError(
                 f"memory.search.fusion: unknown mode {self.fusion!r} "
                 f"(expected one of {', '.join(map(repr, FUSION_MODES))})")
+        # Same reasoning: a null would raise inside every retrieval and a NaN
+        # would empty the dense pool without a word.
+        ms = self.min_score
+        if (isinstance(ms, bool) or not isinstance(ms, (int, float))
+                or not 0.0 <= ms <= 1.0):
+            raise ValueError(
+                f"memory.search.min_score: expected a cosine floor in "
+                f"[0, 1], got {ms!r}")
+        self.min_score = float(ms)
 
 
 @dataclass
@@ -1007,8 +1169,12 @@ class McpConfig:
     * the cortex block sized to the caller's ``top_k`` rather than a fixed 5;
     * ``memory_fact_get``'s bookkeeping keys behind ``verbose=True``.
 
-    ``compact_payloads: False`` restores the pre-cut payloads verbatim. All
-    three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
+    ``compact_payloads: False`` restores the pre-cut payloads verbatim,
+    except that a superseded hit still serves the short ``replaced_by``
+    pointer rather than the replacement's full text (2026-09-23: a
+    correctness change, not a size cut; ``verbose=True`` serves the text),
+    and every entry keeps its write ``date`` (2026-09-25, same reason).
+    All three are PROJECTIONS above ``service.*`` — ranking, ``min_score`` and
     the service layer are untouched, so no eval number can move (the eval
     harness calls the service, pinned by
     ``tests/test_agent_payload_budget.py``).
@@ -1024,9 +1190,10 @@ class McpConfig:
     # consolidated notes, not one-liners, and 600 chars is enough to judge
     # a hit and usually to act on it, with ``memory_get`` for the rest. It
     # halves the served entry text (9,464 -> 4,550 mean chars) and takes
-    # 33% off the call. It does NOT apply to ``superseded_by_text``, which
-    # is exempt: that field has no recovery path, since a compact entry
-    # carries no id for the superseding entry (see ``_compact_entry``).
+    # 33% off the call. It does NOT size a superseded hit's
+    # ``replaced_by.preview``, which has its own fixed 120-char cap
+    # (``_REPLACED_BY_PREVIEW_CHARS`` in ``mcp_server``) and carries the
+    # successor's id for ``memory_get``.
     # Raise it for long-form corpora where the tail of a
     # note carries the answer. ``memory_recall`` has capped its supporting
     # texts at 200 since 2026-07-10 (``_RECALL_TEXT_CHARS``); search
@@ -1088,6 +1255,14 @@ class MemoryConfig:
     # up to 18 points on the LongMemEval naive-RAG arm. Flip to True to
     # restore the pre-2026-07-25 ranking.
     recency_boost_enabled: bool = False
+    # ``delete`` refuses to remove more than this many entries unless the
+    # caller passes ``confirm_bulk=True``; the refusal reports how many
+    # would go. 20 is the ``deleted_texts`` sample cap, so every unguarded
+    # delete lists all of its removed texts in its response. 0 disables the
+    # guard. Added 2026-09-29 after a ``{"text": ..., "source": "status"}``
+    # delete removed 1399 status entries under the OR-combination then in
+    # force (restored from backup).
+    delete_confirm_threshold: int = 20
     # v0.5 store gate is novelty-based (1 - max cos to existing entries). 0.0 =
     # permissive (store everything; novelty still scores eviction/promotion);
     # raise to dedup near-duplicate stores.
@@ -1104,10 +1279,15 @@ class MemoryConfig:
     # recall, so prefer the default outside of debugging.
     # Replaced the no-op ``show_superseded`` field on 2026-07-30.
     hide_superseded: bool = False
-    # Abstention: when the top search score is below this floor, memory_search
-    # returns low_confidence=True so the agent declines instead of using weak
-    # distractor hits. 0.0 = off (only an empty result is low-confidence).
-    # Tuned on a dev split by the benchmark ladder; default off to preserve recall.
+    # Abstention: when the top served (fused) score is below this floor and
+    # no cortex fact clears ``cortex.guard_min_score``, memory_search returns
+    # low_confidence=True. 0.0 = off (only an empty result is low-confidence).
+    # No value is calibrated for the Qwen3 embedder: measured 2026-09-25
+    # over 1,072 real agent searches
+    # (evals/results/serving-policy-replay-20260925-r3.json, abstention), the
+    # 2026-06-19 MiniLM-era pair (floor 0.70 + guard 0.65) would flag 26% of
+    # them, including 20% of the searches whose hits the agent then used,
+    # and in-domain absent answers score like real hits.
     search_confidence_floor: float = 0.0
     # Shadow-verification of the slot-token index: on this fraction of
     # non-dirty slot-pool queries, recompute the index from the band
@@ -1150,6 +1330,309 @@ class StorageConfig:
     write_mode: str = "snapshot"
 
 
+# The standing memory policies session start can serve; see
+# :class:`MemoryPolicyConfig` and ``pseudolife_memory.web.session_hook``.
+MEMORY_POLICY_VARIANTS = ("none", "compact", "full_separate_hook")
+
+
+@dataclass
+class MemoryPolicyConfig:
+    """Which standing memory policy the session-start hooks serve.
+
+    This is the knob ``evals/memory_policy_bench.py`` measures. ``variant``
+    applies to every session:
+
+    * ``compact`` (default) — the short core served since 2026-09-24
+      (``STARTUP_MEMORY_CORE``), ahead of the briefing in one hook output;
+    * ``none`` — no policy text; the briefing and the episode line still serve;
+    * ``full_separate_hook`` — the full ``MEMORY_LOOP_BLOCK`` (about 8 KB),
+      served by the plugin's separate memory-policy hook, because block
+      plus briefing overflow the 9,500-byte budget of one hook output.
+
+    ``ab_arms`` turns on an online A/B test: a non-empty list assigns each
+    hook-registered session one arm by a stable hash of its client session
+    id, in place of ``variant``. A variant may repeat (an A/A test). Sessions
+    that reach the hook without a session id keep ``variant``.
+    """
+
+    variant: str = "compact"
+    ab_arms: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.variant not in MEMORY_POLICY_VARIANTS:
+            raise ValueError(
+                f"memory_policy.variant must be one of "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.variant!r})")
+        if not isinstance(self.ab_arms, list) or any(
+                arm not in MEMORY_POLICY_VARIANTS for arm in self.ab_arms):
+            raise ValueError(
+                f"memory_policy.ab_arms must be a list of variants from "
+                f"{', '.join(MEMORY_POLICY_VARIANTS)} (got {self.ab_arms!r})")
+        if len(self.ab_arms) == 1:
+            raise ValueError(
+                "memory_policy.ab_arms needs at least two arms; set "
+                "memory_policy.variant to serve one variant to every session")
+        self.ab_arms = list(self.ab_arms)
+
+
+# Keys `coordination.wake` once took and no longer uses. A deployed
+# config.yaml may still carry them (the guide's example did), so they are
+# dropped at load rather than refused: WakeConfig takes no unknown key.
+RETIRED_WAKE_KEYS = frozenset({"nudge_interval_seconds"})
+
+
+@dataclass
+class WakeConfig:
+    """Caps on the rings the daemon decides at send (schema v49).
+
+    A ring is an unattended model turn in the recipient, so every one is
+    bounded. The four caps come from the 2026-09-23/24 messageboard trial
+    (ten, then fifteen sessions over two evenings): the Claude Stop hook
+    already capped wakes at 20 an hour per session, and the busiest session
+    received 32 messages in an evening; no sender-recipient pair exchanged
+    more than 10 messages in an hour, so 20 rings per recipient per hour
+    is above any pair the trial saw; no request or hand-off thread ran to
+    more than 6 messages, so 6 urgent rings per sender per hour covers a
+    whole thread of them; fan-out bursts were 2.8% of the traffic, so a
+    30 s stagger between one sender's rings delays little. The nightly
+    total (200) is the design's starting value, not a measurement: about
+    the trial's whole evening of messages, every one rung. A cap of 0
+    rings nobody (or never honours ``urgent``). ``active_seconds`` is the
+    window in which a recipient's own last board action makes new mail
+    ``hinted`` (its next tool result carries it) rather than rung; a
+    judgment call, at least 1. ``nudge_interval_seconds``, which bounded
+    the hourly ring to an idle, unparked session, is retired with that
+    ring (2026-10-02, regular mail never wakes): a config.yaml that still
+    names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
+    ``authority_per_sender_per_hour`` bounds the urgent rings one sender
+    may cause as the maintainer or the maintainer's delegate for a project
+    (2026-10-03), which reopen done parks and no longer spend the plain
+    urgent allowance; the per-recipient, nightly and stagger caps still
+    apply.
+    """
+
+    per_recipient_per_hour: int = 20
+    urgent_per_sender_per_hour: int = 6
+    nightly_total: int = 200
+    fan_out_stagger_seconds: int = 30
+    active_seconds: int = 60
+    # A starting value, not a measurement: twice the largest burst the board
+    # has carried (six recipients, a host fix sent to every session on
+    # 2026-09-27), so a delegate can relay one incident decision and a
+    # follow-up to every session in an hour; on 2026-10-03 such relays came
+    # back capped under the 6-an-hour urgent allowance.
+    authority_per_sender_per_hour: int = 12
+
+    def __post_init__(self) -> None:
+        for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
+                     "fan_out_stagger_seconds", "active_seconds",
+                     "authority_per_sender_per_hour"):
+            value = getattr(self, name)
+            floor = 1 if name == "active_seconds" else 0
+            if type(value) is not int or value < floor:
+                raise ValueError(f"coordination.wake.{name} must be a whole number of at least {floor}")
+
+
+@dataclass
+class MaintainerConfig:
+    """Maintainer messages and Board roles from the Console, proven by a
+    passkey (schema v54; specs 2026-10-02-maintainer-wake-design.md and
+    2026-10-04-board-roles-passkey.md). File-only: ``POST /api/config``
+    refuses every ``coordination.maintainer`` path (``config_protected``),
+    since every environment principal can call that route.
+
+    ``rp_id`` is the hostname the Console is served from (a passkey is bound
+    to it) and ``origin`` that exact origin: ``https://<rp_id>`` or
+    ``https://<rp_id>:<port>`` (for example behind ``tailscale serve
+    --https=8443``), or, for local use only, ``http://localhost[:<port>]``
+    with ``rp_id`` ``localhost``; written as a browser serialises it, without
+    the scheme's default port. The origin is never taken from a request
+    header. Unset, or any other shape (see :meth:`problem`), and every
+    maintainer route answers ``409 maintainer_https_required``.
+    ``maintainer_per_recipient_per_hour`` caps the rings maintainer messages
+    cause per recipient; 30 is the design's starting value, not a
+    measurement."""
+
+    rp_id: str = ""
+    origin: str = ""
+    maintainer_per_recipient_per_hour: int = 30
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rp_id, str) or not isinstance(self.origin, str):
+            raise ValueError("coordination.maintainer.rp_id and .origin must be strings")
+        cap = self.maintainer_per_recipient_per_hour
+        if type(cap) is not int or cap < 0:
+            raise ValueError("coordination.maintainer.maintainer_per_recipient_per_hour must "
+                             "be a whole number, 0 or more")
+
+    def problem(self) -> str | None:
+        """Why the maintainer routes cannot run on this configuration, or
+        ``None`` when they can: unset, or an origin that is not exactly the
+        HTTPS origin of ``rp_id`` (or ``http://localhost[:port]``)."""
+        import re
+        from urllib.parse import urlsplit
+        if not self.rp_id or not self.origin:
+            return "unset"
+        host = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*")
+        if len(self.rp_id) > 253 or not host.fullmatch(self.rp_id):
+            return "rp_id must be a lower-case hostname"
+        parts = urlsplit(self.origin)
+        try:
+            port = parts.port
+        except ValueError:
+            return "origin has an invalid port"
+        scheme = parts.scheme
+        if scheme == "http" and self.rp_id != "localhost":
+            return "plain http is allowed for rp_id localhost only"
+        if scheme not in ("https", "http"):
+            return "origin must be https"
+        # A browser serialises the origin without its scheme's default port,
+        # so a configured one would never match an assertion (review of
+        # #569, 2026-10-05).
+        if port == {"https": 443, "http": 80}[scheme]:
+            return f"origin must leave out the default port :{port}"
+        expected = f"{scheme}://{self.rp_id}" + (f":{port}" if port is not None else "")
+        if parts.hostname != self.rp_id or self.origin != expected:
+            return "origin must be exactly <scheme>://<rp_id>[:<port>]"
+        return None
+
+    @property
+    def configured(self) -> bool:
+        return self.problem() is None
+
+
+@dataclass
+class CoordinationConfig:
+    """Peer awareness and addressed mail; limits bound injected session context.
+
+    On by default since 2026-09-25, still behind bearer authentication: an
+    open (tokenless) install has no principal to admit. Without an explicit
+    ``allowed_principals`` only the singular-token principal ``default`` is
+    admitted; token-map principals are separately trusted identities and
+    join the board only when an operator lists them (maintainer decision,
+    2026-09-25).
+    """
+
+    enabled: bool = True
+    # Initial context limit, not a measured throughput tuning constant.
+    awareness_limit: int = 5
+    allowed_principals: list[str] = field(
+        default_factory=lambda: [DEFAULT_PRINCIPAL])
+    # Principals that may post a board notice as the daemon through
+    # ``POST /api/daemon-notice`` (the unattended updater). Empty by
+    # default: ``default`` is every ordinary session's principal, and a
+    # notice from the daemon must not be something any session can send.
+    # An operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal here
+    # for the scheduled run's bearer (review of #463, 2026-09-29).
+    daemon_notice_principals: list[str] = field(default_factory=list)
+    # Principals whose board mail speaks for the maintainer (2026-10-03):
+    # their urgent mail reopens a done park and spends the authority budget
+    # (``wake.authority_per_sender_per_hour``). Empty by default. An
+    # operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal whose
+    # bearer only the maintainer holds; ``default``, every ordinary
+    # session's principal, and the daemon's own sender are refused.
+    maintainer_principals: list[str] = field(default_factory=list)
+    # Days the board's audit log (coordination_events, schema v42) keeps an
+    # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
+    # still blank after 24 h. Measured 2026-09-24
+    # (evals/results/coordination-audit-volume-20260924.json): a synthetic
+    # replay at the scale of the 2026-09-23/24 fifteen-session trial (40
+    # agents, 623 messages, with assumed status-update and attach counts)
+    # leaves 2,671 events in 1.6 MB with indexes, so 90 such nights would be
+    # 144.5 MB. Ninety days outlives the 7-day backup rotation
+    # (ops/backup.ps1) by a quarter of retrospectives while keeping growth
+    # bounded. The log is cut on UTC day boundaries, so an event stays up to
+    # a day longer than this.
+    audit_retention_days: int = 90
+    # The wake caps (schema v49); see WakeConfig.
+    wake: WakeConfig = field(default_factory=WakeConfig)
+    # v54: passkey-signed maintainer messages and roles; see MaintainerConfig.
+    maintainer: MaintainerConfig = field(default_factory=MaintainerConfig)
+
+    def __post_init__(self) -> None:
+        if type(self.enabled) is not bool:
+            raise ValueError("coordination.enabled must be a boolean")
+        if isinstance(self.maintainer, dict):
+            self.maintainer = MaintainerConfig(**self.maintainer)
+        if not isinstance(self.maintainer, MaintainerConfig):
+            raise ValueError("coordination.maintainer must be a mapping")
+        if isinstance(self.wake, dict):
+            self.wake = WakeConfig(**{key: value for key, value in self.wake.items()
+                                      if key not in RETIRED_WAKE_KEYS})
+        if not isinstance(self.wake, WakeConfig):
+            raise ValueError("coordination.wake must be a mapping of wake caps")
+        if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
+            raise ValueError("coordination.awareness_limit must be an integer in 1..20")
+        if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:
+            raise ValueError("coordination.audit_retention_days must be a whole number of "
+                             "days, 0 or more (0 keeps the audit log forever)")
+        if not isinstance(self.allowed_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.allowed_principals
+        ):
+            raise ValueError("coordination.allowed_principals must be a list of names")
+        self.allowed_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.allowed_principals))
+        if not isinstance(self.daemon_notice_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.daemon_notice_principals
+        ):
+            raise ValueError("coordination.daemon_notice_principals must be a list of names")
+        self.daemon_notice_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.daemon_notice_principals))
+        if not isinstance(self.maintainer_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.maintainer_principals
+        ):
+            raise ValueError("coordination.maintainer_principals must be a list of names")
+        self.maintainer_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.maintainer_principals))
+        shared = {DEFAULT_PRINCIPAL, DAEMON_PRINCIPAL} & set(self.maintainer_principals)
+        if shared:
+            raise ValueError(
+                "coordination.maintainer_principals cannot name " + ", ".join(sorted(shared))
+                + ": every ordinary session (default) or the daemon itself would speak "
+                "for the maintainer; name a dedicated token-map principal")
+
+
+@dataclass
+class UpdatesConfig:
+    """How an install learns about, and takes, a new release.
+
+    ``check_releases``: the daemon asks PyPI for the newest release once per
+    ``check_interval_seconds`` on a background thread (never on a request),
+    ``/health`` carries the answer, and the session-start briefing opens
+    with ``pseudolife-mcp update`` when the daemon is behind. Off, nothing
+    leaves the daemon and no session is told.
+
+    ``unattended_clients`` (off by default): when the daemon runs a newer
+    release than the shim a session starts from, that shim installs the
+    daemon's release as a new runtime beside itself and refreshes the
+    plugin cache in the background (``pseudolife-mcp update
+    --clients-only``); running sessions keep their runtime, the next
+    session starts on the new one. The daemon recreate, with its backup
+    and rollback tag, is never taken unattended by this knob.
+
+    ``unattended_daemon`` (off by default): the scheduled
+    ``pseudolife-mcp update --unattended`` run (a Windows task or a
+    systemd timer, installed with ``update --schedule HH:MM``) may recreate
+    the daemon on a new release, with the same backup and rollback tag as
+    an attended update, when the agent board lists no active session; it
+    posts a board notice from the daemon's principal when it updated or
+    held off. The run reads this through ``/health``, so installing the
+    timer alone changes nothing.
+    """
+
+    check_releases: bool = True
+    check_interval_seconds: int = 6 * 3600
+    unattended_clients: bool = False
+    unattended_daemon: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("check_releases", "unattended_clients", "unattended_daemon"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"updates.{name} must be a boolean")
+        if type(self.check_interval_seconds) is not int or self.check_interval_seconds < 60:
+            raise ValueError("updates.check_interval_seconds must be a whole number of seconds, 60 or more")
+
+
 @dataclass
 class AppConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
@@ -1157,6 +1640,9 @@ class AppConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
+    coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
+    memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1209,6 +1695,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
             recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),
             slot_index_shadow_rate=mem_raw.get("slot_index_shadow_rate", 0.01),
+            delete_confirm_threshold=mem_raw.get("delete_confirm_threshold", 20),
         )
         if "miras" in mem_raw:
             miras_raw = mem_raw["miras"]
@@ -1285,5 +1772,11 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
     if "time" in raw:
         config.time = _dict_to_dataclass(TimeConfig, raw["time"])
+    if "coordination" in raw:
+        config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
+    if "memory_policy" in raw:
+        config.memory_policy = _dict_to_dataclass(MemoryPolicyConfig, raw["memory_policy"])
+    if "updates" in raw:
+        config.updates = _dict_to_dataclass(UpdatesConfig, raw["updates"])
 
     return config

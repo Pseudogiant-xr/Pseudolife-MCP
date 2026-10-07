@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.real_model
+
 # (memory text, paraphrase query). One golden target per query.
 GOLDEN: list[tuple[str, str]] = [
     ("The staging database password rotates every 30 days via vault-agent",

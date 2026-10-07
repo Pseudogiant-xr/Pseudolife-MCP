@@ -7,6 +7,8 @@ fallback for older clients.
 """
 from __future__ import annotations
 
+import pytest
+
 from pseudolife_memory import writer_context as wc
 
 
@@ -92,16 +94,33 @@ def test_default_principal_keeps_x_pl_writer(monkeypatch):
         ctxvar.reset(tok)
 
 
-def test_unknown_bearer_resolves_default_not_named(monkeypatch):
-    # Naming is not authentication: the gate already rejected bad tokens, so
-    # an unmatched bearer here (e.g. the singular token) is just "default".
+def test_the_singular_token_resolves_default_and_keeps_the_writer_header(monkeypatch):
+    # The singular token is the default principal, whose writer stays the
+    # client-asserted X-PL-Writer.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "tokA:hermes-box")
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "single")
+    ctxvar, ctx = _with_request(
+        {"authorization": "Bearer single", "x-pl-writer": "w1"})
+    tok = ctxvar.set(ctx)
+    try:
+        writer, _, _ = wc.resolve_writer_detailed("fallback")
+        assert writer == "w1"
+    finally:
+        ctxvar.reset(tok)
+
+
+def test_an_unknown_bearer_is_refused_not_named_default(monkeypatch):
+    # Security review, 2026-10-02: with authentication configured, a bearer
+    # that matches nothing is not served as "default" (which would honour
+    # its X-PL-Writer); naming refuses instead.
+    from pseudolife_memory.principals import PrincipalsUnavailable
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "tokA:hermes-box")
     ctxvar, ctx = _with_request(
         {"authorization": "Bearer other", "x-pl-writer": "w1"})
     tok = ctxvar.set(ctx)
     try:
-        writer, _, _ = wc.resolve_writer_detailed("fallback")
-        assert writer == "w1"
+        with pytest.raises(PrincipalsUnavailable):
+            wc.resolve_writer_detailed("fallback")
     finally:
         ctxvar.reset(tok)
 
@@ -123,3 +142,16 @@ def test_current_principal_fail_open_outside_request(monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "tokA:hermes-box")
     # No live request bound at all -> default, never an exception.
     assert wc.current_principal() == "default"
+
+
+def test_non_ascii_named_bearer_from_mcp_transport_names_principal(monkeypatch):
+    # The MCP transport binds Starlette's headers, which decode the bearer
+    # as latin-1; the caller authenticated at the gate, so the named
+    # principal must survive rather than fall back to "default".
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "café-token:hermes-box")
+    wire = "café-token".encode("utf-8").decode("latin-1")
+    binding = wc.bind_request_headers({"authorization": "Bearer " + wire})
+    try:
+        assert wc.current_principal() == "hermes-box"
+    finally:
+        wc.unbind_request_headers(binding)

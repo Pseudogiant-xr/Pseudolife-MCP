@@ -19,10 +19,145 @@ from typing import TYPE_CHECKING
 # Silence torch.dynamo before any import. Mirrors the production server.
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
+# Pin the CPU embedder to fp32 for the whole suite. EmbeddingConfig.cpu_dtype
+# defaults to "auto", which picks bf16 on a CPU with native bf16, so without
+# this the suite's numerics would follow the host. Set outright (an exported
+# developer value must not flip it), and as an env var rather than a fixture
+# because the daemons the suite spawns inherit os.environ too.
+os.environ["PSEUDOLIFE_EMBEDDING_CPU_DTYPE"] = "fp32"
+
 # Allow `from pseudolife_memory...` from the test files without an editable
 # install. Keeps CI/setup minimal.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# CPU-only unless PSEUDOLIFE_TEST_CUDA=1, and one full suite per machine
+# unless its lock allows more slots — tests/suite_lock.py carries the
+# measurements. The GPU is hidden here,
+# before anything can import torch; the lock is taken in pytest_configure.
+from tests import suite_lock  # noqa: E402
+
+suite_lock.hide_cuda(os.environ)
+
+# Every report this process renders is scrubbed of PostgreSQL passwords:
+# psycopg's own connect frame shows the DSN as an argument, out of reach of
+# pg_defaults.RedactedUrl. Imported here, before scrub_live_bank_dsn below
+# pops the daemon DSN, so its password is in the snapshot the plugin takes
+# (in this process; an xdist worker never inherits that DSN at all).
+from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
+    pytest_make_collect_report, pytest_runtest_makereport,
+)
+
+# The eval-backed suites (test_recall, test_memcot_bench,
+# test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
+# URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
+# resolver pg_fixtures uses (explicit test DSN, then the test login file or
+# the password from ops/.env),
+# so a rotated dev password or alternate test server cannot turn those files
+# into silent skips. An operator's own bench value is left alone.
+from tests.pg_defaults import (  # noqa: E402
+    ENV_FILE, bench_admin_url, conninfo_with_dbname, full_run_password_preflight,
+    login_file_path, run_suffix,
+)
+
+if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
+    os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
+    os.environ["_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"] = "1"
+
+# Windows can fail a loopback connect for want of a local port, which says
+# nothing about the server (tests/pg_defaults.py, is_local_port_exhaustion).
+# The fixtures and the storage code under test all connect through
+# psycopg.connect, so one wrapper, installed here before any test module
+# imports, covers every connect in this process. Spawned daemons are other
+# processes and run psycopg as shipped.
+try:
+    import psycopg
+except ImportError:  # the PG-backed suites skip themselves
+    pass
+else:
+    from tests.pg_defaults import retry_local_port_exhaustion  # noqa: E402
+
+    psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
+
+# The board mirror of the full-suite lock (tests/suite_lock.py) speaks for
+# this session with its bearer and daemon URL, which the isolation just below
+# strips from the environment; keep a copy first. Only pytest_configure reads
+# it, and only for a full run under the lock.
+_BOARD_ENV = suite_lock.board_environment(os.environ)
+
+# Isolate client configuration before test-module imports can snapshot it.
+# Model caches and ordinary home-directory lookup stay intact; only the Codex
+# connection and its credentials/state are redirected to this owned temp home.
+import tempfile
+from tests.client_environment import isolate_client_environment
+
+_client_test_home = tempfile.TemporaryDirectory(prefix="pseudolife-test-codex-")
+isolate_client_environment(os.environ, _client_test_home.name)
+
+# The suite never talks to a real dream extractor. The endpoint selection
+# reads PSEUDOLIFE_DREAM_* from the ambient environment (memory/dream.py,
+# resolve_endpoints), so a shell with the ops values exported would send
+# every end-of-session dream a test fires to a live model — and pg_conn now
+# waits for those dream threads before it reaps (tests/pg_fixtures.py), so a
+# real call could hold the next PG test for the extractor timeout (240 s
+# default) instead of the no-op extractor's milliseconds. Tests that need an
+# endpoint set it with monkeypatch; none read the ambient value.
+EXTRACTOR_ENDPOINT_ENV = (
+    "PSEUDOLIFE_DREAM_BASE_URL", "PSEUDOLIFE_DREAM_MODEL",
+    "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL", "PSEUDOLIFE_DREAM_FALLBACK_MODEL",
+    "PSEUDOLIFE_DREAM_EXTRACTOR_MODE", "PSEUDOLIFE_DREAM_API_KEY",
+    "PSEUDOLIFE_DREAM_FALLBACK_API_KEY",
+)
+
+
+def scrub_extractor_endpoint_env(environ) -> list[str]:
+    """Drop the extractor endpoint selection from ``environ``; returns the
+    names that were set. Only the selection variables — timeout and token
+    budgets are harmless without an endpoint and stay as the operator left
+    them."""
+    return [name for name in EXTRACTOR_ENDPOINT_ENV
+            if environ.pop(name, None) is not None]
+
+
+scrub_extractor_endpoint_env(os.environ)
+
+
+# The production daemon's DSN never reaches the suite. MemoryService falls
+# back to PSEUDOLIFE_MCP_DATABASE_URL when no database_url is passed, so an
+# exported value binds every file-mode fixture to that bank — and
+# pristine_service.save() then snapshots a just-cleared cortex over it
+# (replace_facts([]) -> DELETE FROM facts), a path no reset-site guard sees
+# (2026-09-23 review). Tests that need a PG-bound service set the variable
+# themselves (monkeypatch in pg_service, a child env in the daemon fixtures);
+# none read the ambient value. Its database NAME is kept — never the DSN,
+# which carries a credential — so the reset guard keeps refusing that bank;
+# and because a record always exists, the guard ignores the live variable
+# those tests point at their own per-run databases.
+def scrub_live_bank_dsn(environ) -> str:
+    """Drop PSEUDOLIFE_MCP_DATABASE_URL from ``environ`` and record the bank
+    it named for the reset guard: the default bank's name when none was
+    exported, and an inherited record (an xdist worker's, from the
+    controller) is kept. A DSN that leaves its database implicit (libpq's
+    user-name default, or a service file) is recorded as unresolved, which
+    stops the run in pytest_configure — the DSN is about to be gone, and
+    with it the only clue to the bank's name. Returns the recorded name."""
+    from pseudolife_memory.storage.schema import (
+        DEFAULT_PRODUCTION_DATABASE, PRODUCTION_DATABASE_ENV,
+        UNRESOLVED_PRODUCTION_DATABASE, dsn_database_name,
+    )
+
+    dsn = environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
+    if dsn:
+        environ[PRODUCTION_DATABASE_ENV] = (
+            dsn_database_name(dsn) or UNRESOLVED_PRODUCTION_DATABASE)
+    else:
+        # Never the empty string: Windows deletes a variable assigned one,
+        # and xdist workers would then inherit no record at all.
+        environ.setdefault(PRODUCTION_DATABASE_ENV, DEFAULT_PRODUCTION_DATABASE)
+    return environ[PRODUCTION_DATABASE_ENV]
+
+
+scrub_live_bank_dsn(os.environ)
 
 # Bench-DB isolation: evals' reset_bench() reaps every backend on its
 # database before truncating, so concurrent suite runs must not share one
@@ -43,7 +178,9 @@ def bench_db_autopin(environ) -> str | None:
     if current is not None and current != environ.get(
             "_PSEUDOLIFE_BENCH_DB_AUTOPIN"):
         return None
-    return f"pseudolife_memory_bench_{os.getpid()}"
+    # run_suffix: tagged inside WSL, so a Windows run's pruning never drops
+    # it (tests/pg_defaults.py, PID_NAMESPACE).
+    return f"pseudolife_memory_bench_{run_suffix()}"
 
 
 _bench_pin = bench_db_autopin(os.environ)
@@ -55,12 +192,12 @@ if _bench_pin is not None:
         try:
             import psycopg
 
-            admin = os.environ.get(
-                "PSEUDOLIFE_BENCH_ADMIN_URL",
-                "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
-            )
-            admin = admin.rsplit("/", 1)[0] + "/postgres"
-            db = os.environ["PSEUDOLIFE_BENCH_DB"]
+            admin = os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or bench_admin_url()
+            admin = conninfo_with_dbname(admin, "postgres")
+            # The name pinned above, not whatever PSEUDOLIFE_BENCH_DB holds
+            # by exit: a DROP ... WITH (FORCE) must never follow a later
+            # (or mistyped) value onto a database this run did not create.
+            db = _bench_pin
             with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
                 conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
         except Exception:  # noqa: BLE001 — best-effort; pg_fixtures prunes leftovers
@@ -70,10 +207,121 @@ if _bench_pin is not None:
 
     atexit.register(_drop_run_bench_db)
 
+# mcp.client.stdio.stdio_client binds ``errlog=sys.stderr`` as a default at
+# first import (``import mcp`` imports it eagerly). A first import inside a
+# capsys test binds capsys's CaptureIO, which has no fileno, and every later
+# stdio_client(params) without errlog= in the process fails with
+# io.UnsupportedOperation — six tests/test_shim.py failures when PR #352's
+# test_codex_doorbell.py ran first (2026-09-23). Importing here, before any
+# test runs, binds pytest's session-long fd-capture file instead (the
+# terminal under -s; --capture=sys/tee-sys offer no fileno at all). The
+# filter keeps opentelemetry's import-time DeprecationWarning as unrecorded
+# as it was when torch first imported it inside pytest_configure. Pinned by
+# tests/test_mcp_stdio_errlog.py.
+import warnings  # noqa: E402
+
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore", message="SelectableGroups dict interface is deprecated",
+        category=DeprecationWarning)
+    import mcp.client.stdio  # noqa: E402, F401
+
 import pytest
+
+from tests.fake_embedder import FakeSentenceTransformer, is_known
 
 if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
+
+_SUITE_LOCK = pytest.StashKey[suite_lock.HeldLock]()
+
+# Fixture HTTP servers (stub extractors, fake daemons, shim upstreams) run
+# serve_forever() on a thread, and shutdown() waits for its next poll: the
+# stdlib default of 0.5 s cost nearly that much per server, since fixtures
+# stop right after their last request. Measured 2026-09-23 UTC on six of the
+# server-heavy files (listed in each artifact's command; 187 tests, 16-CPU
+# Windows host): 65.2 s at 0.5 s, 42.5-47.5 s at 0.05 s, two runs each, a gain
+# that includes one 2 s retry sleep dropped from test_extractor_fallback
+# (evals/results/suite-cost-fixture-server-shutdown-slice-*.json). Only
+# servers inside this pytest process are affected; the eval shims' own
+# serve_forever() runs in their separate processes.
+import socketserver  # noqa: E402
+
+# Fail at import, not as a hung shutdown(), if the stdlib signature changes.
+assert socketserver.BaseServer.serve_forever.__defaults__ == (0.5,)
+socketserver.BaseServer.serve_forever.__defaults__ = (0.05,)
+
+# Which embedder a test gets. By default every test that is not marked
+# ``real_model`` runs on tests/fake_embedder.py's deterministic hashing model;
+# PSEUDOLIFE_TEST_EMBEDDER=real restores the real weights for the whole run.
+EMBEDDER_ENV = "PSEUDOLIFE_TEST_EMBEDDER"
+_real_model_test = False
+
+
+def embedder_mode(environ) -> str:
+    """"fake" (the default) or "real". Anything else is refused: a typo in
+    CI's all-real lane must not quietly run it on the fake and still pass."""
+    value = environ.get(EMBEDDER_ENV)
+    if value is None:
+        return "fake"
+    if value not in ("fake", "real"):
+        raise pytest.UsageError(
+            f"{EMBEDDER_ENV} must be 'fake' or 'real' (or unset), got {value!r}")
+    return value
+
+
+def _use_fake_embedder(args: tuple, kwargs: dict) -> bool:
+    if embedder_mode(os.environ) == "real" or _real_model_test:
+        return False
+    if kwargs.get("backend", "torch") != "torch":
+        return False
+    return is_known(args[0] if args else kwargs.get("model_name_or_path"))
+
+
+def _refuse_fake_in_real_model_test() -> None:
+    # A module-scoped service built by an earlier unmarked test would hand a
+    # real_model test the fake; fail rather than pass on the wrong model.
+    if _real_model_test:
+        raise RuntimeError(
+            "a real_model test is embedding through the fake model built by "
+            "an earlier unmarked test in this module; mark the module "
+            "(pytestmark = pytest.mark.real_model) so the shared service "
+            "loads the real weights")
+
+
+FakeSentenceTransformer.guard = staticmethod(_refuse_fake_in_real_model_test)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Record whether the test about to set up needs the real weights —
+    before its fixtures run, so module-scoped services see it too."""
+    global _real_model_test
+    _real_model_test = item.get_closest_marker("real_model") is not None
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Required CI database coverage must fail before collection can skip it."""
+    if os.environ.get("PSEUDOLIFE_REQUIRE_TEST_POSTGRES") != "1":
+        return
+    try:
+        import psycopg  # noqa: F401 — cannot use importorskip in a required lane
+    except ImportError:
+        raise pytest.UsageError("Required test PostgreSQL needs psycopg") from None
+
+    from pseudolife_memory.storage.schema import ProductionDatabaseError
+    from tests.helpers import pg_reachable
+    from tests.pg_defaults import (
+        PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
+    )
+    from tests.pg_fixtures import ensure_test_db, resolve_test_db_url
+
+    try:
+        ensure_test_db()
+        pg_reachable(resolve_test_db_url())
+    except (PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
+            ProductionDatabaseError) as exc:
+        raise pytest.UsageError(str(exc)) from None
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -101,6 +349,96 @@ def pytest_configure(config: pytest.Config) -> None:
     Qwen3, MiniLM torch, MiniLM ONNX, plus the guard test's
     deliberately-capped ~90 MB MiniLM.
     """
+    # Before anything else: refuse to run when the exported daemon DSN hid
+    # its database (scrub_live_bank_dsn above). Every PG reset would refuse
+    # anyway; one message here beats a thousand errors.
+    from pseudolife_memory.storage.schema import (
+        PRODUCTION_DATABASE_ENV, UNRESOLVED_PRODUCTION_DATABASE,
+    )
+
+    if os.environ.get(PRODUCTION_DATABASE_ENV) == UNRESOLVED_PRODUCTION_DATABASE:
+        raise pytest.UsageError(
+            "PSEUDOLIFE_MCP_DATABASE_URL is exported without an explicit "
+            "database name (libpq would use the user name or a service file), "
+            "so the test/bench reset guard cannot identify the production "
+            "bank. Unset it — the suite never needs it — or add dbname=.")
+
+    # Then, on a run dispatched to a second machine, refuse a server that
+    # holds a production bank under any address (tests/pg_defaults.py,
+    # dispatched_live_bank_refusal): here, and again once the run holds the
+    # suite lock below, as a server that refused the first connection may be
+    # up by then. Only in the process that started the run: xdist workers
+    # inherit its settings.
+    def refuse_live_bank() -> None:
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return
+        from tests import pg_defaults
+
+        refusal = pg_defaults.dispatched_live_bank_refusal()
+        if refusal:
+            # The exit-time bench drop would connect to the refused server.
+            if _bench_pin is not None:
+                import atexit
+
+                atexit.unregister(_drop_run_bench_db)
+            raise pytest.UsageError(refusal)
+
+    refuse_live_bank()
+
+    # A full run queues for the suite lock first, while it holds ~50 MB:
+    # the embedding import below commits ~1.3 GB (measured 2026-09-23).
+    # What it read from the checkout by now (this file, its imports, and
+    # ops/.env and the test login file for the bench URL above) is
+    # fingerprinted and re-checked on
+    # every poll: a run whose copies changed while it queued stops instead
+    # of running them.
+    #
+    # Before it queues, the dev Postgres is asked whether it accepts the
+    # login the suite resolved (PSEUDOLIFE_TEST_PG_PASSWORD, else the test
+    # login file ~/.pseudolife-mcp/test-pg.env, else ops/.env, else the
+    # compose default). A full run it rejects is refused here: from a fresh
+    # worktree, whose ops/.env is missing or the template copy, such a run
+    # went to the end with 1,424 PG-backed setup errors (2026-09-27, twice),
+    # holding the machine's one slot for a gate that gated nothing. A
+    # targeted run gets one line and goes on, as it did. A run the server
+    # accepts as the bank owner, through ops/.env, gets one line naming
+    # `pseudolife-mcp test-login create` (2026-10-04).
+    #
+    # A machine whose lock directory says so refuses a full run on native
+    # Windows before anything else (PSEUDOLIFE_SUITE_WINDOWS, else
+    # full-suite.windows): it runs full suites in WSL, whose lock a Windows
+    # run cannot see. tests/suite_lock.py carries the measurement.
+    #
+    # The board mirrors the lock as this machine's suite lease, `full-suite`
+    # unless PSEUDOLIFE_SUITE_LEASE / full-suite.lease names it (holder, queue,
+    # expected end, a notice to the peers concerned), built only for a full
+    # run past that preflight, before the fingerprint, so its module is part
+    # of it.
+    def preflight(kind: str) -> None:
+        try:
+            refusal = suite_lock.native_windows_refusal(
+                kind, os.environ, suite_lock.lock_dir(os.environ))
+            if kind == "full":  # a bad lease name stops the run before it queues
+                suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))
+        except ValueError as exc:
+            raise pytest.UsageError(str(exc)) from None
+        if refusal:
+            raise pytest.UsageError(refusal)
+        refusal = full_run_password_preflight(kind)
+        if refusal:
+            raise pytest.UsageError(refusal)
+
+    held = suite_lock.take_for_session(
+        config, os.environ, ROOT / "tests", read_files=(ENV_FILE, login_file_path()),
+        preflight=preflight,
+        mirror=lambda: suite_lock.board_mirror(
+            suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV,
+            name=suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))))
+    if held is not None:
+        config.stash[_SUITE_LOCK] = held
+    refuse_live_bank()  # pytest_unconfigure releases the lock on a refusal
+
+    embedder_mode(os.environ)  # a bad PSEUDOLIFE_TEST_EMBEDDER fails here
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig
 
@@ -116,13 +454,16 @@ def pytest_configure(config: pytest.Config) -> None:
     def _shared_load(*args, **kwargs):  # noqa: ANN002, ANN003 — passthrough
         cap = _shared_load.next_cap if _shared_load.next_cap is not None \
             else default_cap
+        fake = _use_fake_embedder(args, kwargs)
         key = (
             args,
             tuple(sorted((k, repr(v)) for k, v in kwargs.items())),
             cap,
+            fake,
         )
         if key not in loaded:
-            loaded[key] = real_load(*args, **kwargs)
+            loaded[key] = (FakeSentenceTransformer(*args, **kwargs) if fake
+                           else real_load(*args, **kwargs))
         return loaded[key]
 
     _shared_load.next_cap = None
@@ -140,6 +481,52 @@ def pytest_configure(config: pytest.Config) -> None:
 
     embedding_module.SentenceTransformer = _shared_load
     embedding_module.EmbeddingPipeline.__init__ = _capturing_init
+
+    # The guard sits on the pipeline as well as the fake: the pipeline's LRU
+    # answers repeated texts without calling the model at all.
+    real_encode = embedding_module.EmbeddingPipeline.encode
+
+    def _guarded_encode(self, texts, normalize=True):  # noqa: ANN001
+        if getattr(self.model, "is_fake", False):
+            _refuse_fake_in_real_model_test()
+        return real_encode(self, texts, normalize)
+
+    embedding_module.EmbeddingPipeline.encode = _guarded_encode
+
+
+def _match_embedder_to_test(svc: MemoryService) -> None:
+    """Rebuild ``svc``'s pipeline when the running test wants the other kind
+    of embedder (fake vs real weights) than the one it holds."""
+    from pseudolife_memory.memory.embedding import EmbeddingPipeline
+
+    config = svc.config.embedding
+    model = getattr(svc._embedder, "model", None)  # noqa: SLF001
+    # The backend in use, not the configured one: an "onnx" config that fell
+    # back to torch holds a fake or real torch model like any other; a real
+    # ONNX model is never faked, so rebuilding it would change nothing.
+    if model is None or getattr(svc._embedder, "backend", "torch") != "torch":  # noqa: SLF001
+        return
+    if getattr(model, "is_fake", False) != _use_fake_embedder(
+            (config.model_name,), {}):
+        svc._embedder = EmbeddingPipeline(config)  # noqa: SLF001
+
+
+_SESSION_EXIT = pytest.StashKey[int]()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    session.config.stash[_SESSION_EXIT] = int(exitstatus)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    held = config.stash.get(_SUITE_LOCK, None)
+    if held is not None:
+        # Only a run that ran its tests (passed or failed) times the next
+        # one's expected end; an interrupted run or a collection error would
+        # drag the median down.
+        exitstatus = config.stash.get(_SESSION_EXIT, None)
+        suite_lock.release(held, record=exitstatus in (pytest.ExitCode.OK,
+                                                       pytest.ExitCode.TESTS_FAILED))
 
 
 @pytest.fixture(scope="module")
@@ -167,8 +554,16 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
     state it did not itself write (surveyed 2026-08-28 across all thirteen
     fixture-consuming files). Also not reset: ``svc.config``, which outlives
     the bank clear, so a test that flips a config knob must restore it.
+
+    The embedder follows the test: the bank is emptied here, so a
+    ``real_model`` test in a module of fake-embedder tests (or the reverse)
+    gets a pipeline of its own kind without leaving vectors of the other
+    kind in the bank. (The uncleared world and lesson stores can keep them;
+    per the survey above, no test reads state there it did not write.)
+    Model loads are memoized, so the swap costs no reload.
     """
     warm_service._ensure_init()  # noqa: SLF001 — fixture wiring.
+    _match_embedder_to_test(warm_service)
     assert warm_service._cms is not None
     warm_service._cms.clear()
     # Slot-keyed facts survive a CMS clear — without this, cortex writes leak

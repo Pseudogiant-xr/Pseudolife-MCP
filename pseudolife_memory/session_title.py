@@ -1,7 +1,7 @@
 """Shared session-episode title derivation.
 
-Torch-free (stdlib only) so both the stdio shim and the episode CLI can import
-it without pulling in the heavy service stack. The title is
+Torch-free (stdlib only) so the episode CLI can import it without pulling in
+the heavy service stack. The title is
 ``"{project} - {YYYY-MM-DD HH:MM}"`` — the minute-resolution stamp keeps
 same-day, same-project sessions distinguishable (the old date-only title
 collided for every session in a day).

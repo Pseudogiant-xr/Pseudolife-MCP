@@ -1,21 +1,11 @@
-"""Supersession on slot identity, not on embedding similarity.
+"""Slot conflicts are detected independently of embedding similarity.
 
-The three heuristic paths in ``detect_contradictions`` all gate on cosine.
-That is a weak discriminator for this judgment: a value swap is a *minimal*
-edit, so a contradiction is often MORE embedding-similar than a harmless
-near-duplicate. Independent measurement (MemStrata, 2026) puts cosine at
-AUROC 0.59 for separating "contradicts" from "duplicates" — barely above
-chance — with contradictions averaging higher similarity than duplicates.
+A matching slot key with a different value or polarity admits a potential
+update through the CMS surprise gate. That conflict does not authorize
+retiring the entire source note, which may contain other useful claims.
+Canonical slot supersession remains the cortex's responsibility.
 
-The cortex has always resolved this deterministically: a new value at an
-existing ``(entity, attribute)`` slot supersedes the old one, newer wins,
-no embedding involved. Raw band entries carry the same extracted slots
-(schema v4) and now get the same rule, as a path checked BEFORE the
-cosine-gated heuristics.
-
-This is additive. The heuristic paths still handle everything without
-slots — slot extraction is deliberately precision-gated and most entries
-have none.
+The other detector paths still handle entries without extracted slots.
 """
 
 from __future__ import annotations
@@ -141,7 +131,7 @@ def test_entries_without_slots_fall_through_to_the_heuristics():
     assert out == [old]
 
 
-def test_a_store_supersedes_the_prior_value_at_the_same_slot():
+def test_a_store_admits_the_new_slot_value_and_preserves_prior_evidence():
     """End-to-end through ``cms.store``: the slots come from the new text's
     own extraction, so a correction lands without the caller doing anything.
 
@@ -152,18 +142,21 @@ def test_a_store_supersedes_the_prior_value_at_the_same_slot():
     from pseudolife_memory.utils.config import MemoryConfig
 
     cfg = MemoryConfig()
-    cfg.surprise_threshold = -1.0          # never gate the write
+    cfg.surprise_threshold = 0.99  # above this pair's synthetic surprise (0.95)
     cms = ContinuumMemorySystem(cfg)
     a, b = _pair(FAR)
     old_text = "I have a Ragdoll cat named Jacque"
     new_text = "I have a Siamese cat named Jacque"   # same slots, new breed
-    cms.store(old_text, a, source="user")
-    cms.store(new_text, b, source="user")
+    assert cms.store(old_text, a, source="user")[0]
+    stored, surprise = cms.store(new_text, b, source="user")
+    assert stored and surprise < cfg.surprise_threshold
 
     by_text = {e.text: e for band in cms.bands for e in band.entries}
     old = by_text[old_text]
-    assert old.superseded_at is not None, "prior value was not superseded"
-    assert old.superseded_by_text == new_text
+    assert old.superseded_at is None
+    assert old.superseded_by_text is None
+    assert old.surprise_score == 1.0
+    assert new_text in by_text
 
 
 def test_omitting_new_slots_preserves_the_previous_behaviour():

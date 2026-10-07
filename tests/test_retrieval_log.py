@@ -1,9 +1,10 @@
 """Retrieval event log (schema v31) — storage round-trips + service wiring.
 
 Storage half: add_retrieval_event / record_retrieval_use /
-prune_retrieval_events / retrieval_events_window against a live PG.
-Service half: search() writes an event, get_entry()/reinforce() write
-implicit use labels, the config kill-switch silences both.
+credit_retrieval_uses / prune_retrieval_events / retrieval_events_window
+against a live PG. Service half: search() writes an event,
+get_entry()/reinforce() write implicit use labels, record_outcome(used_ids=)
+writes the asserted ones, the config kill-switch silences all of it.
 
 Skips cleanly without a PG server (mirrors test_lessons_storage.py).
 """
@@ -85,6 +86,83 @@ def test_use_is_idempotent_per_via(storage):
                                         now=1030.0) == 1
 
 
+def test_credit_retrieval_uses_credits_every_serving_event_in_window(storage):
+    """The batched outcome label (2026-09-08): an id the agent says it used
+    credits EVERY same-session event in the window that served it, not just
+    the most recent one — the agent does not know which query surfaced the
+    id, so the signal is session-scoped by construction. Measured on the
+    live log the same day: 29% of (session, entry) pairs are served by more
+    than one event in their session, so most-recent-wins would have read
+    the earlier events as served-not-used in the replay. Per id the answer
+    is three-way: the event ids credited, "served elsewhere" (an event in
+    the window served it under ANOTHER session id only), or absent (nothing
+    in the window served it)."""
+    # Window is [now - 3600, now] = [500, 4100]: the first event falls
+    # outside it, the other three inside.
+    too_old = storage.add_retrieval_event("q0", _served(7), session_id="s-1",
+                                          now=100.0)
+    first = storage.add_retrieval_event("q1", _served(7, 9), session_id="s-1",
+                                        now=4000.0)
+    second = storage.add_retrieval_event("q2", _served(7), session_id="s-1",
+                                         now=4050.0)
+    other = storage.add_retrieval_event("q3", _served(8), session_id="s-2",
+                                        now=4060.0)
+
+    res = storage.credit_retrieval_uses([7, 8, 9, 424242], "s-1", "outcome",
+                                        window_s=3600, now=4100.0)
+    assert res[7]["events"] == [first, second]
+    assert res[7]["elsewhere"] is False
+    assert res[9]["events"] == [first]
+    # Served in the window, but only under another session id.
+    assert res[8]["events"] == [] and res[8]["elsewhere"] is True
+    # Nothing in the window served it (the id is absent, not a miss row).
+    assert 424242 not in res
+
+    events = {e["id"]: e for e in storage.retrieval_events_window()}
+    labelled = lambda eid: sorted(  # noqa: E731
+        (u["entry_id"], u["used_via"]) for u in events[eid]["uses"])
+    assert labelled(first) == [(7, "outcome"), (9, "outcome")]
+    assert labelled(second) == [(7, "outcome")]
+    assert labelled(too_old) == []
+    assert labelled(other) == []
+
+    # Idempotent per (event, entry, via): a repeat writes no rows and still
+    # reports the same credited events.
+    again = storage.credit_retrieval_uses([7], "s-1", "outcome",
+                                          window_s=3600, now=4200.0)
+    assert again[7]["events"] == [first, second]
+    assert again[7]["written"] == 0
+    assert res[7]["written"] == 2
+
+
+def test_credit_retrieval_uses_without_a_session_keeps_most_recent_wins(storage):
+    """The all-events rule is justified by the session identity: with none
+    (``session_id=None``, 44% of logged events on 2026-09-08), "same
+    session" means every other NULL-session event in the window — other
+    sessions, possibly other agents — so crediting all of them would assert
+    a use of searches the agent never saw. A None-session outcome therefore
+    keeps the dereference rule: the most recent NULL-session serving event
+    only (the reviewer's finding, 2026-09-08)."""
+    older = storage.add_retrieval_event("q1", _served(7), session_id=None,
+                                        now=4000.0)
+    newest = storage.add_retrieval_event("q2", _served(7), session_id=None,
+                                         now=4050.0)
+    named = storage.add_retrieval_event("q3", _served(7), session_id="s-1",
+                                        now=4060.0)
+
+    res = storage.credit_retrieval_uses([7], None, "outcome",
+                                        window_s=3600, now=4100.0)
+    assert res[7]["events"] == [newest]
+    assert res[7]["written"] == 1
+    # The identified session's event is "elsewhere" from a None outcome.
+    assert res[7]["elsewhere"] is True
+
+    events = {e["id"]: e for e in storage.retrieval_events_window()}
+    assert events[older]["uses"] == []
+    assert events[named]["uses"] == []
+    assert [u["entry_id"] for u in events[newest]["uses"]] == [7]
+
+
 def test_prune_cascades_uses(storage, pg_conn):
     storage.add_retrieval_event("old", _served(7), session_id="s-1",
                                 now=1000.0)
@@ -134,6 +212,118 @@ def test_service_search_logs_and_get_reinforce_label(pg_conn, pg_url,
     svc.config.memory.retrieval_log.retention_days = 0
     assert svc.prune_retrieval_log() >= 1
     assert svc._storage.retrieval_events_window() == []
+
+
+# ── episode attribution: the caller's episode, not the last-started one ──
+# One daemon serves many sessions, and the episode manager's process-wide
+# current_id is just the root someone started last. Events were stamped
+# with it (verified 2026-09-25 on master 59b87631), so a search from
+# session A after session B started landed under B's episode while the
+# same row's session_id said A.
+
+
+def _as_session(session_id):
+    from pseudolife_memory.writer_context import set_writer_context
+
+    return set_writer_context("w", session_id)
+
+
+def test_search_event_records_the_callers_episode(pg_conn, pg_url, tmp_path):
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    a = svc.episode_start_session("sess-A", "session A")
+    b = svc.episode_start_session("sess-B", "session B")
+    # Precondition: B is the process-wide current episode, so the old
+    # attribution would name B.
+    assert svc._cms.episodes.current_id == b["id"]
+
+    tok = _as_session("sess-A")
+    try:
+        svc.store(text, source="test")
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] == "sess-A"
+    assert ev["episode_id"] == a["id"]
+    # The same episode store() stamps on the caller's entries.
+    stored = [e for band in svc._cms.bands for e in band.entries
+              if e.text == text]
+    assert stored and stored[0].episode_id == ev["episode_id"]
+
+
+def test_search_event_takes_the_callers_open_sub_episode(pg_conn, pg_url,
+                                                         tmp_path):
+    """The leaf, as store() stamps it: an open sub-episode of the caller's
+    session wins over its root."""
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.episode_start_session("sess-A", "session A")
+    tok = _as_session("sess-A")
+    try:
+        sub = svc.episode_start("A subtask")
+    finally:
+        reset_writer_context(tok)
+    svc.episode_start_session("sess-B", "session B")
+    assert svc._cms.episodes.current_id != sub["id"]
+
+    tok = _as_session("sess-A")
+    try:
+        svc.store(text, source="test")
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    assert svc._storage.retrieval_events_window()[-1]["episode_id"] == sub["id"]
+
+
+def test_search_event_without_a_session_has_no_episode(pg_conn, pg_url,
+                                                       tmp_path):
+    """No session identity (no X-PL-Session header, no fresh hook pointer)
+    records no episode rather than borrowing the last-started one."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.episode_start_session("sess-B", "session B")
+    svc.search(text)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] is None
+    assert ev["episode_id"] is None
+
+
+def test_search_event_opens_no_episode(pg_conn, pg_url, tmp_path):
+    """A session with nothing open logs no episode, and the search does not
+    open one to fill the column (store() lazily opens; search must not
+    leave empty episodes behind)."""
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.writer_context import reset_writer_context
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.episode_start_session("sess-B", "session B")
+    before = set(svc._cms.episodes.episodes)
+
+    tok = _as_session("sess-C")
+    try:
+        svc.search(text)
+    finally:
+        reset_writer_context(tok)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["session_id"] == "sess-C"
+    assert ev["episode_id"] is None
+    assert set(svc._cms.episodes.episodes) == before
 
 
 class _StubReranker:
@@ -415,29 +605,28 @@ def test_record_outcome_separates_a_label_write_failure_from_a_miss(
     svc.store(text, source="test")
     entry_id = svc.search(text)["entries"][0]["id"]
 
-    real = svc._storage.credit_retrieval_use
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connection reset by peer")
 
-    def _flaky(eid, *args, **kwargs):
-        if int(eid) == 424242:
-            raise RuntimeError("connection reset by peer")
-        return real(eid, *args, **kwargs)
-
-    monkeypatch.setattr(svc._storage, "credit_retrieval_use", _flaky)
+    # One statement labels the whole list (2026-09-08), so a failure is a
+    # failure of every id at once — and still not a miss for any of them.
+    monkeypatch.setattr(svc._storage, "credit_retrieval_uses", _boom)
     before = svc._retrieval_log_errors
 
     out = svc.record_outcome("t", "success",
                              used_ids=[entry_id, 424242, 987654])
     assert out["recorded"] is True
-    assert out["used_ids_recorded"] == 1
-    assert out["used_ids_errors"] == 1
-    # The failed id is NOT reported as one nothing served.
-    assert out["used_ids_unmatched"] == [987654]
+    assert out["used_ids_recorded"] == 0
+    assert out["used_ids_errors"] == 3
+    # No id is reported as one nothing served: the write raised, which says
+    # nothing about what the searches served.
+    assert "used_ids_unmatched" not in out
+    assert "used_ids_served_elsewhere" not in out
     # The existing error accounting is unchanged.
     assert svc._retrieval_log_errors == before + 1
 
     uses = svc._storage.retrieval_events_window()[-1]["uses"]
-    assert [u["entry_id"] for u in uses if u["used_via"] == "outcome"] \
-        == [entry_id]
+    assert [u for u in uses if u["used_via"] == "outcome"] == []
 
 
 def test_record_outcome_omits_used_ids_errors_when_nothing_failed(
@@ -453,3 +642,261 @@ def test_record_outcome_omits_used_ids_errors_when_nothing_failed(
     out = svc.record_outcome("t", "success", used_ids=[entry_id])
     assert out["used_ids_recorded"] == 1
     assert "used_ids_errors" not in out
+
+
+def test_record_outcome_credits_every_search_that_served_the_id(
+        pg_conn, pg_url, tmp_path):
+    """Two searches in one session both serve the entry; the outcome names
+    it once; BOTH events carry the label. Under the original most-recent-
+    wins rule the first event stayed unlabelled, and the replay
+    (``retrieval_replay.build_cases`` keys labels per event) either dropped
+    it entirely or — if it carried any other label — scored the id as an
+    implicit negative the agent never asserted."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    # The all-events rule needs a session identity (see the storage test
+    # for the session-less fallback); a bare test service has none.
+    svc.set_active_session("s-1")
+    entry_id = svc.search(text)["entries"][0]["id"]
+    assert svc.search("quick brown fox")["entries"][0]["id"] == entry_id
+
+    out = svc.record_outcome("t", "success", used_ids=[entry_id])
+    assert out["used_ids_recorded"] == 1
+    assert "used_ids_unmatched" not in out
+
+    events = svc._storage.retrieval_events_window()[-2:]
+    assert [e["session_id"] for e in events] == ["s-1", "s-1"]
+    for ev in events:
+        assert entry_id in [s["entry_id"] for s in ev["served"]]
+        assert (entry_id, "outcome") in {(u["entry_id"], u["used_via"])
+                                         for u in ev["uses"]}
+
+
+def test_record_outcome_reports_served_elsewhere_separately(
+        pg_conn, pg_url, tmp_path):
+    """An id served in the window under a DIFFERENT session id is not
+    "never served": the tier-3 pointer vs the X-PL-Session header, or a
+    pointer TTL lapse, can put the search and the outcome under different
+    identities. Telling the agent nothing served the id would be a claim
+    about its retrieval; the honest answer is that the label needs the same
+    session. Reported under ``used_ids_served_elsewhere``, apart from
+    ``used_ids_unmatched``."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.set_active_session("s-A")
+    entry_id = svc.search(text)["entries"][0]["id"]
+    svc.set_active_session("s-B")
+
+    out = svc.record_outcome("t", "success", used_ids=[entry_id, 987654])
+    assert out["used_ids_recorded"] == 0
+    assert out["used_ids_served_elsewhere"] == [entry_id]
+    assert out["used_ids_unmatched"] == [987654]
+    assert svc._storage.retrieval_events_window()[-1]["uses"] == []
+
+
+def test_record_outcome_labels_the_whole_list_in_one_storage_call(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """Fifty ids used to be fifty storage round trips under the service
+    lock, each re-resolving the writer. The list is one statement now, and
+    the session identity is resolved once per outcome."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    calls = {"storage": 0, "writer": 0}
+    real_credit = svc._storage.credit_retrieval_uses
+    real_writer = svc._resolve_writer
+
+    def _credit(*args, **kwargs):
+        calls["storage"] += 1
+        return real_credit(*args, **kwargs)
+
+    def _writer():
+        calls["writer"] += 1
+        return real_writer()
+
+    monkeypatch.setattr(svc._storage, "credit_retrieval_uses", _credit)
+    monkeypatch.setattr(svc, "_resolve_writer", _writer)
+
+    out = svc.record_outcome("t", "success",
+                             used_ids=[entry_id, 424242, 987654])
+    assert out["used_ids_recorded"] == 1
+    assert out["used_ids_unmatched"] == [424242, 987654]
+    assert calls == {"storage": 1, "writer": 1}
+
+
+# ── lesson searches and used_ids outcomes, recorded (schema v44) ─────────
+# The 2026-09-25 memory-policy bench could not measure two loop beats online:
+# whether a session consulted its lessons (memory_lesson_search logged
+# nothing, lessons carry no read counter), and how many of an outcome's
+# used_ids matched a search (only the credited ones were persisted).
+
+
+def _lesson_rows(pg_conn):
+    return pg_conn.execute(
+        "SELECT query_text, session_id, served FROM lesson_search_events "
+        "ORDER BY id").fetchall()
+
+
+def _lesson_svc(pg_url, tmp_path):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    svc.lesson_write("deploy engine to host", "approach",
+                     "ship the engine as a tarball", confidence=0.9)
+    svc.set_active_session("s-1")
+    return svc
+
+
+def test_lesson_search_is_logged_apart_from_retrieval_events(
+        pg_conn, pg_url, tmp_path):
+    """Its own table, never ``retrieval_events``: evals/retrieval_replay.py,
+    the telemetry review and the graph ablation re-run every retrieval
+    event as a ``memory_search``, so a lesson query there would be replayed
+    against the wrong store. Served lessons are named by slot key, since
+    lesson row ids are regenerated by snapshot saves."""
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    svc = _lesson_svc(pg_url, tmp_path)
+    before = len(svc._storage.retrieval_events_window())
+    res = svc.lesson_search("deploy engine to host")
+    assert res["count"] == 1
+    rows = _lesson_rows(pg_conn)
+    assert len(rows) == 1
+    query, session_id, served = rows[0]
+    assert query == "deploy engine to host" and session_id == "s-1"
+    assert served == [{"entity_norm": _norm_key("deploy engine to host"),
+                       "attribute_norm": _norm_key("approach"),
+                       "rank": 0, "score": res["entries"][0]["score"]}]
+    # The caller's own episode, resolved like the retrieval log's (#373).
+    stamped = pg_conn.execute(
+        "SELECT episode_id FROM lesson_search_events").fetchone()[0]
+    assert stamped == svc._caller_episode_id("s-1")
+    assert len(svc._storage.retrieval_events_window()) == before
+    # A miss is recorded too: "searched, found nothing" is the signal.
+    assert svc.lesson_search("tune the reranker", min_score=0.99)["count"] == 0
+    assert _lesson_rows(pg_conn)[-1][2] == []
+
+
+def test_lesson_search_log_obeys_the_retrieval_log_switch_and_retention(
+        pg_conn, pg_url, tmp_path):
+    svc = _lesson_svc(pg_url, tmp_path)
+    svc.config.memory.retrieval_log.enabled = False
+    assert svc.lesson_search("deploy engine to host")["count"] == 1
+    assert _lesson_rows(pg_conn) == []
+    svc.config.memory.retrieval_log.enabled = True
+    svc.lesson_search("deploy engine to host")
+    assert svc.stats()["retrieval_log"]["lesson_searches"] == 1
+    svc.config.memory.retrieval_log.retention_days = 0
+    assert svc.prune_retrieval_log() >= 1
+    assert _lesson_rows(pg_conn) == []
+
+
+def test_lesson_search_log_failure_never_breaks_the_search(
+        pg_conn, pg_url, tmp_path):
+    svc = _lesson_svc(pg_url, tmp_path)
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated log write failure")
+
+    svc._storage.add_lesson_search_event = _boom  # type: ignore[method-assign]
+    before = svc._retrieval_log_errors
+    assert svc.lesson_search("deploy engine to host")["count"] == 1
+    assert svc._retrieval_log_errors == before + 1
+
+
+def _signal_used_ids(pg_conn, signal_id):
+    return pg_conn.execute(
+        "SELECT used_ids FROM outcome_signals WHERE id = %s",
+        (signal_id,)).fetchone()[0]
+
+
+def test_record_outcome_persists_what_each_used_id_became(
+        pg_conn, pg_url, tmp_path):
+    """The match rate needs the whole partition. Only credited ids reached
+    the bank (as ``retrieval_uses`` rows), and nothing linked them to the
+    signal; unmatched and served-elsewhere ids went back to the caller and
+    were dropped. The signal row now carries all three."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    fox = "the quick brown fox jumps over the lazy dog"
+    tax = "quarterly tax filing is due at the end of october"
+    svc.store(fox, source="test")
+    svc.store(tax, source="test")
+    svc.set_active_session("s-A")
+    fox_id = svc.search(fox, top_k=1)["entries"][0]["id"]
+    svc.set_active_session("s-B")
+    tax_id = svc.search(tax, top_k=1)["entries"][0]["id"]
+    assert fox_id != tax_id
+
+    out = svc.record_outcome("t", "success",
+                             used_ids=[tax_id, fox_id, 987654, tax_id])
+    assert out["used_ids_recorded"] == 1
+    assert _signal_used_ids(pg_conn, out["signal_id"]) == {
+        "credited": [tax_id], "unmatched": [987654],
+        "served_elsewhere": [fox_id]}
+
+    # An outcome that names no ids stays NULL: "said nothing" is not
+    # "named ids that all missed".
+    plain = svc.record_outcome("t", "success")
+    assert _signal_used_ids(pg_conn, plain["signal_id"]) is None
+
+
+def test_record_outcome_persists_a_failed_label_as_unchecked(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """A failed label write says nothing about what the searches served, so
+    the ids are persisted as unchecked, never as unmatched. With the
+    retrieval log switched off nothing is persisted: the switch covers the
+    label and its record alike."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connection reset by peer")
+
+    monkeypatch.setattr(svc._storage, "credit_retrieval_uses", _boom)
+    out = svc.record_outcome("t", "success", used_ids=[entry_id, 424242])
+    assert out["used_ids_errors"] == 2
+    assert _signal_used_ids(pg_conn, out["signal_id"]) == {
+        "unchecked": [entry_id, 424242], "reason": "label write failed"}
+
+    monkeypatch.undo()
+    svc.config.memory.retrieval_log.enabled = False
+    off = svc.record_outcome("t", "success", used_ids=[entry_id])
+    assert off["used_ids_reason"] == "retrieval log disabled"
+    assert _signal_used_ids(pg_conn, off["signal_id"]) is None
+
+
+def test_record_outcome_survives_a_failed_used_ids_record(
+        pg_conn, pg_url, tmp_path, monkeypatch):
+    """Persisting the partition is observational: its failure is counted,
+    and the outcome and its labels still stand."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    entry_id = svc.search(text)["entries"][0]["id"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connection reset by peer")
+
+    monkeypatch.setattr(svc._storage, "set_signal_used_ids", _boom)
+    before = svc._retrieval_log_errors
+    out = svc.record_outcome("t", "success", used_ids=[entry_id])
+    assert out["recorded"] is True and out["used_ids_recorded"] == 1
+    assert svc._retrieval_log_errors == before + 1

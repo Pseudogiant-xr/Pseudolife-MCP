@@ -20,12 +20,27 @@
 #   ops\install-shim-autostart.ps1              # default port 8082, v5 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
 #
+# The task runs `ops\shim_autostart.py run claude`, which reads the model,
+# prompt file, port, host, CLI path, interpreter and log file from ops/.env
+# (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
+# into that file. Changing a value later is an edit plus
+# `python ops\shim_autostart.py restart claude` — no elevation. Elevation
+# is needed only here, to register the task, once.
+#   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
+#   claude-haiku-4-5, claude-fable-5 (the list ops\install.ps1 offers; any other
+#   claude-* id passes to the shim unchanged)
+#
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
 # 127.0.0.1 for the daemon's dream pass (primary extractor; the in-stack E4B
 # container is the fallback — see docs/superpowers/specs/
 # 2026-07-11-sonnet-sidecar-cutover-design.md). Requires a logged-in CLI.
-# -Model default is claude-opus-5 per the 2026-08-02 same-harness comparison
-# (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0).
+# -Model default is claude-opus-5-5 since 2026-09-29: it clears the
+# paired extraction-ladder gate with no regression against claude-opus-5
+# (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28).
+# claude-opus-5 was the default from the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0), the
+# judged comparison that chose Opus over Sonnet (best measured extraction quality);
+# it ran on claude-opus-5.
 # -PromptFile default is sonnet_extractor_v5.md since 2026-09-07: the
 # v2 body with its two pre-rule worked examples re-cut on invented names (the
 # same re-cut the daemon's v12 base took on 2026-09-07), plus the
@@ -43,7 +58,7 @@
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,
-    [string]$Model = "claude-opus-5",
+    [string]$Model = "claude-opus-5-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v5.md",
     [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log",
     # How long to wait for the started shim to bind the port. The shim warms
@@ -56,24 +71,51 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-if (-not $PythonExe) {
-    $venv = Join-Path $repo ".venv\Scripts\python.exe"
-    $PythonExe = (Test-Path $venv) ? $venv : (Get-Command python).Source
-}
 $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
-# Absolute up front: the task's cmd.exe would otherwise resolve a relative
-# -LogFile against its WorkingDirectory ($repo) while the verification below
-# resolves it against this shell's location.
+# >>> shim python >>>
+# The task's interpreter must import pseudolife_memory with its
+# dependencies (the shim imports the dream system prompt from it): the
+# Linux twin registered a unit with a bare python3 that exited 1 in a
+# restart loop (Debian 13, 2026-09-29). ops\shim_python.py picks one (the
+# checkout's .venv, a venv it made earlier, a PATH python that imports the
+# package, else a venv it creates from the checkout; never pipx's
+# pseudolife-mcp venv here, which install.ps1 treats as held by a session
+# while anything runs from it), verifies it the way the task will use it,
+# and says which and why; -PythonExe names one to verify instead.
+$helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+    throw "no python on PATH to run ops\shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run."
+}
+$pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
+if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }
+# The helper prints the path as UTF-8; this shell must decode it the same
+# way, or a profile path with a non-ASCII character names an interpreter
+# that does not exist (review, 2026-09-29).
+$savedOutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    $picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+} finally {
+    [Console]::OutputEncoding = $savedOutputEncoding
+}
+if ($LASTEXITCODE -ne 0 -or -not $picked) {
+    throw "shim autostart not registered: no interpreter imports pseudolife_memory for the task (see the message above; -PythonExe <interpreter> names one)."
+}
+$PythonExe = "$picked".Trim()
+# <<< shim python <<<
+# Absolute up front: the runner would otherwise resolve a relative -LogFile
+# against its WorkingDirectory ($repo) while the verification below resolves
+# it against this shell's location.
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Every process whose command line names claude_shim.py AND this --port. The
-# task launches a three-layer tree (cmd.exe running the `>> log` redirect ->
-# the .venv python.exe launcher -> the base interpreter that owns the socket)
-# and no layer's death propagates to the others, so the whole set is what
-# "the running shim" means here. Keyed on the port too: an A/B shim serving
-# another port from the same script must survive an install.
+# shim is a two-layer tree (the .venv python.exe launcher -> the base
+# interpreter that owns the socket) and neither layer's death propagates to
+# the other, so the whole set is what "the running shim" means here. Keyed
+# on the port too: an A/B shim serving another port from the same script
+# must survive an install.
 function Get-ShimProcess {
     param([int]$ShimPort)
     $pattern = "claude_shim\.py.*--port\s+$ShimPort(\s|$)"
@@ -112,26 +154,25 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # console allocation entirely, so WT has nothing to attach a tab to —
 # validated standalone (detached long-running child survives its spawner
 # exiting; redirected output confirmed correct) before wiring in here.
-# The scheduled task launches this tiny spawner, which starts the real
-# python.exe chain fully detached (CreateNoWindow, own console-less
-# session) and returns immediately, so the Task-Scheduler-owned window is
-# at most a sub-second flash rather than persisting for the shim's whole
-# runtime.
+# The scheduled task launches this tiny spawner, which starts the runner
+# with CreateNoWindow (a hidden console the shim inherits) and returns
+# immediately, so the Task-Scheduler-owned window is at most a sub-second
+# flash rather than persisting for the shim's whole runtime.
 #
-# cmd.exe's `/c` argument parsing mishandles a command line containing
-# MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
-# arg) unless the whole thing is wrapped in one extra redundant pair of
-# quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-$innerCmd = "`"$PythonExe`" `"$repo\evals\claude_shim.py`" --port $Port " +
-            "--model $Model --system-prompt-file `"$promptPath`""
-$cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+# The task's only argument is the runner: the values live in ops/.env. The
+# runner opens the log itself and starts the shim with the same hidden
+# console (no `cmd >> log` layer: the process tree is the runner, gone in
+# a second, then the shim's python).
+& $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
+    --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = 'cmd.exe'
-`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.FileName = '$($PythonExe -replace "'", "''")'
+`$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run claude") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
-`$psi.WorkingDirectory = '$repo'
+`$psi.WorkingDirectory = '$($repo -replace "'", "''")'
 [System.Diagnostics.Process]::Start(`$psi) | Out-Null
 "@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -166,7 +207,7 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
 # http.server listener BINDS beside the first (allow_reuse_address is
 # SO_REUSEADDR, which shares a port in LISTEN), so the new interpreter never
 # hit an error to log, and its startup lines were then overwritten by the old
-# shim's next log write (two `cmd >> log` opens keep independent file
+# shim's next log write (two appending opens keep independent file
 # pointers). Both probed 2026-09-07. This runs only after registration
 # succeeded: stopping the live shim and then failing to register would leave
 # the box with no extractor at all.
@@ -236,7 +277,8 @@ if ($startup.Count -eq 0) {
 } else {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
-Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), log $LogFile)."
+Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
+Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude (no elevation)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

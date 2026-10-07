@@ -2,8 +2,9 @@
 
 The dream pass, its extractor tiers (regex floor / agent-driven / headless
 auto-sweep), the bundled CPU sidecar, upgrading to a bigger model, the
-Sonnet-primary fallback setup, cadence, deep dream, and the deliberate
-consolidation workflow. Part of the [user guide](../../README.md#documentation).
+Claude-primary fallback setup (default dreamer model `claude-opus-5-5`),
+cadence, deep dream, and the deliberate consolidation workflow. Part of the
+[user guide](../../README.md#documentation).
 
 A **dream** distils the recent associative stream (MIRAS) into canonical
 cortex facts: pull unconsolidated memories → extract
@@ -12,11 +13,44 @@ cortex facts: pull unconsolidated memories → extract
 slot](memory-model.md#set-valued-slots) — solicited by the shipped prompt
 since 2026-08-01, paired with a counts-are-never-members rule; see the
 [memory model](memory-model.md#dream-extraction) for the measurement
-story) → `memory_fact_set` → advance a monotonic
-cursor so each memory is processed once. Because it keys on the **cursor**,
-not on "sessions", returning to an old session later just appends more
-tail — nothing is reprocessed, and there is no "session finished" event to
-detect.
+story) → `memory_fact_set` → acknowledge the exact input entries.
+Acknowledgement survives restart and does not depend on timestamp order:
+a new entry remains pending even when it shares an older entry's timestamp
+or arrives with a backdated timestamp. Returning to an old session adds
+new pending entries; there is no "session finished" event to detect.
+
+Claim application remains **at least once**. If claim writes succeed but
+acknowledgement fails, a retry can apply those claims again. The numeric
+**cursor** is monotonic display metadata, not the boundary that selects
+pending entries. Relations and lesson synthesis run after the input batch
+is acknowledged and are separate from this acknowledgement contract.
+
+For manual extraction, retain the opaque `commit_token` returned by
+`memory_dream(action="pull")`. After writing the extracted facts, call
+`memory_dream(action="commit", commit_token=<that token>)`. It acknowledges
+only that pull's entries. Repeating a successful commit is idempotent;
+a token from another bank is rejected. A numeric
+`cursor` cannot safely identify a batch and is no longer accepted for a
+commit. Pull again to obtain a token. An empty pull has no token to commit.
+
+An entry deleted between the pull and the commit does not fail the batch:
+the surviving entries are acknowledged and the commit reports `missing: N`
+for the ones that are gone, since a deleted entry can never be pulled
+again. A pull likewise never stalls on an entry that failed to persist —
+it re-persists what it can, excludes what it cannot, and reports
+`skipped_unpersisted: N`; those entries stay pending for the next pass.
+
+PostgreSQL schema v38 classifies old entries once using the previous cursor
+and the configured source eligibility. Entries excluded by that policy stay
+pending so a later policy change can include them. File mode persists entry
+identities and acknowledgement in the same format-v7 checkpoint. This
+migration preserves the old boundary; it does not recover entries already
+skipped before migration. Logical imports create a new bank token identity;
+old source-bank tokens cannot commit against the imported bank.
+If a file import fails validation before writing any imported content,
+repairing those source files allows a retry, including after the daemon
+has accepted new entries. Once any import writes begin, retries require
+the original source files so two different imports cannot be mixed.
 
 Extraction is pluggable; pick the tier that fits — the stack ships with
 tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
@@ -24,7 +58,7 @@ required** if you'd rather not run one:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
+| **0 — none** | no extractor configured — the dream still runs, prunes and acknowledges input batches, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
@@ -41,7 +75,7 @@ instead of by hand, point a scheduled agent/cron job at the same prompt.
 
 **Tier 0 — no extractor.** With no endpoint configured the cortex has no
 automatic writer: `memory_dream(action="run")` still drains the backlog,
-prunes outcome signals and advances the cursor, but extracts no facts, and
+prunes outcome signals and acknowledges its input batch, but extracts no facts, and
 the daemon logs a startup warning. Populate the cortex with deliberate
 `memory_fact_set` calls, or configure tier 1 or 2.
 
@@ -62,12 +96,12 @@ The daemon runs a background sweep every
 `memory.dream.sweep_interval_seconds`; each tick it checks the same
 backlog+quiescence trigger and, if it fires, runs a dream with the
 configured extractor. Under the single-writer cortex a *successful* pass
-that finds no canonical facts writes nothing and advances the cursor; a
-**failed** call (timeout, network, malformed output) instead **holds the
-cursor**, so those memories are retried next sweep rather than skipped —
-up to three times. A batch that keeps failing is re-run entry by entry,
-the individual offenders are quarantined, and the cursor advances past
-them, so one unparseable memory cannot stall consolidation indefinitely.
+that finds no canonical facts writes no facts and acknowledges the input
+batch. A **failed** call (timeout, network, malformed output) instead leaves
+those entries **pending**, so the next sweep retries them — up to three
+times. A batch that keeps failing is re-run entry by entry; individual
+offenders are quarantined and acknowledged under the existing retry policy,
+so one unparseable memory cannot stall consolidation indefinitely.
 There is no regex fallback either way. The extractor timeout defaults to
 **240s** in code; the Docker stack ships **480s**
 (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose file) because the
@@ -165,9 +199,16 @@ same way, v4 vs v5
 and v4 stay in the tree as the gates' pre arms; `sonnet_extractor_v3.md` is
 an unrelated, never-adopted 2026-08-02 lineage.
 
-Existing installs pick v5 up when the shim autostart is re-installed
-(`ops/install-shim-autostart.ps1`) or the shim is restarted with the new
-file. Rebuilding the daemon image alone does **not** reach the shim path.
+Existing installs pick v5 up when the shim is restarted on the new file:
+set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
+and unit read it at every start) and run `python ops/shim_autostart.py
+restart claude` — no re-registration, no elevation, once the task or unit
+runs the runner (an install registered before 2026-09-29 still carries
+the prompt file on its command line: `show claude` says so, `restart`
+refuses until then — `--force` restarts from `ops/.env` anyway, and the
+task's own values come back at the next logon — and one more run of the
+autostart installer, elevated on Windows, switches it).
+Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
 
@@ -242,15 +283,15 @@ paired test, and not comparable to the ceiling's re-based 0.731), so point
 at a bigger *generic* model for faster
 dreams, not better answers. Two ways to switch:
 
-*From the Console (no restart):* the **Extractor** panel in the Cortex
-Console's config view edits the endpoint, model, timeout, and token budget
+*From the Console (no restart):* the **Extractor** group in the Cortex
+Console's Settings view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
-settings and the panel's values are ignored). The API key stays env-only
-either way. The *model alone* needs no source flip: the **Dreamer** card at
-the top of the same view writes a model-only override
-(`memory.dream.extractor_model_override`) that wins over both owners while
-the endpoint wiring keeps its owner.
+settings and the panel's values are ignored). The API keys (primary and
+fallback) stay env-only either way. The *model alone* needs no source
+flip: the **Dreamer** card at the top of the same view writes a model-only
+override (`memory.dream.extractor_model_override`) that wins over both
+owners while the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
 compose file interpolates it into the daemon) and restart the daemon
@@ -290,12 +331,85 @@ stdio mode), the `$env:` variables above apply directly and `localhost`
 URLs work as-is. A local or LAN model keeps all memory text on your
 network; the same env triple pointed at a hosted endpoint does not.
 
+## Extractor modes and dreamer models
+
+The one-shot installers take the extractor as a mode
+(`ops/install.sh --extractor <mode>`, `ops\install.ps1 -Extractor <mode>`);
+re-running with another mode switches it.
+
+| Mode | Primary extractor | Bundled sidecar |
+|---|---|---|
+| `sidecar` | the bundled CPU sidecar | built and run |
+| `claude-only` | a Claude model through the Claude CLI shim (Max plan) | never built |
+| `claude-fallback` | a Claude model through the Claude CLI shim (Max plan) | automatic fallback |
+| `openai-only` | a GPT model through the Codex CLI shim (ChatGPT plan) | never built |
+| `openai-fallback` | a GPT model through the Codex CLI shim (ChatGPT plan) | automatic fallback |
+| `endpoint` | any OpenAI-compatible server you name | never built |
+| `endpoint-fallback` | any OpenAI-compatible server you name | automatic fallback |
+
+The endpoint modes take the server's base URL and one of its model names:
+`--extractor endpoint --extractor-url http://127.0.0.1:1234/v1 --model
+<name>` (Windows: `-ExtractorUrl`). The installer checks that
+`<url>/models` answers (a server that lists no models, or wants a key, is
+warned about, not refused), writes `PSEUDOLIFE_DREAM_BASE_URL` and
+`PSEUDOLIFE_DREAM_MODEL` into its managed block of `ops/.env`, and writes a
+server on this machine's loopback as `host.docker.internal`, the name the
+daemon's container is given for this machine. Docker Desktop routes it to
+this machine's loopback; Linux Docker Engine routes it to the docker bridge,
+so there a server listening only on `127.0.0.1` is out of the container's
+reach: bind it to the bridge address or all interfaces (`OLLAMA_HOST`,
+`llama-server --host`, LM Studio's "Serve on Local Network"). Once the stack
+is up the installer asks the server from inside the daemon container and
+warns, marking the extractor endpoint `[!]` in its summary, when it cannot
+reach it. A key the server needs goes in `PSEUDOLIFE_DREAM_API_KEY` by hand,
+outside the managed block; the installer never takes one on its command
+line. A model id or URL is held to letters, digits and `. _ : / @ + -`, and
+a URL carrying `user:password@` is refused.
+
+The names used until 2026-09-28, `sonnet-only`, `sonnet-fallback`,
+`codex-only` and `codex-fallback`, are still accepted as deprecated
+spellings of `claude-only`, `claude-fallback`, `openai-only` and
+`openai-fallback`.
+
+The CLI shim modes offer these dreamer models (`--model`, or the installer's
+menu):
+
+- Claude:
+  - `claude-opus-5-5`: the default. It clears the extraction-ladder gate with
+    no regression against Opus 5
+    (`evals/results/ladder-opus55-paired-verdict-threshold.json`,
+    2026-09-28).
+  - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
+    comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
+    (`evals/results/dreamer-choice-verdict.json`).
+  - `claude-sonnet-5`: balanced.
+  - `claude-haiku-4-5`: fastest, lightest on plan usage.
+  - `claude-fable-5`: the most capable tier.
+- OpenAI:
+  - `gpt-5.6-terra`: the default, balanced.
+  - `gpt-5.6-sol`: flagship.
+  - `gpt-5.6-luna`: fastest, lightest on plan usage.
+  - `gpt-6-sol`: GPT-6 flagship.
+  - `gpt-6-luna`: GPT-6 fastest, lightest.
+
+No ladder run has measured the OpenAI models yet; the GPT-6 ids were
+accepted by the Codex CLI on 2026-09-29.
+
+These lists are the menu, not a gate: a CLI shim mode takes a model id it
+does not list, says so in one line, and passes it to the shim unchanged, so
+a new release is usable the day it ships. The id must still be the mode's
+family (`claude-*` for the claude modes, `gpt-*` or `codex-*` for the openai
+modes), since a shim honours only its own family per request. An endpoint mode takes whatever
+model name its server serves. `tests/test_extractor_model_lists.py` keeps
+these lists, and the default, the same in both installers, the shims'
+autostart scripts, this guide and the Console.
+
 ## Claude primary with local fallback
 
 With a Claude Max plan, the dream pass can use a Claude model as its primary
 extractor and keep the bundled local sidecar as an automatic fallback. The
 installer does all of this in one go —
-`ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip the
+`ops/install.sh --extractor claude-fallback` (or `claude-only` to skip the
 sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
@@ -308,7 +422,9 @@ steps:
      reboot — see
      [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
      `-Model` picks the served default —
-     `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
+     `claude-opus-5-5` since 2026-09-29, when it cleared the paired
+     extraction-ladder gate against `claude-opus-5`, the default the
+     2026-08-02 dreamer comparison chose; the one-shot
      installer prompts for this choice on Claude-shim installs). Re-running
      the installer replaces a shim already serving the port: it stops that
      process tree first, then waits (`-StartupTimeoutSec`, default 90 s)
@@ -316,14 +432,56 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` /
-   `claude-fable-5` (or any `claude-*` name typed in), no shim restart and
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
+   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.
    - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit, same
      `--model` choice; binds the docker bridge IP so the daemon container
      can reach it — `host-gateway` routes container→host traffic to the
      bridge, where a loopback bind is invisible).
+   - Both register `python ops/shim_autostart.py run claude` and nothing
+     else: the model, prompt file, port, host, CLI path, interpreter and
+     log file are read from `ops/.env` (`PSEUDOLIFE_CLAUDE_SHIM_MODEL`,
+     `…_PROMPT_FILE`, `…_PORT`, `…_HOST`, `…_CLI`, `…_PYTHON`, `…_LOG`, in
+     a block the installers write from their flags) at every start. To
+     change any of them later, edit that line and run
+     `python ops/shim_autostart.py restart claude` — the elevated shell is
+     needed only once, to register the task. On Windows `restart` stops
+     the shim and starts it itself (the task still starts it at logon);
+     on Linux it is `systemctl --user restart`. Run the Windows restart
+     from a plain terminal: the shim starts with that shell's environment
+     (a Claude Code session's own `CLAUDE_CODE_*` variables are dropped,
+     the rest is passed through). `python
+     ops/shim_autostart.py show claude` prints what the next start would
+     run, and warns when the registered task or unit predates the runner
+     and still carries the values on its command line (re-run the
+     installer once, elevated on Windows, to switch it). The Codex shim
+     is the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*`
+     (`…_HEALTH_TTL` instead of a prompt file). When no `…_CLI` is set the
+     shim's own lookup applies (`PSEUDOLIFE_SHIM_CLAUDE_CLI` /
+     `PSEUDOLIFE_SHIM_CODEX_CLI`, then `PATH`).
+   - The unit's (or task's) interpreter must import `pseudolife_memory`
+     with its dependencies: the shim imports the dream system prompt from
+     it, and a bare `python3` registered a unit that exited 1 in a restart
+     loop on a Docker-tier Debian 13 host with no checkout `.venv`
+     (2026-09-29). On every platform both autostart scripts ask
+     `ops/shim_python.py` for one — the checkout's `.venv`, then pipx's
+     `pseudolife-mcp` venv (the installer's shim install; not on Windows,
+     where `ops/install.ps1` treats anything running from that venv as a
+     session holding the MCP shim and would refuse every later shim
+     upgrade), then a venv the
+     helper made on an earlier run (`~/.pseudolife-mcp/shim-venv`), then a
+     `python3` or `python` on PATH that imports the package, else a venv it creates
+     there from the checkout (torch from PyTorch's CPU wheel index; the
+     shim never runs a model). Each candidate is verified the way the unit
+     runs it before anything is written, the choice is printed, and the
+     script refuses rather than register a unit that cannot start.
+     `--python <interpreter>` (Windows: `-PythonExe`) names one to verify
+     instead. The one-shot installers register the autostart after their
+     own shim install for this reason, and when a mode switch removes the
+     other family's autostart they say which unit and why.
 2. Set in `ops/.env` (both vars must flip together — pointing only one at
    the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
@@ -345,6 +503,21 @@ use the fallback; the Console's Observatory shows which extractor is
 active. Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the
 existing single-extractor behavior.
 
+**API keys are per endpoint.** `PSEUDOLIFE_DREAM_API_KEY` authenticates the
+primary only and is never sent to the fallback. The fallback sends its own
+key, `PSEUDOLIFE_DREAM_FALLBACK_API_KEY`, or none at all — right for the
+bundled sidecar and both CLI shims, none of which checks one, so the pairs on
+this page set neither. A fallback that needs the primary's credential, such
+as a second model on the same hosted provider, needs the key set again under
+the fallback name.
+
+**Redirects are refused.** The primary and the fallback never follow an
+HTTP redirect, so a key cannot be forwarded to a host you did not
+configure. A redirect fails the call with `redirect to <url> refused --
+configure the final URL directly`: set `PSEUDOLIFE_DREAM_BASE_URL` and
+`PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` to the endpoint's final URL (for
+example `https` rather than an `http` address that redirects to it).
+
 ## OpenAI primary — the Codex CLI shim
 
 The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
@@ -354,21 +527,29 @@ OpenAI-compatible endpoint on `127.0.0.1:8086`, serving `gpt-5.6-terra` by
 default. The one-shot installer wires the whole mode:
 
 ```bash
-ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\install.ps1 -Extractor codex-fallback
+ops/install.sh --extractor openai-fallback     # or openai-only; Windows: ops\install.ps1 -Extractor openai-fallback
 ```
 
-which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
+which prompts for the GPT dreamer (GPT-5.6 Terra / Sol / Luna, GPT-6 Sol /
+Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
 Scheduler, elevated pwsh opened from the Start menu, same caveat as the
-Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
-and writes the env triple for you. The autostart raises the shim's
+Claude shim above; `.sh` — systemd `--user`, docker-bridge bind; both pick
+and verify the unit's interpreter exactly as the Claude shim's autostart
+does, `--python` / `-PythonExe` naming one), and writes the env triple for
+you. Unlike the Claude shim's installer, the Windows Codex installer does
+not stop a shim already serving its port: re-running it over a live shim
+starts a second listener beside the old one, which can keep answering on
+the old settings. After a re-run, run
+`python ops/shim_autostart.py restart codex`, which stops the running
+shim and starts it again. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
 stale-ok window only costs one failed primary attempt before the dream
 falls back. To run it by hand instead:
 
 ```bash
-python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the default
+python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna to change the default
 ```
 
 then point the env triple at it exactly as in step 2 above, with
@@ -376,7 +557,8 @@ then point the env triple at it exactly as in step 2 above, with
 Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
 accordingly). Either way the shim honours a concrete `gpt-*` or `codex-*`
 name per request, so the Console's **Dreamer** card switches between
-`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` live, exactly like the
+`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` / `gpt-6-sol` /
+`gpt-6-luna` live, exactly like the
 Claude presets. On Windows the shim finds the official installer's
 `codex.exe` on its own (the `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`
 layout is off PATH and rotates on auto-update — the shim re-resolves the
@@ -397,9 +579,11 @@ works directly via the env triple in the previous sections.
 ## Reasoning effort — the dreamer's thinking budget
 
 By default neither CLI shim sets a reasoning effort: the Claude shim runs
-at the `claude` CLI's per-model default and the Codex shim inherits the
-host's `~/.codex/config.toml`, so what the dreamer actually spends is
-decided outside this repo. To pin it, set
+at the `claude` CLI's per-model default, and the Codex shim runs each call
+with `--ignore-user-config` (so a `model_reasoning_effort` in the host's
+`~/.codex/config.toml` does not apply) at the `codex` CLI's per-model
+default. What the dreamer actually spends is therefore decided outside
+this repo. To pin it, set
 `memory.dream.extractor_reasoning_effort` (Console → Extractor panel, or
 the **Effort** row on the Dreamer card). A set value rides every primary
 extractor request as `reasoning_effort`:
@@ -468,6 +652,61 @@ tokens you already pay for (a scheduled daily dream is small but non-zero).
 Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
 (e.g. Ollama) keeps it on-machine.
 
+## When dreaming stalls
+
+A dream whose extraction fails holds its cursor and retries next sweep, so
+nothing is lost, but nothing is consolidated either. The daemon keeps a
+stall record and reports it:
+
+- **When it opens.** On the second consecutive failed extraction (one is
+  noise; a run whose per-memory retry set aside every memory it pulled
+  counts as a failure too), or when the backlog is due (`backlog ≥
+  min_batch` and the sweep would fire) and no dream has succeeded for three
+  sweep intervals. That rule is checked at each sweep, so it fires at the
+  first sweep past three intervals: 30 to about 40 minutes at the default
+  600 s. A claim write that fails holds the cursor too, but it is the
+  database, not the extractor, and never opens a stall.
+- **When it closes.** At the next dream the primary serves that pulled at
+  least one memory and extracted any of them, which records `recovered_at`.
+  An empty pull says nothing about the extractor and closes nothing. The
+  record lives in the daemon process: a restart forgets it, and two failed
+  sweeps open it again.
+- **Why.** `login_expired` (the endpoint answered 401/403, or its error
+  named a failed login, as the CLI shims do when `claude -p` or `codex exec`
+  loses its session), `extractor_unreachable` (refused, timed out),
+  `extractor_error` (any other failure), or `served_by_fallback` (auto mode
+  found the primary down and the fallback served: a warning, not a stall,
+  since dreams still land). `last_error` is an HTTP status or an exception
+  type, never the endpoint's answer.
+- **Where it shows.** `memory_dream(action="status")` carries `stall` (null
+  while dreams are served) and `last_stall`; `/health` reports
+  `extractor: "stalled"` with a `stall` sub-object while `status` stays
+  `ok` (the fallback warning keeps `configured`); the session-start block
+  and `pseudolife-mcp briefing` open with one line, for example:
+
+  ```text
+  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host.
+  ```
+- **On the board.** The daemon posts, as the reserved sender `daemon`, one
+  message to every attached, non-idle session when a stall begins and one
+  when it clears. A begin or repeat goes out at most once every
+  `memory.dream.stall_repeat_hours` (6), counted across incidents, so an
+  extractor that fails and recovers every few dreams is announced once per
+  window rather than every cycle; an incident that was never announced
+  gets no recovery notice. A fallback warning that turns into a hard stall
+  (the fallback fails too) is announced at once. A notice that reached
+  nobody stays owed and is retried at the next sweep. The notices are
+  context (wake decision `hinted`): they never ring a parked session. No
+  client can send as `daemon` or take the label `daemon`, and the per-turn
+  digest names a sender "daemon" only for the daemon's own mail. Set
+  `memory.dream.stall_notice: false` to turn them off; with the board off
+  or without Postgres they are skipped.
+
+On a headless daemon host, an expired CLI login is the expected cause: log
+the CLI in again on that host (`claude auth login`, or `codex login` for
+the Codex shim). The shim's health check recovers within its TTL and the
+next sweep's dream closes the stall.
+
 ## Session digests (opt-in) — one prose memory per closed session
 
 With `memory.dream.digest_enabled` on, the idle dream cycle writes one
@@ -505,14 +744,16 @@ leave no row.
 - `memory_dream(action="runs")` lists recent passes: id, cursor movement,
   tallies (including the literal-gate counters), and lifecycle status
   (`running | committed | failed | rolled_back`). A `failed` run means a
-  claim write blew up mid-pass — partial writes are journaled and the
-  cursor was held.
+  claim write or acknowledgement failed — partial claim writes are
+  journaled. A lost acknowledgement response may require a retry to discover
+  whether the database committed it.
 - `memory_dream(action="rollback")` reverts the **latest committed** pass by
   replaying its journal in reverse through the normal write paths — a
   superseded value is superseded back (history preserved, nothing deleted),
   a dream-inserted slot is retired, member adds/removes are mirrored.
   Rollback covers fact writes only (not relations/lessons/graph), keeps the
-  source traces, and never rewinds the dream cursor. It refuses when a newer
+  source traces, and does not reset input acknowledgement or the display
+  cursor. It refuses when a newer
   run is `failed`/`running` (unjournaled uncertainty) and on double
   rollback. Both actions are full-tier tools — expand with
   `memory_toolset(action="expand")` from a core-tier session.
@@ -595,7 +836,7 @@ is therefore treated as zero-distortion by the dream:
   This is a **flag, not a hard fail**: the paper fails a compaction whose
   input is still there to retry, but here the raw entry is never
   discarded (it stays in the associative store and is served by
-  `memory_search`), and holding the cursor would hostage every other
+  `memory_search`), and withholding acknowledgement would hold every other
   claim in the batch to one rule the extractor could not slot. The
   typical miss is an extractor that emitted no scalar claim for the
   entry at all — inventing a slot is not the dream's business.
@@ -678,19 +919,67 @@ bounded batch of pending merge proposals — with the same evidence pack the
 review surfaces show, plus a caution line on pairs stamped
 `low_differential` (whose snippets cannot tell the sides apart) — to the
 configured model (`memory.deep_dream.judge_mode`,
-default `shadow`; the dream extractor, or a dedicated `judge_url`), and
+default `shadow`; the dream extractor, or a dedicated `judge_url` serving
+`judge_model` — both Console knobs, with an env-only bearer key
+`PSEUDOLIFE_JUDGE_API_KEY` sent to that endpoint alone), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
-(`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
+(`decided_by='dream-judge'`, pair dismissed). A merge reject may also name
+a relation from the link judge's vocabulary (since 2026-09-30) that holds
+from FROM to INTO as the judge was shown them (a file and the concept it
+implements, a component and its parent). The relation never changes the
+verdict or its confidence, which stays about whether the two are different
+things; such a reject is recorded as **relate**. For the merge, relate counts as a
+reject in every gate, and a reject beside a relate is agreement, not a
+`split`. The relation rides on the row's note (`relate:<relation> | …`, and
+`2nd (<model>): relate:<relation> …` for a second opinion); the review
+payloads' `judge` / `judge2` blocks carry it as `relation`. When an
+automatic reject applies and a relate vote was one of its votes, the sweep
+also files that relation (the more confident vote's, if both related) as a
+link proposal with source `merge-judge-relate`, through the ordinary filing
+gate, unless the relation is not a registered one or an edge or link
+proposal already joins the pair (so a reject reopened by a new link's
+evidence change never files a second one). A filing that fails is logged
+and never undoes the reject. The link judge then settles the proposal at
+its own gates; the merge judge never writes an edge, and a shadow verdict
+files nothing. A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
-so an independent sample: two rejects at mean >= `judge_reject_min_confidence_2`
-apply, a disagreement stamps `split` on the note and leaves the row for a
+so an independent sample. The second opinion is asked on the first
+opinion's endpoint unless `judge_second_url` (a Console knob) points it at
+an OpenAI-compatible endpoint of its own, serving `judge_second_model`, so
+the two opinions can come from different providers; that endpoint's bearer
+key is env-only (`PSEUDOLIFE_JUDGE_SECOND_API_KEY`) and goes nowhere else.
+Two rejects at mean >= `judge_reject_min_confidence_2` apply only when the
+two votes came from different models (since 2026-09-30; the same model
+asked twice is one opinion; reject and relate are both rejects here); any
+other disagreement (an accept or a leave against a reject or relate, or an
+accept against a leave) stamps `split` on the note and leaves the row for a
 human. `judge_mode: auto` goes one step further and folds a pair when two
-independent accepts agree on a row that is not `low_differential` at mean
->= `judge_accept_min_confidence` — the only path that ever auto-applies an
-accept. Since 2026-09-02 the other queues have judges too, each riding the
+independent accepts from different models agree on a row that is not
+`low_differential` at mean >= `judge_accept_min_confidence` — the only path
+that ever auto-applies an accept. "Different" is decided on what the
+endpoints *served*, not the names they were asked for: a CLI shim answers a
+name outside its own family (a `claude-*` name on the Codex shim) with its
+launch default, which on 2026-09-03 turned a configured `claude-fable-5`
+second opinion into the first opinion's model. Each merge-judge result counts a
+served-vs-requested mismatch (`served_model_mismatch`, with the names in
+`served_model_mismatches`) and logs a warning, and counts same-model reject
+pairs it refused (`auto_reject_refused_same_model`). A second endpoint
+that fails (down, or refusing its key) is reported as
+`second_opinion_error` and never stops that tick's first opinions. When
+the configuration itself makes the second opinion the first model again
+(no `judge_second_url`, and `judge_second_model` empty or equal to the
+first endpoint's model name) the pass is skipped in every mode, shadow
+included: that vote could authorize nothing, so no model call is spent on
+it, the rows keep waiting, and the result counts them
+(`second_opinion_skipped_same_model`). Reviewers then see no same-model
+`judge2` block or `split` tag on those rows; a same-model re-ask flipped
+2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
+result whenever a tick judged, reconsidered, took second opinions,
+refused a same-model reject, saw a served-model mismatch or lost its
+second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
@@ -699,16 +988,27 @@ because the first ladder scored the judge's relation choice at 0/1; edges
 are reversible, which is why this queue may run auto), the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
-the reversible dismissal, `auto` also retires — never deletes — the losing
-duplicate slot after folding its carry-over into the survivor), and the
-**Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`;
-after each deep apply, works through that apply's candidates one
+the reversible dismissal, `auto` also retires — never deletes — a losing
+duplicate slot only when conservative content and metadata checks pass).
+Lessons must have matching guidance categories and case-sensitive text, ignoring
+outer whitespace. Substring
+containment is not enough because a condition, negation or correction can change
+the meaning. Model-invented rewrites stay in review. The survivor stays unchanged;
+the loser's support and provenance remain in its retired row and audit, so an undo
+restores the exact pair. Both records are checked again after inference;
+the retirement and audit commit atomically before the resident state changes.
+The **Step-C candidate judge** (`candidate_judge_mode`, defaulting to `off`)
+works through a deep apply's candidates one
 `judge_batch` slice per sweep tick — `propose` files an edge proposal and
 `dismiss` marks the pair distinct, and every judged pair is memoised for
-`candidate_rejudge_days`). Two mechanical additions stop the queues
-refilling: each apply files the Console's live analyzer duplicate findings
-into the merge and link queues (`analyzer_file_duplicates`, on by default)
-and — once you switch it on — deletes week-old entities that carry no
+`candidate_rejudge_days`. Two mechanical additions stop the queues
+refilling: ordinary sweeps file a bounded slice of the Console's analyzer
+duplicate findings into the merge and link queues (`analyzer_file_duplicates`,
+on by default); a deep apply still performs its full pass. Settling an analyzer
+link also closes its duplicate finding, with bounded reconciliation for earlier
+terminal decisions. `judges_enabled=false` also stops this ordinary-sweep
+filing and reconciliation; explicit deep apply retains its separate switches.
+The optional orphan sweep, once enabled, deletes week-old entities that carry no
 evidence and no mention at all (`orphan_sweep`, off by default, at most
 `orphan_max_per_apply` per pass: it is the one destructive switch that
 would fire on the first apply after an upgrade). Which models
@@ -717,10 +1017,94 @@ merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
 scores every queue's judge against the 2026-09-02 blind-panel set
 (`evals/results/queue-judge-panel-20260902.json`), simulating each auto gate.
+The measured merge-judge configuration (2026-09-29) is `judge_url` pointing
+at a Claude CLI shim, `judge_model: claude-opus-5-5`,
+`judge_second_model: claude-sonnet-5-5` and `judge_mode: auto-reject`: on
+that panel the pair's two-vote rejects supported `auto-reject`, its two-vote
+accepts did not support `auto`, and GPT-6 models as the second opinion let
+false rejects through the two-vote gate
+(`evals/results/queue-judge-ladder-20260929-*.json`,
+`evals/results/queue-judge-cross-20260929.json`). It is applied by
+configuration; the shipped default stays `shadow`.
+
+Pending judgments are bound to the evidence and policy that produced them.
+Changing the model, prompt, mode or supplied evidence invalidates an old opinion;
+an in-flight reply cannot authorize an action on changed evidence. This does not
+reopen a completed human decision. The Console's **Re-evaluate pending opinions**
+button queues up to 32 opinions for the next sweep. Operators can use
+`POST /api/graph/rejudge` with `{"queue":"all","limit":32}`; supported queues
+are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
+1–100. It queues work without changing automation modes or immediately calling
+a model.
+
+To review a large merge queue from outside the daemon, page through it with
+`GET /api/graph/proposal-evidence?offset=0&limit=25` (limit 1–100). Each item
+is the evidence pack the merge judge itself reads: per-side display, degree,
+scopes and snippets at the judge's snippet cap, `low_differential`, the
+`judge`/`judge2` opinions, and a `group` computed over the whole queue, so
+rows sharing an entity stay one decision across pages. The response carries
+`total` and `next_offset` (`null` on the last page). Offsets shift as rows
+are settled or new proposals are filed, so read the queue first and settle
+it afterwards.
+
+New automatic rejections and pair dismissals also retain the evidence and policy
+behind the decision. A bounded sweep can reopen them when those inputs change;
+candidate dismissals follow their endpoint evidence, so unrelated memory traffic
+does not refill the queue. A human confirmation keeps the decision closed.
+Legacy decisions without this provenance remain closed, and completed merges or
+deletions are never undone automatically. The Console shows the latest 20
+graph automatic decisions and reconsiderations; older records remain in the durable
+audit. Judge results include reconsideration counts even when no new model call
+is needed. An unverified model identity defers a candidate or curation action
+without repeatedly calling the model; explicit re-evaluation can retry it.
+
+A duplicate retirement can be undone through the existing lesson/world restore
+action. If an entity has both curated and other retired slots, restore a specific
+attribute so each curated undo can validate and commit its complete pre-image.
+
+Each graph finding reports whether it is unfiled, pending, already decided,
+gated or requires manual review. These counts are mutually exclusive. A weak
+connection, a test-like name or low edge confidence is not
+by itself authorization to remove information. Those cases retain their reason
+for review unless an existing, separately guarded maintenance path applies.
+
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is
-worth scheduling. A
+worth scheduling.
+
+Beside it rides a `review_queue` block, the health of the queues that
+Step C drains: `pending` counts for the merge, junk and link queues, the
+age of the oldest pending merge proposal (`oldest_merge_age_days`) and of
+the oldest one no judge has recorded a verdict on
+(`oldest_unjudged_merge_age_days`), the
+configured mode of every judge (`judges_enabled`, `judge_mode`,
+`link_judge_mode`, `junk_judge_mode`, `curation_judge_mode`,
+`candidate_judge_mode`) and `attention: {needed, reasons}`. It costs two
+aggregate queries and never fails the status call (a failure is an
+`error` field). The store-curation listing is not counted: it is
+recomputed on demand and capped at `curation_top_k` per store, so it
+cannot pile up. Attention covers the merge queue, the one that piled
+up; the junk and link counts are reported only. It is needed when the
+pending merge queue reaches
+`memory.deep_dream.review_queue_alert_pending` (default 500) in any
+mode, or when at least `review_queue_alert_min_pending` (default 100)
+merges wait and one of them has waited longer than
+`review_queue_alert_age_days` (default 14): the oldest pending merge
+while no judge applies merge verdicts (`judge_mode` `off` or `shadow`,
+or `judges_enabled: false`), or the oldest merge no judge has recorded
+a verdict on in `auto-reject` / `auto`, which catches a judge that is
+configured but not running. 0 disables either rule. While it is needed,
+the session briefing (`GET /api/briefing`, `pseudolife-mcp briefing`)
+and the SessionStart hook output carry one line naming the count, the
+oldest age, the merge judge's mode and the remedy (`/dream`, and the
+judge modes or the judge endpoint); the plugin's hook, which reports
+the session's start source, leaves it out on a resume or compaction.
+The defaults come from the live bank: a triage settled the merge queue on
+2026-09-02, and by 2026-09-29 it held 1,016 pending proposals (the merge
+judge in `shadow` from 09-11) without anything saying so.
+
+A
 dry-run (default) returns a preview of what it would change: re-scored
 edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across
@@ -732,7 +1116,7 @@ self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
 (see the `/dream` flow in `examples/commands/dream.md`): judge each
 candidate from its snippets, post the real relations with
-`memory_graph_review(action="propose")` — they land in the Atlas Review
+`memory_graph_review(action="propose")` — they land in the review
 queue (`proposed_link` findings) for per-item accept/reject before anything
 reaches live edges — and record clearly-distinct pairs with
 `memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
@@ -747,7 +1131,7 @@ realize one role, so merging asserts something false and dismissing throws
 a real relationship away. Settle it with one call —
 `memory_graph_review(action="relate", src=<file>, relation="implements",
 dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
-one Relate button in the Atlas review drawer, which does the same.
+one Relate button in the Console's Review view, which does the same.
 
 **Draining the quarantine.** Quarantined edges are almost all untyped
 `related-to` co-mentions, and about half of them name a real relationship
@@ -811,18 +1195,25 @@ memory_consolidation_candidates(query="MCP transport choice", top_k=20)
 # → {clusters: [{cohesion: 0.84, size: 3, members: [<entry>, ...]}, ...]}
 
 memory_consolidate(
-  replaces=["MCP uses stdio transport", "stdio was chosen for MCP", "decided on stdio for MCP"],
+  entry_ids=[101, 102, 103],  # selected member IDs from the candidates above
   new_text="MCP transport is stdio — chosen over TCP to avoid port conflicts.",
   tags=["consolidated"],
 )
 # → {superseded_count: 3, new_memory_stored: true, ...}
 ```
 
+Pass the selected member IDs rather than copying their text. All targets
+must resolve before any changes; a missing, retired or ambiguous target
+returns a no-op with diagnostics so the caller can reload the candidates.
+Legacy `replaces=[...]` requires unique exact text and does not fall back to
+similarity. File-mode entries have no row IDs and use that exact-text form.
+
 The clustering is deterministic greedy: highest-relevance entry seeds
 the cluster, any unclustered candidate whose cosine with the seed
 clears `min_cohesion` (default 0.6) joins, cohesion is the mean
 intra-cluster cosine, clusters are sorted by `cohesion × size`. Cost
 is O(N²) within the candidate pool, bounded to `top_k` candidates.
+Retired entries are excluded before candidate limits and clustering.
 
 `memory_consolidate` reuses the supersession machinery so the
 predecessors stay in the bank but rank below the canonical note —

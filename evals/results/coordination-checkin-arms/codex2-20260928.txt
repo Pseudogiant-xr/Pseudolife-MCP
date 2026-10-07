@@ -1,0 +1,1 @@
+Board: memory_agents update, list; memory_message receive, ack. Before using a shared thing, message its holder you're next; status isn't a queue.

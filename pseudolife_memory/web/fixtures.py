@@ -10,10 +10,16 @@ console looks realistic in screenshots. Shapes mirror the real service methods
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any
 
+from pseudolife_memory.storage.coordination import CoordinationStore
 from pseudolife_memory.utils.config import AppConfig
 
 _NOW = time.time()
@@ -138,10 +144,10 @@ def _stream_dict(t, idx):
 class FixtureService:
     """Implements the subset of MemoryService the console routes call."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, data_dir: Path | None = None) -> None:
         self.config = AppConfig()
         self.config.memory.recency_base_half_life_s = 86400.0
-        self.data_dir = Path(__file__).parent / ".devdata"
+        self.data_dir = data_dir if data_dir is not None else Path(__file__).parent / ".devdata"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._db_url = "postgresql://pseudolife@localhost/pseudolife_memory"
         self._writer_id = "cortex-console-dev"
@@ -299,8 +305,14 @@ class FixtureService:
     def lessons_dump(self, limit=120):
         return {"count": len(_LESSONS), "entries": [_lesson_dict(t) for t in _LESSONS][:limit]}
 
-    def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3):
+    def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3, *,
+                         include_coordination=True, include_dream_stall=True,
+                         include_review_queue=True):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
+
+    def memory_changes_since(self, since, *, session_key=None, limit=1):
+        return {"now": time.time(), "status_count": 0, "status": [],
+                "lesson_count": 0, "lessons": []}
 
     def loop_health(self, window_days=7, now=None):
         return {"available": True, "window_days": window_days,
@@ -308,7 +320,8 @@ class FixtureService:
                 "outcomes": {"current": 6, "previous": 3,
                              "by_outcome": {"success": 4, "failure": 1,
                                             "correction": 1}},
-                "sessions": 9, "pending_signals": 2,
+                "sessions": 9, "root_episodes": 31, "pending_signals": 2,
+                "pending_signals_expired": 1,
                 "last_lesson_at": _NOW - 26 * _H, "lessons_current": 14,
                 "stores_per_session": 4.67, "outcomes_per_session": 0.67}
 
@@ -702,11 +715,16 @@ class FixtureService:
     def world_restore(self, entity, attribute=None, decided_by="human"):
         return {"restored": 1, "store": "world"}
 
+    def review_rejudge(self, queue="all", *, limit=32):
+        # The real shape (memory/review_judgments.requeue); nothing pending
+        # in the fixture bank, so the Review view's rejudge action reports 0.
+        return {"requeued": 0, "queues": {}, "limit": limit}
+
     def curation_duplicates(self):
         # Representative lesson/world cross-key duplicate pairs so the
         # console's curation section (and its Mark-distinct action) is
         # exercisable against fixtures. Shape pinned by
-        # tests/test_fixture_contract.py against what atlas_review.js reads.
+        # tests/test_fixture_contract.py against what the Review view reads.
         return {
             "lesson_duplicates": [{
                 "a_key": "deploy-daemon-to-homelab-host|approach",
@@ -800,6 +818,7 @@ class FixtureService:
                 "reasoning_effort":
                     self.config.memory.dream.extractor_reasoning_effort or None,
                 "primary_healthy": True,
+                "stall": None, "last_stall": None,
                 "last_dream_extractor": {"which": "primary",
                                          "base_url": "http://host.docker.internal:8082/v1",
                                          "at": _NOW - 2 * _H}}
@@ -819,12 +838,532 @@ class FixtureService:
             {"cohesion": 0.84, "seed_score": 0.9, "size": 3, "members": [
                 _stream_dict(_STREAM[1], 1), _stream_dict(_STREAM[2], 2), _stream_dict(_STREAM[3], 3)]}]}
 
-    def consolidate(self, replaces, new_text, source=None, tags=None):
-        return {"superseded_count": len(replaces), "superseded_texts": replaces[:20],
+    def consolidate(self, replaces=None, new_text="", source=None, tags=None, *, entry_ids=None):
+        texts = replaces or []
+        return {"superseded_count": len(entry_ids) if entry_ids is not None else len(texts),
+                "superseded_texts": texts[:20], "superseded_ids": entry_ids or [],
                 "new_memory_stored": True, "new_memory_surprise": 0.42}
 
-    def supersede(self, old_text, new_text):
-        return {"superseded_count": 1, "superseded_texts": [old_text], "new_memory_stored": True}
+    def supersede(self, old_text=None, new_text="", *, entry_id=None):
+        return {"superseded_count": 1, "superseded_texts": [old_text] if old_text else [],
+                "superseded_ids": [entry_id] if entry_id is not None else [],
+                "new_memory_stored": True}
 
-    def delete(self, text=None, substring=None, source=None, episode=None, tag=None):
+    def delete(self, text=None, substring=None, source=None, episode=None, tag=None,
+               confirm_bulk=False):
         return {"deleted_count": 3, "deleted_texts": ["(fixture) deleted entry"]}
+
+    # ── maintainer passkey and Board roles: DEMO ONLY ───────────────────────
+    # In-memory stand-ins for the maintainer routes (docs/superpowers/specs/
+    # 2026-10-04-board-roles-passkey.md, section 4) so the Console's Roles
+    # band, its message composer and Settings' "Your passkeys" can be clicked
+    # through on the devserver. Shapes follow the contract; NOTHING here
+    # verifies a passkey. In fixture mode (health ``fixtures: true``) the
+    # Console skips the browser ceremony and sends a placeholder assertion,
+    # which these methods accept and a real daemon refuses. Errors raise
+    # ``ValueError(<contract code>)``, which the API layer answers with that
+    # code's real HTTP status. Shapes mirror pseudolife_memory/maintainer.py.
+
+    _MX_SECRET = b"fixture-demo-secret-not-a-real-key"
+    _MX_PROJECT = "Pseudolife-MCP"
+    _MX_SESSIONS = {
+        "a7e2c4d1f0b94e5a8c3d2b1a09f8e7d6": ("Release relay", "laptop"),
+        "8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b": ("Console board roles", "laptop"),
+        "3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f": ("Forget cascade fix", "box"),
+    }
+    _MX_ROLE_PURPOSES = ("grant-delegate", "revoke-delegate", "assign-coordinator",
+                         "revoke-coordinator")
+    # As the real route: any other field in a challenge body is refused.
+    _MX_FIELDS = {
+        "send": {"to", "text", "urgent"},
+        "enrol-approve": {"label"}, "enrol-bootstrap": {"label"},
+        "cancel": {"credential_id"}, "revoke-self": {"credential_id"},
+        "repudiate": {"message_id"},
+        "grant-delegate": {"project", "agent_id", "hold"},
+        "assign-coordinator": {"project", "agent_id", "hold"},
+        "revoke-delegate": {"project"}, "revoke-coordinator": {"project"},
+    }
+
+    def _mx(self) -> dict:
+        """The demo's mutable maintainer state, built on first use."""
+        state = getattr(self, "_mx_state", None)
+        if state is None:
+            now = time.time()
+            relay, roles_session, _ = list(self._MX_SESSIONS)
+            key_id = "ZGVtby1sYXB0b3Atd2luZG93cy1oZWxsbw"
+            state = self._mx_state = {
+                "passkeys": [{
+                    "credential_id": key_id, "label": "Demo laptop (fixture)",
+                    "state": "active", "enrolled_by": "bootstrap",
+                    "active_from": now - 6 * _D, "created_at": now - 6 * _D,
+                    "last_used_at": now - 2 * _H, "revoked_at": None,
+                    "revoked_by": None, "flagged_at": None}],
+                # Newest first, as the audit log reads back. The host
+                # confirm did not come from a key this browser used, so the
+                # demo shows the key-change notice.
+                "key_changes": [
+                    self._mx_change("confirm", key_id, "Demo laptop (fixture)", "host",
+                                    now - 6 * _D + 300),
+                    self._mx_change("enrol", key_id, "Demo laptop (fixture)", "bootstrap",
+                                    now - 6 * _D)],
+                "roles": {self._MX_PROJECT: {
+                    "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
+                                 "granted_by": "maintainer", "reachable": True,
+                                 "reason": None},
+                    # Shows the band's no-listener line.
+                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H,
+                                    "reachable": False, "reason": "listener_expired"},
+                }},
+                "sent": [{
+                    "message_id": "f1c0ffee00000000000000000000000a",
+                    "recipient_agent_id": relay, "recipient_label": "Release relay",
+                    "created_at": now - 2 * _H, "label": "Demo laptop (fixture)",
+                    "text": "Merge #563 once CI is green, then deploy with update -All.",
+                    "wake": {"decision": "rung", "reason": "maintainer_message",
+                             "ring_at": now - 2 * _H + 1},
+                    "first_read_at": now - 2 * _H + 60,
+                    "acknowledged_at": now - 2 * _H + 420, "repudiated_at": None},
+                    # A longer exchange, so the delegate card's thread pane
+                    # scrolls in the demo.
+                    *[{"message_id": f"f1c0ffee0000000000000000000001{i:02x}",
+                       "recipient_agent_id": relay, "recipient_label": "Release relay",
+                       "created_at": now - 90 * 60 + i * 15 * 60,
+                       "label": "Demo laptop (fixture)", "text": text,
+                       "wake": {"decision": "rung", "reason": "maintainer_message",
+                                "ring_at": now - 90 * 60 + i * 15 * 60 + 1},
+                       "first_read_at": now - 90 * 60 + i * 15 * 60 + 40,
+                       "acknowledged_at": now - 90 * 60 + i * 15 * 60 + 90,
+                       "repudiated_at": None}
+                      for i, text in enumerate((
+                          "After the deploy, check the Board on a phone width too.",
+                          "Then re-run the docs guards and regenerate llms-full.txt; "
+                          "the schema table moved to v55.",
+                          "Hold the release until the box suite reports green."))]],
+                "inbox": [{
+                    "message_id": "f1c0ffee00000000000000000000000b",
+                    "sender_agent_id": relay, "sender_label": "Release relay",
+                    "sender_principal": "laptop",
+                    "reply_to": "f1c0ffee00000000000000000000000a",
+                    "text": "CI green; merged as d7cfd36b. Deploy started, ETA 10 min. "
+                            "I will verify /ui/ live after.",
+                    "created_at": now - 2 * _H + 420, "acknowledged_at": None,
+                    "origin": "agent"},
+                    *[{"message_id": f"f1c0ffee0000000000000000000002{i:02x}",
+                       "sender_agent_id": relay, "sender_label": "Release relay",
+                       "sender_principal": "laptop",
+                       "reply_to": f"f1c0ffee0000000000000000000001{i:02x}",
+                       "text": text, "created_at": now - 90 * 60 + i * 15 * 60 + 300,
+                       "acknowledged_at": None, "origin": "agent"}
+                      for i, text in enumerate((
+                          "Checked at 375 px: the session list scrolls in its own pane and "
+                          "the search box stays on top. No horizontal scroll.",
+                          "Guards green, llms-full.txt regenerated and committed.",
+                          "Holding. The box suite is about 60% through; I will report the "
+                          "summary line when it finishes."))]],
+                "spent": set(),
+                "fence": 7,
+            }
+        return state
+
+    @staticmethod
+    def _mx_b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    def _mx_options(self, payload: str, *, create: bool) -> dict:
+        challenge = self._mx_b64(hashlib.sha256(payload.encode("utf-8")).digest())
+        keys = self._mx()["passkeys"]
+        if create:
+            return {"challenge": challenge, "rp": {"id": "localhost", "name": "Pseudolife"},
+                    "user": {"id": self._mx_b64(b"maintainer"), "name": "maintainer",
+                             "displayName": "Maintainer"},
+                    "pubKeyCredParams": [{"type": "public-key", "alg": a} for a in (-7, -8, -257)],
+                    "timeout": 120000, "attestation": "none",
+                    "authenticatorSelection": {"userVerification": "required",
+                                               "residentKey": "preferred"},
+                    "excludeCredentials": [{"type": "public-key", "id": k["credential_id"]}
+                                           for k in keys if k["state"] != "revoked"]}
+        return {"challenge": challenge, "rpId": "localhost", "timeout": 120000,
+                "userVerification": "required",
+                "allowCredentials": [{"type": "public-key", "id": k["credential_id"]}
+                                     for k in keys if k["state"] == "active"]}
+
+    def _mx_mac(self, payload: str) -> str:
+        return hmac.new(self._MX_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _mx_issue(self, purpose: str, fields: dict) -> tuple[str, str]:
+        payload = json.dumps({**fields, "purpose": purpose, "nonce": secrets.token_hex(16),
+                              "expires_at": round(time.time() + 120, 3)},
+                             sort_keys=True, separators=(",", ":"))
+        return payload, self._mx_mac(payload)
+
+    def _mx_open(self, body: dict, purpose: str, proof: str = "assertion") -> dict:
+        """The completing route's checks a real daemon runs, minus the signature."""
+        payload, mac = body.get("payload"), body.get("mac")
+        if (not isinstance(payload, str) or not isinstance(mac, str)
+                or not hmac.compare_digest(self._mx_mac(payload), mac)):
+            raise ValueError("assertion_invalid")
+        fields = json.loads(payload)
+        if fields.get("purpose") != purpose:
+            raise ValueError("assertion_invalid")
+        if time.time() > fields["expires_at"]:
+            raise ValueError("challenge_expired")
+        if not isinstance(body.get(proof), dict):
+            raise ValueError("assertion_invalid")
+        if fields["nonce"] in self._mx()["spent"]:
+            raise ValueError("challenge_spent")
+        self._mx()["spent"].add(fields["nonce"])
+        return fields
+
+    @staticmethod
+    def _mx_purpose(body: dict) -> str | None:
+        try:
+            return json.loads(body.get("payload") or "{}").get("purpose")
+        except (TypeError, ValueError):
+            return None
+
+    def _mx_session(self, agent_id) -> tuple[str, str]:
+        if agent_id not in self._MX_SESSIONS:
+            raise ValueError("recipient_unknown")
+        return self._MX_SESSIONS[agent_id]
+
+    def _mx_preview(self, agent_id) -> dict:
+        label, principal = self._mx_session(agent_id)
+        return {"agent_id_prefix": agent_id[:12], "name": label, "label": label,
+                "principal": principal, "host": None, "client": "claude",
+                "project": self._MX_PROJECT, "task": "",
+                "last_activity": time.time() - 120, "duplicate_name": False}
+
+    @staticmethod
+    def _mx_change(change, credential_id, label, by, at, revoked=None) -> dict:
+        """One ``key_changes`` row, as ``MaintainerStore.key_changes`` builds it."""
+        path = "host" if by == "host" else "console"
+        return {"at": at, "principal": None if path == "host" else "laptop",
+                "change": change, "credential_id": credential_id, "label": label, "by": by,
+                "path": path, "revoked": revoked}
+
+    def _mx_holder(self, role: str, project) -> str | None:
+        """The live holder of ``<role>:<project>``, as ``role_holder`` reads it."""
+        held = (self._mx()["roles"].get(project) or {}).get(role)
+        return held["agent_id"] if held and held["expires_at"] > time.time() else None
+
+    def _mx_signing(self) -> list:
+        now = time.time()
+        return [k for k in self._mx()["passkeys"] if k["state"] == "active"
+                and k["active_from"] is not None and now >= k["active_from"]]
+
+    def _mx_live_roles(self) -> dict:
+        now = time.time()
+        out = {}
+        for project, slots in self._mx()["roles"].items():
+            d, c = slots.get("delegate"), slots.get("coordinator")
+            entry = {"delegate": dict(d) if d and d["expires_at"] > now else None,
+                     "coordinator": dict(c) if c and c["expires_at"] > now else None}
+            if entry["delegate"] or entry["coordinator"]:
+                out[project] = entry
+        return out
+
+    # ── coordination board: DEMO ONLY ────────────────────────────────────────
+    # A Console board snapshot (GET /api/agents?view=coordination) whose
+    # roster carries v55 board names from every source, an unnamed row (read
+    # as label and short id), the maintainer demo's delegate and coordinator,
+    # unread mail, and enough rows that the roster scrolls in its own pane.
+    # Served only where ``demo_board`` is on: the devserver sets it, while
+    # tests drive the real console_snapshot path through a FixtureService.
+    demo_board = False
+    # (agent_id, label, name, name_source, task, status, pending, minutes ago)
+    _BOARD_ROWS = (
+        ("a7e2c4d1f0b94e5a8c3d2b1a09f8e7d6", "claude-code", "Release relay", "harness",
+         "release v0.21", "CI green; deploying with update -All, ETA 10 min", 0, 2),
+        ("8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b", "claude-code", "Console board roles", "harness",
+         "board roles", "Wiring the Roles band to the passkey flow", 1, 5),
+        ("3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f", "codex", "Forget cascade fix", "harness",
+         "forget cascade", "Reviewing the cascade test matrix", 0, 9),
+        ("c41d0e7a9b2f4c3d8e5f6a7b8c9d0e1f", "claude-code", "Nightly eval triage", "agent",
+         "eval triage", "Waiting on the judge server", 2, 14),
+        ("5e6f7a8b9c0d4e1f2a3b4c5d6e7f8a9b", "codex", "Dream extractor ladder", "title",
+         "extractor ladder", "Ladder run 3 of 5", 0, 21),
+        ("9a8b7c6d5e4f4a3b2c1d0e9f8a7b6c5d", "claude-code", "", "",
+         "", "", 0, 26),
+        ("0f1e2d3c4b5a4968a7b6c5d4e3f2a1b0", "claude-code", "Schema v55 docs pass", "harness",
+         "docs currency", "Regenerating llms-full.txt", 0, 33),
+        ("1a2b3c4d5e6f4a7b8c9d0e1f2a3b4c5d", "codex", "Shim restart loop", "harness",
+         "shim restart", "Reproducing on the box", 0, 38),
+        ("2b3c4d5e6f7a4b8c9d0e1f2a3b4c5d6e", "claude-code", "Graph merge review", "harness",
+         "graph review", "12 proposals left in the queue", 0, 44),
+        ("3c4d5e6f7a8b4c9d0e1f2a3b4c5d6e7f", "claude-code", "Installer passkey prompt", "agent",
+         "installer", "Testing the unattended path", 0, 51),
+        ("4d5e6f7a8b9c4d0e1f2a3b4c5d6e7f8a", "codex", "", "",
+         "lease cli", "Paging the lease listing", 0, 57),
+        ("6f7a8b9c0d1e4f2a3b4c5d6e7f8a9b0c", "claude-code", "Bench Postgres upgrade", "title",
+         "pg upgrade", "Dumping the bench database", 0, 63),
+    )
+
+    def board_snapshot(self, limit=50) -> dict:
+        from pseudolife_memory.storage.coordination import _board_name
+
+        now = time.time()
+        roles = self._mx_live_roles().get(self._MX_PROJECT, {})
+        agents = []
+        for agent_id, label, name, source, task, status, pending, ago in self._BOARD_ROWS:
+            active = now - ago * 60
+            agents.append({
+                "agent_id": agent_id, "principal": "laptop", "label": label,
+                "name": _board_name(agent_id, label, name), "name_source": source,
+                "project": self._MX_PROJECT, "task": task, "status": status,
+                "episode": "", "capabilities": {}, "wake_enabled": True,
+                "created_at": active - 3 * _H, "last_activity": active,
+                "lifecycle": "attached" if ago < 45 else "detached", "children": [],
+                "park_reason": None, "park_needs": "", "park_clear_by": "",
+                "park_resume": "", "park_expires": None, "park_set_at": None,
+                "parent_agent_id": None, "subagent": False, "adapter_available": ago < 45,
+                "status_expires_at": None, "status_overdue": False,
+                "status_set_at": active, "status_age": f"{ago} minutes ago",
+                "status_stale": False, "pending_count": pending,
+            })
+        names = {a["agent_id"]: a for a in agents}
+        leases = []
+        for role in ("coordinator", "delegate"):
+            held = roles.get(role)
+            if not held or held["agent_id"] not in names:
+                continue
+            row = names[held["agent_id"]]
+            leases.append({
+                "name": f"{role}:{self._MX_PROJECT}", "fence": None,
+                "holder": {"agent_id": row["agent_id"], "label": row["label"],
+                           "name": row["name"], "principal": row["principal"],
+                           "purpose": role, "acquired_at": now - 2 * _H,
+                           "expires_at": held["expires_at"], "expected_end": None},
+                "expires_at": held["expires_at"], "expected_end": None,
+                "stale": False, "expired": False, "queued": 0, "queue": []})
+        return {"enabled": True, "available": True, "snapshot_at": now,
+                "agents": agents[:limit], "truncated": len(agents) > limit,
+                "idle_omitted": 4, "leases": leases, "leases_truncated": False,
+                "events": [], "events_truncated": False}
+
+    def maintainer_status(self) -> dict:
+        out = {"available": bool(self._mx_signing())}
+        if not out["available"]:
+            out["reason"] = "maintainer_not_enrolled"
+        out.update(rp_id="localhost", origin="http://localhost:8770",
+                   passkeys=[dict(k) for k in self._mx()["passkeys"]],
+                   roles=self._mx_live_roles(),
+                   key_changes=[dict(c) for c in self._mx()["key_changes"]])
+        return out
+
+    def maintainer_challenge(self, body: dict) -> dict:
+        purpose = body.get("purpose")
+        if purpose not in self._MX_FIELDS or set(body) - {"purpose"} - self._MX_FIELDS[purpose]:
+            raise ValueError("invalid_request")
+        if purpose == "enrol-bootstrap":
+            if any(k["state"] in ("pending", "active") for k in self._mx()["passkeys"]):
+                raise ValueError("enrolment_closed")
+        elif not self._mx_signing():
+            raise ValueError("maintainer_not_enrolled")
+        preview = None
+        if purpose == "send":
+            to, text = body.get("to"), body.get("text")
+            preview = self._mx_preview(to)
+            if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 8192:
+                raise ValueError("invalid_request")
+            fields = {"to": to, "text": text, "urgent": body.get("urgent") is True}
+        elif purpose in self._MX_ROLE_PURPOSES:
+            project = body.get("project")
+            if project != self._MX_PROJECT:
+                raise ValueError("invalid_request")
+            fields = {"project": project}
+            role = "delegate" if purpose.endswith("delegate") else "coordinator"
+            other = "coordinator" if role == "delegate" else "delegate"
+            holder = self._mx_holder(role, project)
+            preview = {"role": role, "project": project,
+                       "action": "revoke" if purpose.startswith("revoke") else (
+                           "grant" if role == "delegate" else "assign"),
+                       "current_holder": holder}
+            if purpose in ("grant-delegate", "assign-coordinator"):
+                agent_id, hold = body.get("agent_id"), body.get("hold")
+                if type(hold) is not int or not 60 <= hold <= 604800:
+                    raise ValueError("invalid_request")
+                fields.update(agent_id=agent_id, hold=hold)
+                preview.update(self._mx_preview(agent_id))
+                preview["replaces"] = holder if holder != agent_id else None
+                preview["also_breaks"] = (f"{other}:{project}"
+                                          if self._mx_holder(other, project) == agent_id else None)
+                fields["other_holder"] = self._mx_holder(other, project)
+            # The holder the change displaces is signed too, as the real route does.
+            fields["holder"] = holder
+        elif purpose in ("cancel", "revoke-self"):
+            fields = {"credential_id": body.get("credential_id")}
+        elif purpose == "repudiate":
+            fields = {"message_id": body.get("message_id")}
+        elif purpose in ("enrol-bootstrap", "enrol-approve"):
+            label = body.get("label")
+            if not isinstance(label, str) or not 1 <= len(label.strip()) <= 64:
+                raise ValueError("invalid_request")
+            fields = {"label": label.strip()}
+        else:
+            raise ValueError("invalid_request")
+        payload, mac = self._mx_issue(purpose, fields)
+        out = {"payload": payload, "mac": mac,
+               "publicKey": self._mx_options(payload, create=purpose == "enrol-bootstrap")}
+        if preview is not None:
+            out["preview"] = preview
+        return out
+
+    def maintainer_enrol(self, body: dict) -> dict:
+        now = time.time()
+        if "assertion" in body:
+            # Step 1 of another key: the approval answers with the enrol challenge.
+            fields = self._mx_open(body, "enrol-approve")
+            approver = self._mx()["passkeys"][0]["credential_id"]
+            payload, mac = self._mx_issue("enrol", {"label": fields["label"],
+                                                    "approved_by": approver,
+                                                    "approval_nonce": fields["nonce"]})
+            return {"payload": payload, "mac": mac, "label": fields["label"],
+                    "publicKey": self._mx_options(payload, create=True)}
+        purpose = self._mx_purpose(body)
+        if purpose not in ("enrol-bootstrap", "enrol"):
+            raise ValueError("assertion_invalid")
+        fields = self._mx_open(body, purpose, proof="attestation")
+        if purpose == "enrol-bootstrap":
+            if any(k["state"] in ("pending", "active") for k in self._mx()["passkeys"]):
+                raise ValueError("enrolment_closed")
+            if not body.get("code"):
+                raise ValueError("bootstrap_code_invalid")
+            state, active_from, by = "pending", None, "bootstrap"
+        else:
+            state, active_from, by = "active", now + 24 * _H, fields["approved_by"]
+        key = {"credential_id": self._mx_b64(secrets.token_bytes(16)), "label": fields["label"],
+               "state": state, "enrolled_by": by, "active_from": active_from,
+               "created_at": now, "last_used_at": None, "revoked_at": None,
+               "revoked_by": None, "flagged_at": None}
+        self._mx()["passkeys"].append(key)
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "enrol" if by == "bootstrap" else "add", key["credential_id"], key["label"], by, now))
+        return {"credential_id": key["credential_id"], "label": key["label"], "state": state}
+
+    def maintainer_send(self, body: dict) -> dict:
+        fields = self._mx_open(body, "send")
+        label, principal = self._mx_session(fields["to"])
+        now = time.time()
+        message_id = secrets.token_hex(16)
+        # The board's decision object, as a real send answers it.
+        wake = ({"decision": "rung", "reason": "maintainer_message", "ring_at": now}
+                if fields["urgent"] else
+                {"decision": "no_path", "reason": "no_listener", "queued": True,
+                 "last_activity": now - 300, "fallback": None, "fallback_paths": []})
+        self._mx()["sent"].append({
+            "message_id": message_id, "recipient_agent_id": fields["to"],
+            "recipient_label": label, "created_at": now,
+            "label": self._mx()["passkeys"][0]["label"], "text": fields["text"],
+            "wake": wake, "first_read_at": None, "acknowledged_at": None,
+            "repudiated_at": None})
+        # A canned reply, so the demo thread shows both sides.
+        self._mx()["inbox"].append({
+            "message_id": secrets.token_hex(16), "sender_agent_id": fields["to"],
+            "sender_label": label, "sender_principal": principal, "reply_to": message_id,
+            "text": "On it. (A demo reply from the fixture devserver.)",
+            "created_at": now + 1, "acknowledged_at": None, "origin": "agent"})
+        return {"message_id": message_id, "wake": wake}
+
+    def maintainer_role(self, body: dict) -> dict:
+        purpose = self._mx_purpose(body)
+        if purpose not in self._MX_ROLE_PURPOSES:
+            raise ValueError("assertion_invalid")
+        fields = self._mx_open(body, purpose)
+        now = time.time()
+        project = fields["project"]
+        slots = self._mx()["roles"].setdefault(project, {"delegate": None, "coordinator": None})
+        role = "delegate" if purpose.endswith("delegate") else "coordinator"
+        name = f"{role}:{project}"
+        if self._mx_holder(role, project) != fields.get("holder"):
+            raise ValueError("role_changed")
+        other = "coordinator" if role == "delegate" else "delegate"
+        if (not purpose.startswith("revoke")
+                and self._mx_holder(other, project) != fields.get("other_holder")):
+            raise ValueError("role_changed")
+        held = slots.get(role)
+        if held and held["expires_at"] <= now:
+            held = None
+        if purpose.startswith("revoke"):
+            slots[role] = None
+            return {"name": name, "broken": held is not None,
+                    "was_held_by": held["agent_id"] if held else None}
+        agent_id = fields["agent_id"]
+        self._mx_session(agent_id)
+        also_broken = None
+        if (slots.get(other) or {}).get("agent_id") == agent_id:
+            # One role per session: the other role's lease breaks too.
+            slots[other] = None
+            also_broken = f"{other}:{project}"
+        # The demo's second session is the one whose listener lapsed.
+        reach = ({"reachable": True, "reason": None}
+                 if agent_id != list(self._MX_SESSIONS)[1]
+                 else CoordinationStore.reachability(
+                     {"attachment_id": None, "lease_until": 0, "wake_enabled": False,
+                      "capabilities": {"ring": True, "ring_armed_until": 0}},
+                     now, role=role))
+        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"],
+                 "reachable": reach["reachable"], "reason": reach["reason"]}
+        if role == "delegate":
+            entry["granted_by"] = "maintainer"
+        slots[role] = entry
+        self._mx()["fence"] += 1
+        out = {"name": name, "agent_id": agent_id, "fence": self._mx()["fence"],
+               "expires_at": entry["expires_at"],
+               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None,
+               **reach}
+        if also_broken:
+            out["also_broken"] = also_broken
+        return out
+
+    def _mx_key(self, credential_id) -> dict:
+        for key in self._mx()["passkeys"]:
+            if key["credential_id"] == credential_id:
+                return key
+        raise ValueError("credential_not_found")
+
+    def maintainer_cancel(self, body: dict) -> dict:
+        fields = self._mx_open(body, "cancel")
+        key = self._mx_key(fields["credential_id"])
+        now = time.time()
+        if key["state"] != "active" or not key["active_from"] or key["active_from"] <= now:
+            raise ValueError("assertion_invalid")
+        key.update(state="revoked", revoked_at=now,
+                   revoked_by=self._mx()["passkeys"][0]["credential_id"])
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "cancel", key["credential_id"], key["label"], key["revoked_by"], now))
+        return {"state": "revoked"}
+
+    def maintainer_revoke(self, body: dict) -> dict:
+        fields = self._mx_open(body, "revoke-self")
+        key = self._mx_key(fields["credential_id"])
+        key.update(state="revoked", revoked_at=time.time(), revoked_by=key["credential_id"])
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "revoke", key["credential_id"], key["label"], key["credential_id"], key["revoked_at"]))
+        return {"state": "revoked"}
+
+    def maintainer_repudiate(self, body: dict) -> dict:
+        fields = self._mx_open(body, "repudiate")
+        for message in self._mx()["sent"]:
+            if message["message_id"] == fields["message_id"]:
+                message["repudiated_at"] = message["repudiated_at"] or time.time()
+                follow_up = None
+                if message["acknowledged_at"] is not None:
+                    # Already acknowledged: a withdrawal notice goes out, as the real route.
+                    follow_up = secrets.token_hex(16)
+                    self._mx()["sent"].append({
+                        **message, "message_id": follow_up, "created_at": time.time(),
+                        "text": "The maintainer withdrew message " + message["message_id"]
+                                + "; do not act on it.",
+                        "wake": None, "first_read_at": None, "acknowledged_at": None,
+                        "repudiated_at": None})
+                return {"message_id": message["message_id"],
+                        "repudiated_at": message["repudiated_at"], "follow_up": follow_up}
+        raise ValueError("message_not_found")
+
+    def maintainer_sent(self, limit=50) -> dict:
+        rows = sorted(self._mx()["sent"], key=lambda m: m["created_at"], reverse=True)
+        return {"messages": [dict(m) for m in rows[:int(limit)]]}
+
+    def maintainer_inbox(self, limit=50) -> dict:
+        rows = sorted(self._mx()["inbox"], key=lambda m: m["created_at"], reverse=True)
+        return {"messages": [dict(m) for m in rows[:int(limit)]]}

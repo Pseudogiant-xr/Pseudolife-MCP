@@ -14,8 +14,10 @@ This ledger measures that side, in four parts:
    through the same ``mcp.list_tools()`` + ``_visible_tool_names`` path
    ``tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets``
    meters, so the two can never disagree.
-2. **session_start** — ``web/session_hook.MEMORY_LOOP_BLOCK``, injected once
-   per session by the hook.
+2. **session_start** — ``web/session_hook.STARTUP_MEMORY_CORE``, injected
+   once per session by the hook (before #364, 2026-09-24, the hook served
+   the detailed ``MEMORY_LOOP_BLOCK``; artifacts from before then price
+   that block).
 3. **search / fact_get / recall** — the per-call response payloads, for real
    queries against a live bank.
 
@@ -216,7 +218,10 @@ class Daemon:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         if self.token:
             req.add_header("Authorization", f"Bearer {self.token}")
-        with urllib.request.urlopen(req, timeout=120) as r:
+        # Plain urlopen follows a 3xx and copies Authorization to the new host.
+        from pseudolife_memory.shim import _NoRedirectHandler
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(req, timeout=120) as r:
             return json.loads(r.read().decode("utf-8"))
 
 
@@ -313,11 +318,15 @@ def measure_session_block() -> dict[str, Any]:
     newlines and quotes), kept for comparability with every other cell in
     this ledger, which really is a JSON payload (2026-09-04 review
     finding: the README published the JSON size for a non-JSON surface).
+
+    This prices the fixed policy text only. The bounded briefing the hook
+    appends after it depends on the bank and can fill the rest of the
+    hook's 9,500-byte budget, so a published row must say it excludes it.
     """
-    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
-    return sized(MEMORY_LOOP_BLOCK) | {
-        "raw_chars": len(MEMORY_LOOP_BLOCK),
-        "raw_approx_tokens": approx_tokens(MEMORY_LOOP_BLOCK),
+    from pseudolife_memory.web.session_hook import STARTUP_MEMORY_CORE
+    return sized(STARTUP_MEMORY_CORE) | {
+        "raw_chars": len(STARTUP_MEMORY_CORE),
+        "raw_approx_tokens": approx_tokens(STARTUP_MEMORY_CORE),
     }
 
 
@@ -327,8 +336,15 @@ def _split_search(payload: dict) -> dict[str, int]:
     """Where a served ``memory_search`` payload's bytes actually go."""
     entries = payload.get("entries", []) or []
     text_chars = sum(len(wire(e.get("text", ""))) for e in entries)
+    # Compact entries stopped carrying ``superseded_by_text`` on 2026-09-23
+    # (a superseded hit serves the capped ``replaced_by`` pointer instead),
+    # so this column reads 0 for compact projections from then on; the
+    # pointer is metered in its own column rather than folded into
+    # "other", so runs either side of the change stay comparable.
     sup_chars = sum(len(wire(e.get("superseded_by_text", "")))
                     for e in entries if e.get("superseded_by_text"))
+    rb_chars = sum(len(wire(e["replaced_by"]))
+                   for e in entries if e.get("replaced_by"))
     entries_chars = len(wire(entries))
     cortex_chars = len(wire(payload.get("cortex", []) or []))
     events_chars = len(wire(payload["events"])) if payload.get("events") else 0
@@ -338,7 +354,9 @@ def _split_search(payload: dict) -> dict[str, int]:
         "entries_chars": entries_chars,
         "entries_text_chars": text_chars,
         "entries_superseded_text_chars": sup_chars,
-        "entries_other_chars": entries_chars - text_chars - sup_chars,
+        "entries_replaced_by_chars": rb_chars,
+        "entries_other_chars": (entries_chars - text_chars - sup_chars
+                                - rb_chars),
         "cortex_chars": cortex_chars,
         "events_chars": events_chars,
         "envelope_chars": total - entries_chars - cortex_chars - events_chars,
@@ -413,6 +431,7 @@ def measure_search(mod, dm: Daemon, top_k: int,
             # text + metadata (2026-09-04 review finding).
             for k in ("total_chars", "entries_chars", "entries_text_chars",
                       "entries_superseded_text_chars",
+                      "entries_replaced_by_chars",
                       "entries_other_chars", "cortex_chars", "events_chars")
         }
         agg[arm]["total_approx_tokens"] = _stats(

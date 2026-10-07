@@ -1,0 +1,20 @@
+{
+ "tag": "reference-bank-eager-master",
+ "note": "master's eager reference_bank.py (git show origin/master:pseudolife_memory/memory/reference_bank.py) swapped into the working tree for this arm; everything else is the recorded commit",
+ "n": 50,
+ "git_sha": "d94fb54078f9d79377967782a2d02e52540b5810",
+ "tracked_changes": [
+  "pseudolife_memory/memory/reference_bank.py"
+ ],
+ "first_start_s": 0.5972,
+ "mean_start_s": 0.0681,
+ "threads_before": 34,
+ "threads_after": 988,
+ "private_mb_after": 1495,
+ "memory_kind": "private",
+ "host": {
+  "platform": "Windows-10-10.0.26200-SP0",
+  "cpus": 16,
+  "python": "3.11.9"
+ }
+}

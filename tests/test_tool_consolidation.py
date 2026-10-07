@@ -12,14 +12,16 @@ These tests pin the consolidated contract:
 * dump/introspection tools left the MCP surface — the Cortex Console and the
   ``pseudolife-mcp briefing`` CLI cover them; ``memory_path`` folded into
   ``memory_graph(to=...)``;
-* every remaining description is terse: <=1600 chars each, and both the
-  descriptions and the inputSchema param descriptions are metered per
-  toolset tier (see ``test_descriptions_fit_tier_budgets``).
+* every remaining description is terse: <=1600 chars each, each input
+  schema <=4000 compact bytes, and both the descriptions and the
+  inputSchema param descriptions are metered per toolset tier (see
+  ``test_descriptions_fit_tier_budgets``).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -47,7 +49,10 @@ def test_dream_status_pull_commit_via_one_tool(tmp_path: Path, monkeypatch) -> N
     pulled = _invoke("memory_dream", {"action": "pull"})
     assert "cursor" in pulled and "entries" in pulled
 
-    committed = _invoke("memory_dream", {"action": "commit", "cursor": pulled["cursor"]})
+    committed = _invoke(
+        "memory_dream",
+        {"action": "commit", "commit_token": pulled["commit_token"]},
+    )
     assert "dream_cursor" in committed
 
 
@@ -67,10 +72,18 @@ def test_dream_run_passes_limit(tmp_path: Path, monkeypatch) -> None:
     assert seen["limit"] == 500
 
 
-def test_dream_commit_requires_cursor(tmp_path: Path, monkeypatch) -> None:
+def test_dream_commit_requires_token(tmp_path: Path, monkeypatch) -> None:
     _reload(tmp_path, monkeypatch)
     out = _invoke("memory_dream", {"action": "commit"})
-    assert out.get("error") == "cursor_required"
+    assert out.get("error") == "commit_token_required"
+
+
+def test_dream_commit_explains_legacy_cursor_rejection(
+        tmp_path: Path, monkeypatch) -> None:
+    _reload(tmp_path, monkeypatch)
+    out = _invoke("memory_dream", {"action": "commit", "cursor": 123.0})
+    assert out.get("error") == "legacy_cursor_unsupported"
+    assert "commit_token" in out.get("detail", "")
 
 
 def test_dream_deep_delegates_with_apply_flag(tmp_path: Path, monkeypatch) -> None:
@@ -89,11 +102,9 @@ def test_dream_unknown_action_is_rejected(tmp_path: Path, monkeypatch) -> None:
     """Over MCP the ``Literal`` schema rejects a bad action with a message
     that lists the legal values; direct (in-process) callers still get the
     structured ``unknown_action`` fallback."""
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'status'"):
-        _invoke("memory_dream", {"action": "snooze"})
+    refused = _invoke("memory_dream", {"action": "snooze"})
+    assert refused["error"] == "invalid_argument" and "'status'" in refused["message"]
     out = mod.memory_dream("snooze")
     assert out.get("error") == "unknown_action"
     assert "status" in out.get("actions", [])
@@ -122,6 +133,36 @@ def test_forget_scope_memory_deletes_matching_entries(tmp_path: Path, monkeypatc
     assert "Junk" not in texts and "Keep" in texts
 
 
+def test_forget_scope_memory_filters_narrow(tmp_path: Path, monkeypatch) -> None:
+    """text + source over MCP deletes the intersection, never the union
+    (the 2026-09-29 status-source wipe)."""
+    _reload(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "probe", "source": "status"})
+    _invoke("memory_store", {"text": "probe", "source": "notes"})
+    _invoke("memory_store", {"text": "status line", "source": "status"})
+    out = _invoke("memory_forget",
+                  {"scope": "memory", "text": "probe", "source": "status"})
+    assert out["deleted_count"] == 1
+    left = {(e["text"], e["source"])
+            for e in _invoke("memory_recent", {"n": 10})["entries"]}
+    assert left == {("probe", "notes"), ("status line", "status")}
+
+
+def test_forget_scope_memory_bulk_needs_confirm_bulk(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.service.config.memory, "delete_confirm_threshold", 2)
+    for i in range(3):
+        _invoke("memory_store", {"text": f"bulk {i}", "source": "bulk"})
+    out = _invoke("memory_forget", {"scope": "memory", "source": "bulk"})
+    assert out["error"] == "bulk_confirm_required"
+    assert out["would_delete"] == 3 and out["deleted_count"] == 0
+    assert len(_invoke("memory_recent", {"n": 10})["entries"]) == 3
+    out = _invoke("memory_forget",
+                  {"scope": "memory", "source": "bulk", "confirm_bulk": True})
+    assert out["deleted_count"] == 3
+    assert _invoke("memory_recent", {"n": 10})["entries"] == []
+
+
 def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)
     _invoke("memory_world_set", {"entity": "acme", "attribute": "ceo",
@@ -135,11 +176,9 @@ def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_forget_validates_scope_and_required_args(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'memory'"):  # Literal schema gate
-        _invoke("memory_forget", {"scope": "everything"})
+    refused = _invoke("memory_forget", {"scope": "everything"})  # Literal schema gate
+    assert refused["error"] == "invalid_argument" and "'memory'" in refused["message"]
     assert mod.memory_forget("everything").get("error") == "unknown_scope"
     assert _invoke("memory_forget", {"scope": "fact"}).get("error") == "entity_required"
     # scope=memory with no filter: service refuses wholesale deletion.
@@ -189,17 +228,36 @@ def test_graph_review_actions_route_to_the_right_service_calls(
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.mcpserver.exceptions import ToolError
-
     mod = _reload(tmp_path, monkeypatch)
-    with pytest.raises(ToolError, match="'list'"):  # Literal schema gate
-        _invoke("memory_graph_review", {"action": "bless"})
+    refused = _invoke("memory_graph_review", {"action": "bless"})  # Literal schema gate
+    assert refused["error"] == "invalid_argument" and "'list'" in refused["message"]
     assert mod.memory_graph_review("bless").get("error") == "unknown_action"
     assert _invoke("memory_graph_review", {"action": "accept_link"}).get("error") == "proposal_id_required"
     assert _invoke("memory_graph_review", {"action": "propose"}).get("error") == "proposals_required"
     assert _invoke("memory_graph_review", {"action": "dismiss_pair"}).get("error") == "src_dst_required"
     assert _invoke("memory_graph_review",
                    {"action": "dismiss_pair", "src": "a"}).get("error") == "src_dst_required"
+
+
+def test_graph_review_scope_is_served_as_a_source_filter(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """``list``'s ``scope`` keeps the entities that carry that memory
+    SOURCE (the Atlas project switcher's value) — it is not a finding-kind
+    filter. The served description said "keep only findings of this kind"
+    until the 2026-09-20 review of PR #316, which had briefly told agents to
+    page with ``scope=<finding kind>`` (an empty entity set, so an empty
+    analyzer listing). Pin the served text to the real contract; the
+    service side is pinned by tests/test_graph.py::
+    test_graph_review_scope_filters_by_memory_source_not_finding_kind."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = asyncio.run(mod.mcp.list_tools())
+    desc = {t.name: t for t in tools}["memory_graph_review"].input_schema[
+        "properties"]["scope"].get("description") or ""
+    assert "source" in desc, desc
+    assert "of this kind" not in desc, desc
+    assert "all" in desc, desc  # the documented "everything" spelling
 
 
 def test_graph_review_dismiss_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:
@@ -297,7 +355,28 @@ def test_dream_deep_routes_snippets_param(tmp_path: Path, monkeypatch) -> None:
 
 def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     """The manifest is eager agent context for non-deferring clients; each
-    tier's visible descriptions must fit its budget (spec 2026-07-11)."""
+    tier's visible descriptions must fit its budget (spec 2026-07-11).
+
+    Why each limit exists (re-based 2026-10-04, maintainer decision):
+
+    * Per tool, the hard limits are the clients'. Claude Code truncates each
+      MCP tool description (and server instructions) at 2,048 characters by
+      default (code.claude.com/docs/en/mcp, CLAUDE_CODE_MAX_MCP_DESCRIPTION_
+      LENGTH), so the 1,600-character cap keeps a margin under it. Codex CLI
+      strips every parameter description from a tool whose input schema,
+      serialized compactly, exceeds 5,000 bytes (openai/codex
+      codex-rs/tools/src/json_schema/compaction.rs,
+      DEFAULT_COMPACT_TOOL_SCHEMA_BYTES; per server
+      ``tool_input_schema_max_bytes``), so the 4,000-byte schema cap keeps a
+      margin under that. Both read 2026-10-04; neither the Anthropic API nor
+      Gemini CLI documents a limit.
+    * The tier totals are no client's limit: they are a deliberate wall on
+      context cost (eager context for clients that do not defer tools, and
+      tool-selection quality). They leave a few hundred description
+      characters of headroom on core and full (about 1,000 when re-based,
+      ~400 after the 2026-10-04 rewrite), proportionally less on minimal
+      (every minimal tool counts against core and full too), and move only
+      with a recorded reason below."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
     mod = _reload(tmp_path, monkeypatch)
 
@@ -305,6 +384,16 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     sizes = {t.name: len(t.description or "") for t in tools}
     fat = [(n, s) for n, s in sizes.items() if s > 1600]
     assert fat == [], f"over-long tool descriptions: {fat}"
+    # Codex measures serde_json's compact encoding of the normalized schema
+    # (UTF-8, no whitespace); this approximates what Codex counts, and the
+    # 1,000-byte margin covers normalization. Largest on 2026-10-04:
+    # memory_search, 1,956 bytes; later that day, once the board tools
+    # described their parameters, memory_agents at 3,459.
+    schema_bytes = {t.name: len(json.dumps(t.input_schema or {}, separators=(",", ":"),
+                                           ensure_ascii=False).encode("utf-8"))
+                    for t in tools}
+    big = [(n, b) for n, b in schema_bytes.items() if b > 4000]
+    assert big == [], f"input schemas Codex would strip of parameter descriptions: {big}"
     # Bumped for Task 5 (memory_set_add / memory_set_remove, both minimal
     # tier, so their descriptions count against core/full too) — the prior
     # caps (4500/9500/15500) left only a few dozen chars of headroom.
@@ -313,8 +402,6 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # contender instead of converting), already trimmed to its minimum.
     # Full bumped 2026-08-05: memory_graph_review gained the relate verdict
     # and proposal_ids batching; 16250 left zero headroom after trimming.
-    # Full tier is opt-in (sessions start minimal/core), so it carries the
-    # slack; the default surfaces stay tight.
     #
     # Restructured 2026-08-25. Three bumps in six weeks (2026-07-18 /
     # 07-31 / 08-05), each after trimming descriptions "to the minimum",
@@ -327,7 +414,76 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # param descriptions (nothing on the surface used them before), with
     # schema accounting added below so the newly-used space stays metered
     # rather than becoming an unmetered escape hatch.
-    budgets = {"minimal": 5000, "core": 11500, "full": 17000}
+    # Measured 2026-09-22 after adding the full-tier memory_reinstate
+    # contract: full is 17,238 chars across 38 tools. The 17,250 cap leaves
+    # 12 chars and keeps the minimal/core ceilings unchanged.
+    # Measured 2026-09-23 after memory_search's supersession sentence
+    # changed from "prefer superseded_by_text" (a contract the review
+    # found wrong for ~4 in 10 legacy links) to the replaced_by pointer
+    # contract (field, verified flag, preview test, no chains): +242 chars
+    # on a minimal-tier tool, so minimal is 5,222 and full 17,480. Both
+    # caps move deliberately rather than cut another sentence of the same
+    # description; core (11,172) still fits.
+    # 2026-09-23 follow-up (replaced_by.current, memory_get's pointer):
+    # paid for inside the same descriptions (memory_search's min(5, top_k)
+    # rule moved into its top_k param description), caps unchanged —
+    # minimal 5,215, core 11,178, full 17,466.
+    # The audit-log notice adds five characters to core/full descriptions.
+    # 2026-09-25: memory_search's low_confidence and cortex sentences made
+    # truthful (+17, caps unchanged): minimal 5,232, core 11,200, full
+    # 17,488.
+    # 2026-09-26: memory_agents gained claim/release for v45 resource leases
+    # and update's expect (+295 on a core-tier tool, after trimming its own
+    # docstring): minimal 5,232, core 11,495, full 17,783. Core fits with 5
+    # to spare; the opt-in full cap moves deliberately, 17,500 -> 17,800.
+    # 2026-09-27: memory_agents gained update's children (v47), paid for by
+    # trimming the same docstring, caps unchanged: minimal 5,232, core
+    # 11,496, full 17,784.
+    # 2026-09-28: the park record (five update fields) landed on
+    # memory_agents and the send's wake decision (its seven values, clears
+    # and urgent) on memory_message, both core-tier tools, +199 after each
+    # docstring was tightened to pay for its own line; with the park
+    # expiry's default and cap (review fix, same day), then merged with
+    # #430's fan-out/prefix sentences in one tightened send docstring:
+    # minimal 5,232, core 11,706, full 17,994. Core and full move
+    # deliberately, 11,500 -> 11,750 and 17,800 -> 18,000, rather than cut
+    # the decision table that tells a sender what would wake a parked peer.
+    # 2026-09-29: memory_forget's filters now narrow (AND) and a match over
+    # memory.delete_confirm_threshold needs confirm_bulk, after a text +
+    # source delete under the old OR removed a whole source; +160 on a
+    # full-tier tool after tightening its docstring: minimal 5,232, core
+    # 11,706, full 18,154. Full moves deliberately, 18,000 -> 18,250.
+    # 2026-10-04: memory_message's done-park sentence names the designated
+    # coordinator (+11 for the word, +7 net), paid for by reflowing the
+    # same docstring one line shorter, caps unchanged: minimal 5,232, core
+    # 11,729, full 18,248 (2 to spare).
+    # 2026-10-04, re-based (maintainer decision): about eight bumps had left
+    # the caps a few characters above the totals, so every contract landed by
+    # cutting another, and the per-tool client limits above were found to be
+    # the real constraints. After the delegate rename (memory_message names
+    # the maintainer's delegate): minimal 5,232, core 11,728, full 18,247.
+    # Caps 5,750 / 12,750 / 19,250 leave 518 / 1,022 / 1,003.
+    # 2026-10-04, later (cross-model review): memory_agents, memory_message,
+    # memory_search and memory_toolset rewritten to lead with purpose and
+    # sibling routing, then review fixes (request_conflict, the receive
+    # cursor contract): minimal 5,501, core 12,352, full 18,871 — caps
+    # unchanged, 249 / 398 / 379 to spare.
+    # 2026-10-05: the standing-text fixes (#583) and then each write tool's
+    # sibling routing and hidden-tier marks (#586), measured on the merged
+    # tree: minimal 5,748, core 12,572, full 19,186 (2 / 178 / 64 to spare).
+    # Minimal moves 5,750 -> 6,000 and full 19,250 -> 19,450, about 250 each
+    # again; core keeps its cap. The in-flight #587 adds no description
+    # text, only parameter text, which the budget below meters.
+    # 2026-10-05, later (maintainer decision): memory_lesson_search moves from
+    # core to minimal, so minimal-tier sessions can read back the lessons
+    # memory_outcome writes; memory_search and memory_toolset drop it from
+    # their core lists. Measured: minimal 6,345, core 12,560, full 19,174.
+    # Minimal moves 6,000 -> 6,600 (255 to spare); core (190) and full (276)
+    # keep their caps.
+    # Measured 2026-10-05 on the v0.17.0 fork after RE integration:
+    # minimal 6,361, core 13,020, full 19,634. The RE tool adds 460
+    # characters to core/full; keep the existing headroom beside that tool.
+    budgets = {"minimal": 6600, "core": 13250, "full": 19950}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -343,11 +499,55 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
                 for pn, p in props.items()
                 if len(p.get("description") or "") > 300]
         assert over == [], f"over-long param descriptions: {over}"
-    # Measured 2026-08-31 after the build-scoped RE evidence tool landed:
-    # minimal 1912, core 5871, full 8980. Caps retain roughly 600-800
-    # characters of headroom per tier while metering the evidence tool's
-    # deliberately explicit archive, scope, and address-query contracts.
-    param_budgets = {"minimal": 2600, "core": 6700, "full": 9800}
+    # Measured 2026-08-25 immediately after the migration above:
+    # minimal 1826, core 4304, full 7413. Caps are those plus ~775 of
+    # headroom each — room for a real contract to land without a bump,
+    # not room to drift.
+    #
+    # core/full bumped 2026-09-05 for memory_outcome's `used_ids` (minimal
+    # tier, so it counts against all three): the 2026-08-25 headroom had
+    # been spent down to 53 chars on core and 4 on full, so no argument
+    # contract of any length could land. The caps below leave ~120 again,
+    # deliberately less than 775: still a wall, not a licence. Measured
+    # 2026-09-05 after the review fold (used_ids gained a cap and an
+    # error/miss split, documented in both places): minimal 2405, core
+    # 5159, full 8308 here, and minimal 4985 / core 9570 / full 15064
+    # against the description budgets above — the six used_ids result keys
+    # were listed by trimming memory_outcome's own docstring, not by
+    # moving a cap. 2026-09-08: a seventh key (used_ids_served_elsewhere)
+    # and the window invariant on the param were paid for the same way.
+    # 2026-09-20: memory_graph_review's corrected `scope` contract (a
+    # memory-source filter, not a finding kind — full tier only) was paid
+    # for by trimming the same tool's dst / store / proposal_id /
+    # proposal_ids / relation wording;
+    # full stood at 8398 before the fix.
+    # Measured 2026-09-22 after memory_reinstate's nine exact-input
+    # descriptions: full is 8,832 chars. The 8,925 cap leaves 93 chars.
+    # 2026-09-24: memory_search's top_k gained the min(5, top_k) rule its
+    # description dropped (+13): minimal 2,494, core 5,248, full 8,845 —
+    # core has 2 chars left.
+    # 2026-09-29: memory_forget's confirm_bulk (full tier only) was paid
+    # for by trimming the same tool's five memory-scope filter descriptions
+    # ("delete entries ..." to "entries ...", the docstring already says
+    # they delete); caps unchanged: minimal 2,494, core 5,248, full 8,909.
+    # 2026-10-04, re-based with the description caps (same reason, about a
+    # tenth of headroom each): minimal 2,494, core 5,248, full 8,909 under
+    # 2,750 / 5,750 / 9,750.
+    # 2026-10-04, later: the cross-model review (Claude + Codex) gave the
+    # two board tools their first parameter descriptions (26 parameters,
+    # +2,540, carrying the caps Codex strips from the schema) and
+    # memory_search its filter-scope wording: minimal 2,739, core 8,050,
+    # full 11,711. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
+    # headroom, measured on the text that landed rather than assumed.
+    # 2026-10-05 (maintainer decision): memory_lesson_search moves to
+    # minimal, +137 there: minimal 2,879, core 8,274, full 11,935. The
+    # in-flight #587 adds about 40 more to minimal (its ranges stated in
+    # memory_search and memory_lesson_search parameter text), which would
+    # leave under 100 of 3,000; minimal moves to 3,250.
+    # Same integration, including RE's scope/archive/address contracts:
+    # minimal 2,918, core 9,649, full 13,442; the added tool needs 1,368
+    # parameter-description characters. Preserve about a tenth of headroom.
+    param_budgets = {"minimal": 3250, "core": 10250, "full": 14000}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (
@@ -377,8 +577,9 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
     # Step-3c driver verb: an agent triaging the deep response's
     # lesson_duplicates / world_duplicates must be able to record "these
     # slots are distinct" over MCP (parity with dismiss_pair). src/dst are
-    # the listed "entity|attribute" keys; the MCP layer splits at the FIRST
-    # "|" (listing keys fold literal pipes, so the split is unambiguous).
+    # the listed "entity|attribute" keys; the MCP layer decodes them
+    # (service._parse_slot_key: listing keys spell a literal "|" in a name
+    # as "%7C", so each has exactly one bare "|").
     mod = _reload(tmp_path, monkeypatch)
     calls: list[tuple] = []
     monkeypatch.setattr(
@@ -389,10 +590,21 @@ def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkey
                   {"action": "dismiss_slot_pair", "store": "lesson",
                    "src": "deploy-daemon|approach", "dst": "deploy-host|pitfall"})
     assert out == {"dismissed": True}
+    out = mod.memory_graph_review("dismiss_slot_pair", store="lesson",
+                                  src="ci%7Ccd-deploy|approach",
+                                  dst="ci-cd-deploy|approach")
+    assert out == {"dismissed": True}
     assert calls == [("lesson", "deploy-daemon", "approach",
-                      "deploy-host", "pitfall")]
+                      "deploy-host", "pitfall"),
+                     ("lesson", "ci|cd-deploy", "approach",
+                      "ci-cd-deploy", "approach")]
     bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson", src="no-pipe")
     assert bad.get("error") == "store_src_dst_required"
+    # Two bare pipes are not a listed key: refuse rather than guess a split.
+    bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson",
+                                  src="ci|cd deploy|approach", dst="x|y")
+    assert bad.get("error") == "store_src_dst_required"
+    assert len(calls) == 2
 
 
 def test_graph_review_restore_slot_routes_to_service(tmp_path: Path, monkeypatch) -> None:
@@ -416,12 +628,22 @@ def test_graph_review_restore_slot_routes_to_service(tmp_path: Path, monkeypatch
     out = _invoke("memory_graph_review",
                   {"action": "restore_slot", "store": "world", "src": "acme"})
     assert out == {"restored": 1}
+    # A literal "|" in a name is listed as "%7C", in a key or its entity half.
+    for src in ("ci%7Ccd-deploy|approach", "ci%7Ccd-deploy"):
+        assert mod.memory_graph_review(
+            "restore_slot", store="lesson", src=src) == {"restored": 1}
     assert calls == [("lesson", "deploy-daemon", "approach", {"decided_by": "agent"}),
-                     ("world", "acme", None, {"decided_by": "agent"})]
+                     ("world", "acme", None, {"decided_by": "agent"}),
+                     ("lesson", "ci|cd-deploy", "approach", {"decided_by": "agent"}),
+                     ("lesson", "ci|cd-deploy", None, {"decided_by": "agent"})]
     bad = mod.memory_graph_review("restore_slot", store="fact", src="x|y")
     assert bad.get("error") == "store_src_required"
     bad = mod.memory_graph_review("restore_slot", store="lesson")
     assert bad.get("error") == "store_src_required"
+    bad = mod.memory_graph_review("restore_slot", store="lesson",
+                                  src="ci|cd deploy|approach")
+    assert bad.get("error") == "store_src_required"
+    assert len(calls) == 4
 
 
 # ── served policy text (2026-09-02) ───────────────────────────────────────
@@ -464,3 +686,185 @@ def test_recall_surface_carries_trap_avoidance_guidance(
     # The prose is anchored to the flag the tool already returns, so the
     # guidance points at a computed signal rather than a vague heuristic.
     assert "re_verify" in d["memory_lesson_search"]
+
+
+def test_message_description_names_the_maintainers_delegate(
+        tmp_path: Path, monkeypatch) -> None:
+    """Since #550 (2026-10-03) only the session the operator granted the
+    live ``delegate:<project>`` lease (``designated:coordinator:<project>``
+    before 0.16.1) reopens a done park; holding the open
+    ``coordinator:<project>`` lease, which the memory_agents description
+    tells sessions to claim, grants nothing. A "coordinator" in the send's
+    done-park sentence reads, beside that claim line, as if claiming the
+    lease conferred the authority (maintainer decision 2026-10-04: the
+    authority is the maintainer's delegate)."""
+    d = _descriptions(tmp_path, monkeypatch)
+    assert "coordinator:<project>" in d["memory_agents"]
+    assert "maintainer's delegate" in d["memory_message"]
+    assert "coordinator" not in d["memory_message"]
+
+
+def test_store_and_outcome_teach_status_notes_and_the_credit_window(
+        tmp_path: Path, monkeypatch) -> None:
+    """Peers' memory-change notes and the dream's exclusion both key on
+    ``source="status"`` (``memory_changes_since``, ``DreamConfig
+    .exclude_sources``), but ``memory_store``'s ``source`` never named it, so
+    a session following the per-turn tail stored progress under the default
+    ``agent``. And ``used_ids`` credits only this session's searches from the
+    last hour (``use_window_seconds``), a rule that sat at the end of a
+    parameter description while 43% of Codex outcomes in the 2026-10-04
+    review carried no ``used_ids``: it leads the docstring now."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
+    source = tools["memory_store"].input_schema["properties"]["source"]["description"]
+    assert '"status"' in source and "dream skips" in source
+    outcome = " ".join(tools["memory_outcome"].description.split())
+    lead = outcome.split("Returns")[0]
+    assert "used_ids" in lead and "last hour" in lead
+    used = tools["memory_outcome"].input_schema["properties"]["used_ids"]["description"]
+    assert "hour" not in used
+
+
+def test_board_tools_describe_every_parameter_with_its_cap(
+        tmp_path: Path, monkeypatch) -> None:
+    """The 2026-10-04 cross-model review (Claude + Codex, both reading the
+    served surface) found the two most-called tools shipping 26 parameters
+    with no description at all, and Codex strips ``maxLength`` / ``minimum``
+    / ``maximum`` from MCP schemas, so a cap that is not in the description
+    text never reaches an OpenAI model: 63 of its 110 model-caused errors in
+    five weeks were ``string_too_long`` on these fields. Every parameter of
+    both board tools carries a description, and the capped ones say the cap
+    in words."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
+    for name in ("memory_agents", "memory_message"):
+        props = tools[name].input_schema["properties"]
+        bare = [p for p, v in props.items() if len(v.get("description") or "") < 20]
+        assert bare == [], f"{name} parameters without a description: {bare}"
+    agents = tools["memory_agents"].input_schema["properties"]
+    assert "240" in agents["status"]["description"]
+    assert "120" in agents["task"]["description"]
+    assert "40" in agents["children"]["description"]
+    assert "epoch" in agents["park_expires"]["description"]
+    message = tools["memory_message"].input_schema["properties"]
+    assert "8192" in message["text"]["description"]
+    assert "1..50" in message["limit"]["description"]
+    assert "required" in message["request_id"]["description"]
+    d = _descriptions(tmp_path, monkeypatch)
+    # Both families sent ``limit`` to memory_search (140 calls, silently
+    # ignored) and read a withheld wake receipt as a failed send.
+    assert "not limit" in tools["memory_search"].input_schema["properties"]["top_k"]["description"]
+    assert "send needs to, text and request_id" in d["memory_message"]
+    assert "not delivery failure" in d["memory_message"]
+    # Expanding the server tier does not refresh a client's callable list
+    # (observed from Codex 2026-10-04: status said full, catalog stayed 24).
+    assert "not client refresh" in d["memory_toolset"]
+
+
+def test_lower_tier_descriptions_mark_higher_tier_tools(
+        tmp_path: Path, monkeypatch) -> None:
+    """A description that names a tool its own tier does not show must say
+    which tier does, or a session at the lower tier calls a tool its client
+    never listed (2026-10-04 review, H5: five "No such tool" errors and
+    about ten abandoned tool searches for hidden tools in two months, while
+    every session that expanded found them). The fixed form is the tier in
+    parentheses right after the first mention, ``memory_fact_resolve
+    (core)``, or a ``Core tier``/``Full tier`` label earlier in the same
+    sentence. memory_toolset is exempt: describing the tiers is its job."""
+    import re
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    from pseudolife_memory.toolset_tiers import TIERS
+    rank = {t: i for i, t in enumerate(TIERS)}
+    tiers = mod._TOOL_TIERS
+    names = re.compile(r"\b(" + "|".join(sorted(tiers, key=len, reverse=True))
+                       + r")\b`*")
+    unmarked, wrong = [], []
+    for t in asyncio.run(mod.mcp.list_tools()):
+        if t.name == "memory_toolset":
+            continue
+        props = (t.input_schema or {}).get("properties", {}) or {}
+        texts = [" ".join((t.description or "").split())] + [
+            " ".join((p.get("description") or "").split()) for p in props.values()]
+        for text in texts:
+            seen: set[str] = set()
+            for m in names.finditer(text):
+                named = m.group(1)
+                if named in seen or rank[tiers[named]] <= rank[tiers[t.name]]:
+                    continue
+                seen.add(named)
+                hint = re.match(r"\s*\((core|full)\)", text[m.end():])
+                sentence = re.split(r"[.;] ", text[:m.start()])[-1]
+                label = re.search(r"\b(Core|Full) tier\b", sentence)
+                given = (hint.group(1) if hint
+                         else label.group(1).lower() if label else None)
+                if given is None:
+                    unmarked.append(f"{t.name} -> {named}")
+                elif given != tiers[named]:
+                    wrong.append(f"{t.name} -> {named} ({given}, is {tiers[named]})")
+    assert unmarked == [], f"higher-tier tools named without a tier hint: {unmarked}"
+    assert wrong == [], f"tier hints that name the wrong tier: {wrong}"
+
+
+def test_tier_adds_prose_matches_the_registry(tmp_path: Path, monkeypatch) -> None:
+    """memory_toolset(status) serves ``_TIER_ADDS``, prose written by hand
+    over ``_TOOL_TIERS``; the 2026-10-04 review found it missing the board
+    tools and two full-tier tools. Each tool a tier adds maps to the word
+    that names it in that tier's prose, and the map must cover exactly the
+    registry's difference between neighbouring tiers, so a tool that is
+    added or moves tier fails here until the prose says so."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    words = {
+        "core": {
+            "memory_agents": "memory_agents", "memory_message": "memory_message",
+            "memory_graph": "graph", "memory_graph_relate": "graph",
+            "memory_recall": "recall", "memory_world_set": "world facts",
+            "memory_world_search": "world facts",
+            "document_ingest": "documents",
+            "document_search": "documents", "memory_stats": "stats",
+            "re_evidence": "RE evidence",
+            "memory_episode_start": "episodes", "memory_episode_end": "episodes",
+            "memory_get": "memory_get", "memory_fact_resolve": "fact_resolve",
+        },
+        "full": {
+            "memory_supersede": "supersede", "memory_reinstate": "reinstate",
+            "memory_forget": "forget", "memory_history": "history",
+            "memory_reinforce": "reinforce", "memory_recent": "recent",
+            "memory_episode_summary": "episode_summary", "memory_dream": "dream",
+            "memory_graph_review": "graph-review",
+            "memory_graph_unrelate": "graph_unrelate", "memory_alias": "aliases",
+            "memory_consolidate": "consolidation",
+            "memory_consolidation_candidates": "consolidation",
+            "memory_relation_define": "relation-define",
+        },
+    }
+    assert set(mod._TIER_ADDS) == set(words)
+    below = {"core": "minimal", "full": "core"}
+    for tier, mapping in words.items():
+        added = mod._visible_tool_names(tier) - mod._visible_tool_names(below[tier])
+        assert set(mapping) == added, (
+            f"{tier} adds {sorted(added ^ set(mapping))} unlike this map; "
+            f"update _TIER_ADDS[{tier!r}] and the map together")
+        missing = sorted(n for n, w in mapping.items() if w not in mod._TIER_ADDS[tier])
+        assert missing == [], f"_TIER_ADDS[{tier!r}] does not name {missing}"
+
+
+def test_sibling_tools_route_to_each_other(tmp_path: Path, monkeypatch) -> None:
+    """The routing between the write tools lived on one side only (2026-10-04
+    review, M9/M10): memory_store said to use memory_fact_set for a canonical
+    value, but memory_fact_set never sent narrative to memory_store or many
+    concurrent values to memory_set_add, nor said a set slot refuses it; and
+    memory_supersede never sent test junk to memory_forget or a slot to
+    memory_fact_set. memory_recall quoted its caps as numbers that drift."""
+    d = _descriptions(tmp_path, monkeypatch)
+    fact_set = d["memory_fact_set"]
+    assert "memory_store" in fact_set and "memory_set_add" in fact_set
+    assert "set-valued slot errors" in fact_set
+    assert "open questions go to ``memory_search``" in d["memory_fact_get"]
+    supersede = d["memory_supersede"]
+    assert "memory_forget" in supersede and "memory_fact_set" in supersede
+    assert "currently" not in d["memory_recall"]

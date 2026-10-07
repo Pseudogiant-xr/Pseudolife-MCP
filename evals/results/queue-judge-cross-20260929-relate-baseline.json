@@ -1,0 +1,159 @@
+{
+ "built_by": "evals/merge_relate_gates.py",
+ "inputs": [
+  "queue-judge-ladder-20260929-opus55.json",
+  "queue-judge-ladder-20260929-sonnet55.json"
+ ],
+ "panel": "queue-judge-panel-20260902.json",
+ "first": {
+  "arm": "opus-5-5",
+  "model": "claude-opus-5-5"
+ },
+ "second": {
+  "arm": "sonnet-5-5",
+  "model": "claude-sonnet-5-5"
+ },
+ "gates": {
+  "reject_gate": 0.8,
+  "reject_gate_2": 0.7,
+  "accept_gate": 0.6
+ },
+ "replicates": [
+  {
+   "two_vote_reject_class": {
+    "n": 18,
+    "bad": 0,
+    "bad_ids": [],
+    "links_filed": 0,
+    "links_on_panel_relate": 0
+   },
+   "two_vote_accept_not_lowdiff": {
+    "n": 7,
+    "bad": 1,
+    "bad_ids": [
+     2016
+    ]
+   },
+   "splits": {
+    "n": 5,
+    "rows": [
+     1952,
+     1966,
+     2024,
+     2050,
+     2275
+    ]
+   }
+  },
+  {
+   "two_vote_reject_class": {
+    "n": 17,
+    "bad": 0,
+    "bad_ids": [],
+    "links_filed": 0,
+    "links_on_panel_relate": 0
+   },
+   "two_vote_accept_not_lowdiff": {
+    "n": 7,
+    "bad": 1,
+    "bad_ids": [
+     2016
+    ]
+   },
+   "splits": {
+    "n": 5,
+    "rows": [
+     1953,
+     2049,
+     2050,
+     2055,
+     2123
+    ]
+   }
+  }
+ ],
+ "production_path": [
+  {
+   "applied": 18,
+   "bad": 0,
+   "single": 8,
+   "two_vote": 10
+  },
+  {
+   "applied": 17,
+   "bad": 0,
+   "single": 9,
+   "two_vote": 8
+  }
+ ],
+ "single_vote": {
+  "opus-5-5": [
+   {
+    "n": 8,
+    "bad": 0,
+    "relate": 0
+   },
+   {
+    "n": 9,
+    "bad": 0,
+    "relate": 0
+   }
+  ],
+  "sonnet-5-5": [
+   {
+    "n": 15,
+    "bad": 0,
+    "relate": 0
+   },
+   {
+    "n": 15,
+    "bad": 1,
+    "relate": 0
+   }
+  ]
+ },
+ "vote_confidence": {
+  "opus-5-5": {
+   "accept": {
+    "n": 54,
+    "mean": 0.7144,
+    "ge_reject_gate": 21,
+    "ge_reject_gate_2": 34
+   },
+   "leave": {
+    "n": 5,
+    "mean": 0.5,
+    "ge_reject_gate": 0,
+    "ge_reject_gate_2": 0
+   },
+   "reject": {
+    "n": 67,
+    "mean": 0.6831,
+    "ge_reject_gate": 17,
+    "ge_reject_gate_2": 33
+   }
+  },
+  "sonnet-5-5": {
+   "accept": {
+    "n": 52,
+    "mean": 0.7406,
+    "ge_reject_gate": 23,
+    "ge_reject_gate_2": 30
+   },
+   "reject": {
+    "n": 74,
+    "mean": 0.7259,
+    "ge_reject_gate": 30,
+    "ge_reject_gate_2": 49
+   }
+  }
+ },
+ "relations": {
+  "opus-5-5": {},
+  "sonnet-5-5": {}
+ },
+ "relate_by_arm": {
+  "opus-5-5": null,
+  "sonnet-5-5": null
+ }
+}

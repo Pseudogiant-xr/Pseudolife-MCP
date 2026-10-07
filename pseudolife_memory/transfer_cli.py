@@ -42,6 +42,7 @@ import json
 import os
 import sys
 import time
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Mapping
@@ -50,7 +51,11 @@ import psycopg
 
 from pseudolife_memory.backup_cli import _default_data_dir
 from pseudolife_memory.storage import embedded_pg
-from pseudolife_memory.storage.schema import BENCH_RESET_TABLES, ensure_schema
+from pseudolife_memory.storage.schema import (
+    BENCH_RESET_TABLES,
+    _backfill_trace_invalidations,
+    ensure_schema,
+)
 
 FORMAT_VERSION = 1
 
@@ -60,11 +65,13 @@ FORMAT_VERSION = 1
 # BENCH_RESET_TABLES — the roster test is the forcing function that makes a
 # future table pick a side.
 EXPORTED_TABLES = (
-    "meta", "episodes", "entries", "entities", "entity_aliases",
-    "relations", "edges", "edge_proposals", "entity_proposals",
+    "meta", "episodes", "entries", "entry_reinstatement_decisions",
+    "entities", "entity_aliases",
+    "relations", "edges", "edge_evidence", "edge_proposals", "entity_proposals",
     "entity_kinds", "dismissed_pairs", "facts", "world_facts", "lessons",
     "outcome_signals", "communities", "entity_communities",
-    "memory_traces", "entity_sources", "merge_decisions",
+    "memory_traces", "memory_trace_invalidations", "entity_sources",
+    "merge_decisions",
     "chronicle_events",
     # v35: the store-curation judge's verdict memo travels like
     # dismissed_pairs — a settled pair stays settled on the target bank.
@@ -80,18 +87,64 @@ EXPORTED_TABLES = (
 # strict RE proof records travel only through re_evidence's hash-checked archive.
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
-    "slot_reads", "re_evidence_artifacts", "re_claims", "re_claim_evidence",
+    "re_evidence_artifacts", "re_claims", "re_claim_evidence",
+    "slot_reads", "lesson_search_events",
+    # v43: which clients registered with THIS daemon, and when — the
+    # session half of the retrieval telemetry above.
+    "client_sessions",
+    # Mail and instance credentials belong to the source bank's runtime.
+    "coordination_agents", "coordination_messages",
+    # The board's audit log holds message bodies (paths, usernames) and its
+    # hash chain is anchored in this bank: it stays in full backups only.
+    "coordination_events",
+    # v45: who holds or queues for each lease, by this bank's agent ids.
+    "coordination_leases", "coordination_lease_waiters",
+    # v49: the rings the daemon decided, by this bank's agent and message ids.
+    "coordination_wakes",
+    # v53: invited machines' credentials (token and code hashes). Like the
+    # board's instance credentials they stay in full backups only.
+    "principals",
+    # v54: the maintainer's passkeys, bootstrap codes and spent challenge
+    # nonces are credentials of this deployment (its RP ID): full backups only.
+    "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
 )
+
+# Columns of an exported table that are serving telemetry under the same
+# rule: outcome_signals.used_ids (v44) records what an outcome's ids became
+# against this bank's retrieval_events, which stay behind.
+EXCLUDED_COLUMNS = {"outcome_signals": ("used_ids",)}
 
 # meta keys that must not travel: the target build owns its schema_version
 # and any extension lineage marker (the `*_schema_version` convention —
 # see docs/guide/configuration.md#extension-schemas), and the
 # active-session pointer is transient session state.
-_META_SKIP_KEYS = {"schema_version", "active_session_pointer"}
+_META_SKIP_KEYS = {
+    "schema_version", "active_session_pointer",
+    # Bank-local acknowledgement authority. Logical transfer creates or
+    # retains the target generation; only physical restore preserves it.
+    "dream_ack_secret_v1",
+    # Monotonic coordination clock state belongs to the target bank.
+    "coordination_hlc_highwater",
+    # Mailbox authority belongs to the destination, not imported knowledge.
+    "coordination_bank_id",
+    # The writer-lease handover counter belongs to the target bank: an
+    # imported value could move it backwards under a writer that
+    # remembers a higher one, hiding a handover.
+    "writer_lease_epoch",
+    # v54: the key that MACs maintainer challenges belongs to this bank.
+    "maintainer_secret_v1",
+}
 
 
 def _skip_meta_key(key) -> bool:
     return key in _META_SKIP_KEYS or str(key).endswith("_schema_version")
+
+
+# curation_safety._LISTING_SPELLING_META (not imported: that module loads
+# torch): the one-time carry-over of folded curation dismissals has run. A
+# daemon started on the fresh target sets it with nothing to carry, so the
+# import clears it and only the export's own value stands.
+_CURATION_LISTING_SPELLING_META = "curation_listing_spelling_v2"
 
 # The freshness check import runs. Derived, not listed: every exported
 # table must be empty except the two a daemon-initialized bank legitimately
@@ -114,6 +167,8 @@ class TransferError(RuntimeError):
 def _json_default(value):
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
     raise TypeError(f"cannot serialize {type(value).__name__} for export")
 
 
@@ -208,10 +263,13 @@ def _export_table(conn, zf: zipfile.ZipFile, table: str) -> int:
         # FK the import defers regardless (belt and braces).
         cur.execute(f"SELECT * FROM {table} ORDER BY 1")
         cols = [d.name for d in cur.description]
+        dropped = EXCLUDED_COLUMNS.get(table, ())
         for row in cur:
             rec = dict(zip(cols, row))
             if table == "meta" and _skip_meta_key(rec.get("key")):
                 continue
+            for col in dropped:
+                rec.pop(col, None)
             text.write(json.dumps(
                 rec, default=_json_default, ensure_ascii=False) + "\n")
             n += 1
@@ -269,6 +327,8 @@ def perform_import(dsn: str, zip_path: Path | str, force: bool = False) -> dict:
                     "LOCK TABLE " + ", ".join(EXPORTED_TABLES)
                     + " IN EXCLUSIVE MODE")
                 _refuse_nonempty(conn)
+                conn.execute("DELETE FROM meta WHERE key = %s",
+                             (_CURATION_LISTING_SPELLING_META,))
                 for table in EXPORTED_TABLES:
                     if f"{table}.jsonl" not in names:
                         continue  # an older export without this table
@@ -283,7 +343,21 @@ def perform_import(dsn: str, zip_path: Path | str, force: bool = False) -> dict:
                             counts[table] = _import_meta(conn, lines)
                         else:
                             counts[table] = _import_table(
-                                conn, table, lines)
+                                conn, table, lines,
+                                legacy_entry_states=(
+                                    table == "entries"
+                                    and int(manifest.get("schema_version") or 0)
+                                    < 38
+                                ),
+                            )
+                # ensure_schema ran against the empty target before import,
+                # so its one-time v39 backfill could not see an older
+                # archive's entries/traces. Absence of the table member is
+                # the compatibility marker; a present-but-empty v39 member
+                # is authoritative and must remain empty.
+                if "memory_trace_invalidations.jsonl" not in names:
+                    counts["memory_trace_invalidations"] = (
+                        _backfill_trace_invalidations(conn))
                 _advance_sequences(conn)
     return {"counts": counts}
 
@@ -373,7 +447,9 @@ def _encode(value, udt: str):
     return value
 
 
-def _import_table(conn, table: str, lines) -> int:
+def _import_table(
+    conn, table: str, lines, *, legacy_entry_states: bool = False,
+) -> int:
     types = _column_types(conn, table)
     # Builtin relations are (re-)seeded by every daemon start; an export
     # naturally carries them, so collisions on name are expected identity,
@@ -414,6 +490,12 @@ def _import_table(conn, table: str, lines) -> int:
             if not line:
                 continue
             rec = json.loads(line)
+            if table == "entries" and legacy_entry_states:
+                # Do not let the target column default classify old rows as
+                # new writes. Service initialization applies the imported
+                # finite display cursor plus the target's current source
+                # policy once the complete transaction has landed.
+                rec["dream_state"] = None
             unknown = set(rec) - set(types)
             if unknown:
                 raise TransferError(
@@ -442,7 +524,14 @@ def _import_table(conn, table: str, lines) -> int:
 
 def _advance_sequences(conn) -> None:
     """Move each serial id sequence past the imported rows so fresh writes
-    extend the bank instead of colliding."""
+    extend the bank instead of colliding.
+
+    Entry IDs also survive in FK-free invalidation events and reinstatement
+    decisions after their row is deleted. Keep those identities retired:
+    reusing one could collide with an old slot/source event and suppress a
+    later correction warning, or make a reinstatement replay report on an
+    unrelated entry.
+    """
     for table in EXPORTED_TABLES:
         if "id" not in _column_types(conn, table):
             continue
@@ -451,6 +540,19 @@ def _advance_sequences(conn) -> None:
         ).fetchone()[0]
         if not seq:
             continue  # e.g. communities: BIGINT PK without a sequence
+        if table == "entries":
+            max_retained_id = conn.execute(
+                "SELECT GREATEST("
+                "  COALESCE((SELECT MAX(id) FROM entries), 0), "
+                "  COALESCE((SELECT MAX(source_entry_id) "
+                "            FROM memory_trace_invalidations), 0), "
+                "  COALESCE((SELECT MAX(entry_id) "
+                "            FROM entry_reinstatement_decisions), 0))"
+            ).fetchone()[0]
+            if max_retained_id:
+                conn.execute("SELECT setval(%s, %s, true)",
+                             (seq, max_retained_id))
+            continue
         conn.execute(
             f"SELECT setval(%s, (SELECT MAX(id) FROM {table}), true) "
             f"WHERE EXISTS (SELECT 1 FROM {table})",

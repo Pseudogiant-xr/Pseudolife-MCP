@@ -1,0 +1,4123 @@
+"""Durable instance identities and addressed mail, separate from retrieval.
+
+Mutation paths: bank identity establishment, register, update, attach, heartbeat,
+detach, send, receive (first read), acknowledge, attempt, prune, restore
+recovery, operator rebind and operator redaction, the v45 resource
+leases: acquire (grant, queue, renew), release, operator break, and the
+settling any lease call, listing, prune or recovery does (expire, grant),
+and the v55 naming of rows by a session retitle (``title_names``).
+Every one of them except a heartbeat and a plain lease renewal appends to
+the audit log (``coordination_events``) in its own transaction; a heartbeat
+that changes the row's name (v55) logs that one change. See
+``_append``. A renewal that changes a lease's purpose or estimate is
+logged. Only redaction (a send event's ``body``, which is outside the hash)
+and prune's retention cut change existing log rows, both under the chain
+lock. There is no derived cache.
+Callers serialize access to the mailbox connection with the coordination lock,
+never the service lock (``CoordinationConnection`` below). SQL row locks also
+protect independent connections; send locks the sender and every recipient
+in ID order to avoid reciprocal-send deadlocks. Recovery/rebind/redaction are operator-only
+entry points: the HTTP/service layer must never expose them as agent tools.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import dataclass
+import hashlib
+import hmac
+import json
+import logging
+import math
+import re
+import secrets
+import time
+import unicodedata
+import uuid
+from typing import Any
+
+import psycopg
+from psycopg.rows import dict_row, tuple_row
+from psycopg.types.json import Jsonb
+
+from pseudolife_memory.storage.postgres import connect_retrying_local_ports
+from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+
+logger = logging.getLogger("pseudolife-mcp")
+
+
+class CoordinationConnection:
+    """Dedicated autocommit connection for the mailbox, never the shared
+    service connection.
+
+    Mailbox calls must not queue behind the service lock: a heartbeat or
+    identity check that waits on a consolidation pass expires the adapter's
+    lease and fails its 5s context check (2026-09-20 daemon log: dispatch
+    waited 8.6s, autosave 47s). The rows are guarded by their own SQL row
+    locks, so a second connection is safe; callers still serialize this
+    one with the coordination lock, because psycopg transaction blocks on
+    one connection must never interleave across threads.
+
+    Session setup mirrors ``PostgresStorage._connect`` and the commit check
+    mirrors ``PostgresStorage._txn``: same lock timeout, same public
+    search_path, same refusal to report a transaction the server rolled
+    back when the connection broke mid-block. No schema work happens here;
+    the shared connection ensures the schema before this one is opened.
+    """
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        self._in_txn = False
+        self._conn = self._connect()
+
+    def _connect(self) -> psycopg.Connection:
+        conn = connect_retrying_local_ports(
+            self.dsn, connect_timeout=10, autocommit=True)
+        conn.execute("SET lock_timeout = '5s'")
+        conn.execute("SET search_path TO public")
+        return conn
+
+    @property
+    def conn(self) -> psycopg.Connection:
+        """Heal on next use after a Postgres restart, like the shared one.
+
+        Never mid-block: a statement after the connection broke inside a
+        ``_txn`` must fail with the block, not commit alone on a fresh
+        connection (the shared connection pins the same way)."""
+        c = self._conn
+        if not self._in_txn and (c.closed or c.broken):
+            logger.warning("coordination connection lost (closed=%s broken=%s); "
+                           "reconnecting", c.closed, c.broken)
+            self._conn = self._connect()
+        return self._conn
+
+    def close(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:  # noqa: BLE001 — never fail a shutdown on close
+            pass
+
+    @contextmanager
+    def _txn(self):
+        # Re-entrant (v54): a maintainer's signed action spends its nonce
+        # and changes the board in one transaction, so the board method's
+        # own block becomes a savepoint of the outer one, and only the
+        # outermost block ends the pin.
+        conn = self.conn
+        outer = not self._in_txn
+        self._in_txn = True
+        try:
+            with conn.transaction() as tx:
+                yield
+        finally:
+            if outer:
+                self._in_txn = False
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
+
+
+# Conservative initial bounds for the experiment, not measured throughput
+# claims. Small queues and one-day bodies bound unattended cost and stale work;
+# a longer request-key window makes ordinary offline retries idempotent.
+MAX_TEXT_BYTES = 8192
+MAX_LABEL = 120
+MAX_SCOPE = 120
+# v55: the name a row shows on the board, bounded like the label. Sources in
+# ascending precedence: a lower one never replaces a name a higher one set,
+# an equal or higher one always does. 'agent' is highest so a session can
+# correct a stale harness title (after /clear the shim still reads the old
+# transcript; delegate review of #582, 2026-10-05). Clients may claim only
+# 'agent' and 'harness'; 'title' is the daemon's, from a session retitle.
+MAX_NAME = MAX_LABEL
+NAME_SOURCES = ("", "title", "harness", "agent")
+_NAME_RANK = {source: rank for rank, source in enumerate(NAME_SOURCES)}
+CLIENT_NAME_SOURCES = frozenset({"agent", "harness"})
+# v47: the subagents a session names under its own address. Room for a
+# short work-item label each, and a list small enough to read at a glance
+# in a peer listing, like the 240-character status.
+MAX_CHILDREN = 8
+MAX_CHILD_LABEL = 40
+# v50: a child the plugin's SubagentStart hook lists is an entry with its
+# host's ``agent_id`` (Claude Code's are 17 hex characters, measured
+# 2026-09-30) and the label ``<agent_type>#<first 8 of the id>``, the type
+# cut to fit MAX_CHILD_LABEL. SubagentStart carries no task description.
+# Hook entries have a bound of their own, the same glance-sized eight, and
+# never count against the parent's MAX_CHILDREN labels, so a parent's update
+# is never refused because of them (PR #481 review). Past it a new start
+# replaces the oldest hook entry, the one whose stop was most likely missed.
+MAX_HOOK_CHILDREN = 8
+_HOOK_CHILD_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_HOOK_CHILD_KIND = re.compile(r"[A-Za-z0-9._:-]{1,64}")
+HOOK_CHILD_KIND_CUT = MAX_CHILD_LABEL - 9
+# v50: what a subagent's own address is told when it tries to send
+# (maintainer decision 2026-09-30).
+CHILD_SEND_REFUSED = "a subagent does not send board mail; ask your parent session"
+# v49: the park record, a session's standing statement of why it stopped
+# (maintainer decision 2026-09-28). ``park_needs`` is one line saying what
+# would clear it, ``park_resume`` what to do once cleared, sized like the
+# status; ``park_clear_by`` names an agent id, ``maintainer``, a lease name
+# or ``anyone``.
+PARK_REASONS = ("done", "blocked", "needs_approval", "needs_info", "needs_resource",
+                "waiting_peer")
+MAX_PARK_NEEDS = 120
+MAX_PARK_RESUME = 240
+MAX_PARK_CLEAR_BY = 120
+MAX_CLEARS = 120
+# A park must not withhold mail forever once its clearer is gone: a new
+# park without ``park_expires`` expires after PARK_DEFAULT_TTL, and none may
+# be set past PARK_MAX_TTL; an expired park is an idle session, which only
+# urgent mail rings.
+# Starting values from the board orchestrator's review of PR #433
+# (2026-09-28), awaiting the maintainer, not measurements: 12 h covers one
+# overnight run, a week the longest lease a session may hold.
+PARK_DEFAULT_TTL = 12 * 3600
+PARK_MAX_TTL = 7 * 86400
+_PARK_TEXT_LIMITS = {"park_needs": MAX_PARK_NEEDS, "park_clear_by": MAX_PARK_CLEAR_BY,
+                     "park_resume": MAX_PARK_RESUME}
+PARK_FIELDS = ("park_reason", "park_needs", "park_clear_by", "park_resume", "park_expires")
+_PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "park_resume": "",
+                 "park_expires": None, "park_set_at": None}
+# A status that says the session's work is over reads as parked done to the
+# Stop-hook park gate, so a session that ended with one is not asked to park.
+# A done park says "I expect no follow-up", not "unreachable" (maintainer,
+# 2026-10-03: a coordinator's review of a finished PR could not reach the
+# session that opened it). Urgent mail reopens it when the sender is the
+# maintainer (a principal in ``coordination.maintainer_principals``), the
+# maintainer's delegate for the recipient's project, or the agent the park
+# names in ``park_clear_by``. Each comes from the sender's authenticated
+# bearer, the lease table or the recipient's own park, never from anything a
+# message says. The first two are AUTHORITY_REASONS, which spend their own
+# hourly budget instead of the plain urgent allowance.
+AUTHORITY_REASONS = ("maintainer", "delegate")
+REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
+# 0.16.0 recorded the delegate's rings as ``coordinator`` (renamed
+# 2026-10-04, maintainer decision: the open ``coordinator:<project>`` role
+# keeps that word). Rows written before the upgrade are history that still
+# counts against the authority budget and is still served.
+_AUTHORITY_ROW_REASONS = (*AUTHORITY_REASONS, "coordinator")
+_REOPEN_ROW_REASONS = (*REOPEN_REASONS, "coordinator")
+# Leases only the operator grants (``pseudolife-mcp lease delegate``, which
+# opens the bank directly like ``lease break``): an agent's acquire is
+# refused ``reserved_lease``, while its release (resigning) and the
+# operator's break work as for any lease. The power to reopen done parks is
+# the live ``delegate:<project>`` hold, one agent id, never the open
+# ``coordinator:<project>`` lease: any session can claim that one, and every
+# session on a host may share one principal (review of #549, 2026-10-03).
+# ``designated:`` was the namespace before 0.16.1 and stays reserved; a
+# ``designated:coordinator:<project>`` hold left on an upgraded bank grants
+# nothing (the operator re-grants with ``lease delegate``).
+DELEGATE_PREFIX = "delegate:"
+RESERVED_LEASE_PREFIXES = (DELEGATE_PREFIX, "designated:")
+# The open per-project coordinator lease any session may claim. The
+# maintainer may also assign or free it from the Console with a passkey
+# (``assign_coordinator`` / ``break_lease``, v54).
+COORDINATOR_PREFIX = "coordinator:"
+# Who may write a role record (``lease_delegate``, ``lease_assign``, a
+# ``lease_break``): the operator through the host CLI, or the maintainer
+# through a passkey-signed Console route (v54, addendum 2026-10-04). Never
+# an agent: no bearer-callable path passes either.
+ROLE_ACTORS = ("operator", "maintainer")
+# A grant lasts at least a minute and at most a week (the longest park and
+# expected end); the CLI's default is a day. Starting values, not
+# measurements.
+DELEGATION_MIN = 60
+DELEGATION_MAX = 7 * 86400
+# What a send to a done park is told would reopen it.
+DONE_REOPEN_BY = ("urgent mail from the maintainer, the maintainer's delegate for the project, "
+                  "or the park's named clearer")
+# What a withheld send is told would ring the park.
+WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
+# The ways to reach a session the board cannot ring right now, by client.
+# Codex: the doorbell (``codex queue``) serves CLI and desktop threads alike
+# but watches a thread only from the thread's first Pseudolife call after the
+# MCP server starts, and turns itself off after a failed queue. Claude Code:
+# the Stop hook's watcher, armed at every turn end for as long as the session
+# stays open (14 days; 59 minutes before 2026-10-05), or a background
+# wait-mail; a Claude Desktop Code-tab session also takes its host's session
+# send_message, which needs neither the board nor a listener.
+FALLBACK_CODEX = (
+    "Mail is queued for receive on the thread's next turn and rings once its Codex "
+    "doorbell re-arms (the shim watches a thread from its first Pseudolife call after "
+    "the MCP server starts). For an immediate response, the maintainer types into the "
+    "session's window.")
+FALLBACK_CLAUDE = (
+    "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
+    "listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the "
+    "board cannot tell) does its host's session send_message reach it now; a Claude Code "
+    "CLI session is reached by the maintainer typing into its window.")
+# What a role grant tells the maintainer or operator when the holder has no
+# live wake path now (maintainer requirement 2026-10-05: the delegate above
+# all must be reachable). Keyed by ``_listener_path``'s reasons.
+UNREACHABLE_REASONS = {
+    "listener_expired": "its listener lapsed",
+    "listener_unknown": "its listener has not reported yet",
+    "wake_disabled": "it has no wake listener",
+}
+UNREACHABLE_WARNING = (
+    "The new {role} has no live wake path now ({reason}): maintainer mail to it "
+    "waits for its next turn. A Claude Code session listens again when its turn "
+    "ends, a Codex thread once its doorbell re-arms; a client older than the "
+    "always-listening plugin stops 59 minutes after a turn until it is updated.")
+# ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
+# the board cannot tell one from a CLI session, so the text says so.
+FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
+FALLBACK_PATHS_CLAUDE = ("claude_desktop_send_message", "maintainer_types")
+DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.IGNORECASE)
+# Rings decided at send (v49) are kept this long: the nightly total counts a
+# day of them, and a week matches the request-key window.
+WAKE_RETENTION = 7 * 86400
+# A served ring rides the recipient's answers this long after it is first
+# served: longer than the adapter's 20 s heartbeat, so the answer to a
+# retried heartbeat still carries it (review, 2026-09-28).
+WAKE_SERVE_REPEAT = 25
+MAX_PAGE = 50
+MAX_PENDING = 256
+# Recipients one send may reach through ``to: "project:<name>"`` or ``"all"``:
+# a page of the peer list, and the largest burst the 2026-09-23/24 trial saw
+# was six (a HOST FIX to every session on the machine, 2026-09-27). Starting
+# value, not a measurement.
+FANOUT_MAX = 50
+MESSAGE_TTL = 86400
+DEDUPE_RETENTION = 7 * 86400
+# An address that has had neither its own activity nor a lease for this long
+# and is referenced by no retained message is removed by the same prune pass;
+# a lease renewal counts as activity only when the shim saw a turn, but a
+# held lease still keeps a live shim's address.
+AGENT_RETENTION = DEDUPE_RETENTION
+# Peers the default list shows: holding a lease, or active this recently.
+# Measured 2026-09-20 on the live bank: 90 registered addresses, 11 leased,
+# 67 of them Codex threads whose shim had been killed with the row still
+# marked attached, 5 to 160 hours idle, no task, no mail; and every parked shim
+# looked as busy as a working one because its heartbeat bumped
+# last_activity. An hour keeps a session that just ended visible for a
+# handover and hides the rest; they are still counted.
+ACTIVE_WINDOW = 3600
+# A status line older than this is marked stale in the peer list. Measured
+# 2026-09-25 on the live audit log (582 events over its first 21.6 h): agents
+# that were working refreshed their status at p50 8.7 min, p95 34 min; the
+# longest silence between one agent's own board actions inside a work block
+# was 51 min, and the shortest silence that ended one was 5.4 h (sessions
+# left idle overnight whose statuses still named merged PRs). Two hours is
+# over twice the longest working gap and well under the shortest idle one.
+STATUS_STALE_AFTER = 2 * 3600
+# A peer holding a lease is listed while its own last action is this recent;
+# after that it is counted like any idle peer. A shim's heartbeat holds the
+# lease for as long as the process lives, so on 2026-09-25 the default list
+# carried a dozen sessions silent for hours. Same measurement as above: this
+# shows a quiet session with its (by then stale) status for one more
+# ACTIVE_WINDOW, still under the 5.4 h shortest idle stretch.
+ATTACHED_IDLE_WINDOW = STATUS_STALE_AFTER + ACTIVE_WINDOW
+# v50: a hook-listed subagent older than this is no longer shown and is
+# dropped at the next write to the list: its SubagentStop was missed (a
+# killed session, a hook that failed open). The same window a quiet attached
+# peer stays listed; a subagent running longer than three hours is rarer
+# than a missed stop, and its entry comes back only with a new start.
+HOOK_CHILD_TTL = ATTACHED_IDLE_WINDOW
+# An address whose adapter registered ``resumable: false`` has no state file
+# behind it, so nothing can attach to it again once its lease lapses; it is
+# removed after this much idleness instead of AGENT_RETENTION. Same
+# measurement: the Claude shims without a state path left one new address
+# per launch. An address that did not declare either way predates the flag
+# and keeps the long window, so nothing an older adapter can still resume
+# is removed early.
+EPHEMERAL_AGENT_RETENTION = ACTIVE_WINDOW
+# The attach/heartbeat answer previews this many of the oldest pending
+# messages, each cut to this many characters, so the shim can show a turn
+# digest without a receive call. Five lines of a hundred characters plus
+# the header fit the 200-300 token budget the per-turn check-in design set
+# for a routine change (2026-09-20); the count says what the preview omits.
+PREVIEW_LIMIT = 5
+PREVIEW_EXCERPT = 100
+# Live delivery attempts per message across attachments. Each attachment
+# may attempt a pending message once; past this total the message is left
+# for explicit receive so one unacknowledged message cannot wake the host on
+# every restart.
+MAX_ATTEMPTS = 3
+ATTACHMENT_LEASE = 60
+SEND_RATE = 60
+# Resource leases (schema v45): named holds on shared resources such as a full
+# test suite, the GPU or a daemon maintenance window. Not the adapter's
+# attachment lease (``lease_until``) above. These bounds are starting points,
+# not measurements: a holder renews at least every LEASE_TTL_MIN, a
+# session-held lease (``coordinator:``, ``claim:``) lasts at most a day
+# between renewals, and an expected end past a week is a typo.
+MAX_LEASE_NAME = 120
+LEASE_TTL_MIN = 30
+LEASE_TTL_MAX = 86400
+LEASE_EXPECT_MAX = 7 * 86400
+LEASE_QUEUE_MAX = 64
+# A freed lease is granted to the head of its queue, which must renew within
+# this window (or its own ttl, if shorter) or lose it to the next waiter. The
+# 2026-09-24 overnight relay stalled 20 min (02:39-02:59) on a turn handed to
+# a session that never took it; five minutes bounds that class at a quarter
+# of it, and is about 60 polls of ``pseudolife-mcp lease run``.
+LEASE_GRANT_WINDOW = 300
+# Waiters named per lease in a listing; the count beside them is exact.
+LEASE_LIST_QUEUE = 10
+# A park whose ``park_clear_by`` names a lease is cleared by mail from that
+# lease's last holder for this long after the hold ended: the lease CLI frees
+# the board lease before it mails its release notice, and spends at most its
+# RELEASE_BUDGET (20 s) doing both. Three times that, so a slow daemon still
+# counts the notice; not a measurement.
+LEASE_CLEAR_GRACE = 60
+HLC_META_KEY = "coordination_hlc_highwater"
+WRITER_EPOCH_META_KEY = "writer_lease_epoch"
+BANK_ID_META_KEY = "coordination_bank_id"
+# Every message a recipient reads is agent-origin collaboration, never the
+# operator's authority; the label rides on the row so no consumer infers it.
+MESSAGE_ORIGIN = "agent"
+# The daemon's own sender (dream-stall notices, 2026-09-28). Reserved: the
+# dispatch layer refuses it as a bearer principal, so a row whose sender
+# principal is this came from the daemon. Its notices are context: decided
+# ``hinted`` without the wake table, and never a live-channel turn.
+DAEMON_PRINCIPAL = "daemon"
+DAEMON_NOTICE_WAKE = {"decision": "hinted", "reason": "daemon_notice"}
+# The maintainer's own sender (v54, spec 2026-10-02-maintainer-wake-design).
+# Reserved like ``daemon``: never a bearer principal, a label or a target.
+# Only the maintainer routes send as it, and only after a verified passkey
+# assertion; its messages carry origin ``maintainer`` and their proof.
+MAINTAINER_PRINCIPAL = "maintainer"
+MAINTAINER_ORIGIN = "maintainer"
+RESERVED_SENDERS = frozenset({DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL})
+# Words no label may spell, except a reserved sender's own: a label is the
+# name the digest and the Console show, so ``m a i n t a i n e r`` must not
+# pass for it. Compared on a label's skeleton (``_skeleton``), and refused
+# as near to each word as its rule says (security review, 2026-10-04:
+# "Mаintainer" with a Cyrillic а, "maintainer-bot", "Maintainer (passkey)",
+# "maintainer1" and "maintaner" all registered). ``contained``: refused
+# anywhere in the label, not only as all of it; ``edits``: refused within
+# that many single-letter edits or adjacent swaps of the whole label.
+# ``maintainer`` is the name a human acts on, so it is refused inside any
+# label and one edit off. ``daemon`` is an everyday word in session labels
+# ("daemon watcher") and its notices carry no authority, so only the whole
+# label one edit off. ``passkey`` and ``verified`` are only ever spelled
+# exactly: one edit off they are ordinary words ("passkeys", "verifier").
+NAME_RULES = {MAINTAINER_PRINCIPAL: {"contained": True, "edits": 1},
+              DAEMON_PRINCIPAL: {"contained": False, "edits": 1},
+              "passkey": {"contained": False, "edits": 0},
+              "verified": {"contained": False, "edits": 0}}
+RESERVED_NAMES = frozenset(NAME_RULES)
+# Letters that render like a Latin one, folded to it before comparing: a
+# small hand-picked subset of Unicode's confusables (UTS #39 skeleton), the
+# Cyrillic and Greek look-alikes of Latin letters plus the digits 0 and 1
+# and the ``l``/``ı`` that pass for ``o`` and ``i``. Case-sensitive, applied
+# before casefolding, because some letters only look Latin in one case
+# (Greek capital Η is an H, small η is not). Fullwidth and mathematical
+# letters need no entry: NFKD folds them.
+_CONFUSABLES = str.maketrans({
+    # Cyrillic small
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+    "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "һ": "h", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+    # Cyrillic capital
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P",
+    "С": "C", "Т": "T", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S", "У": "Y",
+    # Greek small
+    "α": "a", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "υ": "u", "χ": "x",
+    # Greek capital
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M",
+    "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+    # Latin and digits
+    "ı": "i", "l": "i", "0": "o", "1": "i",
+})
+# What a recipient reads in place of a message the maintainer withdrew.
+WITHDRAWN_TEXT = "the maintainer withdrew this message; do not act on it"
+# The audit event a withdrawal appends, so history, which keeps a send's
+# body for the audit retention, still withdraws it once the live row (and
+# its ``repudiated_at``) is pruned.
+REPUDIATE_EVENT = "maintainer_repudiate"
+# The wake reason a maintainer message's ring is recorded under; its own
+# hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
+# counts these rows per recipient.
+MAINTAINER_WAKE_REASON = "maintainer_message"
+# The audit log (schema v42): one append-only row per board mutation, written
+# in the mutation's own transaction and chained by sha256(prev_hash ||
+# canonical row), so an edited, inserted, reordered or removed row fails
+# ``verify_audit_chain``. Heartbeats are lease renewals, not board events, and
+# are not logged: at the shim's 20 s cadence a single session would add about
+# 4,300 rows a day, and attach/detach already bracket each lease.
+AUDIT_FORMAT = "pseudolife-coordination-audit-v1"
+GENESIS_HASH = "0" * 64
+# Serializes chain appends across connections (the daemon's mailbox connection,
+# the offline recovery CLI, any second process). Always taken after every
+# board-row lock a mutation takes: its holder then only reads, inserts new log
+# rows and changes old ones (prune's cut deletes them, redact blanks a body)
+# that nobody touches without holding it, so it never waits on anything and
+# cannot close a deadlock cycle.
+AUDIT_LOCK_KEY = "coordination-audit-chain"
+# The columns every event has, hashed or a hash. A send event (v46) also
+# carries ``body`` and ``body_salt``, outside the hash: its hashed payload
+# holds sha256(salt || body) instead, and nothing else derived from the body
+# (not even its length), so the body can be redacted and the chain still
+# verifies, and once the salt goes with it a guess at the body has nothing to
+# be checked against (maintainer decision, 2026-09-26). Rows written before
+# v46 keep the body inside the payload.
+AUDIT_COLUMNS = ("seq", "event", "actor", "principal", "agent_id", "recipient_agent_id",
+                 "project", "task", "message_id", "payload", "created_at", "hlc",
+                 "prev_hash", "hash")
+_AUDIT_INSERT = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUMNS)
+                 + ") VALUES (" + ",".join(["%s"] * len(AUDIT_COLUMNS)) + ")")
+# Named only for rows that carry a body: the offline recovery CLI appends its
+# bodiless events to a restored bank before any schema pass, which on a v42-v45
+# backup has no body column yet.
+_AUDIT_INSERT_BODY = ("INSERT INTO coordination_events (" + ",".join(AUDIT_COLUMNS)
+                      + ",body,body_salt) VALUES ("
+                      + ",".join(["%s"] * (len(AUDIT_COLUMNS) + 2)) + ")")
+# Bytes of random salt per body (hex in the column): enough that the salt
+# itself can never be guessed.
+BODY_SALT_BYTES = 16
+# Exactly the form secrets.token_hex writes. bytes.fromhex alone would skip
+# whitespace, and a salt decoding to fewer bytes would move the salt/body
+# split, which nothing else in the commitment pins.
+_SALT = re.compile("[0-9a-f]{%d}" % (2 * BODY_SALT_BYTES))
+
+
+@dataclass
+class WakePolicy:
+    """The caps the wake decision applies (v49); the same fields, names and
+    defaults as ``utils.config.WakeConfig``, which validates them. Defined
+    here so the offline CLIs and the storage tests need no config import."""
+
+    per_recipient_per_hour: int = 20
+    urgent_per_sender_per_hour: int = 6
+    nightly_total: int = 200
+    fan_out_stagger_seconds: int = 30
+    active_seconds: int = 60
+    authority_per_sender_per_hour: int = 12
+    # v54: rings maintainer messages may cause per recipient per hour. Set
+    # from ``coordination.maintainer``, not WakeConfig; 30 is the spec's
+    # starting value (2026-10-02), not a measurement.
+    maintainer_per_recipient_per_hour: int = 30
+
+    @classmethod
+    def from_config(cls, config) -> "WakePolicy":
+        """Copy the fields a config object carries; anything missing keeps
+        its default (a test service may hand over a bare namespace)."""
+        return cls(**{name: getattr(config, name) for name in cls.__dataclass_fields__
+                      if hasattr(config, name)})
+
+
+def _need_matches(clears: str, needs: str) -> bool:
+    """Whether a message's ``clears`` names the recipient's ``park_needs``:
+    the same words, case and spacing aside, or the words of one as a run of
+    whole words inside the other, holding at least one word of four letters
+    or more. So neither a letter nor a filler word ("the", "of") matches
+    any need and rings past the urgent cap."""
+    left = re.findall(r"\w+", clears.lower())
+    right = re.findall(r"\w+", needs.lower())
+    if not left or not right:
+        return False
+    short, long = (left, right) if len(left) <= len(right) else (right, left)
+    if not any(len(word) >= 4 for word in short):
+        return False
+    return any(long[i:i + len(short)] == short for i in range(len(long) - len(short) + 1))
+
+
+def body_commitment(salt_hex, body):
+    """sha256(salt || body), the value a v46 send's hashed payload holds;
+    None when the salt or body is not the shape one is written in."""
+    if (not isinstance(salt_hex, str) or _SALT.fullmatch(salt_hex) is None
+            or not isinstance(body, str)):
+        return None
+    try:
+        return hashlib.sha256(bytes.fromhex(salt_hex) + body.encode("utf-8")).hexdigest()
+    except (ValueError, UnicodeEncodeError):
+        return None
+MAX_REDACT_REASON = 240
+
+
+def _skeleton(value: str) -> str:
+    """``value`` as it reads: NFKD-normalized with combining marks dropped,
+    confusables folded (``_CONFUSABLES``), casefolded, and every
+    non-alphanumeric removed. An approximation of the UTS #39 skeleton,
+    not an implementation of it."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    bare = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    folded = bare.translate(_CONFUSABLES).casefold()
+    return "".join(ch for ch in folded if ch.isalnum())
+
+
+def _edits(a: str, b: str) -> int:
+    """Edits (insert, delete, substitute, swap two adjacent letters) that
+    turn ``a`` into ``b``: the optimal-string-alignment distance."""
+    previous, row = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        current = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            current[j] = min(row[j] + 1, current[j - 1] + 1,
+                             row[j - 1] + (a[i - 1] != b[j - 1]))
+            if (previous is not None and j > 1 and a[i - 1] == b[j - 2]
+                    and a[i - 2] == b[j - 1]):
+                current[j] = min(current[j], previous[j - 2] + 1)
+        previous, row = row, current
+    return row[-1]
+
+
+def reserved_name(value) -> bool:
+    """Whether ``value`` reads as a reserved word (``RESERVED_NAMES``): its
+    skeleton contains or comes near one, as ``NAME_RULES`` says."""
+    if not isinstance(value, str):
+        return False
+    skeleton = _skeleton(value)
+    for word, rule in NAME_RULES.items():
+        if rule["contained"] and word in skeleton:
+            return True
+        # Lengths further apart than the allowance cannot be within it.
+        if (abs(len(skeleton) - len(word)) <= rule["edits"]
+                and _edits(skeleton, word) <= rule["edits"]):
+            return True
+    return False
+
+
+def message_origin(row) -> dict:
+    """The origin fields a receive shows for one message row (v54).
+
+    ``maintainer`` only for a row the maintainer's reserved sender stored
+    with a proof; anything else is agent mail, whatever a column says.
+    ``verified`` names the passkey while the message stands; once the
+    maintainer withdrew it, ``repudiated_at`` and the withdrawal sentence
+    in place of the body instead."""
+    proof = row.get("maintainer_proof")
+    if (row.get("origin") != MAINTAINER_ORIGIN or not isinstance(proof, dict)
+            or row.get("sender_principal") != MAINTAINER_PRINCIPAL):
+        return {"origin": MESSAGE_ORIGIN}
+    if row.get("repudiated_at") is not None:
+        return {"origin": MAINTAINER_ORIGIN, "repudiated_at": row["repudiated_at"],
+                "text": WITHDRAWN_TEXT}
+    return {"origin": MAINTAINER_ORIGIN,
+            "verified": {"by": "passkey", "label": proof.get("label"),
+                         "signed_at": proof.get("signed_at")}}
+
+
+class CoordinationError(ValueError):
+    """Stable public code; never includes supplied credentials or bodies.
+
+    ``detail`` is a short public elaboration a caller can act on (the
+    candidates an ambiguous prefix matched, the size of a refused burst, the
+    field and rule a value broke): id prefixes, counts, field names and
+    limits only, never a body, a status or a credential. ``param`` names the
+    refused field and ``accepted`` lists its allowed values, where the
+    refusal has one."""
+
+    def __init__(self, code: str, detail: str | None = None, *,
+                 param: str | None = None, accepted: list[str] | None = None):
+        self.code = code
+        self.detail = detail
+        self.param = param
+        self.accepted = accepted
+        super().__init__(code)
+
+
+class CoordinationClockChanged(RuntimeError):
+    """The bank's writer changed since the service clock was reseeded."""
+
+
+def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
+    if not isinstance(value, str) or len(value) > limit or (not empty and not value.strip()):
+        raise CoordinationError(f"invalid_{field}")
+    if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
+        raise CoordinationError(f"invalid_{field}")
+    return value
+
+
+def _board_name(agent_id: str, label: str | None, name: str | None) -> str:
+    """What the board shows for a row (v55): its name, else its label and
+    the first 8 characters of its id, so rows that all registered as
+    "claude-code" still tell apart."""
+    short = agent_id[:8]
+    return name or (f"{label} {short}" if label else short)
+
+
+def _excerpt(text: Any) -> str:
+    """One line of a message body for a digest: whitespace and every
+    control or format character (C0, C1, bidi overrides, zero-width marks)
+    collapse to single spaces, then a hard cut."""
+    if not isinstance(text, str):
+        return ""
+    cleaned = " ".join("".join(" " if unicodedata.category(c)[0] == "C" else c
+                               for c in text).split())
+    return cleaned if len(cleaned) <= PREVIEW_EXCERPT else cleaned[:PREVIEW_EXCERPT] + "..."
+
+
+_ID_CHARS = frozenset("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_")
+_ID_HEX = frozenset("0123456789abcdef")
+# Agent and message ids are uuid4 hex: 32 lowercase hex characters. Every
+# surface shows the first 8 to 12, and on 2026-09-26 seven sends bounced with
+# a pasted prefix as the address (Coordination v2 design, Addressing E8), so
+# a value of at least this many hex characters, and fewer than a whole id,
+# is read as a prefix and resolved when it matches exactly one id.
+ID_PREFIX_MIN = 8
+ID_LENGTH = 32
+# Candidates named in an ambiguous-prefix refusal; a longer prefix narrows it.
+AMBIGUITY_LISTED = 8
+
+
+def is_full_agent_id(value: Any) -> bool:
+    """A full agent id: 32 lower-case hex characters."""
+    return (isinstance(value, str) and len(value) == ID_LENGTH
+            and set(value) <= _ID_HEX)
+
+
+def is_id_prefix(value: Any) -> bool:
+    """Whether ``value`` is looked up as an id prefix rather than exactly."""
+    return (isinstance(value, str) and ID_PREFIX_MIN <= len(value) < ID_LENGTH
+            and all(c in _ID_HEX for c in value))
+
+
+def distinguishing_prefixes(ids) -> list[str]:
+    """The candidates of an ambiguous prefix, each cut to the shortest length
+    that tells them all apart, and never shorter than ID_PREFIX_MIN, so a
+    caller can paste one back."""
+    ordered = sorted(ids)
+    shared = max((len(_common(a, b)) for a, b in zip(ordered, ordered[1:])), default=0)
+    cut = max(ID_PREFIX_MIN, shared + 1)
+    return [one[:cut] for one in ordered]
+
+
+def _common(a: str, b: str) -> str:
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return a[:i]
+    return a[:min(len(a), len(b))]
+
+
+def _resolved(ids, *, missing, ambiguous):
+    """The one id a prefix matched. None matched: ``missing`` is raised, or
+    None returned when it is None (a batch lists the value as missing).
+    Several: ``ambiguous`` is raised with their distinguishing prefixes."""
+    if not ids:
+        if missing is None:
+            return None
+        raise CoordinationError(missing)
+    if len(ids) > 1:
+        raise CoordinationError(
+            ambiguous, ", ".join(distinguishing_prefixes(ids[:AMBIGUITY_LISTED])))
+    return ids[0]
+
+
+def _fingerprint(to, text, reply_to, expires_at, clears=None, urgent=False):
+    """A send's request fingerprint over its resolved recipient (a burst:
+    its address as given) and resolved parent. The same digest a full-id
+    send has always stored, so pre-v48 request keys still match; v49's
+    ``clears`` and ``urgent`` join it only when set, for the same reason."""
+    fingerprinted = [to, text, reply_to, expires_at]
+    if clears is not None or urgent:
+        fingerprinted += [clears, urgent]
+    return _hash(json.dumps(fingerprinted, ensure_ascii=False, separators=(",", ":")))
+
+
+def _fanout_target(to):
+    """``("all", None)`` or ``("project", name)`` when ``to`` addresses a
+    set of peers; None when it names one agent."""
+    if to == "all":
+        return ("all", None)
+    if to.startswith("project:"):
+        name = to[len("project:"):]
+        _string(name, MAX_SCOPE, "recipient", empty=False)
+        return ("project", name)
+    return None
+
+
+def resolve_agent_id(conn, value, *, registered_only=False):
+    """A full agent id for the operator CLIs: ``value`` itself, or the one id
+    it is a prefix of among registered addresses and, unless
+    ``registered_only``, the audit log's actors and recipients (an address
+    the prune pass removed is still named there). Raises
+    ``instance_not_found`` or ``ambiguous_agent``."""
+    if not is_id_prefix(value):
+        return value
+    like = value + "%"
+    sql = "SELECT agent_id FROM coordination_agents WHERE agent_id LIKE %s"
+    params = [like]
+    if not registered_only:
+        sql += (" UNION SELECT agent_id FROM coordination_events WHERE agent_id LIKE %s "
+                "UNION SELECT recipient_agent_id FROM coordination_events "
+                "WHERE recipient_agent_id LIKE %s")
+        params += [like, like]
+    with conn.cursor(row_factory=tuple_row) as cur:
+        cur.execute(f"SELECT agent_id FROM ({sql}) AS ids ORDER BY agent_id LIMIT %s",
+                    (*params, AMBIGUITY_LISTED + 1))
+        ids = [row[0] for row in cur.fetchall()]
+    return _resolved(ids, missing="instance_not_found", ambiguous="ambiguous_agent")
+
+
+def _message_ids(value: Any) -> tuple[list[str], bool]:
+    """One id, or several: comma-separated, or a JSON array of strings, which
+    is how a host that stringifies list parameters sends a list. Items are
+    id-shaped only, so a bracketed fragment fails loudly instead of landing
+    in ``missing``; duplicates drop in order; at most MAX_PAGE. Returns the
+    ids and whether the caller used list syntax. The 8192-character bound on
+    the whole string is incidental; MAX_PAGE is the limit."""
+    _string(value, 8192, "message_id", empty=False)
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except ValueError:
+            raise CoordinationError("invalid_message_id") from None
+        if not isinstance(items, list) or not items or not all(isinstance(i, str) for i in items):
+            raise CoordinationError("invalid_message_id")
+        batch = True
+    else:
+        items = text.split(",")
+        batch = "," in text
+    ids: list[str] = []
+    for item in items:
+        item = item.strip()
+        if not item or len(item) > 120 or any(c not in _ID_CHARS for c in item):
+            raise CoordinationError("invalid_message_id")
+        if item not in ids:
+            ids.append(item)
+    if len(ids) > MAX_PAGE:
+        raise CoordinationError("invalid_message_id")
+    return ids, batch
+
+
+# ── secret-shaped text ────────────────────────────────────────────────────
+#
+# The board keeps what agents write: a message body for the audit log's
+# retention window (and in every backup taken meanwhile); a status, label,
+# project, task, episode, lease name or purpose, or request id hashed into
+# the chain for good. Text shaped like a credential is refused where it
+# would be kept, with ``secret_like_body`` and never an echo of the text. A
+# net for the common shapes, not a guarantee: a v46 message body it misses
+# can still be removed with ``redact``. Checked 2026-09-26 against the board
+# export of the 2026-09-23/24 fifteen-session trial: no hits in its 816
+# message bodies or 25 non-empty statuses. The 2026-09-26 review added this
+# deployment's own shapes (a principal token map, the adapter's key header,
+# a DSN password, a bearer token) and removed its false positives (branch
+# names and paths after a key, truncated digests, names without digits).
+
+
+def _char_classes(value: str) -> int:
+    """How many of lower-case, upper-case and digit ``value`` mixes."""
+    return (any(c.islower() for c in value) + any(c.isupper() for c in value)
+            + any(c.isdigit() for c in value))
+
+
+def _random_looking(value: str) -> bool:
+    return _char_classes(value) >= 2
+
+
+def _three_classes(value: str) -> bool:
+    return _char_classes(value) == 3
+
+
+def _letter_and_digit(value: str) -> bool:
+    return any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
+
+
+def _has_digit(value: str) -> bool:
+    return any(c.isdigit() for c in value)
+
+
+def _random_token(value: str) -> bool:
+    """A run that looks generated rather than written: letters and digits,
+    and either all three of lower case, upper case and digits, or 32 or more
+    characters in one unbroken run (no ``_`` or ``-``: generated single-case
+    keys have none, word-joined identifiers such as
+    ``created_at_2026_09_26_then_agent_id`` do). Words, names
+    (``PSEUDOLIFE_MCP_TOKEN_FILE``, camelCase), branch-like ``name-2026``
+    strings and counts are not."""
+    return _letter_and_digit(value) and (
+        _three_classes(value)
+        or (len(value) >= 32 and "_" not in value and "-" not in value))
+
+
+def _dsn_password(value: str) -> bool:
+    """A DSN's password, unless it is a placeholder (``<password>``,
+    ``${POSTGRES_PASSWORD}``, ``*****``)."""
+    return value[0] not in "<${[(*" and not set(value) <= set("*xX.")
+
+
+# (name, pattern, check on group 1 or None). Prefixes are strong evidence on
+# their own; where a prefix also starts ordinary words or identifiers
+# (``sk-learn-...``, ``github_pat_tests_...``, ``ghs_<lowercase id>``,
+# ``ASIAPACIFIC...``), the tail must look random. Searched in this order;
+# ``secret_kind`` names the first that matches.
+_SECRET_SHAPES = (
+    ("private_key", re.compile(r"-----BEGIN (?:[A-Z0-9]+ ){0,4}PRIVATE KEY(?: BLOCK)?-----"),
+     None),
+    ("github_pat", re.compile(r"(?<![A-Za-z0-9])github_pat_([A-Za-z0-9_]{22,})"),
+     _three_classes),
+    ("github_token", re.compile(r"(?<![A-Za-z0-9])gh[pousr]_([A-Za-z0-9]{36,})"),
+     _three_classes),
+    ("anthropic_key", re.compile(r"(?<![A-Za-z0-9_./-])sk-ant-([A-Za-z0-9_-]{20,})"),
+     _three_classes),
+    ("openai_key", re.compile(r"(?<![A-Za-z0-9_./-])sk-([A-Za-z0-9_-]{32,})"),
+     _three_classes),
+    ("aws_access_key_id",
+     re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)([A-Z0-9]{16})(?![A-Za-z0-9])"), _has_digit),
+    ("aws_secret_key",
+     re.compile(r"(?i:aws_?secret_?(?:access_?)?key)[\"']?[ \t]{0,4}[:=][ \t]{0,4}[\"']?"
+                r"([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])"), _letter_and_digit),
+    ("slack_token", re.compile(r"(?<![A-Za-z0-9])xox[abprs]-([A-Za-z0-9-]{10,})"), _has_digit),
+    ("huggingface_token", re.compile(r"(?<![A-Za-z0-9_])hf_([A-Za-z0-9]{30,})"),
+     _three_classes),
+    ("stripe_key", re.compile(r"(?<![A-Za-z0-9_])[sr]k_live_([A-Za-z0-9]{20,})"),
+     _letter_and_digit),
+    ("google_api_key", re.compile(r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])"),
+     None),
+    ("gitlab_token", re.compile(r"(?<![A-Za-z0-9_-])glpat-([A-Za-z0-9_-]{20,})"),
+     _random_looking),
+    ("jwt", re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}"
+                       r"\.[A-Za-z0-9_-]{8,}"), None),
+    ("bearer_token", re.compile(r"(?<![A-Za-z0-9])(?i:bearer)[ \t]+([A-Za-z0-9_.~+/-]{16,}={0,2})"),
+     _random_token),
+    ("dsn_password", re.compile(r"://[^\s/:@]+:([^\s@/]{6,})@"), _dsn_password),
+)
+# A key naming a secret, then ``:`` or ``=`` (or, for a ``--flag``,
+# whitespace) and a value. ``token`` excludes tokenize/tokenise; ``key`` and
+# ``auth`` cover private_key, access_key, auth and the adapter's
+# X-PL-Agent-Key header.
+_SECRET_KEY = re.compile(
+    r"(?i:secret|token(?!i[sz])|password|passwd|credential|key|auth|bearer)", re.ASCII)
+# Matched forward from each key with bounded runs, and the scan resumes after
+# the value it consumed, so a long body is read once. The value keeps ``:``,
+# ``,`` and ``=`` so a principal map (``codex:<token>,claude:<token>``) is
+# split into its pieces rather than cut at the first name.
+_VALUE = r"([A-Za-z0-9_+/=:,-]+)"
+_SECRET_ASSIGNMENT = re.compile(
+    r"[A-Za-z0-9_.-]{0,40}[\"']?[ \t]{0,4}[:=][ \t]{0,4}[\"']?" + _VALUE, re.ASCII)
+_CLI_FLAG = re.compile(r"(?<![A-Za-z0-9_-])--([A-Za-z0-9_-]{1,60})[ \t]+[\"']?" + _VALUE,
+                       re.ASCII)
+_PIECES = re.compile(r"[,:=]")
+_HEX = frozenset("0123456789abcdefABCDEF")
+_UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+_SRI = re.compile(r"sha(?:1|256|384|512)-", re.IGNORECASE)
+
+
+def _assigned_secret(value: str) -> bool:
+    """Whether a value given to a secret-named key holds one. It is split on
+    ``,``, ``:`` and ``=``; a piece counts when it is 20 or more characters
+    and looks generated (``_random_token``). What this board carries after
+    such keys in ordinary traffic does not: anything with a ``/`` (a path, a
+    branch, ``owner/repo``), all-hex (an id, a git SHA, a sha256 digest, whole
+    or truncated), anything holding a UUID, a subresource hash
+    (``sha256-...``), names, words and counts."""
+    for piece in _PIECES.split(value):
+        if (len(piece) >= 20 and "/" not in piece
+                and not all(c in _HEX for c in piece)
+                and _UUID.search(piece) is None and _SRI.match(piece) is None
+                and _random_token(piece)):
+            return True
+    return False
+
+
+def secret_kind(text: str) -> str | None:
+    """The name of the first credential shape found in ``text``, or None."""
+    if not isinstance(text, str):
+        return None
+    for name, pattern, check in _SECRET_SHAPES:
+        for match in pattern.finditer(text):
+            if check is None or check(match.group(1)):
+                return name
+    for flag in _CLI_FLAG.finditer(text):
+        if _SECRET_KEY.search(flag.group(1)) and _assigned_secret(flag.group(2)):
+            return "cli_flag"
+    pos = 0
+    while (key := _SECRET_KEY.search(text, pos)) is not None:
+        assigned = _SECRET_ASSIGNMENT.match(text, key.end())
+        if assigned is None:
+            pos = key.end()
+            continue
+        if _assigned_secret(assigned.group(1)):
+            return "key_value"
+        pos = assigned.end()
+    return None
+
+
+def looks_like_secret(text: str) -> bool:
+    """Whether ``text`` holds something shaped like a credential: a GitHub,
+    GitLab, Hugging Face, Anthropic, OpenAI-style, Stripe, Slack or Google
+    key or token, an AWS access key id or secret key, a JWT, a bearer token,
+    a DSN password, a PEM private-key header, or a secret-named key or
+    ``--flag`` given a generated-looking value. Ordinary prose about tokens
+    and secrets, git SHAs, digests, UUIDs, message and agent ids, paths,
+    branch names and placeholders are not."""
+    return secret_kind(text) is not None
+
+
+def _refuse_secret(text: str, field: str) -> None:
+    """Refuse credential-shaped ``text``, naming the field, never the text."""
+    if looks_like_secret(text):
+        raise CoordinationError(
+            "secret_like_body", f"{field} looks like a credential, which the board never "
+            "keeps; remove it and retry", param=field)
+
+
+def _hash(credential: str) -> str:
+    return hashlib.sha256(credential.encode()).hexdigest()
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def audit_hash(prev_hash: str, row) -> str:
+    """sha256(prev_hash || canonical row), over every column but the two
+    hashes and ``body``. ``payload`` is hashed as the stored text; a parsed
+    payload (a JSON-lines export read back) is re-canonicalized to that same
+    text. A v46 send event's payload commits to its body by sha256, which
+    ``verify_audit_chain`` checks separately."""
+    payload = row["payload"]
+    if not isinstance(payload, str):
+        payload = _canonical(payload)
+    material = json.dumps(
+        [AUDIT_FORMAT, row["seq"], row["event"], row["actor"], row["principal"],
+         row["agent_id"], row["recipient_agent_id"], row["project"], row["task"],
+         row["message_id"], float(row["created_at"]), row["hlc"], payload],
+        ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256((prev_hash + material).encode("utf-8")).hexdigest()
+
+
+def _broken(seq, reason, **detail):
+    return {"ok": False, "seq": seq, "reason": reason, **detail}
+
+
+def audit_cutoff(now: float, retention_days: int) -> int:
+    """The newest time retention removes: the UTC day boundary at or before
+    ``now - retention_days``. Cutting on day boundaries makes at most one
+    cut, and one ``audit_prune`` row, a day. A cutoff that moved with every
+    once-a-minute prune pass cut again on almost every pass, and each cut's
+    own record aged out a window later and fed the next one (review of
+    15f31aec, 2026-09-24: 30 cutting passes a day from 31 events)."""
+    return math.floor((now - retention_days * 86400) / 86400) * 86400
+
+
+def _cut(row):
+    """The fields of an ``audit_prune`` row, or None when they are not shaped
+    like the ones prune writes."""
+    payload = row["payload"]
+    try:
+        cut = json.loads(payload) if isinstance(payload, str) else payload
+    except ValueError:
+        return None
+    if not isinstance(cut, dict):
+        return None
+    through_seq, through_hash = cut.get("through_seq"), cut.get("through_hash")
+    cutoff, days = cut.get("cutoff"), cut.get("retention_days")
+    created_at = row["created_at"]
+    # No clock or config produces a non-finite time or a window beyond a
+    # century; refusing them here keeps audit_cutoff from overflowing.
+    if (type(through_seq) is not int or not isinstance(through_hash, str)
+            or type(cutoff) not in (int, float) or type(days) is not int
+            or not 0 <= days <= 36500
+            or type(created_at) not in (int, float) or not math.isfinite(created_at)):
+        return None
+    return {"seq": row["seq"], "created_at": float(created_at), "cutoff": cutoff,
+            "retention_days": days, "through_seq": through_seq,
+            "through_hash": through_hash, "actor": row["actor"]}
+
+
+def _parsed_payload(row):
+    """The row's payload as a dict, or None when it is not a JSON object."""
+    payload = row["payload"]
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _body_matches(body, salt, payload) -> bool:
+    """Whether a present body and its salt open the commitment a v46 send
+    payload holds."""
+    if not isinstance(body, str) or payload is None:
+        return False
+    commitment = payload.get("text_commitment")
+    if not isinstance(commitment, str):
+        return False
+    return body_commitment(salt, body) == commitment
+
+
+def verify_audit_chain(rows, *, expect_head=None) -> dict:
+    """Walk rows in ``seq`` order and report the first break.
+
+    A row fails as ``sequence_gap`` (a missing seq), ``broken_link`` (its
+    prev_hash is not the previous row's hash) or ``hash_mismatch`` (its
+    content changed). Bodies are outside the hash (schema v46), so they are
+    checked against what the hashed payload commits to: a present ``body``
+    must be on a send event whose payload carries ``text_commitment``, and
+    with its ``body_salt`` open it (``body_mismatch``,
+    also for a salt left without its body; a body on any other row is
+    content the chain never vouched for, and one on a send that a later
+    operator ``redact`` event names was written back after its redaction,
+    since redaction blanks it in the same transaction). A v46 send event
+    without its body must be named by a later ``redact`` event, written by
+    the operator, whose payload gives that event's ``seq`` and
+    ``message_id`` and says the body was removed (``audit_copy:
+    removed``); otherwise it fails as ``body_missing``, reported once the
+    walk ends, since the redact comes after it, or as ``body_not_exported``
+    when the row has no ``body`` field at all (an export written by a
+    pre-v46 CLI). Send events from before v46 keep ``text`` inside the
+    hashed payload and carry no body; redacting one takes only the live copy
+    and says so (``audit_copy: kept``). A log whose oldest rows were removed must start right
+    after a cut recorded later in the same chain (an ``audit_prune`` naming
+    the last removed row) whose own fields add up: written by the daemon, a
+    window of at least a day, the cutoff that window gives at its time, and
+    a first surviving row no older than that cutoff. Otherwise the start is
+    ``unanchored_start``. ``expect_head=(seq, hash)``, a head recorded
+    elsewhere earlier, fails as ``head_missing``, ``head_mismatch``, or
+    ``head_pruned`` when the log now starts after it.
+
+    What this cannot see, with no secret involved: the newest rows dropped,
+    a rewrite that recomputes every hash, the oldest rows removed by
+    someone who also appends a consistent cut record, or a body removed by
+    someone who also appends a consistent redact record (that record, with
+    its reason, stays in the log). An expected head catches the first two,
+    not the last two. The report names the cut the log starts from
+    (``start_cut``) so an operator can check it against the retention
+    window they configured.
+
+    Returns ``{ok: True, events, first_seq, head_seq, head_hash,
+    head_created_at, start_cut}``
+    or ``{ok: False, seq, reason}`` (plus ``start_cut`` on ``head_pruned``).
+    """
+    first = prev = None
+    count = 0
+    cuts = {}
+    expected = None
+    absent = {}                     # seq -> (message_id, body field present) of a bodiless v46 send
+    kept = set()                                # seqs of v46 sends that keep their body
+    for row in rows:
+        seq = row["seq"]
+        if prev is None:
+            first = row
+            if seq == 1 and row["prev_hash"] != GENESIS_HASH:
+                return _broken(seq, "broken_link")
+        elif seq != prev["seq"] + 1:
+            return _broken(seq, "sequence_gap")
+        elif row["prev_hash"] != prev["hash"]:
+            return _broken(seq, "broken_link")
+        if audit_hash(row["prev_hash"], row) != row["hash"]:
+            return _broken(seq, "hash_mismatch")
+        event, body, salt = row["event"], row.get("body"), row.get("body_salt")
+        payload = (_parsed_payload(row)
+                   if body is not None or event in ("send", "redact") else None)
+        if body is None and salt is not None:
+            # A redaction removes both; a salt left behind would make the
+            # removed body guessable against its commitment again.
+            return _broken(seq, "body_mismatch")
+        if body is not None:
+            if not _body_matches(body, salt, payload if event == "send" else None):
+                return _broken(seq, "body_mismatch")
+            kept.add(seq)
+        elif event == "send" and payload is not None and "text_commitment" in payload:
+            absent[seq] = (row["message_id"], "body" in row)
+        if event == "redact" and row["actor"] == "operator" and payload is not None:
+            named, message_id = payload.get("seq"), payload.get("message_id")
+            if type(named) is int:
+                if named in kept:
+                    # Redaction blanks the body in the redact's own
+                    # transaction, so a body still there was written back.
+                    return _broken(named, "body_mismatch")
+                if (payload.get("audit_copy") == "removed" and isinstance(message_id, str)
+                        and named in absent and absent[named][0] == message_id):
+                    del absent[named]
+        if event == "audit_prune" and (cut := _cut(row)) is not None:
+            cuts[(cut["through_seq"], cut["through_hash"])] = cut
+        if expect_head is not None and seq == expect_head[0]:
+            expected = row["hash"]
+        prev = row
+        count += 1
+    start_cut = None
+    if first is not None and first["seq"] != 1:
+        cut = cuts.get((first["seq"] - 1, first["prev_hash"]))
+        if (cut is None or cut["actor"] != "daemon" or cut["retention_days"] < 1
+                or cut["cutoff"] != audit_cutoff(cut["created_at"], cut["retention_days"])
+                or float(first["created_at"]) < cut["cutoff"]):
+            return _broken(first["seq"], "unanchored_start")
+        start_cut = {key: cut[key] for key in
+                     ("seq", "created_at", "cutoff", "retention_days", "through_seq")}
+    if absent:
+        missing = min(absent)
+        return _broken(missing, "body_missing" if absent[missing][1] else "body_not_exported")
+    if expect_head is not None:
+        seq, digest = expect_head
+        if expected is None:
+            if first is not None and seq < first["seq"]:
+                return _broken(seq, "head_pruned", start_cut=start_cut)
+            return _broken(seq, "head_missing")
+        if expected != digest:
+            return _broken(seq, "head_mismatch")
+    return {"ok": True, "events": count,
+            "first_seq": first["seq"] if first else None,
+            "head_seq": prev["seq"] if prev else None,
+            "head_hash": prev["hash"] if prev else None,
+            "head_created_at": float(prev["created_at"]) if prev else None,
+            "start_cut": start_cut}
+
+
+def audit_has_body_column(conn) -> bool:
+    """Whether the log has the v46 ``body`` column. A restored v42-v45 bank
+    read before any v46 daemon has started does not: every send body there
+    is inside its hashed payload."""
+    with conn.cursor(row_factory=tuple_row) as cur:
+        cur.execute("SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE "
+                    "attrelid=to_regclass('coordination_events') AND attname='body' "
+                    "AND attnum>0 AND NOT attisdropped)")
+        return cur.fetchone()[0]
+
+
+def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, until=None):
+    """Stream the audit log in chain order through a server-side cursor.
+
+    Each row carries ``body`` and ``body_salt`` too (None on every event but
+    a v46 send, and on a redacted one). ``agent_id`` matches the acting agent or a message's
+    recipient; ``since`` is inclusive and ``until`` exclusive, in epoch
+    seconds. A filtered stream is a slice for reading, not a chain
+    ``verify_audit_chain`` can check."""
+    clauses, params = [], []
+    for column, value in (("project", project), ("task", task)):
+        if value is not None:
+            clauses.append(f"{column}=%s")
+            params.append(value)
+    if agent_id is not None:
+        clauses.append("(agent_id=%s OR recipient_agent_id=%s)")
+        params += [agent_id, agent_id]
+    if since is not None:
+        clauses.append("created_at>=%s")
+        params.append(since)
+    if until is not None:
+        clauses.append("created_at<%s")
+        params.append(until)
+    where = (" WHERE " + " AND ".join(clauses) if clauses else "") + " ORDER BY seq"
+    with conn.transaction():
+        # created_at is hashed as the float written; a server configured for
+        # rounded float output would make every row read back as tampered.
+        conn.execute("SET LOCAL extra_float_digits = 3")
+        if audit_has_body_column(conn):
+            body = "body,body_salt"
+        else:
+            body = "NULL::text AS body,NULL::text AS body_salt"
+        sql = "SELECT " + ",".join(AUDIT_COLUMNS) + "," + body + " FROM coordination_events" + where
+        with conn.cursor(name="coordination_audit", row_factory=dict_row) as cur:
+            cur.itersize = 1000
+            cur.execute(sql, params)
+            yield from cur
+
+
+class CoordinationStore:
+    def __init__(self, storage, *, clock=time.time, wake=None, maintainer_principals=()):
+        self.storage = storage
+        self.clock = clock
+        # The wake caps (v49); the daemon hands over its configured ones.
+        self.wake = WakePolicy() if wake is None else wake
+        # Bearer principals whose mail speaks for the maintainer
+        # (``coordination.maintainer_principals``; empty by default).
+        self.maintainer_principals = frozenset(maintainer_principals)
+
+    def _one(self, sql, params=()):
+        with self.storage.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
+
+    def _all(self, sql, params=()):
+        with self.storage.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+    @staticmethod
+    def _event(event, payload, *, actor="agent", principal="", agent_id="", recipient=None,
+               project="", task="", message_id=None, hlc="", body=None, body_salt=None):
+        """One audit row before its chain position. ``principal`` is the
+        bearer principal the transport verified, empty for the daemon's own
+        maintenance and for the offline operator; never a credential.
+        ``body`` (a send's text) and ``body_salt`` are stored outside the
+        hash; the payload must commit to both."""
+        return {"event": event, "actor": actor, "principal": principal, "agent_id": agent_id,
+                "recipient_agent_id": recipient, "project": project, "task": task,
+                "message_id": message_id, "hlc": hlc, "payload": _canonical(payload),
+                "body": body, "body_salt": body_salt}
+
+    def _chain_head(self):
+        """Take the chain lock, then read the head ``(seq, hash)``.
+
+        Transaction-scoped, so it must run inside the mutation's transaction:
+        outside one the lock would end with the statement and two writers
+        could read the same head."""
+        conn = self.storage.conn
+        if conn.info.transaction_status != psycopg.pq.TransactionStatus.INTRANS:
+            raise RuntimeError("audit events are appended inside the mutation's transaction")
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (AUDIT_LOCK_KEY,))
+        row = self._one("SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1")
+        return (row["seq"], row["hash"]) if row else (0, GENESIS_HASH)
+
+    def _append(self, events, now, *, head=None):
+        """Chain and insert ``events`` as the mutation's last statements, so
+        they commit or roll back with it and the log cannot diverge from the
+        board. ``head`` comes from a ``_chain_head`` the caller already took
+        (prune reads it before removing old rows, so the chain continues from
+        a removed head instead of restarting at genesis)."""
+        if not events:
+            return
+        seq, prev = self._chain_head() if head is None else head
+        plain, bodied = [], []
+        for event in events:
+            seq += 1
+            row = {**event, "seq": seq, "created_at": float(now), "prev_hash": prev}
+            row["hash"] = prev = audit_hash(prev, row)
+            values = tuple(row[column] for column in AUDIT_COLUMNS)
+            if row.get("body") is None:
+                plain.append(values)
+            else:
+                bodied.append(values + (row["body"], row.get("body_salt")))
+        with self.storage.conn.cursor() as cur:
+            if plain:
+                cur.executemany(_AUDIT_INSERT, plain)
+            if bodied:
+                cur.executemany(_AUDIT_INSERT_BODY, bodied)
+        return seq, prev
+
+    def _audit_present(self):
+        """Whether the log exists. Only the offline recovery paths ask: they
+        can run on a restored pre-v42 backup before any schema pass."""
+        return self._one("SELECT to_regclass('coordination_events') IS NOT NULL "
+                         "AS present")["present"]
+
+    @staticmethod
+    def _bank_id(value):
+        if not isinstance(value, str):
+            raise CoordinationError("invalid_bank_identity")
+        try:
+            parsed = uuid.UUID(value)
+        except (AttributeError, ValueError):
+            raise CoordinationError("invalid_bank_identity") from None
+        if str(parsed) != value:
+            raise CoordinationError("invalid_bank_identity")
+        return value
+
+    def context(self, principal, *, agent_id=None, nonce=None, read_only=False):
+        """Return this logical bank's durable identity and optional mailbox proof."""
+        if type(read_only) is not bool:
+            raise CoordinationError("unexpected_parameter")
+        if (agent_id is None) != (nonce is None):
+            raise CoordinationError("missing_parameter")
+        for value, field in ((agent_id, "agent_id"), (nonce, "nonce")):
+            if value is not None and (
+                    not isinstance(value, str) or len(value) != 32
+                    or value != value.lower()
+                    or any(c not in "0123456789abcdef" for c in value)):
+                raise CoordinationError(f"invalid_{field}")
+        candidate = str(uuid.uuid4())
+        with self.storage._txn():
+            created = False
+            if not read_only:
+                created = self.storage.conn.execute(
+                    "INSERT INTO meta (key,value) VALUES (%s,%s) "
+                    "ON CONFLICT (key) DO NOTHING",
+                    (BANK_ID_META_KEY, Jsonb(candidate))).rowcount
+            bank = self._one("SELECT value FROM meta WHERE key=%s", (BANK_ID_META_KEY,))
+            if bank is None:
+                raise CoordinationError("invalid_bank_identity")
+            bank_id = self._bank_id(bank["value"])
+            if created:
+                self._append([self._event("bank_identity", {"bank_id": bank_id},
+                                          principal=principal)], self.clock())
+            result = {"bank_id": bank_id, "principal": principal}
+            if agent_id is None:
+                return result
+            row = self._one(
+                "SELECT principal,credential_hash FROM coordination_agents "
+                "WHERE agent_id=%s", (agent_id,))
+            credential_hash = row and row["credential_hash"]
+            if (row is None or row["principal"] != principal
+                    or not isinstance(credential_hash, str)
+                    or len(credential_hash) != 64
+                    or credential_hash != credential_hash.lower()
+                    or any(c not in "0123456789abcdef" for c in credential_hash)):
+                raise CoordinationError("invalid_credential")
+            message = json.dumps(
+                ["pseudolife-context-v1", bank_id, principal, agent_id, nonce],
+                separators=(",", ":"), ensure_ascii=True).encode("ascii")
+            result["proof"] = hmac.new(
+                bytes.fromhex(credential_hash), message, hashlib.sha256).hexdigest()
+            return result
+
+    def _auth(self, principal, agent_id, credential, *, lock=False):
+        if not isinstance(credential, str) or not credential or len(credential) > 256:
+            raise CoordinationError("invalid_credential")
+        try:
+            credential_hash = _hash(credential)
+        except UnicodeError:
+            raise CoordinationError("invalid_credential") from None
+        row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s" +
+                        (" FOR UPDATE" if lock else ""), (agent_id,))
+        if row is None:
+            raise CoordinationError("instance_not_found")
+        if (row["principal"] != principal or not row["credential_hash"]
+                or not hmac.compare_digest(row["credential_hash"], credential_hash)):
+            raise CoordinationError("invalid_credential")
+        return row
+
+    def _public(self, row):
+        keys = ("agent_id", "principal", "label", "project", "task", "status",
+                "episode", "capabilities", "wake_enabled", "created_at",
+                "last_activity", "lifecycle")
+        result = {k: row[k] for k in keys}
+        # Offline rebind runs on a restored bank before any schema pass, so
+        # a pre-v47 row has no children column, and a pre-v49 row no park.
+        result["children"] = self._live_children(row.get("children", []), self.clock())
+        for key, default in _PARK_CLEARED.items():
+            result[key] = row.get(key, default)
+        # v50: a subagent's parent, and whether the row is a subagent at all
+        # (true before its parent registers, while the link is still empty).
+        result["parent_agent_id"] = row.get("parent_agent_id")
+        result["subagent"] = row.get("parent_thread") is not None
+        result["adapter_available"] = bool(row["attachment_id"] and
+                                           (row["lease_until"] or 0) > self.clock())
+        # v55: what the board shows for the row, and who set it. An unnamed
+        # row (name_source "") reads as its label and short id, so rows that
+        # all registered as "claude-code" still tell apart.
+        result["name"] = _board_name(row["agent_id"], row["label"], row.get("name"))
+        result["name_source"] = row.get("name_source") or ""
+        return result
+
+    @staticmethod
+    def _check_label(principal, fields):
+        """The label ``daemon`` names the daemon's own sender: the per-turn
+        digest shows a sender's label, so a session could otherwise post as
+        "from daemon" (PR #456 review). Since v54 the same holds for
+        ``maintainer``, ``passkey`` and ``verified``, in any spelling that
+        reads as one (``reserved_name``: look-alike letters, and for
+        ``maintainer`` inside a longer label or one edit off, since the
+        2026-10-04 review); a reserved sender keeps its own name. Checked
+        only when a label is set, so an older row keeps working."""
+        label = fields.get("label")
+        if reserved_name(label) and not (
+                principal in RESERVED_SENDERS and label.strip().casefold() == principal):
+            raise CoordinationError("invalid_label")
+
+    @staticmethod
+    def _check_name(name):
+        """A v55 board name from a client: one line of at most MAX_NAME
+        characters that names no reserved sender and holds nothing shaped
+        like a credential (hashed into the audit chain for good). Returned
+        stripped; empty clears. No control or format character either
+        (Unicode category C: bidi overrides, zero-width marks, C1): the
+        reserved-word check reads past them, so one could make a name
+        render as a reserved word (review of 2026-10-05)."""
+        _string(name, MAX_NAME, "name")
+        if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
+            raise CoordinationError("invalid_name")
+        _refuse_secret(name, "name")
+        return name.strip()
+
+    @staticmethod
+    def _title_name(title):
+        """The name a session title gives (v55), or ``None`` when it gives
+        none: the title is cleaned to one bounded line, and one that names a
+        reserved sender or looks like a credential names nothing (a retitle
+        must not fail over its board side)."""
+        from pseudolife_memory.harness_names import clean_name
+        name = clean_name(title)
+        if name is None or reserved_name(name) or looks_like_secret(name):
+            return None
+        return name
+
+    @staticmethod
+    def _name_change(row, name, source, now):
+        """The columns that apply ``name`` from ``source`` to ``row`` under
+        the v55 precedence, or ``{}`` when nothing changes: a lower source
+        never replaces a higher one's name, an equal or higher one does. An
+        empty name clears only the caller's own source's name; an agent's
+        cleared name gives way to the newest harness title (``harness_name``)."""
+        current = row.get("name_source") or ""
+        if _NAME_RANK[source] < _NAME_RANK.get(current, 0):
+            return {}
+        if not name:
+            if current != source:
+                return {}
+            kept = (row.get("harness_name") or "") if source == "agent" else ""
+            return {"name": kept, "name_source": "harness" if kept else "", "name_set_at": now}
+        if (row.get("name") or "") == name and current == source:
+            return {}
+        return {"name": name, "name_source": source, "name_set_at": now}
+
+    def _name_event(self, row, naming, principal, *, actor="agent"):
+        return self._event(
+            "update", {"fields": {k: naming[k] for k in ("name", "name_source")},
+                       "before": {k: row.get(k) or "" for k in ("name", "name_source")}},
+            actor=actor, principal=principal, agent_id=row["agent_id"],
+            project=row["project"], task=row["task"])
+
+    @staticmethod
+    def _codex_thread(fields) -> str | None:
+        """The Codex thread a row speaks for: its episode, on a row whose
+        capabilities name the ``codex`` transport (the shim's Codex adapter
+        registers each thread that way). The Codex namespace for the v50
+        parent link."""
+        if "codex" not in fields["capabilities"] or not fields["episode"]:
+            return None
+        return fields["episode"]
+
+    def register(self, principal, *, label="", project="", task="", episode="", status="",
+                 capabilities=None, wake_enabled=False, parent_thread=None, name="",
+                 name_source=None):
+        """``parent_thread`` (v50) is the parent Codex thread a native child
+        read from Codex's turn metadata: a canonical UUID, on a Codex row
+        (``_codex_thread``) for another thread. It marks the row a subagent
+        for good, and links it to the parent's row under the same principal
+        now or when that parent registers."""
+        _string(principal, 256, "principal", empty=False)
+        self._check_label(principal, {"label": label})
+        fields = self._fields(label=label, project=project, task=task, episode=episode, status=status,
+                              capabilities={} if capabilities is None else capabilities,
+                              wake_enabled=wake_enabled)
+        thread = self._codex_thread(fields)
+        # v55: a name at register is the agent's own unless it says it is
+        # the harness's.
+        if name_source is not None and (name_source not in CLIENT_NAME_SOURCES or not name):
+            raise CoordinationError("invalid_name")
+        if name:
+            name = self._check_name(name)
+        if name:
+            fields.update(name=name, name_source=name_source or "agent")
+        if parent_thread is not None:
+            try:
+                canonical = str(uuid.UUID(parent_thread)) if isinstance(parent_thread, str) else None
+            except ValueError:
+                canonical = None
+            if canonical != parent_thread or thread is None or thread == parent_thread:
+                raise CoordinationError("invalid_parent")
+        agent_id, credential = uuid.uuid4().hex, secrets.token_urlsafe(32)
+        now = self.clock()
+        with self.storage._txn():
+            parent = None
+            if parent_thread is not None:
+                parent = self._codex_parent(principal, parent_thread)
+                fields.update(parent_thread=parent_thread, parent_agent_id=parent)
+            self.storage.conn.execute(
+                "INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
+                "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity,"
+                "parent_thread,parent_agent_id,name,name_source,name_set_at,harness_name) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (agent_id, principal, _hash(credential), fields["label"], fields["project"],
+                 fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
+                 fields["wake_enabled"], now, now, parent_thread, parent,
+                 fields.get("name", ""), fields.get("name_source", ""),
+                 now if fields.get("name") else None,
+                 fields["name"] if fields.get("name_source") == "harness" else ""))
+            events = [self._event("register", fields, principal=principal, agent_id=agent_id,
+                                  project=fields["project"], task=fields["task"])]
+            if thread is not None:
+                events += self._link_children(principal, thread, agent_id)
+            self._append(events, now)
+            out = self.authenticate(principal, agent_id, credential)
+        return {**out, "credential": credential}
+
+    def _codex_parent(self, principal, thread):
+        """The live row speaking for Codex ``thread`` under ``principal``:
+        the most recently active, if a thread ever held two."""
+        row = self._one(
+            "SELECT agent_id FROM coordination_agents WHERE principal=%s AND episode=%s "
+            "AND capabilities ? 'codex' AND credential_hash IS NOT NULL "
+            "ORDER BY last_activity DESC, agent_id LIMIT 1", (principal, thread))
+        return row["agent_id"] if row else None
+
+    def _link_children(self, principal, thread, agent_id):
+        """Point every subagent of Codex ``thread`` under ``principal`` at
+        ``agent_id``, the row that thread just registered (the parent that
+        registered after its children, or again after prune removed it).
+        One ``update`` event per child whose link changed, by the daemon."""
+        rows = self._all(
+            "UPDATE coordination_agents c SET parent_agent_id=%s FROM coordination_agents o "
+            "WHERE c.agent_id=o.agent_id AND c.principal=%s AND c.parent_thread=%s "
+            "AND c.agent_id<>%s AND c.parent_agent_id IS DISTINCT FROM %s "
+            "RETURNING c.agent_id, o.parent_agent_id AS before, c.project, c.task",
+            (agent_id, principal, thread, agent_id, agent_id))
+        return [self._event("update", {"fields": {"parent_agent_id": agent_id},
+                                       "before": {"parent_agent_id": row["before"]}},
+                            actor="daemon", principal=principal, agent_id=row["agent_id"],
+                            project=row["project"], task=row["task"])
+                for row in sorted(rows, key=lambda r: r["agent_id"])]
+
+    def authenticate(self, principal, agent_id, credential):
+        return self._public(self._auth(principal, agent_id, credential))
+
+    @staticmethod
+    def _fields(**fields):
+        limits = {"label": MAX_LABEL, "project": MAX_SCOPE, "task": MAX_SCOPE,
+                  "status": 240, "episode": 120}
+        for key, value in fields.items():
+            if key in limits:
+                _string(value, limits[key], key)
+                # Hashed into the audit chain for good: every field in the
+                # register event, and project and task into the columns of
+                # every later event by this agent.
+                _refuse_secret(value, key)
+            elif key == "wake_enabled":
+                if not isinstance(value, bool):
+                    raise CoordinationError("invalid_wake_enabled")
+            elif key == "capabilities":
+                if not isinstance(value, dict) or len(value) > 8:
+                    raise CoordinationError("invalid_capabilities")
+                for item, enabled in value.items():
+                    _string(item, 40, "capabilities", empty=False)
+                    # Capability names are hashed into the event too, and a
+                    # GitHub token fits in 40 characters.
+                    _refuse_secret(item, "capabilities")
+                    if not isinstance(enabled, bool):
+                        raise CoordinationError("invalid_capabilities")
+            elif key == "children":
+                # Labels only: update() stamps each one's ``since``. Refused
+                # before the update's transaction opens, so none of the
+                # call's other fields (status, park) is applied either, and
+                # the detail says so (PR #481 review).
+                refused = CoordinationError(
+                    "invalid_children",
+                    f"at most {MAX_CHILDREN} distinct labels of at most {MAX_CHILD_LABEL} "
+                    "characters; nothing was updated")
+                if not isinstance(value, list) or len(value) > MAX_CHILDREN:
+                    raise refused
+                for label in value:
+                    try:
+                        _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    except CoordinationError:
+                        raise refused from None
+                    # Hashed into the update event, like the status.
+                    _refuse_secret(label, "children")
+                if len(set(value)) != len(value):
+                    raise refused
+            elif key == "park_reason":
+                # None (REST null) and "" (the tool's spelling of it) both
+                # clear the park.
+                if value is None or value == "":
+                    fields[key] = None
+                elif value not in PARK_REASONS:
+                    raise CoordinationError(
+                        "invalid_park", f"park_reason must be one of {', '.join(PARK_REASONS)}, "
+                        "or empty to clear the park; nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
+            elif key in _PARK_TEXT_LIMITS:
+                try:
+                    _string(value, _PARK_TEXT_LIMITS[key], "park")
+                except CoordinationError:
+                    raise CoordinationError(
+                        "invalid_park", f"{key} must be text of at most "
+                        f"{_PARK_TEXT_LIMITS[key]} characters with no control characters; "
+                        "nothing was updated", param=key) from None
+                # Hashed into the update event, like the status.
+                _refuse_secret(value, key)
+            elif key == "park_expires":
+                # A null (REST passes JSON null through) would store a park
+                # that never lapses, past the default and the cap: refused.
+                if (value is None or isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value <= 0):
+                    raise CoordinationError(
+                        "invalid_park", "park_expires must be a positive finite Unix epoch "
+                        "in seconds; nothing was updated", param="park_expires")
+                fields[key] = float(value)
+            else:
+                raise CoordinationError("invalid_update")
+        return fields
+
+    def update(self, principal, agent_id, credential, *, expect=None, name=None, **fields):
+        """Change the caller's own row. ``expect`` (seconds) says when the
+        status stops being true: past it the peer list marks the row
+        ``status_overdue``. A new status without one clears the old
+        expectation; ``expect`` alone re-times the current status.
+        ``name`` (v55) is the agent naming its row (source ``agent``): it
+        outranks the harness title, and ``""`` clears its own, bringing the
+        newest harness title back."""
+        fields = self._fields(**fields)
+        if name is not None:
+            name = self._check_name(name)
+        self._check_label(principal, fields)
+        if expect is not None and (type(expect) is not int
+                                   or not 1 <= expect <= LEASE_EXPECT_MAX):
+            raise CoordinationError("invalid_expect")
+        park_update = any(key in fields for key in PARK_FIELDS)
+        with self.storage._txn():
+            row = self._auth(principal, agent_id, credential, lock=True)
+            now = self.clock()
+            # A lapsed park (past its ``park_expires``) still carries its
+            # fields but no longer stands: it cannot be refined, and a new
+            # park over it starts fresh, with an empty record and the
+            # default expiry from now (review of PR #441, 2026-09-28). A
+            # status clears either.
+            recorded = row.get("park_reason") is not None
+            parked = self._live_park(row, now) is not None
+            # The park record (v49). A null reason clears the whole record;
+            # any other park field re-stamps it, and needs a reason unless
+            # the row is already parked; a status without park fields is a
+            # session working again, which is not parked.
+            if park_update:
+                if "park_reason" in fields and fields["park_reason"] is None:
+                    fields.update(_PARK_CLEARED)
+                elif "park_reason" not in fields and not parked:
+                    raise CoordinationError(
+                        "invalid_park", "park_reason is required: no park stands to refine "
+                        "(a lapsed park counts as none); nothing was updated",
+                        param="park_reason", accepted=list(PARK_REASONS))
+                else:
+                    if recorded and not parked:
+                        # A new park over a lapsed one starts empty: its
+                        # stale need must not come back live with it.
+                        for key in _PARK_TEXT_LIMITS:
+                            fields.setdefault(key, "")
+                    fields["park_set_at"] = now
+                    # Only a park that would have no expiry gets the default:
+                    # a refinement, or a new reason, keeps the standing one.
+                    standing = row.get("park_expires") if parked else None
+                    if "park_expires" not in fields and standing is None:
+                        fields["park_expires"] = now + PARK_DEFAULT_TTL
+                    expires = fields.get("park_expires")
+                    if expires is not None and expires > now + PARK_MAX_TTL:
+                        raise CoordinationError(
+                            "invalid_park", f"park_expires must be at most "
+                            f"{PARK_MAX_TTL // 86400} days ({PARK_MAX_TTL} seconds) from now; "
+                            "nothing was updated",
+                            param="park_expires")
+            elif "status" in fields and recorded:
+                fields.update(_PARK_CLEARED)
+            # Only a real change reaches the row and the log, so a status
+            # update that never used an expectation logs what it always did.
+            if "children" in fields:
+                fields["children"] = self._parent_children(row["children"], fields["children"], now)
+            if expect is not None:
+                fields["status_expires_at"] = now + expect
+            elif "status" in fields and row["status_expires_at"] is not None:
+                fields["status_expires_at"] = None
+            naming = {} if name is None else self._name_change(row, name, "agent", now)
+            columns = {**fields, **naming}
+            # The event says what the name became; the time is the event's.
+            fields.update({k: v for k, v in naming.items() if k != "name_set_at"})
+            assignments = [f"{key}=%s" for key in columns]
+            values = [Jsonb(v) if k in {"capabilities", "children"} else v
+                      for k, v in columns.items()]
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET " + ",".join(assignments + ["last_activity=%s"])
+                + " WHERE agent_id=%s", (*values, now, agent_id))
+            # The live row keeps only the newest value; the log keeps each one
+            # and what it replaced, which is the status history.
+            self._append([self._event(
+                "update", {"fields": fields, "before": {key: row[key] for key in fields}},
+                principal=principal, agent_id=agent_id,
+                project=fields.get("project", row["project"]),
+                task=fields.get("task", row["task"]))], now)
+            return self.authenticate(principal, agent_id, credential)
+
+    @staticmethod
+    def _live_children(children, now):
+        """``children`` without the hook entries (v50, those carrying an
+        ``agent_id``) older than HOOK_CHILD_TTL: their stop was missed."""
+        return [child for child in children
+                if not child.get("agent_id") or now - child["since"] < HOOK_CHILD_TTL]
+
+    @classmethod
+    def _parent_children(cls, current, labels, now):
+        """The children list after the parent names ``labels`` (v47, at
+        most MAX_CHILDREN, checked in ``_fields``), with the live entries
+        the subagent hooks keep (v50) left as they are: the parent's
+        replace-all rewrites only its own labels, and a label spelled like a
+        live hook entry names that same child. Parent labels first, then
+        the hook entries, which have their own bound (MAX_HOOK_CHILDREN),
+        so nothing here can refuse the update."""
+        hooked = [child for child in cls._live_children(current, now) if child.get("agent_id")]
+        taken = {child["label"] for child in hooked}
+        # A label carried over keeps the time it first appeared.
+        since = {child["label"]: child["since"] for child in current if not child.get("agent_id")}
+        named = [{"label": label, "since": since.get(label, now)}
+                 for label in labels if label not in taken]
+        return named + hooked
+
+    def _hook_children_row(self, agent_id, principal):
+        return self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                         "AND credential_hash IS NOT NULL FOR UPDATE", (agent_id, principal))
+
+    def _set_hook_children(self, row, children, principal, now):
+        self.storage.conn.execute(
+            "UPDATE coordination_agents SET children=%s,last_activity=%s WHERE agent_id=%s",
+            (Jsonb(children), now, row["agent_id"]))
+        self._append([self._event(
+            "update", {"fields": {"children": children}, "before": {"children": row["children"]}},
+            actor="hook", principal=principal, agent_id=row["agent_id"],
+            project=row["project"], task=row["task"])], now)
+
+    def subagent_started(self, agent_id, principal, *, child, kind=""):
+        """The plugin's SubagentStart hook (v50): list Claude Code subagent
+        ``child`` (its host ``agent_id``) of ``kind`` (its ``agent_type``)
+        among the children of ``agent_id``, the session address the hook
+        read beside its digest. Idempotent per child. Always listed: past
+        MAX_HOOK_CHILDREN hook entries it replaces the oldest of them, whose
+        stop was most likely missed; parent labels are never touched, except
+        one spelled like the new entry, which names the same child. Entries
+        past HOOK_CHILD_TTL go at this write. An address the caller's
+        principal does not own, or none at all, is not touched."""
+        if not isinstance(child, str) or not _HOOK_CHILD_ID.fullmatch(child):
+            raise CoordinationError("invalid_children")
+        if not isinstance(kind, str) or (kind and not _HOOK_CHILD_KIND.fullmatch(kind)):
+            raise CoordinationError("invalid_children")
+        label = f"{kind[:HOOK_CHILD_KIND_CUT] or 'subagent'}#{child[:8]}"
+        # Hashed into the update event, like a parent's labels.
+        _refuse_secret(label, "children")
+        with self.storage._txn():
+            row = self._hook_children_row(agent_id, principal)
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            current = self._live_children(row["children"], now)
+            if any(entry.get("agent_id") == child for entry in current):
+                return {"recorded": True, "changed": False}
+            children = [entry for entry in current if entry["label"] != label]
+            hooked = [entry for entry in children if entry.get("agent_id")]
+            if len(hooked) >= MAX_HOOK_CHILDREN:
+                children.remove(min(hooked, key=lambda entry: entry["since"]))
+            children.append({"label": label, "since": now, "agent_id": child})
+            self._set_hook_children(row, children, principal, now)
+        return {"recorded": True, "changed": True}
+
+    def subagent_stopped(self, agent_id, principal, *, child):
+        """The plugin's SubagentStop hook (v50): remove the entry
+        ``subagent_started`` listed for ``child``; parent labels stay."""
+        if not isinstance(child, str) or not _HOOK_CHILD_ID.fullmatch(child):
+            raise CoordinationError("invalid_children")
+        with self.storage._txn():
+            row = self._hook_children_row(agent_id, principal)
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            live = self._live_children(row["children"], now)
+            children = [entry for entry in live if entry.get("agent_id") != child]
+            if len(children) == len(live):
+                return {"recorded": False, "reason": "not_listed"}
+            self._set_hook_children(row, children, principal, now)
+        return {"recorded": True, "changed": True}
+
+    def list_agents(self, principal, agent_id, credential, *, project=None, task=None, limit=50):
+        self._auth(principal, agent_id, credential)
+        return self._roster(agent_id, project=project, task=task, limit=limit)
+
+    def _roster(self, agent_id, *, project=None, task=None, limit=50, settle_leases=True):
+        self._limit(limit)
+        clauses, values = ["agent_id<>%s", "credential_hash IS NOT NULL"], [agent_id]
+        for key, value in (("project", project), ("task", task)):
+            if value is not None:
+                _string(value, MAX_SCOPE, key)
+                clauses.append(f"{key}=%s")
+                values.append(value)
+        now = self.clock()
+        scope = "SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
+        leased = "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>%s)"
+        # Only peers whose own last action is recent: within ACTIVE_WINDOW,
+        # or ATTACHED_IDLE_WINDOW while they hold a lease. Reachable adapters
+        # come first: a burst of idle addresses must not push the peers that
+        # can actually receive live mail off a bounded page. The rest are
+        # counted, not listed; one extra row tells whether the page cut
+        # active peers too.
+        recent = f"last_activity>CASE WHEN {leased} THEN %s ELSE %s END"
+        windows = (now, now - ATTACHED_IDLE_WINDOW, now - ACTIVE_WINDOW)
+        rows = self._all(scope + f" AND {recent} ORDER BY {leased} DESC,"
+                         "last_activity DESC,agent_id LIMIT %s",
+                         (*values, *windows, now, limit + 1))
+        idle = self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + " AND ".join(clauses)
+                         + f" AND NOT {recent}", (*values, *windows))["n"]
+        agents = []
+        for row in rows[:limit]:
+            agent = self._public(row)
+            agent["status_expires_at"] = row["status_expires_at"]
+            agent["status_overdue"] = (row["status_expires_at"] is not None
+                                       and now > row["status_expires_at"])
+            agents.append(agent)
+        self._stamp_status_age(agents, now)
+        leases = self.list_leases(limit=MAX_PAGE, settle=settle_leases)
+        return {"agents": agents, "truncated": len(rows) > limit, "idle_omitted": idle,
+                "leases": leases["leases"], "leases_truncated": leases["truncated"]}
+
+    def console_snapshot(self, principal, *, limit=50):
+        """One consistent read-only snapshot of board metadata."""
+        with self.storage._txn():
+            self.storage.conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
+            return self._console_snapshot(principal, limit=limit)
+
+    def _console_snapshot(self, principal, *, limit=50):
+        """Read board metadata without receiving mail or settling leases.
+
+        Roster/lease visibility matches the board. Mail counts and retained
+        events are limited to the caller's principal or its visible mail.
+        Payloads (including pre-v46 text), bodies, salts and credentials never
+        leave this projection. This is a reading slice, not a chain export.
+        """
+        result = self._roster("", limit=limit, settle_leases=False)
+        now = self.clock()
+        counts = {r["recipient_agent_id"]: r["n"] for r in self._all(
+            "SELECT m.recipient_agent_id,count(*) AS n FROM coordination_messages m "
+            "JOIN coordination_agents a ON a.agent_id=m.recipient_agent_id "
+            "WHERE a.principal=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "AND m.recipient_agent_id=ANY(%s) GROUP BY m.recipient_agent_id",
+            (principal, now, [a["agent_id"] for a in result["agents"]]))}
+        for agent in result["agents"]:
+            agent["pending_count"] = (counts.get(agent["agent_id"], 0)
+                                      if agent["principal"] == principal else None)
+        for lease in result["leases"]:
+            lease["expired"] = lease["expires_at"] is not None and lease["expires_at"] <= now
+        # Participant/message indexes avoid unrelated retained sends. Each
+        # branch caps returned rows; the transaction-local timeout also bounds
+        # large caller-owned histories and expiry payloads before releasing the
+        # shared board lock. No participant list or payload leaves this query.
+        rows = self._all(
+            "WITH visible_mail AS MATERIALIZED ("
+            "SELECT message_id FROM coordination_events WHERE event='send' "
+            "AND principal>=%s AND principal<=%s UNION "
+            "SELECT e.message_id FROM coordination_agents a CROSS JOIN LATERAL "
+            "(SELECT message_id FROM coordination_events WHERE event='send' "
+            "AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id "
+            "ORDER BY recipient_agent_id,seq) e WHERE a.principal=%s), "
+            "candidates AS ("
+            "(SELECT e.* FROM coordination_events e WHERE principal>=%s AND principal<=%s "
+            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
+            "ORDER BY principal DESC,seq DESC LIMIT 101) UNION "
+            "(SELECT e.* FROM visible_mail v CROSS JOIN LATERAL "
+            "(SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id "
+            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
+            "ORDER BY message_id,event,created_at OFFSET 0) e "
+            "ORDER BY e.seq DESC LIMIT 101) UNION "
+            "(SELECT e.* FROM coordination_events e WHERE e.event='expire' AND EXISTS "
+            "(SELECT 1 FROM jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+            "JOIN visible_mail v ON v.message_id=ids.id) ORDER BY e.seq DESC LIMIT 101)), "
+            "timeline AS (SELECT e.seq,e.event,e.created_at,e.agent_id,e.recipient_agent_id,"
+            "e.message_id,e.project,e.task, "
+            "CASE e.event WHEN 'send' THEN e.payload::jsonb->>'wake' "
+            "WHEN 'read' THEN e.payload::jsonb->>'path' END AS detail, "
+            "CASE WHEN e.event='expire' THEN (SELECT count(*) FROM "
+            "jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+            "JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count "
+            "FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT 101",
+            (principal, principal, principal, principal, principal))
+        # ``nudged`` is no longer decided (2026-10-02) but stays displayable
+        # for sends logged before then.
+        details = {"hinted", "not_needed", "rung", "withheld", "nudged", "no_path", "capped",
+                   "pull", "delivery"}
+        result["events"] = [{**dict(r), "detail": r["detail"] if r["detail"] in details else None}
+                            for r in rows[:100]]
+        result["events_truncated"] = len(rows) > 100
+        return {"enabled": True, "available": True, "snapshot_at": now, **result}
+
+    def _stamp_status_age(self, agents, now):
+        """Say when each listed peer's status was set, and mark it stale past
+        STATUS_STALE_AFTER. The live row keeps only the newest value, so the
+        time comes from the audit log: the newest ``register`` (which always
+        sets the status, blank included) or ``update`` that carried one.
+        When the log holds neither (the status predates the v42 log, or
+        retention cut the event), the log's oldest row is a lower bound on
+        the age, reported as such. A blank status is never stale."""
+        if not agents:
+            return
+        # Lazy: the helper's package loads the embedding stack, which the
+        # daemon has already imported and the offline CLIs never need.
+        from pseudolife_memory.memory.context_builder import _relative_time
+        # CASE fixes the evaluation order: only update payloads are cast.
+        set_at = {row["agent_id"]: row["set_at"] for row in self._all(
+            "SELECT agent_id,max(created_at) AS set_at FROM coordination_events "
+            "WHERE agent_id=ANY(%s) AND CASE event WHEN 'register' THEN true "
+            "WHEN 'update' THEN (payload::jsonb->'fields') ? 'status' ELSE false END "
+            "GROUP BY agent_id", ([agent["agent_id"] for agent in agents],))}
+        oldest = None
+        if len(set_at) < len(agents):
+            oldest = self._one("SELECT min(created_at) AS t FROM coordination_events")["t"]
+        for agent in agents:
+            when = set_at.get(agent["agent_id"])
+            if when is not None:
+                age, text = now - when, _relative_time(when, now)
+            elif oldest is not None and now - oldest >= 60:
+                age, text = now - oldest, "more than " + _relative_time(oldest, now)
+            else:
+                age, text = None, "unknown"
+            agent["status_set_at"] = when
+            agent["status_age"] = text
+            agent["status_stale"] = bool(agent["status"]) and age is not None \
+                and age >= STATUS_STALE_AFTER
+
+    # ── resource leases (v45) ─────────────────────────────────────────────
+    #
+    # One row per lease name, kept after each hold so ``fence`` keeps rising;
+    # a queue per name in ticket order. Every change settles the lease first:
+    # a hold past ``expires_at`` expires, and a free lease goes to the head of
+    # its queue for LEASE_GRANT_WINDOW. Settling happens on any lease call,
+    # any listing and the prune pass, so a queue advances even when its
+    # holder died without a word. Lock order: lease row, then waiter rows,
+    # then the caller's agent row, then (in _append) the audit chain. Renewals
+    # are not logged, like heartbeats; grants, releases and expiries are.
+
+    @staticmethod
+    def _lease_args(name, ttl=None, expect=None, purpose=None):
+        # No control, format (zero-width, bidi), surrogate or unassigned
+        # characters: two names that render alike must be one lease.
+        if (not isinstance(name, str) or not name or name != name.strip()
+                or len(name) > MAX_LEASE_NAME
+                or any(unicodedata.category(c)[0] == "C" for c in name)):
+            raise CoordinationError("invalid_lease")
+        # The name is in every lease event's hashed payload, for good.
+        _refuse_secret(name, "lease")
+        if ttl is not None and (type(ttl) is not int
+                                or not LEASE_TTL_MIN <= ttl <= LEASE_TTL_MAX):
+            raise CoordinationError("invalid_ttl")
+        if expect is not None and (type(expect) is not int
+                                   or not 1 <= expect <= LEASE_EXPECT_MAX):
+            raise CoordinationError("invalid_expect")
+        if purpose is not None:
+            _string(purpose, 240, "purpose")
+            # Hashed into the audit chain for good (lease_acquire/queue/grant).
+            _refuse_secret(purpose, "purpose")
+
+    def _grant(self, name, agent_id, principal, *, now, hold, expect, purpose):
+        # The fence comes from one sequence for every lease, never from the
+        # row: prune forgets a row left free for a week, and a counter kept
+        # on it would restart and hand a later grant a fence already used.
+        return self._one(
+            "UPDATE coordination_leases SET holder_agent_id=%s,holder_principal=%s,purpose=%s,"
+            "fence=nextval('coordination_lease_fence'),acquired_at=%s,expires_at=%s,expect=%s,"
+            "expected_end=%s,freed_at=NULL WHERE name=%s RETURNING *",
+            (agent_id, principal, purpose, now, now + hold, expect,
+             None if expect is None else now + expect, name))
+
+    def _vacate(self, name, now):
+        return self._one(
+            "UPDATE coordination_leases SET holder_agent_id=NULL,holder_principal='',"
+            "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
+            "freed_at=%s WHERE name=%s RETURNING *", (now, name))
+
+    def _settle(self, name, now, events):
+        """Expire a lapsed hold on ``name`` and grant a free lease to the head
+        of its queue, inside the caller's transaction. Returns the locked row,
+        or None when no lease has that name; appends the audit rows it causes
+        to ``events``. The expiry and grant are the daemon's bookkeeping, so
+        their actor is the daemon and their agent the one affected."""
+        row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+        if row is None:
+            return None
+        if row["holder_agent_id"] is not None and row["expires_at"] <= now:
+            events.append(self._event("lease_expire", {"name": name, "fence": row["fence"]},
+                                      actor="daemon", agent_id=row["holder_agent_id"]))
+            row = self._vacate(name, now)
+        if row["holder_agent_id"] is None:
+            # A waiter that could never take its turn up leaves the queue
+            # here, under the lease lock just taken, so every path locks a
+            # lease before its queue (prune once deleted departed waiters
+            # first, which deadlocked against a break holding the lease:
+            # reproduced 2026-09-26). Departed: the agent row is gone, or it
+            # has been idle past its retention window with no live
+            # attachment (prune's test for removing it, less the retained-
+            # mail condition, which keeps an address but not a turn). A
+            # revoked waiter (restore recovery) is passed over below.
+            window = ("CASE WHEN a.capabilities->>'resumable'='false' THEN %s ELSE %s END")
+            gone = [r["agent_id"] for r in self._all(
+                "DELETE FROM coordination_lease_waiters w WHERE w.name=%s AND (NOT EXISTS "
+                "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id) OR EXISTS "
+                "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id "
+                f"AND (a.lease_until IS NULL OR a.lease_until<={window}) "
+                f"AND a.last_activity<={window})) RETURNING w.agent_id",
+                (name, *(now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2))]
+            for agent in gone:
+                events.append(self._event("lease_dequeue", {"name": name, "reason": "departed"},
+                                          actor="daemon", agent_id=agent))
+            if name.startswith(RESERVED_LEASE_PREFIXES):
+                # Only the operator grants these; a waiter queued under older
+                # code leaves instead of inheriting the role (review of #550).
+                self._drop_reserved_waiters(name, events)
+                return row
+            waiter = self._one(
+                "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a "
+                "ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL "
+                "WHERE w.name=%s ORDER BY w.ticket LIMIT 1 FOR UPDATE OF w", (name,))
+            if waiter is not None:
+                self.storage.conn.execute(
+                    "DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s",
+                    (name, waiter["agent_id"]))
+                hold = min(waiter["ttl"], LEASE_GRANT_WINDOW)
+                row = self._grant(name, waiter["agent_id"], waiter["principal"], now=now,
+                                  hold=hold, expect=waiter["expect"], purpose=waiter["purpose"])
+                events.append(self._event(
+                    "lease_grant", {"name": name, "fence": row["fence"], "window": hold,
+                                    "expect": waiter["expect"], "purpose": waiter["purpose"]},
+                    actor="daemon", agent_id=waiter["agent_id"]))
+        return row
+
+    def _drop_reserved_waiters(self, name, events):
+        """Empty the queue of an operator-only (``delegate:``) lease, one
+        ``lease_dequeue`` (reason ``reserved``) per waiter. Only an agent
+        queued before the namespace was reserved can be there."""
+        for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
+                           "RETURNING agent_id", (name,)):
+            events.append(self._event("lease_dequeue", {"name": name, "reason": "reserved"},
+                                      actor="daemon", agent_id=r["agent_id"]))
+
+    def _settle_due(self, now, events, *, name=None):
+        """Settle every lease with a lapsed hold or a free lease with waiters,
+        in name order so concurrent settlers lock rows in one order."""
+        rows = self._all(
+            "SELECT name FROM coordination_leases l WHERE ((l.holder_agent_id IS NOT NULL "
+            "AND l.expires_at<=%s) OR (l.holder_agent_id IS NULL AND EXISTS (SELECT 1 FROM "
+            "coordination_lease_waiters w WHERE w.name=l.name)))"
+            + (" AND l.name=%s" if name is not None else "")
+            + " ORDER BY l.name FOR UPDATE",
+            (now,) if name is None else (now, name))
+        for row in rows:
+            self._settle(row["name"], now, events)
+
+    @staticmethod
+    def _holder(row):
+        if row["holder_agent_id"] is None:
+            return None
+        holder = {"agent_id": row["holder_agent_id"], "label": row.get("label") or "",
+                  # v55: the holder's board name, as the roster shows it.
+                  "name": _board_name(row["holder_agent_id"], row.get("label"),
+                                      row.get("holder_name")),
+                  "principal": row["holder_principal"], "purpose": row["purpose"],
+                  "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
+                  "expected_end": row["expected_end"]}
+        if row["name"].startswith("claim:file:"):
+            holder["fence"] = row["fence"]
+        return holder
+
+    def _lease_row(self, name):
+        return self._one(
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
+            "ON a.agent_id=l.holder_agent_id WHERE l.name=%s", (name,))
+
+    def _lease_view(self, name, agent_id):
+        row = self._lease_row(name)
+        queued = self._one("SELECT count(*) AS n FROM coordination_lease_waiters WHERE name=%s",
+                           (name,))["n"]
+        mine = row["holder_agent_id"] == agent_id
+        position = None
+        if not mine:
+            ahead = self._one(
+                "SELECT count(*) AS n FROM coordination_lease_waiters w, "
+                "coordination_lease_waiters me WHERE me.name=%s AND me.agent_id=%s "
+                "AND w.name=me.name AND w.ticket<=me.ticket", (name, agent_id))["n"]
+            position = ahead or None
+        return {"name": name, "state": "held" if mine else "queued",
+                "fence": row["fence"] if mine else None,
+                "expires_at": row["expires_at"] if mine else None,
+                "expected_end": row["expected_end"] if mine else None,
+                "position": position, "queued": queued, "holder": self._holder(row)}
+
+    def acquire_lease(self, principal, agent_id, credential, *, name, ttl=120, expect=None,
+                      purpose=None):
+        """Acquire or renew ``name`` for the caller, or queue it once.
+
+        Holding it already, the caller's expiry moves to now + ``ttl`` (and
+        the expected end to now + ``expect`` when given); a free lease with
+        nobody queued is the caller's at once; otherwise the caller joins the
+        queue, and asking again keeps its place and writes nothing."""
+        self._lease_args(name, ttl, expect, purpose)
+        if name.startswith(RESERVED_LEASE_PREFIXES):
+            raise CoordinationError("reserved_lease")
+        with self.storage._txn():
+            agent = self._auth(principal, agent_id, credential)
+            now = self.clock()
+            if name.startswith(COORDINATOR_PREFIX):
+                # A session holds one role per project: the delegate neither
+                # claims nor queues for the coordinator lease (security
+                # review, 2026-10-04: only the signed routes kept the rule).
+                # Both role leases lock in the order the role changes take.
+                # The live holder still renews: before v54 a session could
+                # hold both roles, and refusing its renewal let the lease
+                # lapse under it (review of #569, 2026-10-05).
+                project = name[len(COORDINATOR_PREFIX):]
+                self._lock_role_leases(project)
+                live = "SELECT 1 AS d FROM coordination_leases WHERE name=%s " \
+                       "AND holder_agent_id=%s AND expires_at>%s"
+                if (self._one(live, (DELEGATE_PREFIX + project, agent_id, now)) is not None
+                        and self._one(live, (name, agent_id, now)) is None):
+                    raise CoordinationError("already_delegate")
+            self.storage.conn.execute(
+                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (name,))
+            events = []
+            row = self._settle(name, now, events)
+            scope = {"principal": principal, "agent_id": agent_id,
+                     "project": agent["project"], "task": agent["task"]}
+            if row["holder_agent_id"] == agent_id:
+                # A renewal only extends the hold. Repeating the estimate
+                # the hold already carries leaves its expected end alone,
+                # so a stalled holder that keeps renewing still reads
+                # stale; a new estimate or purpose is a logged change.
+                sets, values, changed = ["expires_at=%s"], [now + ttl], {}
+                if expect is not None and expect != row["expect"]:
+                    sets += ["expect=%s", "expected_end=%s"]
+                    values += [expect, now + expect]
+                    changed["expect"] = expect
+                if purpose is not None and purpose != row["purpose"]:
+                    sets.append("purpose=%s")
+                    values.append(purpose)
+                    changed["purpose"] = purpose
+                self.storage.conn.execute(
+                    "UPDATE coordination_leases SET " + ",".join(sets) + " WHERE name=%s",
+                    (*values, name))
+                if changed:
+                    events.append(self._event(
+                        "lease_update", {"name": name, "fence": row["fence"], **changed},
+                        **scope))
+            elif row["holder_agent_id"] is None:
+                row = self._grant(name, agent_id, principal, now=now, hold=ttl, expect=expect,
+                                  purpose=purpose or "")
+                events.append(self._event(
+                    "lease_acquire", {"name": name, "fence": row["fence"], "ttl": ttl,
+                                      "expect": expect, "purpose": purpose or ""}, **scope))
+            elif self._one("SELECT 1 AS q FROM coordination_lease_waiters WHERE name=%s "
+                           "AND agent_id=%s", (name, agent_id)) is None:
+                if self._one("SELECT count(*) AS n FROM coordination_lease_waiters WHERE name=%s",
+                             (name,))["n"] >= LEASE_QUEUE_MAX:
+                    raise CoordinationError("lease_queue_full")
+                self.storage.conn.execute(
+                    "INSERT INTO coordination_lease_waiters (name,agent_id,principal,purpose,ttl,"
+                    "expect,enqueued_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (name, agent_id, principal, purpose or "", ttl, expect, now))
+                events.append(self._event(
+                    "lease_queue", {"name": name, "ttl": ttl, "expect": expect,
+                                    "purpose": purpose or ""}, **scope))
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s",
+                (now, agent_id))
+            self._append(events, now)
+            return self._lease_view(name, agent_id)
+
+    def release_lease(self, principal, agent_id, credential, *, name):
+        """Give up a held lease (the next waiter is granted it) or leave its
+        queue. Neither holding nor queued: ``lease_not_held``."""
+        self._lease_args(name)
+        with self.storage._txn():
+            agent = self._auth(principal, agent_id, credential)
+            now = self.clock()
+            scope = {"principal": principal, "agent_id": agent_id,
+                     "project": agent["project"], "task": agent["task"]}
+            row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+            events = []
+            if row is not None and row["holder_agent_id"] == agent_id:
+                self._vacate(name, now)
+                events.append(self._event("lease_release",
+                                          {"name": name, "fence": row["fence"]}, **scope))
+                self._settle(name, now, events)
+                result = {"name": name, "released": True, "dequeued": False}
+            elif self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                           "RETURNING ticket", (name, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": name}, **scope))
+                result = {"name": name, "released": False, "dequeued": True}
+            else:
+                raise CoordinationError("lease_not_held")
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s",
+                (now, agent_id))
+            self._append(events, now)
+        return result
+
+    def list_leases(self, *, name=None, limit=MAX_PAGE, settle=True):
+        """Held and queued leases, name order, each with its first
+        LEASE_LIST_QUEUE waiters and an exact count. Free leases are omitted.
+        ``stale`` means past the holder's expected end. Due leases are settled
+        first by default. ``settle=False`` is the Console's read-only view,
+        which labels a lapsed hold rather than changing the durable board."""
+        if name is not None:
+            self._lease_args(name)
+        self._limit(limit)
+        now = self.clock()
+        if settle:
+            with self.storage._txn():
+                events = []
+                self._settle_due(now, events, name=name)
+                self._append(events, now)
+        busy = ("(l.holder_agent_id IS NOT NULL OR EXISTS (SELECT 1 FROM "
+                "coordination_lease_waiters w WHERE w.name=l.name))")
+        rows = self._all(
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
+            "ON a.agent_id=l.holder_agent_id WHERE " + busy
+            + (" AND l.name=%s" if name is not None else "")
+            # Resource leases (suite, GPU, coordinator) before the day-long
+            # work-area claims, so a page of claims never hides them.
+            + " ORDER BY l.name LIKE 'claim:%%', l.name LIMIT %s",
+            ((name,) if name is not None else ()) + (limit + 1,))
+        page = rows[:limit]
+        names = [row["name"] for row in page]
+        queues = {name: [] for name in names}
+        counts = {}
+        if names:
+            # Bound each queue before joining its labels; the truncated lease
+            # page's extra row does not need a queue read.
+            waiters = self._all(
+                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,a.name AS agent_name,"
+                "w.enqueued_at,w.purpose "
+                "FROM unnest(%s::text[]) AS wanted(name) CROSS JOIN LATERAL "
+                "(SELECT agent_id,enqueued_at,purpose,ticket FROM coordination_lease_waiters "
+                "WHERE name=wanted.name ORDER BY ticket LIMIT %s) w "
+                "LEFT JOIN coordination_agents a ON a.agent_id=w.agent_id "
+                "ORDER BY wanted.name,w.ticket", (names, LEASE_LIST_QUEUE))
+            for waiter in waiters:
+                lease = waiter.pop("name")
+                waiter["name"] = _board_name(waiter["agent_id"], waiter["label"],
+                                             waiter.pop("agent_name"))
+                queues[lease].append(dict(waiter))
+            counts = {row["name"]: row["n"] for row in self._all(
+                "SELECT name,count(*) AS n FROM coordination_lease_waiters "
+                "WHERE name=ANY(%s::text[]) GROUP BY name", (names,))}
+        leases = []
+        for row in page:
+            leases.append({
+                "name": row["name"], "holder": self._holder(row), "fence": row["fence"],
+                "expires_at": row["expires_at"], "expected_end": row["expected_end"],
+                "stale": row["expected_end"] is not None and now > row["expected_end"],
+                "queued": counts.get(row["name"], 0), "queue": queues[row["name"]]})
+        return {"leases": leases, "truncated": len(rows) > limit}
+
+    @staticmethod
+    def _role_actor(actor):
+        if actor not in ROLE_ACTORS:
+            raise CoordinationError("invalid_request")
+        return actor
+
+    @staticmethod
+    def _role_project(project, prefix):
+        """A project the recipient's row can carry exactly: no surrounding
+        whitespace (it would never match), and short enough for the name."""
+        if (not isinstance(project, str) or not project or project != project.strip()
+                or len(prefix + project) > MAX_LEASE_NAME):
+            raise CoordinationError("invalid_project")
+        return prefix + project
+
+    def _lock_role_leases(self, project):
+        """Create and lock both role leases of ``project`` in name order
+        (``coordinator:`` before ``delegate:``), the order ``_settle_due``
+        locks leases in, before any waiter or agent row is touched."""
+        # A name past MAX_LEASE_NAME can hold no lease (acquire refuses it).
+        names = sorted(name for name in (COORDINATOR_PREFIX + project,
+                                          DELEGATE_PREFIX + project)
+                       if len(name) <= MAX_LEASE_NAME)
+        for name in names:
+            self.storage.conn.execute(
+                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (name,))
+        self._all("SELECT name FROM coordination_leases WHERE name=ANY(%s) ORDER BY name "
+                  "FOR UPDATE", (names,))
+
+    def _role_agent(self, agent_id):
+        """The registered, unrevoked row a role goes to. Only read: the
+        lease rows are locked first (lease row before agent row)."""
+        agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+        agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
+        if agent is None:
+            raise CoordinationError("instance_not_found")
+        if agent["credential_hash"] is None:
+            raise CoordinationError("agent_revoked")
+        return agent
+
+    def _break_held(self, name, agent_id, now, events, *, actor):
+        """Inside a role change: free ``name`` when ``agent_id`` holds it
+        live (a session holds one role per project at a time), logged as a
+        break by ``actor``; the next queued waiter takes it as after any
+        break. Returns the name when it broke one."""
+        row = self._one("SELECT * FROM coordination_leases WHERE name=%s", (name,))
+        if (row is None or row["holder_agent_id"] != agent_id
+                or row["expires_at"] is None or row["expires_at"] <= now):
+            return None
+        self._vacate(name, now)
+        events.append(self._event("lease_break", {"name": name, "fence": row["fence"],
+                                                  "reason": "one_role"},
+                                  actor=actor, agent_id=agent_id))
+        self._settle(name, now, events)
+        return name
+
+    def break_lease(self, name, *, actor="operator"):
+        """Operator only (the offline CLI; never exposed to agents), or the
+        maintainer through a passkey-signed Console route (v54, ``actor``
+        ``maintainer``): free a held lease whatever its holder says, and
+        grant it to the next waiter. The break is logged with its actor."""
+        self._role_actor(actor)
+        self._lease_args(name)
+        with self.storage._txn():
+            now = self.clock()
+            row = self._one("SELECT * FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+            if row is None or row["holder_agent_id"] is None:
+                return {"name": name, "broken": False, "was_held_by": None}
+            self._vacate(name, now)
+            events = [self._event("lease_break", {"name": name, "fence": row["fence"]},
+                                  actor=actor, agent_id=row["holder_agent_id"])]
+            self._settle(name, now, events)
+            self._append(events, now)
+        return {"name": name, "broken": True, "was_held_by": row["holder_agent_id"]}
+
+    def grant_delegate(self, project, agent_id, *, hold, actor="operator"):
+        """Operator only (the offline CLI; never exposed to agents), or the
+        maintainer through a passkey-signed Console route (v54, ``actor``
+        ``maintainer``): make ``agent_id`` (or a unique prefix of a
+        registered one) the maintainer's delegate for ``project`` for
+        ``hold`` seconds, replacing any current one. The hold is the lease
+        ``delegate:<project>``, so it expires, shows on the board and is
+        revoked with ``break_lease`` like any lease; the delegate may
+        release it, never take or renew it. A session holds one role per
+        project: the new delegate's live ``coordinator:<project>`` hold is
+        broken in the same transaction (``also_broken``)."""
+        self._role_actor(actor)
+        name = self._role_project(project, DELEGATE_PREFIX)
+        if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
+            raise CoordinationError("invalid_ttl")
+        self._lease_args(name)
+        with self.storage._txn():
+            now = self.clock()
+            self._lock_role_leases(project)
+            agent = self._role_agent(agent_id)
+            agent_id = agent["agent_id"]
+            events = []
+            # Queued for the coordinator lease, the new delegate leaves that
+            # queue rather than be handed the second role later.
+            if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                         "RETURNING ticket", (COORDINATOR_PREFIX + project, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": COORDINATOR_PREFIX + project,
+                                                            "reason": "one_role"},
+                                          actor="daemon", agent_id=agent_id))
+            also = self._break_held(COORDINATOR_PREFIX + project, agent_id, now, events,
+                                    actor=actor)
+            # A waiter queued before the namespace was reserved never takes
+            # it; dropped here too, since a held lease's settle keeps its queue.
+            self._drop_reserved_waiters(name, events)
+            row = self._settle(name, now, events)
+            replaced = row["holder_agent_id"]
+            row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
+                              expect=None, purpose=f"granted by the {actor}")
+            events.append(self._event("lease_delegate",
+                                      {"name": name, "fence": row["fence"], "hold": hold,
+                                       "replaced": replaced},
+                                      actor=actor, agent_id=agent_id,
+                                      project=agent["project"], task=agent["task"]))
+            self._append(events, now)
+        out = {"name": name, "agent_id": agent_id, "fence": row["fence"],
+               "expires_at": row["expires_at"], "replaced": replaced}
+        if also:
+            out["also_broken"] = also
+        return {**out, **self.reachability(agent, now, role="delegate")}
+
+    @classmethod
+    def reachability(cls, agent, now, *, role=None):
+        """Whether maintainer mail rings ``agent`` (an agent row, or None for
+        a holder with no board row) now: ``reachable`` and the no-path
+        ``reason`` a send would carry, plus, given ``role``, the ``warning``
+        a grant shows when it is not."""
+        reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
+        out = {"reachable": reason is None, "reason": reason}
+        if role is not None and reason is not None:
+            out["warning"] = UNREACHABLE_WARNING.format(
+                role=role, reason=UNREACHABLE_REASONS.get(reason, reason))
+        return out
+
+    def assign_coordinator(self, project, agent_id, *, hold, actor="operator"):
+        """Give ``coordinator:<project>`` to ``agent_id`` for ``hold``
+        seconds, vacating the current holder (logged, ``replaced``): the
+        maintainer's passkey-signed Console route (v54). Afterwards it is an
+        ordinary lease: the holder renews or releases it, others queue, and
+        the queue is left as it was (the assignee leaves it). A session
+        holds one role per project: the assignee's live
+        ``delegate:<project>`` hold is broken in the same transaction
+        (``also_broken``)."""
+        self._role_actor(actor)
+        name = self._role_project(project, COORDINATOR_PREFIX)
+        if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
+            raise CoordinationError("invalid_ttl")
+        self._lease_args(name)
+        with self.storage._txn():
+            now = self.clock()
+            self._lock_role_leases(project)
+            agent = self._role_agent(agent_id)
+            agent_id = agent["agent_id"]
+            events = []
+            also = self._break_held(DELEGATE_PREFIX + project, agent_id, now, events,
+                                    actor=actor)
+            row = self._one("SELECT * FROM coordination_leases WHERE name=%s", (name,))
+            replaced = None
+            if row["holder_agent_id"] is not None and row["expires_at"] <= now:
+                events.append(self._event("lease_expire", {"name": name, "fence": row["fence"]},
+                                          actor="daemon", agent_id=row["holder_agent_id"]))
+            elif row["holder_agent_id"] is not None:
+                replaced = row["holder_agent_id"]
+            if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                         "RETURNING ticket", (name, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": name, "reason": "assigned"},
+                                          actor="daemon", agent_id=agent_id))
+            row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
+                              expect=None, purpose=f"assigned by the {actor}")
+            events.append(self._event("lease_assign",
+                                      {"name": name, "fence": row["fence"], "hold": hold,
+                                       "replaced": replaced},
+                                      actor=actor, agent_id=agent_id,
+                                      project=agent["project"], task=agent["task"]))
+            self._append(events, now)
+        out = {"name": name, "agent_id": agent_id, "fence": row["fence"],
+               "expires_at": row["expires_at"], "replaced": replaced}
+        if also:
+            out["also_broken"] = also
+        return {**out, **self.reachability(agent, now, role="coordinator")}
+
+    def _pending_count(self, agent_id):
+        return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
+                         "AND acknowledged_at IS NULL AND expires_at>%s", (agent_id, self.clock()))["n"]
+
+    def _pending_preview(self, agent_id):
+        """The oldest pending messages, bounded, for the shim's per-turn digest.
+
+        Oldest first so a backlog shows what has waited longest; the count
+        beside it says how much the preview omits. Reading is not delivery:
+        nothing here touches attempts or acknowledgements. Maintainer
+        messages (v54) are left out: the digest only counts them, in fixed
+        text, so no body of one reaches a local file."""
+        rows = self._all(
+            "SELECT m.message_id,m.sender_agent_id,m.sender_principal,m.created_at,m.text,"
+            "a.label AS sender_label "
+            "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
+            "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "AND m.origin<>%s ORDER BY m.recipient_sequence LIMIT %s",
+            (agent_id, self.clock(), MAINTAINER_ORIGIN, PREVIEW_LIMIT))
+        return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
+                 "sender_principal": r["sender_principal"],
+                 "sender_label": self._preview_label(r), "created_at": r["created_at"],
+                 "excerpt": _excerpt(r["text"])} for r in rows]
+
+    @staticmethod
+    def _preview_label(row):
+        """The digest's sender name: ``daemon`` only for the daemon's own
+        mail, whatever label a row carries (one registered before the label
+        was refused renders as a plain peer)."""
+        if row["sender_principal"] == DAEMON_PRINCIPAL:
+            return DAEMON_PRINCIPAL
+        label = row["sender_label"] or ""
+        return "" if reserved_name(label) else label
+
+    def _maintainer_pending(self, agent_id):
+        """Pending maintainer-origin messages (v54), withdrawn ones too: the
+        digest's one fixed line counts them, the agent-mail line the rest."""
+        return self._one("SELECT count(*) AS n FROM coordination_messages WHERE "
+                         "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s "
+                         "AND origin=%s AND sender_principal=%s",
+                         (agent_id, self.clock(), MAINTAINER_ORIGIN, MAINTAINER_PRINCIPAL))["n"]
+
+    def _mailbox_state(self, agent_id):
+        return {"pending_count": self._pending_count(agent_id),
+                "pending_preview": self._pending_preview(agent_id),
+                "maintainer_pending": self._maintainer_pending(agent_id)}
+
+    def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False,
+               ring=None, ring_armed_until=None):
+        """Take or renew the adapter lease. ``ring`` (v49) says whether a
+        ring the daemon decides reaches this session without a live channel
+        (the Claude Stop hook's .ring marker, the Codex doorbell); it is
+        kept in ``capabilities``. A listener must also renew its bounded
+        ``ring_armed_until`` deadline; static capability alone is no live path."""
+        _string(attachment_id, 120, "attachment_id", empty=False)
+        self._fields(wake_enabled=wake_enabled)
+        if ring is not None and not isinstance(ring, bool):
+            raise CoordinationError("invalid_capabilities")
+        with self.storage._txn():
+            row = self._auth(principal, agent_id, credential, lock=True)
+            now = self.clock()
+            armed_until = self._listener_deadline(ring_armed_until, now)
+            alive = row["attachment_id"] is not None and (row["lease_until"] or 0) > now
+            if alive and row["attachment_id"] != attachment_id:
+                raise CoordinationError("attachment_busy")
+            generation = row["generation"] if alive else row["generation"] + 1
+            # Only a new attachment, a process starting, is the agent's own
+            # act. The id the row already holds is the adapter recovering its
+            # lease after a daemon outage, a host sleep or a pull downgrade:
+            # on 2026-09-25 a 9-minute sleep lapsed every idle shim's lease,
+            # and the re-attach wave on wake made a dozen sessions idle for
+            # hours read as active within 28 s of each other.
+            started = row["attachment_id"] != attachment_id
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET attachment_id=%s,generation=%s,lease_until=%s,"
+                "last_activity=CASE WHEN %s THEN %s ELSE last_activity END,"
+                "wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
+                (attachment_id, generation, now + ATTACHMENT_LEASE, started, now,
+                 wake_enabled, agent_id))
+            if ring is not None:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET capabilities=capabilities || %s "
+                    "WHERE agent_id=%s", (Jsonb({"ring": ring}), agent_id))
+            self._record_listener(row, armed_until)
+            mailbox = self._mailbox_state(agent_id)
+            ring = self._serve_wake(agent_id, now)
+            self._append([self._event(
+                "attach", {"generation": generation, "lease_until": now + ATTACHMENT_LEASE,
+                           "wake_enabled": wake_enabled, "renewed": alive},
+                principal=principal, agent_id=agent_id, project=row["project"],
+                task=row["task"])], now)
+        return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
+                "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
+
+    @staticmethod
+    def _listener_deadline(value, now):
+        if value is None:
+            return None
+        if (type(value) not in (int, float) or value < 0
+                or (type(value) is float and not math.isfinite(value))):
+            raise CoordinationError("invalid_ring_armed_until")
+        # Listener and attachment leases share the same 60-second ceiling;
+        # an abandoned listener cannot remain advertised indefinitely.
+        return min(value, now + ATTACHMENT_LEASE)
+
+    def _record_listener(self, row, deadline):
+        if deadline is not None or "ring_armed_until" in (row.get("capabilities") or {}):
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET capabilities=capabilities || %s WHERE agent_id=%s",
+                (Jsonb({"ring_armed_until": deadline or 0}), row["agent_id"]))
+
+    @staticmethod
+    def _listener_path(row, now):
+        attached = row["attachment_id"] is not None and (row["lease_until"] or 0) > now
+        if attached and row["wake_enabled"]:
+            return None
+        capabilities = row.get("capabilities") or {}
+        deadline = capabilities.get("ring_armed_until")
+        if (attached and capabilities.get("ring") is True and type(deadline) in (int, float)
+                and math.isfinite(deadline) and deadline > now):
+            return None
+        if deadline is not None or row["wake_enabled"]:
+            return "listener_expired"
+        return "listener_unknown" if capabilities.get("ring") is True else "wake_disabled"
+
+    def _attachment(self, row, attachment_id, generation):
+        if (row["attachment_id"] != attachment_id or row["generation"] != generation
+                or not row["attachment_id"] or (row["lease_until"] or 0) <= self.clock()):
+            raise CoordinationError("stale_attachment")
+
+    def check_attachment(self, principal, agent_id, credential, *, attachment_id, generation):
+        row = self._auth(principal, agent_id, credential)
+        self._attachment(row, attachment_id, generation)
+        return {"agent_id": agent_id, "generation": generation,
+                "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
+
+    def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
+                  active=False, ring_armed_until=None, name=None):
+        """Renew the lease. ``active`` says the shim forwarded a tool call
+        since its previous heartbeat; only then does the renewal count as
+        activity, so a parked shim is not ranked or retained as a working
+        one. ``name`` (v55) is the title the harness shows for the session
+        (source ``harness``); the shim sends it only when it changed, and
+        only a real change is written and logged."""
+        if not isinstance(active, bool):
+            raise CoordinationError("invalid_active")
+        if name is not None:
+            name = self._check_name(name)
+        with self.storage._txn():
+            row = self._auth(principal, agent_id, credential, lock=True)
+            self._attachment(row, attachment_id, generation)
+            now = self.clock()
+            armed_until = self._listener_deadline(ring_armed_until, now)
+            until = now + ATTACHMENT_LEASE
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET lease_until=%s,"
+                "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
+                (until, active, now, agent_id))
+            if name is not None and name != (row.get("harness_name") or ""):
+                # Kept even while an agent name outranks it, so clearing that
+                # name restores the harness title. Heartbeat state, unlogged;
+                # only a change of the shown name is an audit event.
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET harness_name=%s WHERE agent_id=%s",
+                    (name, agent_id))
+            naming = {} if name is None else self._name_change(row, name, "harness", now)
+            if naming:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET name=%s,name_source=%s,name_set_at=%s "
+                    "WHERE agent_id=%s", (naming["name"], naming["name_source"],
+                                         naming["name_set_at"], agent_id))
+                self._append([self._name_event(row, naming, principal)], now)
+            self._record_listener(row, armed_until)
+            mailbox = self._mailbox_state(agent_id)
+            ring = self._serve_wake(agent_id, now)
+        return {"agent_id": agent_id, "generation": generation, "lease_until": until,
+                "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
+
+    def title_names(self, episodes, title, *, principal=None):
+        """Name the rows registered under any of ``episodes`` (the session
+        keys a ``memory_session_title`` rename resolved) after ``title``,
+        with source ``title`` (v55): only rows no agent or harness named,
+        only those of ``principal``, one ``update`` event per row that
+        changed, by the daemon. Returns how many changed. Without a
+        principal it names nothing: fail closed, never every principal's
+        rows (delegate review of #582, 2026-10-05)."""
+        name = self._title_name(title)
+        episodes = sorted({e for e in episodes if isinstance(e, str) and e})
+        if name is None or not episodes or principal is None:
+            return 0
+        now = self.clock()
+        params = [name, now, episodes, name, principal]
+        scope = " AND a.principal=%s"
+        with self.storage._txn():
+            rows = self._all(
+                "UPDATE coordination_agents a SET name=%s,name_source='title',name_set_at=%s "
+                "FROM coordination_agents b WHERE a.agent_id=b.agent_id "
+                "AND a.episode=ANY(%s) AND a.episode<>'' AND a.credential_hash IS NOT NULL "
+                "AND a.name_source IN ('','title') AND a.name<>%s" + scope +
+                " RETURNING a.agent_id,a.principal,a.project,a.task,b.name,b.name_source",
+                params)
+            self._append([self._name_event(row, {"name": name, "name_source": "title"},
+                                           row["principal"], actor="daemon")
+                          for row in sorted(rows, key=lambda r: r["agent_id"])], now)
+        return len(rows)
+
+    def _serve_wake(self, agent_id, now):
+        """Offer the newest pending ring; the adapter deduplicates its identity.
+        Queued mail retains a stable offer until acknowledgment or expiry,
+        covering lost handoffs and replacement attachments. Codex ring offers
+        require retained audit proof of the unchanged current live park. Other rings
+        repeat only for one heartbeat interval. New capped unparked ``attention``
+        rows may explicitly authorize an unknown-state queue bell; historical
+        attention without that permission stays hint-only. A
+        ``nudged`` row decided before 2026-10-02 (regular mail never wakes) is history, never served."""
+        row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
+        codex = "codex" in (row.get("capabilities") or {})
+        park = self._live_park(row, now) if codex else None
+        # A done park is served only a reopen (REOPEN_REASONS) sent after it
+        # (2026-10-03); older grants and attention stay withdrawn.
+        reopen_only = park is not None and park["park_reason"] == "done"
+        park_since = park["park_set_at"] if park else None
+        # Audit sequence, not wall time, binds a grant to the unchanged
+        # current park. A missing or mismatched audit snapshot proves nothing.
+        park_event = self._one(
+            "SELECT seq,payload::jsonb->'fields'->'park_set_at' AS park_set_at "
+            "FROM coordination_events WHERE agent_id=%s AND event='update' "
+            "AND payload::jsonb->'fields' ? 'park_set_at' ORDER BY seq DESC LIMIT 1",
+            (agent_id,)) if park else None
+        park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
+        ring_allowed = park_seq is not None and self._listener_path(row, now) is None
+        # A maintainer message's ring (v54) needs no park: a live listener
+        # is enough, a done park included.
+        listening = self._listener_path(row, now) is None
+        serve_guard = (" AND (decision='attention' OR (%s AND reason=%s) OR (%s AND EXISTS "
+                       "(SELECT 1 FROM coordination_events s WHERE s.event='send' "
+                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))"
+                       ) if codex else ""
+        serve_values = (listening, MAINTAINER_WAKE_REASON, ring_allowed,
+                        park_seq or 0) if codex else ()
+        if reopen_only:
+            serve_guard += " AND decision='rung' AND reason=ANY(%s)"
+            serve_values += ([*_REOPEN_ROW_REASONS, MAINTAINER_WAKE_REASON],)
+        if not codex and self._listener_path(row, now) is not None:
+            return None
+        self.storage.conn.execute(
+            "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
+            "AND decision IN ('rung','attention') "
+            "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
+            "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)" + serve_guard,
+            (now, agent_id, agent_id, now, *serve_values))
+        rows = self._all(
+            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,"
+            "coalesce(m.wake->>'queue_allowed'='true',false) AS queue_allowed,"
+            "coalesce(m.wake->>'queued'='true',false) AS queued,"
+            "EXISTS (SELECT 1 FROM coordination_events s WHERE s.event='send' "
+            "AND s.message_id=w.message_id AND s.seq>%s) AS park_authorized FROM coordination_wakes w "
+            "JOIN coordination_messages m ON m.message_id=w.message_id "
+            "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
+            "AND w.decision IN ('rung','attention') "
+            "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
+            (park_seq or 0, agent_id, codex, now))
+        if reopen_only:
+            rows = [item for item in rows if item["reason"] == MAINTAINER_WAKE_REASON or (
+                park_seq is not None and item["decision"] == "rung"
+                and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"])]
+        if not rows:
+            return None
+        if codex:
+            eligible = [item for item in rows if item["decision"] == "attention"
+                        or (listening and item["reason"] == MAINTAINER_WAKE_REASON)
+                        or (ring_allowed and item["park_authorized"])]
+            if not eligible:
+                # Historical ring authorization without its unchanged park is
+                # pending context, never a new queue or a recorded ring handoff.
+                return {"decision": "attention", "reason": "no_steer_path",
+                        "ring_at": max(item["ring_at"] for item in rows)}
+            rows = eligible
+        # Attention is context for pull/hints, never an idle ring. An armed
+        # queue listener does not establish an active-turn steer path.
+        if self._listener_path(row, now) is not None:
+            rows = [item for item in rows if item["decision"] == "attention"]
+            if not rows:
+                return None
+        newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
+        if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
+            return None
+        offer = {"decision": newest["decision"], "reason": newest["reason"],
+                 "ring_at": max(r["ring_at"] for r in rows)}
+        if codex:
+            # Exact immutable message expiry, not a new lifetime on each heartbeat.
+            offer["message_expires_at"] = newest["expires_at"]
+            if newest["decision"] == "attention":
+                offer.update(queue_allowed=(newest["queue_allowed"] and park is None
+                                            and self._listener_path(row, now) is None),
+                             recipient_state="unknown")
+        return offer
+
+    def _live_park(self, row, now):
+        """The row's park record while it stands: a reason set, and no
+        ``park_expires`` in the past."""
+        reason = row.get("park_reason")
+        expires = row.get("park_expires")
+        if reason is None or (expires is not None and expires <= now):
+            return None
+        return {key: row.get(key, default) for key, default in _PARK_CLEARED.items()}
+
+    def _lease_clearer(self, agent_id, name, now):
+        """Whether ``agent_id``'s hold on the lease ``name`` ended (a release
+        or an expiry the daemon logged against it) at most LEASE_CLEAR_GRACE
+        ago: a park waiting for a lease is cleared when it frees, never when
+        someone takes it (review, 2026-09-28). Read from the audit log, never
+        from anything the sender says. ``maintainer``, an agent id and an
+        id prefix (8 or more of its hex characters, as every surface shows
+        it) are never lease names here, so no lease can stand in for the
+        human or a peer. ``maintainer`` is compared exactly, as everywhere
+        else on the board."""
+        if name == "maintainer" or (ID_PREFIX_MIN <= len(name) <= ID_LENGTH
+                                    and set(name) <= _ID_HEX):
+            return False
+        # The CASE keeps the cast off other events' payloads, as park_gate's.
+        return self._one(
+            "SELECT 1 AS hit FROM coordination_events WHERE created_at>%s AND agent_id=%s "
+            "AND CASE WHEN event IN ('lease_release','lease_expire') "
+            "THEN payload::jsonb->>'name'=%s ELSE false END LIMIT 1",
+            (now - LEASE_CLEAR_GRACE, agent_id, name)) is not None
+
+    def _authority(self, sender, recipient, now):
+        """``maintainer`` when the sender's bearer principal is one the
+        operator listed, ``delegate`` when the operator made the sending
+        agent the maintainer's delegate for the recipient's (non-empty)
+        project (the live ``delegate:<project>`` hold), else None. Read from
+        the authenticated sender row, the lease table and the audit log only:
+        nothing a message says can claim either, and holding the open
+        ``coordinator:<project>`` lease counts for nothing. An expired grant
+        counts for nothing even before a settle vacates it.
+
+        The hold counts only with the operator's ``lease_delegate`` record
+        for its current fence (coordinator review of #559, 2026-10-04):
+        0.16.0 reserved only ``designated:``, so a session could hold an
+        ordinary lease named ``delegate:<project>`` across the upgrade.
+        Fences come from one sequence and only the daemon writes the audit
+        log, so no session can match one; the purpose text is the holder's
+        and proves nothing. The audit scan runs only for a sender that holds
+        such a lease. An audit window shorter than the grant
+        (``audit_retention_days`` under 7) can end the authority early,
+        never extend it. Since v54 the record's actor is ``operator`` (the
+        host CLI) or ``maintainer`` (the passkey-signed Console route,
+        addendum 2026-10-04); nothing else writes either."""
+        if sender["principal"] in self.maintainer_principals:
+            return "maintainer"
+        project = recipient.get("project") or ""
+        if project and self._one(
+                "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=%s "
+                "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
+                "FROM coordination_events e WHERE e.event='lease_delegate' "
+                "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
+                "AND CASE WHEN e.event='lease_delegate' THEN "
+                "e.payload::jsonb->>'name'=l.name "
+                "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
+                (DELEGATE_PREFIX + project, sender["agent_id"], now,
+                 list(ROLE_ACTORS))) is not None:
+            return "delegate"
+        return None
+
+    def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id,
+                       maintainer=False):
+        """Decide at send whether the recipient's shim should ring (v49).
+
+        The decision table (Coordination v2 design, decided 2026-09-28):
+        ``hinted`` for a recipient active within ``active_seconds`` (its
+        next tool result carries the mail); ``not_needed`` for one parked
+        done; ``no_path`` for one without a wake path (its need rides
+        along); parked with a need, ``rung`` when the sender is the clearer
+        (``park_clear_by`` names it, or names a lease whose hold it has just
+        given up, ``_lease_clearer``), ``park_clear_by`` is ``anyone``,
+        ``clears`` names the need, or the
+        sender set ``urgent`` (each within its cap), else ``withheld`` with
+        the need and ``retry`` so the sender knows what would wake it.
+        A done park rings only for ``urgent`` mail from the maintainer, the
+        maintainer's delegate for the project or the park's named clearer
+        (``reopened``; 2026-10-03), else ``not_needed`` with ``reopen_by``.
+        Urgent mail from the maintainer or the delegate is decided
+        ``maintainer`` or ``delegate`` wherever plain urgency would ring,
+        and spends the sender's ``authority_per_sender_per_hour`` instead of its urgent
+        allowance; the per-recipient, nightly and stagger caps bind every
+        ring alike. Unparked Codex
+        urgency is capped attention with explicit one-bell queue permission,
+        unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
+        else ``not_needed`` with reason ``no_park``: the session is
+        waiting on nobody, so the mail waits for its next turn. Regular
+        mail never wakes (maintainer decision 2026-10-02, retiring the
+        hourly ``nudged`` ring; rows decided ``nudged`` before then are
+        history, never served). Every ring is bounded per recipient per
+        hour and by the nightly total, and rings from one sender's burst
+        are staggered by ``fan_out_stagger_seconds``. Chatter never rings.
+
+        A maintainer message (v54, ``maintainer``) is decided first and on
+        its own: it rings whenever the recipient has a live listener,
+        whatever its park record (``done`` included) or recent activity,
+        never answers ``withheld`` or ``not_needed``, is ``capped`` above
+        ``maintainer_per_recipient_per_hour``, and with no live listener
+        answers ``no_path``, queued for the next receive, as any ring does."""
+        policy = self.wake
+        if maintainer:
+            return self._maintainer_wake(sender, recipient, now, message_id=message_id)
+        park = self._live_park(recipient, now)
+        done = park is not None and park["park_reason"] == "done"
+        need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
+                if park and not done else {})
+        # A parked session has stopped: its last board action (the park
+        # itself) is no sign a tool result will carry the mail, so only an
+        # unparked session counts as active (review, 2026-09-28).
+        attention = park is None and urgent and "codex" in (recipient.get("capabilities") or {})
+        if (not attention and park is None
+                and recipient["last_activity"] > now - policy.active_seconds):
+            return {"decision": "hinted", "reason": "active"}
+        authority = self._authority(sender, recipient, now) if urgent else None
+        hour, day = now - 3600, now - 86400
+        if done:
+            how = authority
+            if how is None and urgent and park["park_clear_by"] and (
+                    park["park_clear_by"] == sender["agent_id"]
+                    or self._lease_clearer(sender["agent_id"], park["park_clear_by"], now)):
+                how = "clearer"
+            if how is None:
+                # Plain mail, or a peer's urgency (``anyone`` included): the
+                # session expects no follow-up, and the mail waits for its
+                # next turn.
+                return {"decision": "not_needed", "reason": "parked_done",
+                        "reopen_by": DONE_REOPEN_BY}
+        elif park:
+            how = None
+            if park["park_clear_by"] == sender["agent_id"]:
+                how = "clearer"
+            elif park["park_clear_by"] == "anyone":
+                how = "anyone"
+            elif park["park_clear_by"] and self._lease_clearer(
+                    sender["agent_id"], park["park_clear_by"], now):
+                # The lease CLI's release notice (full-suite, gpu) comes
+                # from the mirror's own address, never the lease's name.
+                how = "clearer"
+            elif clears is not None and _need_matches(clears, park["park_needs"]):
+                how = "clears"
+            elif urgent:
+                how = authority or "urgent"
+            if how is None:
+                return {"decision": "withheld", "reason": "need_not_cleared", **need,
+                        "retry": WITHHELD_RETRY}
+        elif urgent:
+            # Waiting on nobody, but the sender says it cannot wait
+            # (maintainer decision 2026-10-02): apply the existing caps;
+            # unparked Codex becomes pending attention below.
+            how = authority or "urgent"
+        else:
+            # Waiting on nobody: plain mail, or clears with no need to
+            # clear, never rings; it waits for the session's next turn
+            # (maintainer decision 2026-10-02).
+            return {"decision": "not_needed", "reason": "no_park"}
+        # A named clearer reopening a done park spends the plain urgent
+        # allowance: the park itself names it; it is not an authority.
+        counts_urgent = how == "urgent" or (done and how == "clearer")
+        if counts_urgent:
+            sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                             "sender_agent_id=%s AND urgent AND created_at>%s",
+                             (sender["agent_id"], hour))["n"]
+            if sent >= policy.urgent_per_sender_per_hour:
+                return {"decision": "capped", "reason": "urgent_sender_hour", **need}
+        elif how in AUTHORITY_REASONS:
+            sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                             "sender_agent_id=%s AND reason=ANY(%s) AND created_at>%s",
+                             (sender["agent_id"], list(_AUTHORITY_ROW_REASONS), hour))["n"]
+            if sent >= policy.authority_per_sender_per_hour:
+                return {"decision": "capped", "reason": "authority_sender_hour", **need}
+        decision, reason = ("attention" if attention else "rung"), how
+        counts = self._one(
+            "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
+            "count(*) FILTER (WHERE created_at>%s) AS night,"
+            "max(ring_at) FILTER (WHERE sender_agent_id=%s AND ring_at>%s) AS burst "
+            "FROM coordination_wakes",
+            (recipient["agent_id"], hour, day, sender["agent_id"],
+             now - policy.fan_out_stagger_seconds))
+        if counts["recipient"] >= policy.per_recipient_per_hour:
+            return {"decision": "capped", "reason": "recipient_hour", **need}
+        if counts["night"] >= policy.nightly_total:
+            return {"decision": "capped", "reason": "nightly", **need}
+        ring_at = now
+        if counts["burst"] is not None:
+            ring_at = max(now, counts["burst"] + policy.fan_out_stagger_seconds)
+        self.storage.conn.execute(
+            "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+            "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
+             counts_urgent, ring_at, now))
+        reopened = {"reopened": True} if done else {}
+        # Why this ring was allowed, for the send's audit event (``send``
+        # pops it before the decision is stored or returned): a ``no_path``
+        # receipt's own reason names the missing listener instead.
+        ring = {"_ring": reason}
+        if attention:
+            # Codex's desktop owner uses private stdio; a queue capability
+            # proves neither actual idle state nor a supported steer route.
+            return {"decision": "no_path", "reason": "no_steer_path",
+                    "attention": True, "delivery": "queue_pending", "recipient_state": "unknown",
+                    "queue_allowed": True,
+                    "ring_at": ring_at,
+                    "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering.",
+                    **ring}
+        missing = self._listener_path(recipient, now)
+        if missing is not None:
+            codex = "codex" in (recipient.get("capabilities") or {})
+            return {"decision": "no_path", "reason": missing, "queued": True,
+                    "last_activity": recipient["last_activity"],
+                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
+                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
+                                           else FALLBACK_PATHS_CLAUDE),
+                    **need, **reopened, **ring}
+        return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
+
+    def _maintainer_wake(self, sender, recipient, now, *, message_id):
+        """The maintainer branch of ``_wake_decision`` (v54)."""
+        sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                         "recipient_agent_id=%s AND reason=%s AND created_at>%s",
+                         (recipient["agent_id"], MAINTAINER_WAKE_REASON, now - 3600))["n"]
+        if sent >= self.wake.maintainer_per_recipient_per_hour:
+            return {"decision": "capped", "reason": "maintainer_hour"}
+        self.storage.conn.execute(
+            "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+            "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,'rung',%s,false,%s,%s)",
+            (recipient["agent_id"], sender["agent_id"], message_id, MAINTAINER_WAKE_REASON,
+             now, now))
+        ring = {"_ring": MAINTAINER_WAKE_REASON}
+        missing = self._listener_path(recipient, now)
+        if missing is not None:
+            codex = "codex" in (recipient.get("capabilities") or {})
+            return {"decision": "no_path", "reason": missing, "queued": True,
+                    "last_activity": recipient["last_activity"],
+                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
+                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
+                                           else FALLBACK_PATHS_CLAUDE), **ring}
+        return {"decision": "rung", "reason": MAINTAINER_WAKE_REASON, "ring_at": now, **ring}
+
+    def park_gate(self, agent_id, principal, *, since=None):
+        """What the Stop hook asks when a turn ends (v49): ``block`` when the
+        session should first record a park, ``allow`` otherwise. Blocked
+        when its row carries no live park record and its status is not
+        done-shaped, or, given the turn's start ``since``, when it set no
+        status or park during the turn. A live standing park allows the
+        stop. A park set at or before the newest rung delivery during the
+        turn is stale. An address the caller's principal does not own, or
+        none at all, is allowed: there is nothing to ask."""
+        row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                        "AND credential_hash IS NOT NULL", (agent_id, principal))
+        if row is None:
+            return {"gate": "allow", "reason": "unknown_agent"}
+        now = self.clock()
+        park = self._live_park(row, now)
+        if park is not None:
+            if since is not None:
+                # Immediate rings use their send time. A queued no-path
+                # ring reaches nobody until the listener takes it.
+                latest = self._one(
+                    "SELECT max(delivered_at) AS created_at FROM (SELECT CASE WHEN "
+                    "m.wake->>'queued'='true' THEN w.served_at ELSE w.created_at END AS delivered_at "
+                    "FROM coordination_wakes w LEFT JOIN coordination_messages m "
+                    "ON m.message_id=w.message_id AND m.recipient_agent_id=w.recipient_agent_id "
+                    "WHERE w.recipient_agent_id=%s AND w.decision='rung') delivered WHERE delivered_at>%s",
+                    (agent_id, since))["created_at"]
+                if latest is not None and (park["park_set_at"] is None or
+                                           park["park_set_at"] <= latest):
+                    return {"gate": "block", "reason": "not_updated_this_turn"}
+            return {"gate": "allow", "reason": "parked"}
+        if since is not None:
+            # Status and park changes are update events whose fields name
+            # them; the CASE keeps the cast off other events' payloads.
+            updated = self._one(
+                "SELECT 1 AS hit FROM coordination_events WHERE agent_id=%s AND created_at>%s "
+                "AND CASE event WHEN 'register' THEN true WHEN 'update' THEN "
+                "(payload::jsonb->'fields') ?| array['status','park_reason','park_needs',"
+                "'park_clear_by','park_resume','park_expires'] ELSE false END LIMIT 1",
+                (agent_id, since))
+            if updated is None:
+                return {"gate": "block", "reason": "not_updated_this_turn"}
+        if DONE_STATUS.search(row["status"] or ""):
+            return {"gate": "allow", "reason": "done"}
+        return {"gate": "block", "reason": "no_park"}
+
+    def woke(self, agent_id, principal):
+        """What the Stop hook posts once a wake has fired: this address's turn
+        is starting. Logged as one ``woke`` audit event for the recipient
+        whose payload counts the rings served to it in the last hour (the
+        hook's longest wait) and nothing else, so ``board-audit stats`` can
+        measure wake precision from the turn starting rather than from
+        ``served_at``. An address the caller's principal does not own, or
+        none at all, records nothing."""
+        with self.storage._txn():
+            row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                            "AND credential_hash IS NOT NULL FOR UPDATE", (agent_id, principal))
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            rings = self._one(
+                "SELECT count(*) AS n FROM coordination_wakes WHERE recipient_agent_id=%s "
+                "AND served_at IS NOT NULL AND served_at>%s", (agent_id, now - 3600))["n"]
+            self._append([self._event("woke", {"rings": rings}, principal=principal,
+                                      agent_id=agent_id, recipient=agent_id,
+                                      project=row["project"], task=row["task"])], now)
+        return {"recorded": True, "rings": rings}
+
+    def detach(self, principal, agent_id, credential, *, attachment_id, generation):
+        with self.storage._txn():
+            row = self._auth(principal, agent_id, credential, lock=True)
+            self._attachment(row, attachment_id, generation)
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET attachment_id=NULL,lease_until=NULL,"
+                "generation=generation+1,lifecycle='detached' WHERE agent_id=%s", (agent_id,))
+            events = [self._event("detach", {"generation": generation}, principal=principal,
+                                  agent_id=agent_id, project=row["project"], task=row["task"])]
+            # v50: a detach is the shim ending with its session, and with it
+            # every subagent the hooks listed under it; the parent's own
+            # labels stay, as they always have.
+            named = [child for child in row.get("children", []) if not child.get("agent_id")]
+            if len(named) != len(row.get("children", [])):
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET children=%s WHERE agent_id=%s",
+                    (Jsonb(named), agent_id))
+                events.append(self._event(
+                    "update", {"fields": {"children": named}, "before": {"children": row["children"]}},
+                    actor="daemon", principal=principal, agent_id=agent_id,
+                    project=row["project"], task=row["task"]))
+            self._append(events, self.clock())
+        return {"detached": True}
+
+    def _resolve_agent(self, value, *, missing, ambiguous):
+        """``value`` as a full agent id: itself, or the one address it is a
+        prefix of. Addresses a restore revoked are not candidates."""
+        if not is_id_prefix(value):
+            return value
+        rows = self._all("SELECT agent_id FROM coordination_agents WHERE credential_hash "
+                         "IS NOT NULL AND agent_id LIKE %s ORDER BY agent_id LIMIT %s",
+                         (value + "%", AMBIGUITY_LISTED + 1))
+        return _resolved([r["agent_id"] for r in rows], missing=missing, ambiguous=ambiguous)
+
+    def _resolve_message(self, value, *, scope, params, missing, ambiguous):
+        """``value`` as a full message id among the rows ``scope`` admits
+        (the caller's own mail, so another mailbox's ids never make a prefix
+        ambiguous or resolvable)."""
+        if not is_id_prefix(value):
+            return value
+        rows = self._all(f"SELECT message_id FROM coordination_messages WHERE {scope} "
+                         "AND message_id LIKE %s ORDER BY message_id LIMIT %s",
+                         (*params, value + "%", AMBIGUITY_LISTED + 1))
+        return _resolved([r["message_id"] for r in rows], missing=missing, ambiguous=ambiguous)
+
+    @staticmethod
+    def _fanout_scope(sender, target, now, only=None):
+        clauses = ["credential_hash IS NOT NULL", "agent_id<>%s", "attachment_id IS NOT NULL",
+                   "coalesce(lease_until,0)>%s", "last_activity>%s"]
+        params = [sender, now, now - ATTACHED_IDLE_WINDOW]
+        if target[0] == "project":
+            clauses.append("project=%s")
+            params.append(target[1])
+        if only is not None:
+            clauses.append("agent_id=ANY(%s)")
+            params.append(only)
+        return " AND ".join(clauses), params
+
+    def _fanout_rows(self, sender, target, now, *, only=None):
+        """The agents ``to: "all"`` or ``to: "project:<name>"`` reaches:
+        every registered address but the sender's whose adapter holds a live
+        lease and whose own last action is within ATTACHED_IDLE_WINDOW, the
+        peers the list shows with ``adapter_available``. ``only`` re-reads
+        a set under its row locks. One over FANOUT_MAX is enough to refuse."""
+        where, params = self._fanout_scope(sender, target, now, only)
+        return self._all("SELECT * FROM coordination_agents WHERE " + where
+                         + " ORDER BY agent_id LIMIT %s", (*params, FANOUT_MAX + 1))
+
+    def _fanout_count(self, sender, target, now):
+        """How many a refused burst would have reached, for its detail."""
+        where, params = self._fanout_scope(sender, target, now)
+        return self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + where,
+                         params)["n"]
+
+    def _replayed(self, existing, *, to, fanout, text, reply_to, expires_at, now,
+                  clears=None, urgent=False):
+        """The result of a send whose request id already has rows: the same
+        receipts when ``to``, ``reply_to`` (each in full or as a prefix of
+        what the first attempt resolved), the text and the expiry match it,
+        else ``request_conflict``."""
+        first = existing[0]
+        if fanout is None:
+            target, parent = first["recipient_agent_id"], first["reply_to"]
+            if to is not None and to != target and not (
+                    is_id_prefix(to) and target.startswith(to)):
+                raise CoordinationError("request_conflict")
+            if reply_to is not None and reply_to != parent and not (
+                    parent and is_id_prefix(reply_to) and parent.startswith(reply_to)):
+                raise CoordinationError("request_conflict")
+            fingerprint = _fingerprint(target, text, None if reply_to is None else parent,
+                                       expires_at, clears, urgent)
+        else:
+            fingerprint = _fingerprint(to, text, reply_to, expires_at, clears, urgent)
+        if any(row["fingerprint"] != fingerprint for row in existing):
+            raise CoordinationError("request_conflict")
+        agents = {r["agent_id"]: r for r in self._all(
+            "SELECT * FROM coordination_agents WHERE agent_id=ANY(%s)",
+            ([row["recipient_agent_id"] for row in existing],))}
+        return self._send_result(to, fanout, existing, agents, now)
+
+    def _wake(self, agent, now):
+        """What the daemon will do for this recipient: ``live`` when its
+        attached adapter opted into wake, so the notifier rings it; ``pull``
+        when it reads the message at its next receive or digest."""
+        attached = agent["attachment_id"] is not None and (agent["lease_until"] or 0) > now
+        return "live" if attached and agent["wake_enabled"] else "pull"
+
+    def _send_result(self, to, fanout, rows, agents, now):
+        """A direct send's receipt, naming the recipient the address resolved
+        to, the wake decision stored with the message (v49; ``None`` for one
+        sent before) and ``path``, whether the recipient's adapter holds a
+        live channel; a burst's per-recipient receipts."""
+        receipts = [{**self._receipt(row), "recipient_agent_id": row["recipient_agent_id"],
+                     "wake": row.get("wake"),
+                     "path": self._wake(agents[row["recipient_agent_id"]], now)
+                     if row["recipient_agent_id"] in agents else "pull"}
+                    for row in sorted(rows, key=lambda r: r["recipient_agent_id"])]
+        if fanout is None:
+            return receipts[0]
+        return {"to": to, "recipients": len(receipts), "receipts": receipts}
+
+    def _receipt(self, row):
+        state = ("acknowledged" if row["acknowledged_at"] is not None else
+                 "expired" if row["expires_at"] <= self.clock() else
+                 "attempted" if row["attempt_at"] is not None else "queued")
+        return {"message_id": row["message_id"], "state": state,
+                "created_at": row["created_at"], "expires_at": row["expires_at"],
+                "acknowledged_at": row["acknowledged_at"]}
+
+    def send(self, principal, agent_id, credential, *, to=None, text, request_id,
+             reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
+             enforce_writer_epoch=False, clears=None, urgent=False, notice=False,
+             maintainer_proof=None):
+        """Queue ``text`` for ``to``: one agent (a full id, or a unique
+        prefix of at least ID_PREFIX_MIN hex characters), or a burst,
+        ``project:<name>`` or ``all`` (see ``_fanout_rows``), at most
+        FANOUT_MAX recipients. One request id covers a burst, so a retry
+        returns the same receipts, and the burst is atomic: a full mailbox
+        or the cap refuses it whole and writes nothing. Each recipient gets
+        its own message row and its own ``send`` event, with its own body
+        and salt, so the log needs no new event kind; a burst's events
+        carry ``fanout`` in their payload. A burst counts once against the
+        sender's rate. A reply cannot ride a burst.
+
+        Each recipient gets its own wake decision (v49, ``_wake_decision``),
+        on its row as the message arrives; ``clears`` says which parked need
+        the message answers, ``urgent`` asks for a ring whatever the need,
+        within the sender's cap. A retry repeats the first decisions.
+
+        ``notice`` is the daemon's own send (``DAEMON_PRINCIPAL`` only, never
+        reachable from dispatch): every recipient's decision is
+        ``DAEMON_NOTICE_WAKE``, so nothing rings.
+
+        v54: ``to`` may be left out of a reply, which goes to the sender of
+        ``reply_to`` (one of the caller's own messages); that is the only way
+        to reach the maintainer's reserved address, and only in reply to a
+        maintainer message. A reserved address named by ``to``
+        (``daemon``, ``maintainer`` or either row's id or prefix) is
+        ``recipient_reserved``. ``maintainer_proof`` is the maintainer's own
+        send (``MAINTAINER_PRINCIPAL`` only, never reachable from dispatch):
+        one recipient by full id, a session's own address (never a reserved
+        row or a subagent's), stored with origin ``maintainer`` and the
+        proof, its wake decided by the maintainer branch of
+        ``_wake_decision``."""
+        if notice and principal != DAEMON_PRINCIPAL:
+            raise CoordinationError("invalid_request")
+        maintainer = maintainer_proof is not None
+        if maintainer != (principal == MAINTAINER_PRINCIPAL) or (
+                maintainer and (notice or not isinstance(maintainer_proof, dict))):
+            raise CoordinationError("invalid_request")
+        if to is None:
+            if reply_to is None or maintainer:
+                raise CoordinationError("invalid_recipient")
+        else:
+            _string(to, 120, "recipient", empty=False)
+            if to.strip().casefold() in RESERVED_SENDERS:
+                raise CoordinationError("recipient_reserved")
+        _string(request_id, 120, "request_id", empty=False)
+        _string(hlc, 120, "hlc")
+        if clears is not None:
+            _string(clears, MAX_CLEARS, "clears", empty=False)
+            _refuse_secret(clears, "clears")
+        if not isinstance(urgent, bool):
+            raise CoordinationError("invalid_urgent")
+        stamp = None
+        if hlc:
+            try:
+                stamp = [int(part) for part in hlc.split(":")]
+                if len(stamp) != 2 or any(part < 0 or part > 2**63 - 1 for part in stamp):
+                    raise ValueError
+            except ValueError:
+                raise CoordinationError("invalid_hlc") from None
+        # The detail says which rule the body broke, with a byte count and
+        # never the text (review 2026-10-04: one bare code covered four).
+        problem = None
+        if not isinstance(text, str) or not text.strip():
+            problem = "text must be nonblank"
+        elif "\x00" in text:
+            problem = "text must not contain NUL characters"
+        else:
+            try:
+                size = len(text.encode("utf-8"))
+            except UnicodeEncodeError:
+                problem = "text is not encodable as UTF-8 (it holds a lone surrogate)"
+            else:
+                if size > MAX_TEXT_BYTES:
+                    problem = (f"text is {size} UTF-8 bytes; the limit is {MAX_TEXT_BYTES} "
+                               "bytes, not characters")
+        if problem is not None:
+            raise CoordinationError("invalid_text", problem, param="text")
+        # Refused before this call reads or writes a row: the audit log would
+        # keep the body for its whole retention window, and the request id
+        # in the send event's hashed payload for good.
+        _refuse_secret(text, "text")
+        _refuse_secret(request_id, "request_id")
+        if reply_to is not None:
+            _string(reply_to, 120, "reply", empty=False)
+        if expires_at is not None and (isinstance(expires_at, bool) or
+                not isinstance(expires_at, (int, float)) or not math.isfinite(expires_at)):
+            raise CoordinationError("invalid_expiry")
+        fanout = None if to is None else _fanout_target(to)
+        if fanout is not None and reply_to is not None:
+            raise CoordinationError("invalid_reply")
+        if maintainer and (fanout is not None or not is_full_agent_id(to)):
+            raise CoordinationError("invalid_recipient")
+        with self.storage._txn():
+            now = self.clock()
+            # Authenticated before anything is resolved: a prefix lookup
+            # answers differently for mail that exists, so an unauthenticated
+            # call must never reach one (review of 67d54ac7). Re-read under
+            # the row locks below.
+            sender = self._auth(principal, agent_id, credential)
+            # v50: a subagent's own address receives, acknowledges and sets
+            # its status, but its parent sends for it (maintainer decision
+            # 2026-09-30), whether or not the parent has registered yet.
+            if sender.get("parent_thread") is not None:
+                raise CoordinationError("child_send_refused", CHILD_SEND_REFUSED)
+            # A retry is recognised from its stored rows before any prefix is
+            # resolved, so it returns its receipts even after a new address
+            # made its prefix ambiguous or its recipient was revoked.
+            existing = self._all("SELECT * FROM coordination_messages WHERE sender_agent_id=%s "
+                                 "AND request_id=%s", (agent_id, request_id))
+            if existing:
+                return self._replayed(existing, to=to, fanout=fanout, text=text,
+                                      reply_to=reply_to, expires_at=expires_at, now=now,
+                                      clears=clears, urgent=urgent)
+            # The recipients are read before any lock so that every row can
+            # be locked in one global order, including the sender's own
+            # rate/idempotency state; a burst re-reads its set under the
+            # locks below.
+            if to is None:
+                # A routed reply: to the sender of one of the caller's own
+                # messages, resolved among them.
+                reply_to = self._resolve_message(
+                    reply_to, scope="recipient_agent_id=%s", params=(agent_id,),
+                    missing="invalid_reply", ambiguous="ambiguous_reply")
+                routed = self._one("SELECT sender_agent_id FROM coordination_messages "
+                                   "WHERE message_id=%s AND recipient_agent_id=%s",
+                                   (reply_to, agent_id))
+                if routed is None:
+                    raise CoordinationError("invalid_reply")
+                targets = [routed["sender_agent_id"]]
+            elif fanout is None:
+                targets = [self._resolve_agent(to, missing="recipient_not_found",
+                                               ambiguous="ambiguous_recipient")]
+                if reply_to is not None:
+                    # Resolved among the thread's own mail, so another
+                    # pair's message never makes a prefix ambiguous.
+                    reply_to = self._resolve_message(
+                        reply_to, scope="sender_agent_id=%s AND recipient_agent_id=%s",
+                        params=(targets[0], agent_id),
+                        missing="invalid_reply", ambiguous="ambiguous_reply")
+            else:
+                targets = [r["agent_id"] for r in self._fanout_rows(agent_id, fanout, now)]
+                if len(targets) > FANOUT_MAX:
+                    raise CoordinationError(
+                        "fanout_too_large",
+                        f"{self._fanout_count(agent_id, fanout, now)} recipients, "
+                        f"limit {FANOUT_MAX}")
+            # The request key covers what was resolved, so a retry that
+            # spells the recipient or the parent by prefix is the same
+            # request as one that spells it in full.
+            fingerprint = _fingerprint(to if fanout is not None else targets[0], text,
+                                       reply_to, expires_at, clears, urgent)
+            self._all("SELECT agent_id FROM coordination_agents WHERE agent_id=ANY(%s) "
+                      "ORDER BY agent_id FOR UPDATE", (sorted({agent_id, *targets}),))
+            sender = self._auth(principal, agent_id, credential)
+            existing = self._all("SELECT * FROM coordination_messages WHERE sender_agent_id=%s "
+                                 "AND request_id=%s", (agent_id, request_id))
+            if existing:
+                # A concurrent first attempt committed while this one resolved.
+                return self._replayed(existing, to=to, fanout=fanout, text=text,
+                                      reply_to=reply_to, expires_at=expires_at, now=now,
+                                      clears=clears, urgent=urgent)
+            if enforce_writer_epoch:
+                if (type(expected_writer_epoch) is not int
+                        or expected_writer_epoch < 1):
+                    raise CoordinationClockChanged("service clock is not ready")
+                # Hold this row lock through the message commit. A new writer
+                # cannot complete its epoch bump (and start canonical writes)
+                # between this comparison and the committed HLC high-water.
+                epoch_row = self.storage.conn.execute(
+                    "SELECT value FROM meta WHERE key=%s FOR SHARE",
+                    (WRITER_EPOCH_META_KEY,),
+                ).fetchone()
+                if (epoch_row is None or type(epoch_row[0]) is not int
+                        or epoch_row[0] < 1):
+                    raise RuntimeError("invalid writer lease epoch")
+                if epoch_row[0] != expected_writer_epoch:
+                    raise CoordinationClockChanged("writer lease epoch changed")
+            if fanout is None:
+                recipient = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s "
+                                      "AND credential_hash IS NOT NULL", (targets[0],))
+                if recipient is None:
+                    raise CoordinationError("recipient_not_found")
+                recipients = [recipient]
+            else:
+                # A peer that detached or went idle since the unlocked read
+                # is dropped here, so the receipts name who was reached.
+                recipients = self._fanout_rows(agent_id, fanout, now, only=targets)
+                if not recipients:
+                    raise CoordinationError("no_recipients")
+            expiry = now + MESSAGE_TTL if expires_at is None else float(expires_at)
+            if not now < expiry <= now + MESSAGE_TTL:
+                raise CoordinationError("invalid_expiry")
+            parent = None
+            if reply_to is not None:
+                parent = self._one("SELECT sender_agent_id,recipient_agent_id,origin,"
+                                   "sender_principal FROM coordination_messages "
+                                   "WHERE message_id=%s", (reply_to,))
+                if (parent is None or parent["sender_agent_id"] != recipients[0]["agent_id"]
+                        or parent["recipient_agent_id"] != agent_id):
+                    raise CoordinationError("invalid_reply")
+            for recipient in recipients:
+                # A reserved address is reached only by a routed reply to a
+                # maintainer message; a maintainer message reaches only a
+                # session's own address, never a subagent's (v54).
+                if recipient["principal"] in RESERVED_SENDERS and not (
+                        to is None and recipient["principal"] == MAINTAINER_PRINCIPAL
+                        and parent is not None and parent["origin"] == MAINTAINER_ORIGIN
+                        and parent["sender_principal"] == MAINTAINER_PRINCIPAL):
+                    raise CoordinationError("recipient_reserved")
+                if maintainer and recipient.get("parent_thread") is not None:
+                    raise CoordinationError("recipient_reserved")
+            # One request, however many recipients, is one send for the rate.
+            if self._one("SELECT count(DISTINCT request_id) AS n FROM coordination_messages "
+                         "WHERE sender_agent_id=%s AND created_at>%s",
+                         (agent_id, now - 60))["n"] >= SEND_RATE:
+                raise CoordinationError("rate_limited")
+            for recipient in recipients:
+                # Nothing acknowledges the maintainer's reserved row (the
+                # Console only reads its inbox, and no bearer may ack it), so
+                # a cap over all its pending mail let one session's replies
+                # refuse every other session's until they expired (review,
+                # 2026-10-04). There the cap counts the sender's own pending
+                # replies; the sender rate and MESSAGE_TTL bound the rest.
+                own = (" AND sender_agent_id=%s"
+                       if recipient["principal"] == MAINTAINER_PRINCIPAL else "")
+                if self._one("SELECT count(*) AS n FROM coordination_messages WHERE "
+                             "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s"
+                             + own, (recipient["agent_id"], now, *((agent_id,) if own else ()))
+                             )["n"] >= MAX_PENDING:
+                    raise CoordinationError("queue_full", recipient["agent_id"][:12])
+            self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
+                                      "WHERE agent_id=%s", (now, agent_id))
+            marker = ({"fanout": {"to": to, "recipients": len(recipients)}}
+                      if fanout is not None else {})
+            rows, events = [], []
+            for recipient in recipients:
+                seq = recipient["next_sequence"] + 1
+                message_id = uuid.uuid4().hex
+                # Decided on the recipient row as the message arrives (the row
+                # is locked above); a burst's earlier rings are visible here,
+                # so the fan-out stagger spaces them.
+                wake = (dict(DAEMON_NOTICE_WAKE) if notice else
+                        self._wake_decision(sender, recipient, now, clears=clears,
+                                            urgent=urgent, message_id=message_id,
+                                            maintainer=maintainer))
+                # The send event names the authority a ring used (maintainer,
+                # delegate, clearer, urgent, ...; ``coordinator`` on events
+                # from before the 2026-10-04 rename), so board-audit export
+                # shows it without the wake table, which it does not carry.
+                ring = wake.pop("_ring", None)
+                audited = {"wake_reason": ring} if ring is not None else {}
+                self.storage.conn.execute("UPDATE coordination_agents SET next_sequence=%s "
+                                          "WHERE agent_id=%s", (seq, recipient["agent_id"]))
+                rows.append(self._one(
+                    "INSERT INTO coordination_messages (message_id,sender_agent_id,recipient_agent_id,"
+                    "sender_principal,project,task,text,reply_to,request_id,fingerprint,"
+                    "recipient_sequence,hlc,created_at,expires_at,wake,origin,maintainer_proof) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+                    (message_id, agent_id, recipient["agent_id"], principal, sender["project"],
+                     sender["task"], text, reply_to, request_id, fingerprint, seq, hlc, now,
+                     expiry, Jsonb(wake), MAINTAINER_ORIGIN if maintainer else MESSAGE_ORIGIN,
+                     Jsonb(maintainer_proof) if maintainer else None)))
+                # The body lives on in the event's body column after prune
+                # blanks the live copy. The hashed payload holds a salted
+                # commitment to it, not the text (v46), so ``redact`` can
+                # remove body and salt and the chain holds, with nothing
+                # left to test a guess against.
+                salt = secrets.token_hex(BODY_SALT_BYTES)
+                events.append(self._event(
+                    "send", {"text_commitment": body_commitment(salt, text),
+                             "reply_to": reply_to, "request_id": request_id,
+                             "recipient_sequence": seq, "expires_at": expiry,
+                             "wake": wake["decision"], **audited, **marker,
+                             **({"origin": MAINTAINER_ORIGIN} if maintainer else {})},
+                    principal=principal, agent_id=agent_id, recipient=recipient["agent_id"],
+                    project=sender["project"], task=sender["task"], message_id=message_id,
+                    hlc=hlc, body=text, body_salt=salt))
+            if stamp is not None:
+                # Retain clock history after message pruning. Numeric comparison
+                # matters across digit boundaries and concurrent connections.
+                self.storage.conn.execute(
+                    "INSERT INTO meta (key,value) VALUES (%s,%s) ON CONFLICT (key) "
+                    "DO UPDATE SET value=EXCLUDED.value WHERE "
+                    "((meta.value->>0)::bigint,(meta.value->>1)::bigint) < "
+                    "((EXCLUDED.value->>0)::bigint,(EXCLUDED.value->>1)::bigint)",
+                    (HLC_META_KEY, Jsonb(stamp)))
+            self._append(events, now)
+        agents = {r["agent_id"]: r for r in recipients}
+        return self._send_result(to, fanout, rows, agents, now)
+
+    @staticmethod
+    def _limit(limit):
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PAGE:
+            raise CoordinationError("invalid_limit")
+
+    def receive(self, principal, agent_id, credential, *, after=None, limit=50,
+                for_delivery=False):
+        """Page pending mail. ``for_delivery`` is the adapter's live path: it
+        skips messages whose attempts are exhausted, and (v49) messages the
+        daemon decided not to ring: every message it yields becomes a turn in
+        a live-channel recipient, so it carries only mail decided ``rung``
+        or ``hinted`` (and mail from before v49, which has no decision),
+        and never the daemon's notices, which are context for the next
+        turn rather than a turn of their own. Mail decided ``nudged``
+        before 2026-10-02 (regular mail never wakes), immediately or
+        queued behind a ``no_path`` receipt, is skipped too. An explicit
+        receive still returns all of it. The first
+        time a message is served, by either path, its ``first_read_at`` is
+        stamped and a ``read`` event logged; a replay of unacknowledged mail
+        writes nothing."""
+        row = self._auth(principal, agent_id, credential)
+        self._limit(limit)
+        seq = 0
+        if after is not None:
+            try:
+                mailbox, raw = after.split(":", 1)
+                seq = int(raw)
+                if mailbox != agent_id or seq < 0:
+                    raise ValueError
+            except (AttributeError, ValueError):
+                raise CoordinationError("invalid_cursor") from None
+            if seq > row["next_sequence"]:
+                raise CoordinationError("invalid_cursor", "cursor_ahead")
+        attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
+                          "wake->>'decision' IN ('rung','hinted') OR "
+                          "(wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM "
+                          "coordination_wakes w WHERE w.recipient_agent_id="
+                          "coordination_messages.recipient_agent_id AND "
+                          "w.message_id=coordination_messages.message_id AND "
+                          "w.decision='nudged'))) AND repudiated_at IS NULL"
+                          if for_delivery else "")
+        now = self.clock()
+        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
+                  + [limit])
+        rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
+                         "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"
+                         + attempt_clause + " ORDER BY recipient_sequence LIMIT %s", params)
+        # Metadata has a separate seven-day bound. Explain what is still
+        # known without retrieving expired bodies or guessing what pruned
+        # messages contained. A cursor never acknowledges those messages.
+        continuity = self._one(
+            "SELECT count(*) FILTER (WHERE recipient_sequence>%s) AS retained_after,"
+            "count(*) FILTER (WHERE recipient_sequence>%s AND acknowledged_at IS NULL "
+            "AND expires_at<=%s) AS expired_unacknowledged,"
+            "(SELECT next_sequence FROM coordination_agents WHERE agent_id=%s) AS high_water "
+            "FROM coordination_messages WHERE recipient_agent_id=%s "
+            "AND (created_at>%s OR expires_at>%s)",
+            (seq, seq, now, agent_id, agent_id, now - DEDUPE_RETENTION, now))
+        gap = continuity["retained_after"] < continuity["high_water"] - seq
+        expired = continuity["expired_unacknowledged"]
+        status = ("messages" if rows else "expired_unacknowledged" if expired else
+                  "retention_gap" if gap else "empty")
+        unread = [r["message_id"] for r in rows if r["first_read_at"] is None]
+        # Only a first read writes, so an empty poll or a replay stays
+        # read-only. The IS NULL guard stamps and logs each message
+        # once even when two receives race on the same page.
+        if unread:
+            with self.storage._txn():
+                # The mailbox row first, as ack and mark_attempt take it, so
+                # a first read and an acknowledgment on separate connections
+                # lock message rows in the same order.
+                self._one("SELECT 1 FROM coordination_agents WHERE agent_id=%s FOR UPDATE",
+                          (agent_id,))
+                first = {r["message_id"] for r in self._all(
+                    "UPDATE coordination_messages SET first_read_at=%s WHERE message_id=ANY(%s) "
+                    "AND first_read_at IS NULL RETURNING message_id", (now, unread))}
+                self._append([self._event(
+                    "read", {"path": "delivery" if for_delivery else "pull",
+                             "sender_agent_id": r["sender_agent_id"]},
+                    principal=principal, agent_id=agent_id, recipient=agent_id,
+                    project=r["project"], task=r["task"], message_id=r["message_id"])
+                    for r in rows if r["message_id"] in first], now)
+        keys = ("message_id", "sender_agent_id", "sender_principal", "recipient_agent_id",
+                "project", "task", "text", "reply_to", "recipient_sequence", "hlc", "created_at", "expires_at")
+        return {"messages": [{**{k: r[k] for k in keys}, **message_origin(r)} for r in rows],
+                "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}",
+                "continuity": {"status": status, "expired_unacknowledged": expired,
+                               "metadata_gap": gap, "high_water": continuity["high_water"],
+                               "metadata_retention_seconds": DEDUPE_RETENTION}}
+
+    def history(self, principal, agent_id, credential, *, after=None, limit=50,
+                peer=None, audit_retention_days=90):
+        with self.storage._txn():
+            # Match the mailbox connection's existing five-second lock budget.
+            # Retention and a LIMIT do not bound work under planner skew.
+            self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
+            return self._history(principal, agent_id, credential, after=after, limit=limit,
+                                 peer=peer, audit_retention_days=audit_retention_days)
+
+    def _history(self, principal, agent_id, credential, *, after=None, limit=50,
+                 peer=None, audit_retention_days=90):
+        """Read this instance's retained send events, without delivery effects.
+
+        Only the authenticated sender or recipient sees a message. Bodies
+        follow audit retention and operator redaction, independently of the
+        live TTL. The cursor is an audit sequence scoped to this instance;
+        changing a peer filter starts a different slice, so restart without
+        a cursor to read the newly selected pair from its beginning.
+        """
+        self._auth(principal, agent_id, credential)
+        self._limit(limit)
+        if type(audit_retention_days) is not int or audit_retention_days < 0:
+            raise ValueError("audit_retention_days must be a whole number of days, 0 or more")
+        seq = 0
+        if after is not None:
+            try:
+                mailbox, kind, raw = after.split(":", 2)
+                seq = int(raw)
+                if mailbox != agent_id or kind != "history" or seq < 0:
+                    raise ValueError
+            except (AttributeError, ValueError):
+                raise CoordinationError("invalid_cursor") from None
+            head = self._one(
+                "SELECT max(seq) AS seq FROM ("
+                "(SELECT seq FROM coordination_events WHERE event='send' "
+                "AND (agent_id,principal)>=(%s,%s) AND (agent_id,principal)<=(%s,%s) "
+                "ORDER BY agent_id DESC,principal DESC,seq DESC LIMIT 1) UNION ALL "
+                "(SELECT seq FROM coordination_events WHERE event='send' "
+                "AND recipient_agent_id>=%s AND recipient_agent_id<=%s "
+                "ORDER BY recipient_agent_id DESC,seq DESC LIMIT 1)) heads",
+                (agent_id, principal, agent_id, principal, agent_id, agent_id))["seq"]
+            # Do not turn cursor validation into a probe of other agents'
+            # audit activity. When retention has cut the whole slice, its
+            # former high-water mark is unknown; a saved cursor stays usable.
+            if head is not None and seq > head:
+                raise CoordinationError("invalid_cursor", "cursor_ahead")
+        if peer is not None:
+            # Exact IDs also work after an address has been pruned. Do not
+            # resolve prefixes across another mailbox's retained events.
+            if (not isinstance(peer, str) or not peer or len(peer) > 120
+                    or any(c not in _ID_CHARS for c in peer)):
+                raise CoordinationError("invalid_recipient")
+        now = self.clock()
+        cutoff = audit_cutoff(now, audit_retention_days) if audit_retention_days else None
+        # Equal range bounds retain the participant prefix in ORDER BY.
+        # Equality predicates would let the planner discard that prefix and
+        # choose an audit-wide primary-key walk for a sparse mailbox instead.
+        def direction(columns, values):
+            prefix = "(" + ",".join("s." + col for col in columns) + ")"
+            placeholders = "(" + ",".join("%s" for _ in columns) + ")"
+            return (["s.event='send'", prefix + ">=" + placeholders,
+                     prefix + "<=" + placeholders, "s.seq>%s"],
+                    list(values) * 2 + [seq], ",".join("s." + col for col in columns) + ",s.seq")
+        if peer is None:
+            outgoing, outgoing_params, outgoing_order = direction(
+                ("agent_id", "principal"), (agent_id, principal))
+            incoming, incoming_params, incoming_order = direction(("recipient_agent_id",), (agent_id,))
+        else:
+            outgoing, outgoing_params, outgoing_order = direction(
+                ("agent_id", "recipient_agent_id"), (agent_id, peer))
+            incoming, incoming_params, incoming_order = direction(
+                ("agent_id", "recipient_agent_id"), (peer, agent_id))
+            outgoing.append("s.principal=%s")
+            outgoing_params.append(principal)
+        if cutoff is not None:
+            outgoing.append("s.created_at>=%s")
+            incoming.append("s.created_at>=%s")
+            outgoing_params.append(cutoff)
+            incoming_params.append(cutoff)
+        # Each direction uses its participant/pair index and stops at a page.
+        # UNION deduplicates self-addressed mail before the combined page cap.
+        # Lateral lifecycle reads seek only those message IDs. One statement
+        # keeps bodies and operator redaction in the same database snapshot.
+        rows = self._all(
+            "WITH page AS (SELECT seq FROM ((SELECT s.seq FROM coordination_events s WHERE "
+            + " AND ".join(outgoing) + " ORDER BY " + outgoing_order + " LIMIT %s) UNION "
+            "(SELECT s.seq FROM coordination_events s WHERE " + " AND ".join(incoming)
+            + " ORDER BY " + incoming_order + " LIMIT %s)) sends ORDER BY seq LIMIT %s) "
+            "SELECT p.*,COALESCE(m.acknowledged_at,l.acknowledged_at) AS acknowledged_at,"
+            "COALESCE(m.first_read_at,l.first_read_at) AS first_read_at,l.redacted_at,"
+            "COALESCE(m.repudiated_at,l.repudiated_at) AS repudiated_at "
+            "FROM page ids JOIN coordination_events p ON p.seq=ids.seq "
+            "LEFT JOIN coordination_messages m ON m.message_id=p.message_id "
+            "LEFT JOIN LATERAL (SELECT "
+            "min(e.created_at) FILTER (WHERE e.event='ack' AND "
+            "e.agent_id=p.recipient_agent_id) AS acknowledged_at,"
+            "min(e.created_at) FILTER (WHERE e.event='read' AND "
+            "e.agent_id=p.recipient_agent_id) AS first_read_at,"
+            "min(e.created_at) FILTER (WHERE e.event='redact') AS redacted_at,"
+            "min(e.created_at) FILTER (WHERE e.event=%s AND e.actor='maintainer') "
+            "AS repudiated_at "
+            "FROM coordination_events e WHERE e.message_id=p.message_id "
+            "AND e.event IN ('ack','read','redact',%s)) l ON true ORDER BY p.seq",
+            outgoing_params + [limit + 1] + incoming_params + [limit + 1, limit + 1]
+            + [REPUDIATE_EVENT, REPUDIATE_EVENT])
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        messages = []
+        for sent in rows:
+            payload = json.loads(sent["payload"])
+            # Pre-v46 bodies are in the hashed payload. A legacy operator
+            # redaction can only clear the live copy; agents still must not
+            # receive that retained audit body.
+            redacted = sent["redacted_at"] is not None
+            text = None if redacted else sent["body"]
+            if text is None and not redacted:
+                text = payload.get("text")
+            expires_at = payload.get("expires_at")
+            if redacted:
+                expires_at = (sent["redacted_at"] if expires_at is None else
+                              min(expires_at, sent["redacted_at"]))
+            maintainer = (payload.get("origin") == MAINTAINER_ORIGIN
+                          and sent["principal"] == MAINTAINER_PRINCIPAL)
+            state = ("acknowledged" if sent["acknowledged_at"] is not None else
+                     "expired" if expires_at is not None and expires_at <= now else "pending")
+            messages.append({
+                "message_id": sent["message_id"], "sender_agent_id": sent["agent_id"],
+                "sender_principal": sent["principal"],
+                "recipient_agent_id": sent["recipient_agent_id"],
+                "participants": sorted({sent["agent_id"], sent["recipient_agent_id"]}),
+                "project": sent["project"], "task": sent["task"], "text": text,
+                "body_state": ("redacted" if redacted else
+                               "retained" if text is not None else "unavailable"),
+                "reply_to": payload.get("reply_to"),
+                "recipient_sequence": payload.get("recipient_sequence"), "hlc": sent["hlc"],
+                "created_at": sent["created_at"], "expires_at": expires_at,
+                "acknowledged_at": sent["acknowledged_at"], "first_read_at": sent["first_read_at"],
+                "state": state,
+                # History names a maintainer message's origin (v54); only a
+                # receive result carries its verification.
+                "origin": MAINTAINER_ORIGIN if maintainer else MESSAGE_ORIGIN})
+            if maintainer and sent["repudiated_at"] is not None:
+                # Withdrawn, as receive shows it (review of #569, 2026-10-05).
+                messages[-1]["repudiated_at"] = sent["repudiated_at"]
+                if not redacted:
+                    messages[-1]["text"] = WITHDRAWN_TEXT
+        return {"messages": messages, "after": f"{agent_id}:history:{rows[-1]['seq'] if rows else seq}",
+                "has_more": has_more, "retention_days": audit_retention_days,
+                "retained_since": cutoff}
+
+    def ack(self, principal, agent_id, credential, *, message_id):
+        """Acknowledge one message, or several comma-separated (at most
+        MAX_PAGE). One id returns its receipt or message_not_found; several
+        return the receipts in the order given plus the ids that were not this
+        mailbox's to acknowledge, so a batch never fails because one id went
+        stale. The list is a string because some hosts stringify list
+        parameters. Acknowledging is not completion; a cursor is never an
+        acknowledgement."""
+        given, batch = _message_ids(message_id)
+        with self.storage._txn():
+            # The agent row lock serializes acknowledgements per mailbox, so
+            # two overlapping batches cannot deadlock on message rows.
+            self._auth(principal, agent_id, credential, lock=True)
+            now = self.clock()
+            # A prefix resolves among this mailbox's own messages; in a
+            # batch one that matches nothing stays as given and lands in
+            # ``missing``, and two spellings of one message count once.
+            # An ambiguous prefix refuses the whole call, batch or not:
+            # acknowledging the wrong message cannot be undone.
+            prefixes = [one for one in given if is_id_prefix(one)]
+            matches = {one: [] for one in prefixes}
+            if prefixes:
+                # One statement for every prefix in the batch: the calls run
+                # under the coordination lock, which heartbeats wait on.
+                for row in self._all(
+                        "SELECT message_id FROM coordination_messages WHERE recipient_agent_id=%s "
+                        "AND message_id LIKE ANY(%s) ORDER BY message_id",
+                        (agent_id, [one + "%" for one in prefixes])):
+                    for one in prefixes:
+                        if row["message_id"].startswith(one):
+                            matches[one].append(row["message_id"])
+            ids, resolved = [], {}
+            for one in given:
+                full = one if one not in matches else _resolved(
+                    matches[one], missing=None if batch else "message_not_found",
+                    ambiguous="ambiguous_message_id")
+                resolved[one] = one if full is None else full
+                if resolved[one] not in ids:
+                    ids.append(resolved[one])
+            # Two more statements for the whole batch.
+            found = {row["message_id"]: row for row in self._all(
+                "SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
+                "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
+            pending = [one for one in ids if one in found and found[one]["acknowledged_at"] is None]
+            if pending:
+                # New acknowledgments count as activity. Replays leave both
+                # the mailbox and its audit trail unchanged.
+                self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
+                                          "WHERE agent_id=%s", (now, agent_id))
+                for row in self._all("UPDATE coordination_messages SET acknowledged_at=%s "
+                                     "WHERE message_id = ANY(%s) RETURNING *", (now, pending)):
+                    found[row["message_id"]] = row
+            missing = [one for one in given if resolved[one] not in found]
+            if not batch and missing:
+                raise CoordinationError("message_not_found")
+            self._append([self._event(
+                "ack", {"sender_agent_id": found[one]["sender_agent_id"]}, principal=principal,
+                agent_id=agent_id, recipient=agent_id, project=found[one]["project"],
+                task=found[one]["task"], message_id=one) for one in pending], now)
+        receipts = [self._receipt(found[one]) for one in ids if one in found]
+        return {"receipts": receipts, "missing": missing} if batch else receipts[0]
+
+    def mark_attempt(self, principal, agent_id, credential, *, message_id, attachment_id, generation):
+        with self.storage._txn():
+            agent = self._auth(principal, agent_id, credential, lock=True)
+            self._attachment(agent, attachment_id, generation)
+            if not agent["wake_enabled"]:
+                raise CoordinationError("wake_disabled")
+            row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s "
+                            "AND recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s "
+                            "FOR UPDATE", (message_id, agent_id, self.clock()))
+            if row is None:
+                raise CoordinationError("message_not_pending")
+            if row["attempt_generation"] != generation:
+                if row["attempts"] >= MAX_ATTEMPTS:
+                    raise CoordinationError("attempts_exhausted")
+                now = self.clock()
+                row = self._one("UPDATE coordination_messages SET attempt_at=%s,attempt_generation=%s,"
+                                "attempts=attempts+1 WHERE message_id=%s RETURNING *",
+                                (now, generation, message_id))
+                self._append([self._event(
+                    "attempt", {"generation": generation, "attempts": row["attempts"],
+                                "sender_agent_id": row["sender_agent_id"]},
+                    principal=principal, agent_id=agent_id, recipient=agent_id,
+                    project=row["project"], task=row["task"], message_id=message_id)], now)
+        return self._receipt(row)
+
+    def prune(self, *, audit_retention_days=0):
+        """Expire bodies, discard terminal retry metadata after seven days, and
+        remove addresses that are idle, unleased and referenced by no retained
+        message (the message rows go first, so a referenced address outlives
+        its mail by the retention window). An address goes once it has had
+        neither its own activity nor a lease for its window:
+        EPHEMERAL_AGENT_RETENTION when registered as not resumable,
+        AGENT_RETENTION otherwise. A parked shim whose lease lapsed during a
+        daemon restart or a host sleep keeps its address, because the first
+        heartbeat afterwards prunes before it is served and the adapter
+        re-attaches within a minute; a resumable one keeps it across any
+        outage shorter than AGENT_RETENTION.
+
+        The pass logs what it blanked (``expire``) and removed (``prune``).
+        With ``audit_retention_days`` > 0 it also removes the audit log's
+        prefix older than that window, cut on a UTC day boundary
+        (``audit_cutoff``), and logs the cut (``audit_prune``, naming the last
+        removed row, which anchors the surviving chain); 0 keeps the log
+        forever."""
+        if (type(audit_retention_days) is not int or audit_retention_days < 0):
+            raise ValueError("audit_retention_days must be a whole number of days, 0 or more")
+        now = self.clock()
+        ephemeral = "a.capabilities->>'resumable'='false'"
+        with self.storage._txn():
+            # Resource leases first, lease rows before their queues as on
+            # every other path (an offline `lease break` runs on another
+            # connection). Settling drops a departed waiter's place before
+            # anything is granted, so no turn goes to a session that is gone,
+            # and expires a lapsed hold before the address that held it can
+            # be removed, so the log says who lost it. A live holder is
+            # never removed below.
+            window = f"CASE WHEN {ephemeral} THEN %s ELSE %s END"
+            removable = ("(a.lease_until IS NULL OR a.lease_until<={w}) AND a.last_activity<={w} "
+                         "AND NOT EXISTS (SELECT 1 FROM coordination_messages m "
+                         "WHERE m.sender_agent_id=a.agent_id OR m.recipient_agent_id=a.agent_id)"
+                         ).format(w=window)
+            retention = (now - EPHEMERAL_AGENT_RETENTION, now - AGENT_RETENTION) * 2
+            events = []
+            self._settle_due(now, events)
+            expired = sorted(r["message_id"] for r in self._all(
+                "UPDATE coordination_messages SET text=NULL "
+                "WHERE expires_at<=%s AND text IS NOT NULL RETURNING message_id", (now,)))
+            removed = sorted(r["message_id"] for r in self._all(
+                "DELETE FROM coordination_messages WHERE created_at<=%s "
+                "AND expires_at<=%s RETURNING message_id", (now - DEDUPE_RETENTION, now)))
+            # Rings older than the caps look back (a day) plus the request-key
+            # window; not logged, the send event already names the decision.
+            self.storage.conn.execute("DELETE FROM coordination_wakes WHERE created_at<=%s",
+                                      (now - WAKE_RETENTION,))
+            # The retention window runs from the later of the address's own
+            # last action and its last lease. A lapsed lease may belong to a
+            # live shim cut off by a restart or a host sleep, whose recovery
+            # re-attach does not refresh last_activity; only a lease gone for
+            # the whole window, or a detach, says the process has ended.
+            agents = sorted(r["agent_id"] for r in self._all(
+                "DELETE FROM coordination_agents a WHERE " + removable
+                + " AND NOT EXISTS (SELECT 1 FROM coordination_leases l "
+                "WHERE l.holder_agent_id=a.agent_id) RETURNING a.agent_id", retention))
+            # A removed parent leaves its subagents unlinked (v50, no foreign
+            # key either), until its thread registers again and relinks them.
+            # Not logged per child: the prune event names the removed row.
+            if agents:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET parent_agent_id=NULL "
+                    "WHERE parent_agent_id=ANY(%s)", (agents,))
+            # A removed address leaves no place in any queue (the lease tables
+            # carry no foreign keys; see the v45 DDL).
+            self.storage.conn.execute(
+                "DELETE FROM coordination_lease_waiters w WHERE NOT EXISTS "
+                "(SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id)")
+            # A lease row outlives each hold so its fence keeps rising; one
+            # left free and unqueued for the request-key window is forgotten,
+            # well past the longest hold (a day) whose fence could matter.
+            leases = sorted(r["name"] for r in self._all(
+                "DELETE FROM coordination_leases l WHERE l.holder_agent_id IS NULL "
+                "AND l.freed_at<=%s AND NOT EXISTS (SELECT 1 FROM coordination_lease_waiters w "
+                "WHERE w.name=l.name) RETURNING l.name", (now - DEDUPE_RETENTION,)))
+            if expired:
+                events.append(self._event("expire", {"message_ids": expired}, actor="daemon"))
+            if removed or agents or leases:
+                pruned = {"message_ids": removed, "agent_ids": agents}
+                if leases:
+                    pruned["leases"] = leases
+                events.append(self._event("prune", pruned, actor="daemon"))
+            head, audit_removed = None, 0
+            if audit_retention_days:
+                cutoff = audit_cutoff(now, audit_retention_days)
+                # The head is read before the cut: when every row is older than
+                # the window the head itself goes, and the chain must continue
+                # from it rather than restart at genesis.
+                head = self._chain_head()
+                # Writers sample time before taking the chain lock, so
+                # timestamps need not follow sequence order. Only remove an
+                # expired prefix; an older row after a recent one must wait.
+                cut = self._one(
+                    "WITH retained AS (SELECT min(seq) AS first_seq FROM coordination_events "
+                    "WHERE created_at>=%s) SELECT seq,hash FROM coordination_events,retained "
+                    "WHERE retained.first_seq IS NULL OR seq<retained.first_seq "
+                    "ORDER BY seq DESC LIMIT 1", (cutoff,))
+                if cut is not None:
+                    audit_removed = self.storage.conn.execute(
+                        "DELETE FROM coordination_events WHERE seq<=%s", (cut["seq"],)).rowcount
+                    events.append(self._event(
+                        "audit_prune", {"through_seq": cut["seq"], "through_hash": cut["hash"],
+                                        "removed": audit_removed, "cutoff": cutoff,
+                                        "retention_days": audit_retention_days},
+                        actor="daemon"))
+            self._append(events, now, head=head)
+        return {"bodies_expired": len(expired), "removed": len(removed),
+                "agents_removed": len(agents), "audit_removed": audit_removed}
+
+    def recover(self):
+        """Operator-only restore reset; never call on an ordinary restart.
+
+        ``audited`` is False when the restored bank predates the audit log;
+        the revocation still happens, unrecorded."""
+        with self.storage._txn():
+            revoked = sorted(r["agent_id"] for r in self._all(
+                "UPDATE coordination_agents SET credential_hash=NULL,"
+                "wake_enabled=FALSE,attachment_id=NULL,lease_until=NULL,generation=generation+1,"
+                "lifecycle='revoked' RETURNING agent_id"))
+            # Every credential is revoked, so no holder can renew or release
+            # and no waiter can take a turn up: free every lease and empty
+            # every queue. A bank restored from before v45 has neither table.
+            freed, waiters = [], 0
+            if self._one("SELECT to_regclass('coordination_leases') IS NOT NULL "
+                         "AS present")["present"]:
+                now = self.clock()
+                freed = sorted(r["name"] for r in self._all(
+                    "UPDATE coordination_leases SET holder_agent_id=NULL,holder_principal='',"
+                    "purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,"
+                    "freed_at=%s WHERE holder_agent_id IS NOT NULL RETURNING name", (now,)))
+                waiters = self.storage.conn.execute(
+                    "DELETE FROM coordination_lease_waiters").rowcount
+            audited = self._audit_present()
+            if audited:
+                recovered = {"agent_ids": revoked}
+                if freed or waiters:
+                    recovered.update(leases_freed=freed, waiters_removed=waiters)
+                self._append([self._event("recover", recovered, actor="operator")],
+                             self.clock())
+        result = {"revoked": len(revoked), "audited": audited}
+        if freed or waiters:
+            result.update(leases_freed=len(freed), waiters_removed=waiters)
+        return result
+
+    def rebind(self, agent_id, principal):
+        """Operator-only reissue to the same owner, retaining pending mail."""
+        credential = secrets.token_urlsafe(32)
+        with self.storage._txn():
+            # A prefix resolves among every registered address, revoked ones
+            # included: those are what a rebind is for.
+            try:
+                agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+            except CoordinationError as exc:
+                if exc.code == "instance_not_found":
+                    raise CoordinationError("invalid_rebind") from None
+                raise
+            row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s FOR UPDATE", (agent_id,))
+            if row is None or row["principal"] != principal or row["credential_hash"] is not None:
+                raise CoordinationError("invalid_rebind")
+            self.storage.conn.execute("UPDATE coordination_agents SET credential_hash=%s,"
+                                      "lifecycle='registered' WHERE agent_id=%s", (_hash(credential), agent_id))
+            audited = self._audit_present()
+            if audited:
+                self._append([self._event("rebind", {"principal": principal}, actor="operator",
+                                          agent_id=agent_id, project=row["project"],
+                                          task=row["task"])], self.clock())
+            result = self.authenticate(principal, agent_id, credential)
+        return {**result, "credential": credential, "audited": audited}
+
+    def redact(self, message_id, reason):
+        """Operator only (``pseudolife-mcp board-audit redact``; never exposed
+        to agents): remove one message body from the board.
+
+        In one transaction: blank the ``body`` and ``body_salt`` of the
+        message's send event, blank the live copy (and its request
+        fingerprint, a digest of the text kept seven days for retries, so a
+        retry of the request is refused as ``request_conflict``) if prune has
+        not already, end its delivery,
+        and append a chained ``redact`` event (actor ``operator``) whose
+        payload names the send event's ``seq``, the operator's reason, and
+        ``audit_copy: removed``. The send event's hashed payload keeps the
+        salted commitment, so the chain still verifies, and
+        ``verify_audit_chain`` accepts the absent body only behind that
+        event. A message sent before v46 has its body inside the hashed
+        payload, which cannot change; while its live copy is still there, that
+        copy is blanked and taken out of delivery all the same, and the event
+        says ``audit_copy: kept``. With audit retention under the seven days
+        a mailbox row keeps its request fingerprint, the send event can go
+        first: the live row's fingerprint (and any live text) is still
+        taken, and the event says ``seq: None`` and ``audit_copy: gone``.
+        Copies outside the bank (a backup, an export, what the recipient
+        already read) are untouched.
+
+        Returns the send event's ``seq``, the redact event's ``redact_seq``
+        and ``redact_hash`` (with ``expect_head``, the two as ``verify
+        --expect-head`` takes them: recorded outside the bank, they catch a
+        later removal of this record), ``live_body_cleared`` and
+        ``audit_copy``.
+
+        Refused: ``invalid_message_id``, ``invalid_reason`` (blank, over
+        MAX_REDACT_REASON characters, or holding a control, format or
+        line/paragraph separator character), ``secret_like_body`` (the reason
+        is hashed for good), ``message_not_found`` (neither a send event nor
+        a mailbox row for the id: unknown, or both gone),
+        ``body_in_hashed_payload``
+        (sent before v46 and no live copy left to take), ``already_redacted``."""
+        if (not isinstance(message_id, str) or not message_id or len(message_id) > 120
+                or any(c not in _ID_CHARS for c in message_id)):
+            raise CoordinationError("invalid_message_id")
+        if (not isinstance(reason, str) or not reason.strip()
+                or len(reason) > MAX_REDACT_REASON
+                or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp")
+                       for c in reason)):
+            raise CoordinationError("invalid_reason")
+        if looks_like_secret(reason):
+            # Operator-only: board-audit explains this refusal in its own words.
+            raise CoordinationError("secret_like_body", param="reason")
+        if is_id_prefix(message_id):
+            like = message_id + "%"
+            message_id = _resolved([r["message_id"] for r in self._all(
+                "SELECT message_id FROM (SELECT message_id FROM coordination_messages WHERE "
+                "message_id LIKE %s UNION SELECT message_id FROM coordination_events WHERE "
+                "event='send' AND message_id LIKE %s) AS ids ORDER BY message_id LIMIT %s",
+                (like, like, AMBIGUITY_LISTED + 1))],
+                missing="message_not_found", ambiguous="ambiguous_message_id")
+        with self.storage._txn():
+            now = self.clock()
+            # The board row first, as every mutation takes it.
+            live = self._one("SELECT text FROM coordination_messages WHERE message_id=%s "
+                             "FOR UPDATE", (message_id,))
+            # Then the chain lock, before any log row is read or changed:
+            # prune deletes the log's oldest rows while holding it, so a
+            # redaction that locked the send event's row first could wait on
+            # prune while prune waits on it.
+            head = self._chain_head()
+            sent = self._one(
+                "SELECT seq,payload,agent_id,recipient_agent_id,project,task "
+                "FROM coordination_events WHERE event='send' AND message_id=%s "
+                "ORDER BY seq LIMIT 1", (message_id,))
+            if sent is None:
+                # Audit retention under the seven days a mailbox row keeps
+                # its request fingerprint can cut the send event first; the
+                # fingerprint is still a digest of the body, so take it (and
+                # any live text) and log that the audit copy was gone.
+                live_row = self._one("SELECT text,fingerprint,sender_agent_id,"
+                                     "recipient_agent_id,project,task FROM coordination_messages "
+                                     "WHERE message_id=%s", (message_id,))
+                if live_row is None:
+                    raise CoordinationError("message_not_found")
+                if live_row["text"] is None and live_row["fingerprint"] == "redacted":
+                    raise CoordinationError("already_redacted")
+                self.storage.conn.execute(
+                    "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+                    "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
+                seq, digest = self._append([self._event(
+                    "redact", {"message_id": message_id, "seq": None, "reason": reason,
+                               "audit_copy": "gone"},
+                    actor="operator", agent_id=live_row["sender_agent_id"],
+                    recipient=live_row["recipient_agent_id"], project=live_row["project"],
+                    task=live_row["task"], message_id=message_id)], now, head=head)
+                return {"message_id": message_id, "seq": None, "redact_seq": seq,
+                        "redact_hash": digest, "expect_head": f"{seq}:{digest}",
+                        "live_body_cleared": live_row["text"] is not None,
+                        "audit_copy": "gone"}
+            payload = _parsed_payload(sent)
+            if payload is None or "text_commitment" not in payload:
+                # Sent before v46: the audit copy stays. Decided before the
+                # body column is touched, so a restored v42-v45 bank that has
+                # none yet takes this path too.
+                if live is None or live["text"] is None:
+                    raise CoordinationError("body_in_hashed_payload")
+                audit_copy = "kept"
+            elif self._one("UPDATE coordination_events SET body=NULL,body_salt=NULL "
+                           "WHERE seq=%s AND (body IS NOT NULL OR body_salt IS NOT NULL) "
+                           "RETURNING seq", (sent["seq"],)) is None:
+                raise CoordinationError("already_redacted")
+            else:
+                audit_copy = "removed"
+            cleared = False
+            if live is not None:
+                cleared = live["text"] is not None
+                self.storage.conn.execute(
+                    "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+                    "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
+            seq, digest = self._append([self._event(
+                "redact", {"message_id": message_id, "seq": sent["seq"], "reason": reason,
+                           "audit_copy": audit_copy},
+                actor="operator", agent_id=sent["agent_id"],
+                recipient=sent["recipient_agent_id"], project=sent["project"],
+                task=sent["task"], message_id=message_id)], now, head=head)
+            siblings = self._burst_siblings(message_id, sent["agent_id"], payload)
+        return {"message_id": message_id, "seq": sent["seq"], "redact_seq": seq,
+                "redact_hash": digest, "expect_head": f"{seq}:{digest}",
+                "live_body_cleared": cleared, "audit_copy": audit_copy,
+                "other_copies": siblings}
+
+    def _burst_siblings(self, message_id, sender, payload):
+        """The other messages of the burst ``message_id`` was sent in (v48:
+        the same sender and request id), which each keep their own copy of
+        the body until they are redacted too. Empty for a direct send."""
+        if payload is None or "fanout" not in payload:
+            return []
+        return [r["message_id"] for r in self._all(
+            "SELECT message_id FROM coordination_events WHERE event='send' AND agent_id=%s "
+            "AND message_id<>%s AND payload::jsonb->>'request_id'=%s ORDER BY seq",
+            (sender, message_id, payload.get("request_id")))]

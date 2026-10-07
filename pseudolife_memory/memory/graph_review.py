@@ -15,6 +15,54 @@ _TEST_PATTERNS = re.compile(
     re.I)
 
 
+# The merge judge's "relate" verdict (2026-09-30): the pair is distinct, so
+# for the merge it counts as a reject, and the named vocabulary relation
+# holds from FROM to INTO as the judge was shown them. entity_proposals has
+# no relation column: the relation rides in the note, as a ``relate:<rel>``
+# token at the head of the first opinion's note and as the verdict token of
+# the second opinion's ``| 2nd (<model>): <token> <conf>`` tail.
+MERGE_REJECT_CLASS = ("reject", "relate")
+_RELATE_TOKEN = re.compile(r"relate:([a-z0-9-]+)")
+
+
+def merge_verdict_class(verdict):
+    """``reject`` for both reject-class merge verdicts, else the verdict."""
+    return "reject" if verdict in MERGE_REJECT_CLASS else verdict
+
+
+def merge_verdict_token(verdict, relation):
+    """The verdict as written into a note: ``relate:<relation>`` or bare."""
+    return f"relate:{relation}" if verdict == "relate" and relation else verdict
+
+
+def relate_note(relation, note):
+    """The first opinion's note for a relate verdict."""
+    return f"relate:{relation} | {note}" if note else f"relate:{relation}"
+
+
+def relate_relations(note):
+    """``(first, second)`` relations recorded in a merge row's note, each
+    None when that opinion recorded none. Callers read an opinion's
+    relation only when its verdict is ``relate``."""
+    note = note or ""
+    head = _RELATE_TOKEN.match(note)
+    tail = None
+    cut = note.rfind("| 2nd (")
+    if cut != -1:
+        tail = re.search(r"\): relate:([a-z0-9-]+) ", note[cut:])
+    return (head.group(1) if head else None, tail.group(1) if tail else None)
+
+
+def add_relate_relations(payload, row):
+    """Stamp ``relation`` on a review payload's ``judge`` / ``judge2``
+    blocks whose verdict is ``relate``; every other block is unchanged."""
+    first, second = relate_relations(row.get("judge_note"))
+    for key, relation in (("judge", first), ("judge2", second)):
+        block = payload.get(key)
+        if block and block.get("verdict") == "relate" and relation:
+            block["relation"] = relation
+
+
 def classify_edge(edge: dict, *, proposed: bool = False) -> str:
     """Three-way provenance tag for an edge (graphify-style).
 
@@ -206,7 +254,7 @@ def file_concept_split(a, b):
 
 
 def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset(),
-                         lesson_ids=frozenset()):
+                         lesson_ids=frozenset(), anchor_ids=None):
     """``dismissed`` holds human-settled false positives as ordered
     (canonical_a, canonical_b) tuples — those pairs never re-flag.
 
@@ -221,34 +269,54 @@ def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset(),
     toks = [(e["id"], e["display"], _token_set(e["display"]), e.get("canonical"))
             for e in entities if e["id"] not in lesson_ids]
     out = []
-    for i in range(len(toks)):
-        for j in range(i + 1, len(toks)):
-            a, b = toks[i][2], toks[j][2]
-            if not a or not b:
+
+    def pairs():
+        if anchor_ids is None:
+            for i in range(len(toks)):
+                for j in range(i + 1, len(toks)):
+                    yield i, j
+            return
+        anchors = frozenset(anchor_ids)
+        seen = set()
+        for i, row in enumerate(toks):
+            if row[0] not in anchors:
                 continue
-            if tuple(sorted((toks[i][3] or "", toks[j][3] or ""))) in dismissed:
-                continue
-            jac = len(a & b) / len(a | b)
-            if jac < min_jaccard:
-                continue
-            pair = file_concept_split(toks[i][1], toks[j][1])
-            # Same name-shape vetoes the proposal-filing paths apply (the
-            # replay gate that admitted them covers this listing too — same
-            # predicate): a numeric-substitution / event-slug pair clutters
-            # the Console with never-merge siblings ("pgvector 0.8.5" ↔
-            # "0.8.6", two dated snapshot files) that filing already
-            # refuses. Relate-action pairs (file/concept) are not merges
-            # and keep listing.
-            if not pair and merge_veto(toks[i][1], toks[j][1]) is not None:
-                continue
-            names = list(pair) if pair else [toks[i][1], toks[j][1]]
-            found = {"type": "duplicate", "severity": "warn",
-                     "label": f"{names[0]} ↔ {names[1]}", "entities": names,
-                     "score": round(jac, 3),
-                     "action": "relate" if pair else "merge"}
-            if pair:
-                found["suggested_relation"] = "implements"
-            out.append(found)
+            for j in range(len(toks)):
+                if i == j:
+                    continue
+                pair = (min(i, j), max(i, j))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                yield pair
+
+    for i, j in pairs():
+        a, b = toks[i][2], toks[j][2]
+        if not a or not b:
+            continue
+        if tuple(sorted((toks[i][3] or "", toks[j][3] or ""))) in dismissed:
+            continue
+        jac = len(a & b) / len(a | b)
+        if jac < min_jaccard:
+            continue
+        pair = file_concept_split(toks[i][1], toks[j][1])
+        # Same name-shape vetoes the proposal-filing paths apply (the
+        # replay gate that admitted them covers this listing too — same
+        # predicate): a numeric-substitution / event-slug pair clutters
+        # the Console with never-merge siblings ("pgvector 0.8.5" ↔
+        # "0.8.6", two dated snapshot files) that filing already
+        # refuses. Relate-action pairs (file/concept) are not merges
+        # and keep listing.
+        if not pair and merge_veto(toks[i][1], toks[j][1]) is not None:
+            continue
+        names = list(pair) if pair else [toks[i][1], toks[j][1]]
+        found = {"type": "duplicate", "severity": "warn",
+                 "label": f"{names[0]} ↔ {names[1]}", "entities": names,
+                 "score": round(jac, 3),
+                 "action": "relate" if pair else "merge"}
+        if pair:
+            found["suggested_relation"] = "implements"
+        out.append(found)
     out.sort(key=lambda f: -f["score"])
     return out
 
@@ -408,6 +476,7 @@ def merge_candidates(entity_proposals):
             m["judge2"] = {"verdict": p["judge2_verdict"],
                            "confidence": p.get("judge2_confidence"),
                            "model": p.get("judge2_model")}
+        add_relate_relations(m, p)
         merges.append(m)
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]

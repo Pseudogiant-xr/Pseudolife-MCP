@@ -8,9 +8,10 @@ rationale: `docs/superpowers/specs/2026-07-28-embedding-backbone-v25-design.md`.
 
 ## Step 0a — you need a Python environment, and Docker-only installs do not have one
 
-`ops/migrate_embeddings.py` runs **on the host**, not in a container: `ops/`
+`ops/migrate_embeddings.py` runs **on the host**, not in a container: it
 is not copied into the daemon image (`ops/Dockerfile.daemon` copies only
-`pseudolife_memory`, `pyproject.toml` and the lockfile), so there is nothing
+`pseudolife_memory`, `pyproject.toml`, `README.md`, `plugin/hooks`, the
+lockfile and the embedding-model provisioning script), so there is nothing
 to `docker exec`. The script imports `psycopg`, `pgvector` and
 `pseudolife_memory`, and on `--apply` it also loads the embedding model,
 which the *image* bakes but the host does not.
@@ -226,7 +227,7 @@ Expect roughly 2-4 minutes for a ~4k-text bank on CPU.
 Each of the four tables (`facts`, `world_facts`, `lessons`, `entries` — in
 that order, entries deliberately last) migrates in its own transaction;
 `SCHEMA_META_VERSION` is stamped only after all four succeed — the script
-stamps whatever the constant currently is (v37 as of this writing), not
+stamps whatever the constant currently is, not
 literally 25. If it
 fails partway, already-migrated tables stay committed and the daemon's
 dimension guard (below) will keep refusing to boot until you re-run this
@@ -254,8 +255,10 @@ exists. If you see that refusal, do not proceed with the migration until
 you know which image is the last-good one; `-ForceRollbackTag` overrides it
 only when you are sure.
 
-**That anchor expires, silently, in two more deploys.** `update.ps1` step 2b
-calls `ops/prune-rollbacks.ps1`, which matches *every* tag containing `-pre-`
+**That anchor expires, silently, in two more deploys.** The deploy's
+rollback-tag prune, just before the build (`pseudolife_memory/update_cli.py`,
+which `update.ps1` wraps), calls `ops/prune-rollbacks.ps1`, which matches
+*every* tag containing `-pre-`
 — including this hand-named one — and keeps only the newest `-KeepRollbacks`
 (default **2**). Nothing exempts a deliberately-named rollback tag. If you
 want this image to survive past the next couple of deploys, pin it outside
@@ -306,7 +309,8 @@ gate; this step only proves the container runs.
   docker logs pseudolife-mcp-daemon | grep "Embedding backend:"
   ```
 
-  Expect `Embedding backend: torch (model=Qwen/Qwen3-Embedding-0.6B, dim=1024, device=cpu)`
+  Expect `Embedding backend: torch (model=Qwen/Qwen3-Embedding-0.6B, dim=1024, device=cpu, dtype=bf16)`
+  (`dtype=fp32` on a CPU without native bf16; the dtype field arrived after v25)
   — this is the positive confirmation that the live daemon actually loaded
   the new backbone (Qwen3-Embedding-0.6B has no ONNX export, so `torch` is
   the correct backend here, not a fallback failure).

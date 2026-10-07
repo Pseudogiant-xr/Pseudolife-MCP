@@ -26,6 +26,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import build_service, probe            # noqa: E402
 from longmemeval_bench import EXTRACTORS                  # noqa: E402
+import embedder_stamp                                     # noqa: E402
 
 # Distinctive seeds: values that could not plausibly be extracted from the
 # unrelated notes below. Any reappearance is an echo by construction.
@@ -100,6 +101,7 @@ def main() -> int:
                 sys.exit("extractor endpoint failing — restart it and rerun")
             if not res.get("pulled"):
                 break
+        embedder = embedder_stamp.describe(svc)
 
     seeded_slots = {(e.lower(), a.lower()) for e, a, _ in SEEDS}
     seeded_values = {v.lower() for _, _, v in SEEDS}
@@ -108,6 +110,8 @@ def main() -> int:
               or any(v in c["value"].lower() for v in seeded_values)]
     print(f"extractor={args.extractor} window={args.window} "
           f"claims={len(rec.claims)} echoes={len(echoes)}")
+    # No result file: the verdict is this output, so the stamp is too.
+    print(f"embedder: {embedder}")
     for c in echoes:
         print(f"  ECHO: {c['entity']} — {c['attribute']}: {c['value']}")
     if echoes:

@@ -6,6 +6,8 @@ locked-pull / unlocked-extract / locked-commit shape with a meta cursor,
 but writes one narrative band entry per closed session root instead of
 outcome signals.
 """
+import io
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +33,60 @@ def test_parse_digest_malformed_vs_empty():
     assert _parse_digest('{"digest": ""}') is None
     assert _parse_digest('{"digest": "   "}') is None
     assert _parse_digest('{"digest": 42}') is None
+
+
+@pytest.mark.parametrize("echo", [
+    "A missing detail was a cheap omission while an invented one poisoned later recall.",
+    "The result was one compact narrative paragraph with no headings or bullet lists.",
+    "No headings, no bullet lists — one compact narrative paragraph (two at most).",
+    "The writer used past tense anchored to the session.",
+    "It read as history, never as a claim about the present.",
+    "The outline covered what the session set out to do and the phases or steps it went through.",
+])
+def test_summarize_session_rejects_prompt_echo_unless_source_mentions_it(
+        monkeypatch, echo):
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    from pseudolife_memory.utils import no_redirect
+
+    payload = {"digest": f"The team fixed a fixture. {echo}"}
+
+    def reply(request, timeout):
+        body = json.dumps({"choices": [{"message": {"content":
+            json.dumps(payload)}}]}).encode()
+        return io.BytesIO(body)
+
+    monkeypatch.setattr(no_redirect, "urlopen",
+                        reply)
+    extractor = OpenAICompatExtractor("http://example.test/v1", "test-model")
+
+    assert extractor.summarize_session("Session: Fixture repair\n- Fixed the fixture.") is None
+    assert extractor.summarize_session(
+        f"Session: Prompt review\n- Discussed: {echo}") == (
+            f"The team fixed a fixture. {echo}")
+    payload["digest"] = "In this session the team fixed a fixture and then tested it."
+    assert extractor.summarize_session(
+        "Session: Fixture repair\n- Fixed the fixture and tested it.") == (
+            payload["digest"])
+
+
+@pytest.mark.parametrize("source_space", ["\n", "\r\n", "\t", " \n  "])
+@pytest.mark.parametrize("digest_space", [" ", "\n"])
+def test_summarize_session_accepts_wrapped_source_wording(
+        monkeypatch, source_space, digest_space):
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    from pseudolife_memory.utils import no_redirect
+
+    digest = f"The team adopted past tense anchored to the{digest_space}session."
+    context = ("Session: Digest review\n- The team adopted past tense anchored "
+               f"to the{source_space}session.")
+    reply = json.dumps({"choices": [{"message": {"content":
+        json.dumps({"digest": digest})}}]}).encode()
+    monkeypatch.setattr(no_redirect, "urlopen",
+                        lambda request, timeout: io.BytesIO(reply))
+    extractor = OpenAICompatExtractor("http://example.test/v1", "test-model")
+
+    assert extractor.summarize_session(context) == digest
+    assert extractor.summarize_session("Session: Fixture repair\n- Fixed a fixture.") is None
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -319,7 +375,7 @@ def _drain_dream_backlog(svc):
         pulled = svc.dream_pull(limit=100)
         if not pulled["entries"]:
             return
-        svc.dream_commit(max(e["timestamp"] for e in pulled["entries"]))
+        svc.dream_commit(pulled["commit_token"])
     pytest.fail("dream backlog did not drain in 50 pulls")
 
 
@@ -397,7 +453,7 @@ def test_dream_run_idle_cycle_runs_digest_stage(closed_episode):
         pulled = svc.dream_pull(limit=100)
         if not pulled["entries"]:
             break
-        svc.dream_commit(max(e["timestamp"] for e in pulled["entries"]))
+        svc.dream_commit(pulled["commit_token"])
     else:
         pytest.fail("dream backlog did not drain in 50 pulls")
     res = svc.dream_run(_IdleExtractor(["The digest."]))

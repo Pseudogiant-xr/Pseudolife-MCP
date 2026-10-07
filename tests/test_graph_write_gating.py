@@ -235,7 +235,92 @@ def _quarantine_pair(svc, a, b, scope="proj-r"):
     svc._link_dream_relations([{"src": a, "relation": "correlates-with", "dst": b}])
 
 
-def test_retype_upgrades_a_quarantined_pair_to_a_typed_proposal(svc):
+@pytest.mark.parametrize("read_contract", ["text_projection", "one_registry_read"])
+def test_retype_reads_only_text_and_one_registry_snapshot(monkeypatch, read_contract):
+    """Retyping needs ordered text evidence, not decoded entry embeddings."""
+    from threading import Lock
+    from types import SimpleNamespace
+
+    from pseudolife_memory.service import MemoryService
+
+    svc = object.__new__(MemoryService)
+    svc._lock = Lock()
+    monkeypatch.setattr(svc, "_ensure_init", lambda: None)
+    monkeypatch.setattr(svc, "_resolve_or_create_entity",
+                        lambda name: {"id": {"alpha-tool": 10, "beta-store": 20}[name]})
+    entries = [
+        {"id": 1, "text": "alpha-tool alone", "source": "t"},
+        {"id": 2, "text": "", "source": ""},
+        *[{"id": i + 3, "text": f"alpha-tool uses beta-store note {i}",
+           "source": source, "superseded_at": 50.0 if i == 0 else None,
+           "embedding": object()}
+          for i, source in enumerate(("status", "digest", "t", "t", "other"))],
+    ]
+    evidence = [row["text"] for row in entries[2:6]]
+    pending = [
+        {"id": 0, "src": "alpha-tool", "dst": "beta-store",
+         "source": "dream-cross-project"},
+        {"id": 1, "src": "missing-a", "dst": "missing-b",
+         "source": "dream-low-confidence"},
+        {"id": 2, "src": "alpha-tool", "dst": "beta-store",
+         "source": "dream-low-confidence"},
+        {"id": 3, "src": "alpha-tool", "dst": "beta-store",
+         "source": "dream-low-confidence"},
+    ]
+    reads = {"full": 0, "text": 0, "relations": 0}
+    inserted, settled, calls = [], [], []
+
+    def load_entries():
+        assert svc._lock.locked()
+        reads["full"] += 1
+        return entries
+
+    def load_entry_texts():
+        assert svc._lock.locked()
+        reads["text"] += 1
+        return [{key: row[key] for key in ("id", "text", "source")}
+                for row in entries]
+
+    def load_relations():
+        assert svc._lock.locked()
+        reads["relations"] += 1
+        return [{"name": name, "description": f"description of {name}"}
+                for name in ("prefers", "uses", "avoids", "related-to")]
+
+    def extract_relations(texts, known):
+        assert not svc._lock.locked()
+        calls.append((texts, known))
+        return [{"src": "alpha-tool", "relation": relation, "dst": dst}
+                for relation, dst in (("uses", "wrong-store"),
+                                      ("related-to", "beta-store"),
+                                      ("uses", "beta-store"))]
+
+    svc._storage = SimpleNamespace(
+        pending_proposals=lambda: pending, load_entries=load_entries,
+        load_entry_texts=load_entry_texts,
+        insert_proposal=lambda *args: inserted.append(args),
+        set_proposal_status=lambda *args: settled.append(args))
+    svc._graph = SimpleNamespace(load_relations=load_relations)
+
+    out = svc.retype_quarantined_links(
+        SimpleNamespace(extract_relations=extract_relations), limit=2)
+
+    assert out == {"considered": 2, "retyped": 1, "settled": 1}
+    assert calls == [(evidence, [("uses", "description of uses"),
+                                 ("related-to", "description of related-to")])]
+    assert settled == [(2, "rejected")]
+    assert len(inserted) == 1
+    assert inserted[0][:-1] == (
+        10, "uses", 20, 0.7, None,
+        "retyped from related-to on 4 shared note(s)", "dream-retyped")
+    if read_contract == "text_projection":
+        assert reads["full"] == 0
+        assert reads["text"] == 1
+    else:
+        assert reads["relations"] == 1
+
+
+def test_retype_upgrades_a_quarantined_pair_to_a_typed_proposal(svc, monkeypatch):
     # 2026-07-26: 44% of quarantined untyped pairs name a REAL relationship
     # that merely got the wrong label. A second pass over just the notes where
     # both entities co-occur re-asks for a typed relation; a hit files a
@@ -243,6 +328,10 @@ def test_retype_upgrades_a_quarantined_pair_to_a_typed_proposal(svc):
     _quarantine_pair(svc, "retype-tool", "retype-store")
     stub = _RetypeStub([{"src": "retype-tool", "relation": "uses",
                          "dst": "retype-store", "confidence": 0.7}])
+
+    def no_embedding_load():
+        pytest.fail("retyping must not load entry embeddings")
+    monkeypatch.setattr(svc._storage, "load_entries", no_embedding_load)
 
     out = svc.retype_quarantined_links(stub, limit=5)
 
@@ -276,9 +365,10 @@ def test_retype_runs_even_with_no_dream_backlog(svc):
     # quarantine — exactly backwards, since the quarantine accumulates when
     # dreams are INFREQUENT. Same precedent as lesson synthesis on this path:
     # no new memories, but pending work may still exist.
-    import time as _t
     _quarantine_pair(svc, "nobacklog-a", "nobacklog-b")
-    svc.dream_commit(_t.time() + 60)       # cursor past everything: no backlog
+    pulled = svc.dream_pull(limit=10**6)
+    if pulled.get("commit_token"):
+        svc.dream_commit(pulled["commit_token"])
 
     class _Stub:
         def extract(self, texts, vocab, known_facts=None):
@@ -466,6 +556,7 @@ def _alias_props(svc):
             if (p["reason"] or "").startswith("dream-alias:")]
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     """A dreamed paraphrase of an existing cortex entity (near-zero token
     overlap, so the Jaccard write-dedup can't see it) files a merge proposal
@@ -485,6 +576,7 @@ def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     assert len(_alias_props(svc)) == 1
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_ignores_unrelated_entities(svc):
     svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
                      "e4b", support="user")
@@ -493,6 +585,7 @@ def test_dream_alias_candidate_ignores_unrelated_entities(svc):
     assert _alias_props(svc) == []
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
     from pseudolife_memory.graph import norm_name
     svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
@@ -517,6 +610,7 @@ def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
         svc.config.memory.dream.alias_candidate_min_cosine = old
 
 
+@pytest.mark.real_model
 def test_dream_alias_candidate_blocks_variant_conflict(svc):
     """E4B vs E2B names embed nearly identically but denote different models —
     the alias post-pass must not file a merge proposal for them."""

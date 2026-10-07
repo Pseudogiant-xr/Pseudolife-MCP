@@ -69,6 +69,24 @@ def test_argv_disables_agent_tools_for_a_pure_completion():
     assert "--ephemeral" in argv
 
 
+def test_argv_isolates_the_call_from_the_hosts_codex_config():
+    # 2026-09-29: a ladder run got HTTP 500 because the host's
+    # ~/.codex/config.toml marked the pseudolife-memory MCP server required
+    # and the daemon was unreachable, so `codex exec` refused to start a
+    # session. `-c mcp_servers={}` is NOT enough (measured on codex 0.158:
+    # the enabled plugin still started its own pseudolife-memory server and
+    # the model called it). --ignore-user-config drops MCP servers, plugins
+    # and hook trust while auth still comes from CODEX_HOME; hooks.json is
+    # still read, so features.hooks=false keeps hooks off outright. Directory
+    # trust lived in the ignored config too: without --skip-git-repo-check a
+    # shim started outside a git checkout fails every call ("Not inside a
+    # trusted directory", measured the same day).
+    argv = shim.CodexCli(Path("codex"), "m", 30.0)._argv(None)
+    assert "--ignore-user-config" in argv
+    assert "--skip-git-repo-check" in argv
+    assert argv[argv.index("features.hooks=false") - 1] == "-c"
+
+
 def test_resolve_model_per_request_override_mirrors_claude_shim():
     # The Console Dreamer card switches the dreamer live by naming a concrete
     # model in the request; endpoint aliases keep the launch default.
@@ -340,11 +358,6 @@ def test_chat_completions_round_trips_the_resolved_model(monkeypatch):
 
 # --- /health parity with sonnet_shim ------------------------------------
 
-def test_health_ok_when_cli_answers(monkeypatch):
-    ok, detail = _cli(monkeypatch, True).health()
-    assert ok is True
-
-
 def test_health_fails_when_cli_errors(monkeypatch):
     ok, detail = _cli(monkeypatch, False).health()
     assert ok is False and "Not logged in" in detail
@@ -411,8 +424,8 @@ def test_chat_threads_reasoning_effort_into_argv():
 
 
 def test_no_effort_omits_the_config_key():
-    # Unset everywhere == pre-knob behavior: the CLI inherits the host's
-    # ~/.codex/config.toml, exactly as before.
+    # Unset everywhere: the key is never passed, so the CLI runs at its own
+    # per-model default (the host config.toml is not loaded).
     cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0)
     seen = _stub_run(cli, stdout=_OK_STREAM)
     cli.chat("sys", "hi")

@@ -8,8 +8,9 @@ Pins the fixes from the pre-release UI/UX pass:
 * verb-dispatch and enum-shaped params expose ``enum`` values in the JSON
   schema (``typing.Literal``), so dispatch is discoverable from the manifest
   alone, not just the docstring prose;
-* tool bodies that raise map to the same structured ``{"error": ...}`` shape
-  the dispatch tools already return, instead of leaking raw exceptions;
+* tool bodies that raise map to a structured MCP tool error (``isError``,
+  ``{"error": <code>, "message": ...}``) instead of leaking raw exceptions or
+  Python class names;
 * the Console's list endpoints report ``total``/``truncated`` so big banks
   don't silently cap at the fetch limit;
 * README version claims are mechanically guarded against drift (the schema
@@ -94,17 +95,149 @@ def test_enum_params_are_enums_in_the_input_schema(tmp_path: Path, monkeypatch) 
 # ── uniform failure contract ──────────────────────────────────────────────
 
 
+def _tool_error(mod, name: str, args: dict) -> dict:
+    """Call a tool through FastMCP and return its refusal payload, asserting
+    the refusal reached the client as an MCP tool error (``isError``)."""
+    result = asyncio.run(mod.mcp.call_tool(name, args))
+    text = "".join(item.text for item in result.content if hasattr(item, "text"))
+    assert result.is_error, f"{name} refusal came back success-shaped: {text}"
+    payload = json.loads(text)
+    assert result.structured_content in (None, payload)
+    return payload
+
+
 def test_tool_exceptions_become_structured_errors(tmp_path: Path, monkeypatch) -> None:
-    """A service-level raise must surface as the same ``{"error": ...}``
-    shape the dispatch tools return — not a raw exception string."""
+    """A service-level raise must surface as a structured MCP tool error
+    (``isError``) with a stable code, not a raw exception string or a Python
+    class name. A missing file names its path, which the caller gave."""
     mod = _reload(tmp_path, monkeypatch)
     monkeypatch.setattr(
         mod.service, "ingest_document",
         lambda path, source=None: (_ for _ in ()).throw(
             FileNotFoundError(f"Not found: {path}")))
-    out = _invoke("document_ingest", {"path": "Z:/missing.pdf"})
-    assert out["error"] == "FileNotFoundError"
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/missing.pdf"})
+    assert out["error"] == "file_not_found"
     assert "Z:/missing.pdf" in out["message"]
+    assert "server" in out["message"]
+
+
+def test_prose_value_errors_become_invalid_argument(tmp_path: Path, monkeypatch) -> None:
+    """A ValueError whose text is a sentence keeps the sentence as the
+    message under the stable code ``invalid_argument``. The call binds
+    cleanly and the tool body refuses it, so this tests the body path."""
+    mod = _reload(tmp_path, monkeypatch)
+    asyncio.run(mod.mcp.call_tool(
+        "memory_set_add", {"entity": "probe", "attribute": "tags", "member": "rust"}))
+    out = _tool_error(mod, "memory_fact_set",
+                      {"entity": "probe", "attribute": "tags", "value": "go"})
+    assert out["error"] == "invalid_argument"
+    assert "memory_set_add" in out["message"]
+    assert "ValueError" not in json.dumps(out)
+
+
+# Pydantic's own framing: what a binding refusal must never carry.
+_BINDING_LEAKS = ("input_value", "input_type", "errors.pydantic.dev", "validation error")
+
+
+def test_binding_rejections_share_the_error_shape(tmp_path: Path, monkeypatch) -> None:
+    """An argument the schema refuses (wrong type here) never reaches the
+    tool body, yet comes back as the same JSON tool error as a body
+    refusal: ``invalid_argument`` naming the parameter, with neither the
+    value passed nor pydantic's framing (review of #587/#588, 2026-10-05)."""
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(mod.service, "search", lambda *a, **k: calls.append(k))
+    value = "PROBE" + "VALUE" * 3  # built at runtime: must not be echoed
+    out = _tool_error(mod, "memory_search", {"query": "q", "top_k": value})
+    assert out["error"] == "invalid_argument"
+    assert out["param"] == "top_k"
+    assert "top_k" in out["message"] and "integer" in out["message"]
+    text = json.dumps(out)
+    for leak in (value, *_BINDING_LEAKS):
+        assert leak not in text, text
+    assert set(out) <= {"error", "message", "param"}
+    assert calls == []
+
+
+def test_binding_rejections_name_every_argument(tmp_path: Path, monkeypatch) -> None:
+    """Several refused arguments are each named in the message; ``param``
+    is the first of them."""
+    mod = _reload(tmp_path, monkeypatch)
+    out = _tool_error(mod, "memory_search", {"top_k": "many"})
+    assert out["error"] == "invalid_argument"
+    assert out["param"] in {"query", "top_k"}
+    assert "query" in out["message"] and "top_k" in out["message"]
+    assert "many" not in out["message"]
+
+
+def test_unknown_parameter_is_its_own_code(tmp_path: Path, monkeypatch) -> None:
+    """A misnamed argument keeps #584's sentence and gains the shape's
+    fields: ``error: unknown_parameter``, the name, and what is accepted."""
+    mod = _reload(tmp_path, monkeypatch)
+    out = _tool_error(mod, "memory_search", {"query": "q", "limit": 3})
+    assert out["error"] == "unknown_parameter"
+    assert out["param"] == "limit"
+    assert "top_k" in out["accepted"] and "query" in out["accepted"]
+    assert "limit" not in out["accepted"]
+    assert out["message"].startswith(
+        "unknown parameter 'limit' for memory_search; did you mean 'top_k'?")
+    assert out["message"].count("Accepted:") == 1
+    for leak in _BINDING_LEAKS:
+        assert leak not in json.dumps(out)
+
+
+def test_an_unavailable_board_leaves_a_write_in_doubt(tmp_path: Path, monkeypatch) -> None:
+    """``coordination_unavailable`` is what an unexpected failure inside a
+    board call becomes. It is a ValueError like any refusal, but the write
+    may have happened, so a write tool says so; a read-only one does not."""
+    from pseudolife_memory.coordination import CoordinationRefused
+
+    mod = _reload(tmp_path, monkeypatch)
+    out = mod._error_payload("memory_message",
+                             CoordinationRefused("coordination_unavailable"))
+    assert out["error"] == "coordination_unavailable"
+    assert out["mutation"] == "unknown"
+    refused = mod._error_payload("memory_message", CoordinationRefused("missing_parameter"))
+    assert "mutation" not in refused
+    read = mod._error_payload("memory_search",
+                              CoordinationRefused("coordination_unavailable"))
+    assert "mutation" not in read
+
+
+def test_coded_value_errors_keep_their_code(tmp_path: Path, monkeypatch) -> None:
+    """A ValueError raised with a snake_case code keeps that code as
+    ``error``: other callers already key on it."""
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        mod.service, "ingest_document",
+        lambda path, source=None: (_ for _ in ()).throw(
+            ValueError("coordination_requires_postgres")))
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/x.pdf"})
+    assert out["error"] == "coordination_requires_postgres"
+    assert "coordination_requires_postgres" in out["message"]
+
+
+def test_unexpected_exceptions_become_internal_error(tmp_path: Path, monkeypatch) -> None:
+    """An unexpected exception names neither its class nor its text (both
+    are internals) and tells the model not to retry blindly; a write tool
+    says it cannot tell whether anything was written."""
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        mod.service, "ingest_document",
+        lambda path, source=None: (_ for _ in ()).throw(
+            RuntimeError("row 42 holds private text")))
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/x.pdf"})
+    assert out["error"] == "internal_error"
+    assert "RuntimeError" not in json.dumps(out)
+    assert "private text" not in json.dumps(out)
+    assert "retry" in out["message"]
+    assert out["mutation"] == "unknown"
+    # A read-only tool's failure wrote nothing, so it says nothing about it.
+    monkeypatch.setattr(
+        mod.service, "search_documents",
+        lambda query, top_k=5: (_ for _ in ()).throw(RuntimeError("boom")))
+    read = _tool_error(mod, "document_search", {"query": "x"})
+    assert read["error"] == "internal_error" and "mutation" not in read
 
 
 def test_search_always_returns_cortex_key(tmp_path: Path, monkeypatch) -> None:
@@ -218,19 +351,37 @@ def test_dockerfile_bakes_the_default_embedding_model() -> None:
     built from that state boots healthy (nothing touches the model until the
     first tool call) and then throws ``OSError`` the moment a client calls
     any memory tool, because the offline HF cache never has the new model.
-    Pin the Dockerfile bake to the code default so a future model swap can
-    never leave the two silently out of sync again."""
+    Pin the bake to the code default so a future model swap can never leave
+    the two silently out of sync again.
+
+    The bake moved into ``ops/provision_embedding_models.py`` (2026-09-11),
+    so the model name now reaches the Dockerfile only through that script.
+    Matching the name against the Dockerfile text would pass on the prose
+    comment that names the model, which downloads nothing — check the
+    script's model list and the Dockerfile's invocation of it instead."""
+    import importlib.util
+
     from pseudolife_memory.utils.config import EmbeddingConfig
 
+    ops = Path(__file__).resolve().parents[1] / "ops"
+    spec = importlib.util.spec_from_file_location(
+        "provision_embedding_models", ops / "provision_embedding_models.py",
+    )
+    assert spec is not None and spec.loader is not None
+    provisioner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(provisioner)
+
     default_model = EmbeddingConfig().model_name
-    dockerfile = (
-        Path(__file__).resolve().parents[1] / "ops" / "Dockerfile.daemon"
-    ).read_text(encoding="utf-8")
-    assert default_model in dockerfile, (
-        f"ops/Dockerfile.daemon does not bake the default embedding model "
-        f"({default_model!r}) — a container built from this image would "
-        f"boot healthy and OSError on the first tool call under "
-        f"HF_HUB_OFFLINE=1")
+    provisioned = {provisioner.QWEN_MODEL, provisioner.MINILM_MODEL}
+    assert default_model in provisioned, (
+        f"ops/provision_embedding_models.py does not provision the default "
+        f"embedding model ({default_model!r}, provisions {sorted(provisioned)}) "
+        f"— a container built from this image would boot healthy and OSError "
+        f"on the first tool call under HF_HUB_OFFLINE=1")
+    dockerfile = (ops / "Dockerfile.daemon").read_text(encoding="utf-8")
+    assert "python /app/provision_embedding_models.py" in dockerfile, (
+        "ops/Dockerfile.daemon does not run the provisioner, so nothing "
+        "downloads the models the guard above just checked")
 
 
 def test_ci_warms_the_default_embedding_model() -> None:
@@ -364,6 +515,22 @@ _RFC1918_PAT = re.compile(
     rb"|192\.168\.\d{1,3}\.\d{1,3})\b")
 _RFC1918_PRESCREEN = (b"10.", b"172.", b"192.168.")
 _ALLOWED_IP_PREFIXES = (b"10.0.0.", b"192.168.1.", b"172.17.0.1")
+# Tailnet addresses (CGNAT 100.64.0.0/10) and MagicDNS names: the remote-bank
+# docs and tests talk about them, and a real one is a machine identifier
+# like a LAN address. Sanctioned placeholders: the 100.64.0.x prefix and the
+# literal <machine>.<tailnet>.ts.net.
+_TAILNET_PAT = re.compile(
+    rb"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b")
+_TAILNET_PRESCREEN = (b"100.",)
+_ALLOWED_TAILNET_PREFIXES = (b"100.64.0.",)
+_TSNET_PAT = re.compile(rb"[a-z0-9<>._-]+\.ts\.net\b")
+_TSNET_PRESCREEN = (b".ts.net",)
+_ALLOWED_TSNET_NAMES = (b"<machine>.<tailnet>.ts.net",)
+# Tailscale's IPv6 range (fd7a:115c:a1e0::/48); no placeholder is sanctioned.
+# A real address carries hex digits after the prefix; the bare range name
+# (prefix, "::", a slash) does not, and may be written down.
+_TAILNET6_PAT = re.compile(rb"\bfd7a:115c:a1e0:[0-9a-f:]*[0-9a-f]")
+_TAILNET6_PRESCREEN = (b"fd7a:115c:a1e0:",)
 _CREDENTIAL_PAT = re.compile(
     rb"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
     rb"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
@@ -400,6 +567,24 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
                 ip = m.group(0).decode("ascii", "replace")
                 hits.append((rel, f"unsanctioned private IP {ip}"))
                 return
+    if any(p in low for p in _TAILNET_PRESCREEN):
+        for m in _TAILNET_PAT.finditer(low):
+            if not m.group(0).startswith(_ALLOWED_TAILNET_PREFIXES):
+                ip = m.group(0).decode("ascii", "replace")
+                hits.append((rel, f"unsanctioned tailnet IP {ip}"))
+                return
+    if any(p in low for p in _TSNET_PRESCREEN):
+        for m in _TSNET_PAT.finditer(low):
+            if m.group(0) not in _ALLOWED_TSNET_NAMES:
+                name = m.group(0).decode("ascii", "replace")
+                hits.append((rel, f"tailnet name {name}"))
+                return
+    if any(p in low for p in _TAILNET6_PRESCREEN):
+        m = _TAILNET6_PAT.search(low)
+        if m:
+            ip = m.group(0).decode("ascii", "replace")
+            hits.append((rel, f"tailnet IPv6 address {ip}"))
+            return
 
 
 def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
@@ -461,6 +646,33 @@ def test_tracked_tree_carries_no_stray_control_bytes(
     containing NUL are treated as binary and skipped."""
     hits = tracked_tree_scan[1]
     assert hits == [], f"stray control bytes in tracked files: {hits}"
+
+
+def test_every_ops_env_variant_but_the_template_is_git_ignored() -> None:
+    """``ops/.env`` holds the database password and the principal tokens. A
+    timestamped backup copy of it sat in a checkout untracked and NOT
+    ignored — ``.env`` and ``*.bak`` match neither ``.env.bak-<ts>`` shape —
+    one ``git add .`` away from a public push (2026-09-23 review). The
+    identifier guard above cannot see it: it scans tracked files only.
+    Every ``ops/.env*`` variant is ignored except the tracked template."""
+    repo = _README.parent
+
+    def ignored(rel: str) -> bool:
+        try:
+            proc = subprocess.run(
+                ["git", "check-ignore", "--no-index", "-q", rel],
+                cwd=repo, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            pytest.skip("not a git checkout")
+        if proc.returncode not in (0, 1):
+            pytest.skip("not a git checkout")
+        return proc.returncode == 0
+
+    for rel in ("ops/.env", "ops/.env.bak-x", "ops/.env.bak-20990101-000000",
+                "ops/.env.local", "ops/.env.old", "ops/.env~"):
+        assert ignored(rel), f"{rel} is not git-ignored"
+    assert not ignored("ops/.env.example"), (
+        "ops/.env.example is the tracked template; it must stay unignored")
 
 
 def test_changelog_mentions_current_schema_version() -> None:
@@ -540,3 +752,36 @@ def test_codex_hook_changelog_subsection_keeps_its_separator() -> None:
     before, separator, _after = changelog.partition(header)
     assert separator, "Codex hook trust changelog subsection is missing"
     assert before.endswith("\n\n"), "changelog subsection must follow a blank line"
+def test_identifier_guard_catches_tailnet_addresses_and_names():
+    """Remote-bank docs and tests talk about tailnet addresses, so the guard
+    must screen the tailnet range (100.64.0.0/10) and ``*.ts.net`` names the
+    way it screens RFC1918: a real machine's address or MagicDNS name must
+    not reach the public tree. Only the ``100.64.0.`` placeholder prefix and
+    the ``<machine>.<tailnet>.ts.net`` placeholder are sanctioned."""
+    # Samples are assembled at runtime so this file never carries one.
+    for text in (b"daemon at http://100." + b"101.102.103:8765",
+                 b"use 100.64." + b"7.9 here",
+                 b"https://some-box.tail1234ab" + b".ts.net:8765"):
+        hits: list = []
+        _scan_identifiers("x.md", text, hits)
+        assert hits, text
+    for text in (b"http://100.64.0.2:8765", b"100.64.0.10",
+                 b"https://<machine>.<tailnet>.ts.net", b"a 100.63.0.1 (not tailnet)",
+                 b"100.128.0.1 (outside the /10)"):
+        hits = []
+        _scan_identifiers("x.md", text, hits)
+        assert not hits, (text, hits)
+
+
+def test_identifier_guard_catches_tailnet_ipv6_addresses():
+    """Tailscale also hands every node an address in fd7a:115c:a1e0::/48;
+    a real one identifies a machine just like the IPv4 form. No placeholder
+    is sanctioned: docs use the IPv4 placeholder."""
+    hits: list = []
+    _scan_identifiers("x.md", b"at [fd7a:115c:" + b"a1e0::a33:376f]:8765", hits)
+    assert hits
+    for text in (b"fd7a:115d:a1e0::1 is not in the /48",
+                 b"the range fd7a:115c:a1e0::/48 itself may be named"):
+        hits = []
+        _scan_identifiers("x.md", text, hits)
+        assert not hits, (text, hits)

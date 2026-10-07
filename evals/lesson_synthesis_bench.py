@@ -83,12 +83,46 @@ def _format_signals(signals: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ── rule-mode prompt under test (sync with dream.py; 2026-09-08) ───────────
+# Pinned to pseudolife_memory.memory.dream._RULE_LESSON_SYSTEM_PROMPT by
+# tests/test_lesson_rule_mode.py. Tune here, port back.
+_RULE_LESSON_SYSTEM_PROMPT = (
+    "You turn ONE outcome signal from an agent's episode into ONE "
+    "situation-specific RULE. Reply with JSON only: "
+    '{"lessons":[{"task":..,"aspect":"rule","lesson":..,"about":..,'
+    '"polarity":"+"|"-","outcome":"success"|"failure"|"correction",'
+    '"confidence":0..1}]} containing exactly one lesson.\n'
+    "- task = a short name for the SITUATION: the request and the observable "
+    "behaviour that distinguishes it from look-alike situations, taken from "
+    "the signal's detail. Specific to this situation, never a generic task "
+    "type.\n"
+    "- lesson = one sentence. A success: \"WHEN <situation> THEN <the exact "
+    "action(s) that produced the outcome>\". A correction (the detail carries "
+    "a CORRECT SOLUTION): \"WHEN <situation> THEN <the exact correct "
+    "action(s), copied verbatim from the correct solution>\"; if an ACTION "
+    "DIFF is given, add one clause naming the decisive divergence. A failure "
+    "with no correct solution: \"WHEN <situation> do NOT <the exact action(s) "
+    "taken> — verified wrong against the outcome\"; never invent the right "
+    "answer.\n"
+    "- Copy decision-critical values (names of things, options, amounts, "
+    "reasons, arguments) VERBATIM from the signal; do not paraphrase, soften, "
+    "or add conditions, alternatives or exceptions the signal does not "
+    "contain. Identifiers of people become placeholders. If the detail lists "
+    "MUST INCLUDE values, every one of them appears verbatim in the lesson.\n"
+    '- polarity = "+" for a THEN rule, "-" for a do-NOT rule. outcome = the '
+    "signal's class. about = the tool or action the rule concerns. "
+    "confidence = 0..1.\n"
+    "Do not cluster and do not skip: this signal yields exactly one rule."
+)
+
+
 def call_model(base_url: str, model: str, signals: list[dict],
-               timeout: float = 150.0) -> tuple[list[dict], float]:
+               timeout: float = 150.0,
+               system: str = _LESSON_SYSTEM_PROMPT) -> tuple[list[dict], float]:
     body = json.dumps({
         "model": model,
         "messages": [
-            {"role": "system", "content": _LESSON_SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": _format_signals(signals)},
         ],
         "response_format": {"type": "json_object"},
@@ -209,6 +243,54 @@ FIXTURES = [
 ]
 
 
+# ── rule-mode fixtures (--rules): one verbatim rule per signal ──────────────
+# The discriminator is VALUE SURVIVAL: the corrected value must appear in
+# the rule unchanged and the mistaken one must not be prescribed; and a
+# failure without a correct solution must stay a do-NOT rule (no invented
+# answer). Wording is deliberately generic — no benchmark text.
+RULE_FIXTURES = [
+    {
+        "id": "verbatim_rule_correction",
+        "signals": [
+            {"outcome": "correction", "task": "renewal with a loyalty discount",
+             "about": "rule: apply_discount",
+             "detail": "SITUATION: a caller renews a subscription, asks for the "
+                       "loyalty discount and insists on paying annually\n"
+                       "VERDICT: failure\n"
+                       "ACTIONS TAKEN: apply_discount(code=LOYAL10, term=monthly)\n"
+                       "CORRECT SOLUTION: apply_discount(code=LOYAL15, term=annual)\n"
+                       "ACTION DIFF: wrong_args apply_discount code LOYAL10->LOYAL15, "
+                       "term monthly->annual\n"
+                       "MUST INCLUDE: LOYAL15; annual"},
+        ],
+        "min_lessons": 1, "max_lessons": 1,
+        "checks": [
+            {"about_has": "apply_discount", "polarity": "+", "outcome": "correction",
+             "value_any": ["loyal15"],
+             "value_not": ["then apply_discount(code=loyal10",
+                           "then use loyal10", "code=loyal10, term=annual"]},
+        ],
+    },
+    {
+        "id": "verbatim_rule_failure_no_solution",
+        "signals": [
+            {"outcome": "failure", "task": "renewal with a loyalty discount",
+             "about": "rule: apply_discount",
+             "detail": "SITUATION: a caller renews a subscription and asks for "
+                       "the loyalty discount\n"
+                       "VERDICT: failure\n"
+                       "ACTIONS TAKEN: apply_discount(code=LOYAL10, term=monthly)"},
+        ],
+        "min_lessons": 1, "max_lessons": 1,
+        "checks": [
+            {"about_has": "apply_discount", "polarity": "-", "outcome": "failure",
+             "value_any": ["do not", "don't", "never"],
+             "value_not": ["then apply_discount(code=loyal15", "loyal15"]},
+        ],
+    },
+]
+
+
 def _norm(s) -> str:
     return str(s or "").lower()
 
@@ -253,12 +335,16 @@ def score_scenario(fx: dict, lessons: list[dict]) -> dict:
             "checks": checks, "full_pass": full, "lessons": lessons}
 
 
-def run_target(name: str, base_url: str, model: str) -> dict:
+def run_target(name: str, base_url: str, model: str, *,
+               fixtures: list[dict] | None = None,
+               system: str = _LESSON_SYSTEM_PROMPT) -> dict:
+    fixtures = FIXTURES if fixtures is None else fixtures
     rows, agg = [], {"full": 0, "count_ok": 0, "found": 0, "polarity": 0,
                      "outcome": 0, "direction": 0, "checks": 0, "secs": 0.0}
-    for fx in FIXTURES:
+    for fx in fixtures:
         try:
-            lessons, dt = call_model(base_url, model, fx["signals"])
+            lessons, dt = call_model(base_url, model, fx["signals"],
+                                     system=system)
         except Exception as exc:  # noqa: BLE001
             rows.append({"id": fx["id"], "error": str(exc)})
             continue
@@ -274,7 +360,7 @@ def run_target(name: str, base_url: str, model: str) -> dict:
             agg["polarity"] += int(ch["polarity_ok"])
             agg["outcome"] += int(ch["outcome_ok"])
             agg["direction"] += int(ch["direction_ok"])
-    return {"target": name, "model": model, "scenarios": len(FIXTURES),
+    return {"target": name, "model": model, "scenarios": len(fixtures),
             "aggregate": agg, "rows": rows}
 
 
@@ -488,6 +574,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--infer", action="store_true",
                     help="run the outcome-inference rung (8 fixtures) "
                          "instead of lesson synthesis")
+    ap.add_argument("--rules", action="store_true",
+                    help="run the rule-mode rung (RULE_FIXTURES under "
+                         "_RULE_LESSON_SYSTEM_PROMPT, one call per signal) "
+                         "instead of the clustering fixtures")
     ap.add_argument("--dry-run", action="store_true",
                     help="with --infer: print fixtures and exit, no import/network")
     ap.add_argument("--infer-url", default=os.environ.get("INFER_URL"))
@@ -534,14 +624,17 @@ def main(argv: list[str] | None = None) -> None:
         TARGETS["qwen-27b"] = (args.qwen_url, TARGETS["qwen-27b"][1])
 
     names = list(TARGETS) if args.target == "all" else [args.target]
+    fixtures = RULE_FIXTURES if args.rules else FIXTURES
+    system = _RULE_LESSON_SYSTEM_PROMPT if args.rules else _LESSON_SYSTEM_PROMPT
     out = {}
     for nm in names:
         base, model = TARGETS[nm]
-        out[nm] = run_target(nm, base, model)
+        out[nm] = run_target(nm, base, model, fixtures=fixtures, system=system)
+        out[nm]["rung"] = "rules" if args.rules else "lessons"
         a = out[nm]["aggregate"]
-        print(f"\n=== {nm} ({model}) ===")
-        print(f"  full-pass scenarios : {a['full']}/{len(FIXTURES)}")
-        print(f"  count_ok            : {a['count_ok']}/{len(FIXTURES)}")
+        print(f"\n=== {nm} ({model}) {'[rules]' if args.rules else ''} ===")
+        print(f"  full-pass scenarios : {a['full']}/{len(fixtures)}")
+        print(f"  count_ok            : {a['count_ok']}/{len(fixtures)}")
         print(f"  checks found        : {a['found']}/{a['checks']}")
         print(f"  polarity correct    : {a['polarity']}/{a['checks']}")
         print(f"  outcome correct     : {a['outcome']}/{a['checks']}")

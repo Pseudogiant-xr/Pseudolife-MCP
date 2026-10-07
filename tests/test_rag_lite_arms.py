@@ -380,7 +380,8 @@ def _rebuild_fixture(tmp_path, monkeypatch, raw_texts, slug="ku"):
     monkeypatch.setattr(lmb, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(lmb, "load_questions",
                         lambda *a, **kw: [{"question_id": "q1"}])
-    monkeypatch.setattr(rlr, "rederive_raw_texts", lambda q: raw_texts)
+    monkeypatch.setattr(rlr, "rederive_raw_texts",
+                        lambda q: (raw_texts, None))
     return rlr
 
 
@@ -409,7 +410,7 @@ def test_rebuild_refuses_when_the_rag_context_does_not_re_derive(
     they would measure drift instead of budget — so nothing is written."""
     rlr = _rebuild_fixture(tmp_path, monkeypatch, ["a" * 40, "b" * 40])
     monkeypatch.setattr(rlr, "rederive_raw_texts",
-                        lambda q: ["DIFFERENT", "b" * 40])
+                        lambda q: (["DIFFERENT", "b" * 40], None))
     with pytest.raises(SystemExit, match="DIFFERENT rag context"):
         rlr.main(["--src-tag", "src", "--out-tag", "out",
                   "--rag-lite-top-k", "1"])

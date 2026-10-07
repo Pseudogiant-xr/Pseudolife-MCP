@@ -48,6 +48,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
+import embedder_stamp  # noqa: E402 — stdlib only
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 WINDOW = 0   # --window: known-facts window size applied to every bench service
@@ -155,8 +158,9 @@ RUNGS: dict[str, dict] = {
     # Luna rides the shim's per-request override (a concrete gpt-* name in
     # the request wins over the launch default), so one shim serves both
     # rungs without a restart. NOTE: neither Codex-shim rung pins
-    # model_reasoning_effort — calls inherit the host's ~/.codex/config.toml
-    # (the 2026-09-01 measurements ran at "high").
+    # model_reasoning_effort. The 2026-09-01 measurements inherited "high"
+    # from the host's ~/.codex/config.toml; since 2026-09-29 the shim skips
+    # that file, so an unpinned call runs at the CLI's per-model default.
     "luna": {"kind": "llm",
              "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
              "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",
@@ -310,15 +314,20 @@ def _bench_db_name() -> str:
     # PSEUDOLIFE_BENCH_DB: the test suite pins a per-run name here so that
     # reset_bench()'s backend reap + truncate can't hit a concurrent suite
     # run (tests/conftest.py). Eval CLI runs leave it unset -> fixed name.
-    return os.environ.get("PSEUDOLIFE_BENCH_DB", "pseudolife_memory_bench")
+    # A production bank name is refused here, before anything connects.
+    name = os.environ.get("PSEUDOLIFE_BENCH_DB", "pseudolife_memory_bench")
+    refuse_production_database(name)
+    return name
 
 
 def bench_url() -> str:
+    from psycopg.conninfo import make_conninfo
+
     base = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
     )
-    return base.rsplit("/", 1)[0] + "/" + _bench_db_name()
+    return make_conninfo(base, dbname=_bench_db_name())
 
 
 # The bench reset's truncate list. It used to be a hand-maintained
@@ -328,43 +337,54 @@ def bench_url() -> str:
 # questions until 2026-08-25 (#181). One list now, defined beside the DDL
 # and completeness-checked by tests/test_bench_reset_tables.py.
 #
-# Safe above the lazy service imports below: schema.py imports only
-# `logging`, and neither package __init__ pulls in torch — the
+# Safe above the lazy service imports below: schema.py imports only the
+# standard library, and neither package __init__ pulls in torch — the
 # CUDA_VISIBLE_DEVICES setup at the top of this module is unaffected.
 from pseudolife_memory.storage.schema import (  # noqa: E402
     BENCH_RESET_TABLES as _ALL_TABLES,
+    refuse_production_database,
 )
 
 
 def reset_bench() -> str:
     """Ensure the dedicated bench DB exists and is empty. Returns its URL.
 
-    NEVER touches the live ``pseudolife_memory`` DB — this is its own database.
+    NEVER touches the live ``pseudolife_memory`` DB — this is its own
+    database, and that is enforced, not just named: ``_bench_db_name()``
+    refuses a production bank name before anything connects, and the
+    server-side check below runs before the reap.
     """
     import psycopg
+    from psycopg.conninfo import make_conninfo
 
+    bench_db = _bench_db_name()
     admin = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
     )
-    admin = admin.rsplit("/", 1)[0] + "/postgres"
+    admin = make_conninfo(admin, dbname="postgres")
     with psycopg.connect(admin, connect_timeout=5, autocommit=True) as conn:
         row = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
-            (_bench_db_name(),),
+            (bench_db,),
         ).fetchone()
         if row is None:
-            conn.execute(f'CREATE DATABASE "{_bench_db_name()}"')
+            conn.execute(f'CREATE DATABASE "{bench_db}"')
 
     url = bench_url()
-    from pseudolife_memory.storage.schema import ensure_schema
+    from pseudolife_memory.storage.schema import (
+        assert_disposable_database,
+        ensure_schema,
+    )
     with psycopg.connect(url, connect_timeout=5) as conn:
+        assert_disposable_database(conn)  # first: before the reap below
         conn.execute("SET search_path TO public")
         conn.commit()
         with conn.cursor() as cur:  # reap any leaked backends holding locks
             cur.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                "AND backend_type = 'client backend' AND usename = current_user"
             )
         conn.commit()
         ensure_schema(conn)
@@ -544,14 +564,24 @@ def rerank_env_knobs() -> dict:
     config cannot be audited afterwards is exactly the failure PR #165
     closed. ``enabled`` reflects whether ``PSEUDOLIFE_BENCH_RERANK`` turned
     the reranker on; the shipped default (``memory.reranker.enabled =
-    False``) is in force whenever the var is unset.
+    False``) is in force whenever the var is unset. ``top_n`` is the
+    ``PSEUDOLIFE_BENCH_RERANK_TOP_N`` override, ``None`` for the shipped
+    budget (20). It is stamped because the pass scores the whole combined
+    pool or skips it (``candidate_budget_exceeded``): a widened-pool cell
+    whose pool outgrows the budget serves the un-reranked order, and
+    ``enabled: true`` alone would read as a reranked run.
     """
     raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
-    return {"enabled": raw in ("1", "true", "on")}
+    return {
+        "enabled": raw in ("1", "true", "on"),
+        "top_n": (
+            os.environ.get("PSEUDOLIFE_BENCH_RERANK_TOP_N", "").strip()
+            or None),
+    }
 
 
 def apply_rerank_env(memory_cfg) -> None:
-    """Apply the PSEUDOLIFE_BENCH_RERANK env override to a bench config.
+    """Apply the PSEUDOLIFE_BENCH_RERANK* env overrides to a bench config.
 
     The cross-encoder reranker (Tier B, ``memory.reranker``) ships OFF by
     default. This is the ONLY sanctioned way to run a judged eval with it
@@ -559,10 +589,14 @@ def apply_rerank_env(memory_cfg) -> None:
     hard error, not a silent fall-back to the default.
 
         PSEUDOLIFE_BENCH_RERANK=1
+        PSEUDOLIFE_BENCH_RERANK_TOP_N=32   # the whole pool must fit, or
+                                           # the pass skips; widen it with
+                                           # PSEUDOLIFE_BENCH_POOL_MULT
+
+    ``TOP_N`` is applied whether or not the pass is on, so the stamp
+    describes the config that ran rather than the config that mattered.
     """
     raw = os.environ.get("PSEUDOLIFE_BENCH_RERANK", "").strip().lower()
-    if not raw:
-        return
     if raw in ("1", "true", "on"):
         memory_cfg.reranker.enabled = True
     elif raw in ("0", "false", "off"):
@@ -573,9 +607,15 @@ def apply_rerank_env(memory_cfg) -> None:
         # config alone here would ship a judged artifact whose retrieval
         # stamp contradicts the retrieval it measured (2026-09-05 review).
         memory_cfg.reranker.enabled = False
-    else:
+    elif raw:
         sys.exit(f"PSEUDOLIFE_BENCH_RERANK={raw!r}: want "
                  "'1'/'true'/'on' or '0'/'false'/'off'")
+    top_n = os.environ.get("PSEUDOLIFE_BENCH_RERANK_TOP_N", "").strip()
+    if top_n:
+        if not top_n.isdigit() or int(top_n) < 1:
+            sys.exit(f"PSEUDOLIFE_BENCH_RERANK_TOP_N={top_n!r}: want an "
+                     "int >= 1")
+        memory_cfg.reranker.top_n = int(top_n)
 
 
 def ingest(svc) -> None:
@@ -725,6 +765,7 @@ def run_rung(name: str) -> dict:
         svc = build_service(Path(td))
         result["bench_env"] = rung_bench_env(svc.config.memory.dream)
         ingest(svc)
+        result["embedder"] = embedder_stamp.describe(svc)
         if rung["kind"] == "naive":
             result.update(measure_naive(svc))
             result["extract_seconds"] = 0.0
@@ -786,6 +827,7 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
                     "false_abstain_answerable": round(wrong / len(PAIRS), 3),
                 })
     return {"rung": name, "status": "ok", "curve": curve,
+            "embedder": embedder_stamp.describe(svc),
             **endpoint_stamp(rung)}
 
 
@@ -798,6 +840,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 **endpoint_stamp(rung)}
     import tempfile
     curve = []
+    embedder = None
     for thr in thresholds:
         with tempfile.TemporaryDirectory(prefix=f"plsup_{name}_",
                                          ignore_cleanup_errors=True) as td:
@@ -808,6 +851,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 svc.store(pair["a_text"], source="bench")
                 svc.store(pair["b_text"], source="bench")
             _, tally = consolidate(svc, make_extractor(rung))
+            embedder = embedder_stamp.describe(svc)
             m = measure_cortex(svc)
             false_merge = 0
             for pair in NO_MERGE:
@@ -823,7 +867,7 @@ def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
                 "false_merge": false_merge,
             })
     return {"rung": name, "status": "ok", "curve": curve,
-            **endpoint_stamp(rung)}
+            "embedder": embedder, **endpoint_stamp(rung)}
 
 
 # ---------------------------------------------------------------------------

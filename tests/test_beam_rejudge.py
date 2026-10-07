@@ -257,3 +257,13 @@ def test_cli_judge_success_path_through_run_seam(monkeypatch):
     judge = beam_rejudge.CliJudge("claude", "m", 30.0)
     assert judge("sys", "user") == '{"score": 1.0}'
     assert judge.calls == 1 and judge.errors == 0
+
+
+def test_rejudge_row_carries_the_embedder_stamp():
+    stamp = {"extract": {"backend": "torch", "device": "cpu", "dtype": "bf16"}}
+    judge = lambda *a, **k: '{"score": 1.0}'             # noqa: E731
+    out = beam_rejudge.rejudge_row({**_row(), "embedder": stamp}, ("rag",),
+                                   "j", judge)
+    assert out["embedder"] == stamp
+    assert "embedder" not in beam_rejudge.rejudge_row(_row(), ("rag",), "j",
+                                                      judge)

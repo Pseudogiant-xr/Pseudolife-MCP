@@ -35,6 +35,11 @@ PS1_SCRIPT = REPO / "ops" / "prune-rollbacks.ps1"
 SH_SCRIPT = REPO / "ops" / "prune-rollbacks.sh"
 UPDATE_PS1 = REPO / "ops" / "update.ps1"
 UPDATE_SH = REPO / "ops" / "update.sh"
+# Since pseudolife-mcp update (2026-09-29) the wrappers map their flags to
+# ops/update.py, and the deploy in pseudolife_memory.update_cli calls the
+# retention script; tests/test_update_cli.py proves the order and the
+# non-fatal path by execution against a fake Docker.
+UPDATE_CLI = REPO / "pseudolife_memory" / "update_cli.py"
 
 LIVE = "sha256:" + "a" * 16   # image the running daemon container uses
 ID_B = "sha256:" + "b" * 16
@@ -264,18 +269,20 @@ def test_nothing_to_prune_is_a_quiet_success(prune):
 
 
 def test_update_ps1_wires_retention_in():
-    """update.ps1 must expose -KeepRollbacks and call the retention script;
-    retention failures must not abort a deploy (wrapped, not bare)."""
+    """update.ps1 must expose -KeepRollbacks (default 2) and hand it to the
+    deploy, which calls the checkout's retention script; retention failures
+    must not abort a deploy (the deploy wraps the call)."""
     text = UPDATE_PS1.read_text(encoding="utf-8")
-    assert "KeepRollbacks" in text
-    assert "prune-rollbacks.ps1" in text
-    assert "$KeepRollbacks = 2" in text
+    assert "[int]$KeepRollbacks = 2" in text
+    assert '"--keep-rollbacks", "$KeepRollbacks"' in text
+    deploy = UPDATE_CLI.read_text(encoding="utf-8")
+    assert "keep_rollbacks: int = 2" in deploy
+    assert '_checkout_script(checkout, "prune-rollbacks")' in deploy
 
 
 def test_update_sh_wires_retention_in():
     """update.sh (the Linux/macOS port) must mirror the wiring: a
-    --keep-rollbacks flag defaulting to 2 and a non-fatal retention call."""
+    --keep-rollbacks flag handed to the same deploy, whose default is 2."""
     text = UPDATE_SH.read_text(encoding="utf-8")
-    assert "--keep-rollbacks" in text
-    assert "prune-rollbacks.sh" in text
-    assert "KEEP_ROLLBACKS=2" in text
+    assert '--keep-rollbacks) args+=(--keep-rollbacks "$2")' in text
+    assert "keep_rollbacks: int = 2" in UPDATE_CLI.read_text(encoding="utf-8")

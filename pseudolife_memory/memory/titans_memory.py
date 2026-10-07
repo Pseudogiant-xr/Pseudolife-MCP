@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import time
+import uuid
 from dataclasses import dataclass, field
 
 import torch
@@ -26,10 +27,10 @@ _seq_counter = itertools.count(1)
 class MemoryEntry:
     """A memory entry with text and metadata.
 
-    ``superseded_at`` is set by the contradiction-detection path in
-    :mod:`src.memory.contradiction` when a newer memory replaces this one.
-    Retrieval filters superseded entries by default so the LLM sees only
-    current facts (see ``ContinuumMemorySystem.retrieve``).
+    ``superseded_at`` is set by the explicit ``memory_supersede`` and
+    ``memory_consolidate`` correction paths. Retrieval filters superseded
+    entries by default so the LLM sees only current facts (see
+    ``ContinuumMemorySystem.retrieve``).
 
     ``last_logical_turn`` is stamped by the CMS at store time when a
     logical turn is open, and read by the ``min_logical_turn=`` retrieval
@@ -39,8 +40,7 @@ class MemoryEntry:
     currently every entry.
 
     ``superseded_by_text`` (schema v5, v0.7.6) records the text of the
-    memory that triggered this entry's supersession — populated by
-    :func:`src.memory.contradiction.decay_contradicted_entries`. Used by
+    memory that replaced this entry during an explicit correction. Used by
     the context builder to render *both* the superseded fact and its
     correction together so the LLM can answer state-probe questions
     correctly even when the correction's own embedding misses
@@ -91,6 +91,11 @@ class MemoryEntry:
     # relocation; NULL everywhere is exactly the pre-v35 behaviour.
     authority: str | None = None
     distortion_tolerance: str | None = None
+    # Durable dream acknowledgement. New entries start pending; ``None`` is
+    # reserved for an old saved row that has not been classified yet.
+    dream_state: str | None = "pending"
+    # File-mode identity for exact acknowledgement. PostgreSQL uses ``db_id``.
+    dream_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # Storage row id (schema v8, transient — NOT persisted in .pt saves).
     # None in file mode or before the write-through insert returns.
     db_id: int | None = None

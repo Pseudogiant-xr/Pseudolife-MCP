@@ -184,9 +184,9 @@ def rejudge_row(row: dict, arms: tuple[str, ...], judge_prompt: str,
     out = {k: row.get(k) for k in ("chat_id", "tier", "type", "index",
                                    "question", "difficulty", "rubric")}
     # Provenance carried when the source recorded it (a budget-matched run
-    # stamps hybrid_top_k); legacy rows stay legacy rather than gaining
-    # explicit-None keys.
-    out.update({k: row[k] for k in ("extractor", "hybrid_top_k")
+    # stamps hybrid_top_k, a stamped run its embedder); legacy rows stay
+    # legacy rather than gaining explicit-None keys.
+    out.update({k: row[k] for k in ("extractor", "hybrid_top_k", "embedder")
                 if k in row})
     for arm in arms:
         try:

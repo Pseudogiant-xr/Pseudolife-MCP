@@ -28,7 +28,8 @@ slots](#set-valued-slots)), retrievable out of the context window.
   `my <attr> is <value>`, `<Entity>'s <attr> is <value>`,
   `the <attr> of <entity> is <value>`, and single-line
   `<entity> <attr>: <value>`.) A one-time `ops/dedup_cortex.py`
-  (dry-run-first, reversible) collapses sibling slots left by past
+  (dry-run-first, reversible; run it with the daemon stopped, since it
+  opens the bank as its writer) collapses sibling slots left by past
   auto-promotes.
 - **Documented vs enacted.** A fact stated by a *document* you shared (a
   spec, policy, protocol, runbook) is captured under that document's
@@ -106,10 +107,14 @@ entity is deliberately classified.
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.
 The read surface does nudge, though: once a fact has aged past a third
-of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+of its TTL, `memory_search`, `memory_fact_get`, and
 `memory_world_search` attach a ready-made `correct_with` call to it — a
 filled-in `memory_fact_set(...)` the reading agent can run the moment it
-verifies the value, re-asserting or correcting at the same slot. The
+verifies the value, re-asserting or correcting at the same slot. A
+contested fact's `correct_with` instead names `memory_fact_get` to read
+the contenders and `memory_fact_resolve` (core tier) to run once a human
+decides, with no `accept` value filled in: re-asserting `memory_fact_set`
+only contests the slot further. The
 `stale: true` flag is the louder, later signal (twice the TTL);
 `correct_with` fires earlier so drift gets fixed at first contact.
 
@@ -124,15 +129,19 @@ plus a `re_verify_reason` naming how many source memories were corrected
 since. It surfaces on `memory_fact_get`, `memory_search`'s cortex block,
 and `memory_recall`; on a set-valued slot the comparison is against the
 newest member's confirmation stamp, since a set is served as one grouped
-answer. It is a flag, never a cascade, and deliberately not routed into a
-`correct_with` call: keyed on `last_confirmed`, a slot re-asserted long
-after its retracted contributor still fires it, which on a mature bank is
-common — on the live bank on 2026-09-02 roughly a quarter of current facts
-stood on a source memory contradicted since they were last confirmed.
-Routing that into the same call `correct_with` tells the reader
-to run *now* would turn a common, weak signal into a standing instruction
-to rewrite a quarter of the cortex every session. Re-asserting or
-re-confirming the slot moves `last_confirmed` forward and clears the flag.
+answer — falling back to a member's assertion time when that member carries
+no confirmation stamp, so one legacy member cannot drag the slot's clock to
+zero and warn on every source it ever had corrected.
+
+It is a flag, never a cascade, and deliberately excluded from the
+`correct_with` affordance: correcting a source note does not establish that
+every fact derived from that note is wrong, and the signal is broad. Measured
+on the live bank on 2026-09-11 with `ops/measure_reverify_population.py`
+(read-only): 1668 of 6015 current facts, 27.7%, stood on a source memory
+corrected since they were last confirmed. Routing that into a call whose
+served note says to run a correction *now* would be a standing instruction to
+rewrite a quarter of the cortex every session. Re-asserting or re-confirming
+the slot moves `last_confirmed` forward and clears the flag.
 
 The **active** affordance for retracted evidence lives on the correction
 itself: `memory_supersede`'s result carries `derived_flagged` — the
@@ -144,29 +153,76 @@ nothing to go re-check), the list is capped at 50 entries with live slots
 first, and `derived_flagged_truncated` / `derived_flagged_total` say
 whether a correction reached further than the cap.
 
-Both signals are **best-effort**, on purpose: they are derived at read
-time from evidence that still exists, so losing the evidence loses the
-flag. `memory_traces.entry_id` is `ON DELETE CASCADE`, a true-drop
-capacity eviction hard-deletes the entry row, and a superseded entry is
-the top eviction candidate (contradiction decay multiplies its surprise by
-0.3) — so a flag can appear and later vanish with no re-verification
-having happened, and `memory_delete`, the strongest retraction of all,
-raises no flag at any point. Both are gated on `memory.traces.enabled`;
-turning it off silences both without changing anything else about how
-facts are served.
+PostgreSQL schema v39 preserves the correction event separately from the
+evictable source and its trace. A corrected source can later disappear from
+`source_entries` while its fact's `re_verify` warning remains, until the fact
+is confirmed again. The event holds a normalized slot, opaque source entry ID
+and correction time, without source text or a foreign key to the entry or fact
+row. Cortex snapshots and fact compaction therefore retain it. Ordinary
+eviction or deletion of an uncorrected source does not establish a correction
+and creates no warning.
 
-Since 2026-07-25 **raw band entries follow the same slot rule.** When a
-stored memory and an earlier one assert different values — or opposite
-polarities — at the same normalised `(entity, attribute)` slot, the earlier
-entry is marked superseded. This is deterministic and does not consult
-embeddings, which matters because a value swap is a *minimal* edit: a real
-correction is often more embedding-similar than a harmless near-duplicate,
-so similarity alone is close to a coin flip for this judgment. It runs
-ahead of the similarity-gated heuristics (negation asymmetry, affirmative
-replacement, state transition), which still handle everything without
-slots. Slot extraction is deliberately precision-gated — about 0.6% of
-conversational turns yield one — so this path mostly serves deliberate,
-fact-shaped writes, and its reach grows with extraction quality.
+**What the upgrade does to an existing bank.** The first start on v39
+materialises one durable event for every surviving `memory_traces` row whose
+source entry is already superseded — 2077 pairs on the reference bank on
+2026-09-11, which is what the same script reports as
+`trace_supersession_pairs`. That reproduces the warnings the bank was already
+serving; it does not invent new ones, and history already lost to deletion
+cannot be recovered. The difference afterwards is that these warnings no
+longer drain when their source is evicted. Each one clears only when its slot
+is confirmed again: a `memory_fact_set` at the slot with the same or a new
+value, or accepting a contender there. An operator who wants to clear a
+population deliberately re-asserts those slots — the flag is per slot, so
+there is no bulk switch, and there is deliberately no way to dismiss a warning
+without confirming the value it stands on. `re_verify` stays passive
+throughout: it is never rendered into `correct_with`, so a large flagged
+population never becomes a large instruction list.
+
+Both served signals are gated on `memory.traces.enabled`. Turning tracing off
+silences them and stops new trace formation; corrections still preserve events
+for trace relationships that already exist, so turning it back on does not
+erase known provenance. Upgrades and older logical imports can reconstruct
+events only from surviving superseded sources and traces. History already
+lost to deletion cannot be recovered. These warnings remain passive: they
+request scrutiny without changing or deleting a fact.
+
+**Source notes retain their evidence when a potential conflict is stored.**
+The contradiction detector runs before the surprise gate: a different
+value or polarity at the same normalised `(entity, attribute)` slot, or a
+match from its similarity-gated heuristics, lets a potential update pass
+even when it is too similar to existing text to meet a positive surprise
+threshold. A conflict about one detail does not establish that the whole
+earlier note is invalid. Ordinary `memory_store` therefore does not decay
+that note or stamp a supersession mark on it.
+
+Old and new source notes can both compete in retrieval. Use
+`memory_supersede` or `memory_consolidate` when deliberately replacing a
+whole note or cluster; the cortex still supersedes canonical slot values
+under its existing rules. Existing source-note supersession marks and
+history are preserved, with no automatic repair or backfill. Their
+retrieval treatment is described under
+[superseded entries](retrieval.md#superseded-entries).
+
+For an explicit correction, carry the selected entry's `id` from search or
+recent results into `memory_supersede(entry_id=..., new_text=...)`. Use
+`entry_ids=[...]` for `memory_consolidate`. IDs identify entries in the same
+bank and survive ordinary PostgreSQL hydration; they are not portable across
+bank replacement or arbitrary imports. The Console sends selected IDs too.
+
+Use exactly one selector mode. Legacy `old_text` and `replaces` calls still
+work when each full text identifies exactly one live entry; a retired
+duplicate is history rather than a rival target, so text that was corrected
+and later restated stays selectable. There is no paraphrase fallback or
+replace-all behavior. Missing, ambiguous, already-superseded or unavailable
+targets return `new_memory_stored: false` with `reason`, `error` and
+`target_errors`; none of the selected entries change on target-validation
+failure. Search again and resubmit IDs. Success results include
+`superseded_ids`, which is empty in file mode: file-mode entries have no
+durable row ID and therefore require unique exact text.
+
+Whole-selection validation does not provide transactional rollback for later
+encoding or storage failures. Operational failure recovery remains a separate
+limitation of explicit corrections.
 
 ### Who said it, and how exactly must it survive? (schema v35)
 
@@ -191,8 +247,12 @@ inherited through supersession unless a later write restates them:
   Only `constraint` has consumers today: the dream copies a constraint
   entry's text verbatim onto a derived fact and a post-dream guard reports
   any constraint left without a carrier ([dreaming](dreaming.md#constraint-entries-survive-verbatim--typecompact--guard-schema-v35)),
-  and in-scope constraint facts are served *ahead of* the cosine ranking
-  ([retrieval](retrieval.md#constraint-pinning-schema-v35)).
+  and in-scope constraint facts — in scope meaning the query names the
+  fact's entity (a seed of the walk, in `memory_recall`) — are served
+  *ahead of* the cosine ranking
+  ([retrieval](retrieval.md#constraint-pinning-schema-v35), which also
+  says what that scope test means for how a rule should be named and
+  where a rule that must always hold belongs).
 
 Both are explicit parameters on `memory_store` and `memory_fact_set`;
 the `auto` default is a deterministic form heuristic (no model call on
@@ -250,7 +310,8 @@ against a slot that still holds a protected aggregate scalar — see
 [Conversion rules](#conversion-rules) below — parks as a scalar contender.
 Once a slot has actually converted to a set, this still holds: members
 themselves are never contested.) A set slot also caps at 100 concurrent
-members; further adds beyond the cap are dropped (`"member_capped"`) rather
+members; further adds beyond the cap are dropped (`"member_capped"`, with a
+`note`; see [Tool errors and refusals](#tool-errors-and-refusals)) rather
 than silently applied or queued.
 
 ### Conversion rules
@@ -513,7 +574,78 @@ duplicate and counted (`lessons_deduped` in the dream-run row;
 `memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
 disables). Opposite-polarity near-matches always write — a dead-end and a
 success about the same thing are both worth keeping — and explicit
-`lesson_write` calls are never gated.
+`lesson_write` calls are never gated. The comparison covers the lessons the
+same batch has already staged, so two near-identical claims in one batch
+write once.
+
+In PostgreSQL, synthesis stages lesson changes in memory and commits the
+lessons, their graph updates, and the handled signals' acknowledgements in one
+transaction. Each claim writes inside its own savepoint: a claim that cannot be
+written rolls back both halves of itself and is counted as `write_errors`,
+while the rest of the batch commits. A fully deduplicated group is acknowledged
+only with its supporting lesson state durable. Extraction happens outside the
+service lock; changed or already consumed inputs invalidate the extracted batch
+before it writes anything. One sweep drains at most
+`memory.lessons.synthesis_max_signals` signals (default 200), which bounds a
+single lock hold rather than the total work; the rest waits for the next sweep.
+
+An empty or failed extraction route leaves its signals pending for a later
+sweep, while they are younger than `memory.lessons.signal_retry_days`
+(default 30 days, counted from when the signal was recorded). Older pending
+signals are kept as evidence but no longer offered. A rule signal whose own claim
+failed stays pending too; the clustering route, whose claims do not map to
+single signals, is acknowledged once any of its claims lands. This is a
+persistence guarantee, not evidence that every extracted lesson is correct or
+complete. A lost commit response triggers a durable-state check before retrying
+or saving; if that check is unavailable, the service latches until it succeeds
+or the daemon restarts.
+
+While latched, lesson reads and the lesson half of a save fail; `/health`
+reports `lesson_reconciliation_required` (status stays `ok`, so the container
+healthcheck does not restart the daemon by itself) and the daemon logs the
+latch at ERROR. Everything else still persists: the autosave and exit flush
+write weights, access counts, and dirty cortex and world slots, then report the
+lesson failure. That split matters because restarting is the operator's
+recovery: it rehydrates the durable bank and clears the latch, and it discards
+anything that was still only in memory. If selected signal rows have been
+removed or retargeted during an extended outage, their state may no longer
+prove the commit outcome: the service remains blocked for operator recovery
+instead of claiming a successful retry. This protocol does not repair
+historical losses or recover prior unsaved changes. It assumes the existing
+single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
+
+**Lessons keep their sources, and only a forget retires them (2026-10-01).**
+Synthesis records where each lesson came from. Its `provenance` lists the
+signal and episode ids it was distilled from (ids the model proposes are
+ignored), and the entries those signals credited through `used_ids` (the
+`credited` partition only) go into a `store_decisions` lineage row
+(`action='lineage'`, `decided_by='lesson_synthesis'`,
+`reason='verified_dependencies'`, record `{lesson, asserted_at,
+source_entry_ids}`) committed with the lesson. A rule's lineage is its own
+signal. Clustered claims do not map to single signals, so a clustered lesson
+carries every credited entry of its batch and is tagged `lineage:batch`.
+Re-deriving a lesson that already has lineage adds the new entries in another
+lineage row; re-deriving one that has none (an explicit write, or a lesson
+from before lineage existed) never attaches any.
+
+A lesson retires only when an explicit forget (`memory_forget(scope="memory")`)
+removes the **last** entry of its lineage. This follows the v51 forget
+cascade for facts and dream edges with one difference: that cascade counts
+only current sources, while a superseded entry still supports a lesson,
+because a correction is often what the lesson is about. Superseding a source (a
+correction), consolidating it into a merged note and capacity eviction never
+retire a lesson: a superseded entry is kept as history and still counts as
+support, and a digest the forget retires is superseded too. An entry already
+deleted (forgotten or evicted earlier) counts as gone, so a clustered lesson
+survives while any entry of its batch survives. The retirement commits in the
+forget's transaction with a `retire` row in `store_decisions`
+(`decided_by='source_cascade'`, `reason='source_forgotten'`); lessons without
+lineage are never retired this way. A signal stays pending, and is not
+offered to the extractor, only when every entry it credits has been deleted;
+one surviving credited entry is enough, and a superseded entry still counts.
+A signal whose credited entries were all evicted therefore waits until it
+ages out, because a deleted row cannot say whether it was forgotten or
+evicted.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
@@ -535,17 +667,85 @@ both stores, and the Console's undo route is `POST /api/lessons/restore`.
 Only `scope="memory"` and `scope="fact"` still hard-delete.
 
 `used_ids` is a second, unrelated payload riding the same call: the ids of
-the `memory_search` hits the work actually turned on. Each one credits the
-serving `retrieval_events` row with a `retrieval_uses` label
-(`used_via="outcome"`) — the relevance signal a learned reranker trains on,
-which otherwise only `memory_get` / `memory_reinforce` produce. Nothing is
-written to the signal itself, and nothing links a signal to the labels it
-caused: the labels stand on their own, and which outcome named which ids is
-deliberately not recorded. The result reports `used_ids_recorded`,
-`used_ids_unmatched` (ids no search in the window served) and
+the `memory_search` hits the work actually turned on. Each one credits
+**every** `retrieval_events` row in the session window that served it with a
+`retrieval_uses` label (`used_via="outcome"`) — the relevance signal a
+learned reranker trains on, which otherwise only `memory_get` /
+`memory_reinforce` produce (those credit only the most recent serving
+search: a dereference follows one query, an outcome follows a session, and
+the agent names ids, not queries — under most-recent-wins an entry served by
+two searches left the earlier one unlabelled, which the replay dropped or,
+when that event carried another label, scored as a miss). With no session
+identity at all the most-recent rule stays: "same session" would otherwise
+mean every other session-less search in the window.
+No foreign key links a signal to the labels it caused: the labels stand on
+their own. Since schema v44 the signal row's `used_ids` column keeps what
+the ids became, as id lists: `{"credited", "unmatched",
+"served_elsewhere"}`, or `{"unchecked", "reason"}` when the label write
+failed. So the share of named ids that matched a search can be measured
+from the bank. It stays `NULL` when the outcome named no ids or the
+retrieval log is off, and also when this best-effort write itself failed
+(counted in `memory_stats` `retrieval_log.write_errors`), so a match rate
+over non-`NULL` rows skips those outcomes. Like the retrieval log, the
+column stays out of portable exports.
+
+`memory_lesson_search` calls are logged too (schema v44), in their own
+`lesson_search_events` table: the query, the caller's session, and the
+lessons served by `(task, aspect)` slot key (stored as `entity_norm` /
+`attribute_norm`) with rank and score. A search
+that found nothing gets a row as well. They are kept out of
+`retrieval_events` because the retrieval replay and telemetry harnesses
+re-run every row there as a `memory_search`. The log shares the retrieval
+log's switch and retention, and `memory_stats` counts it under
+`retrieval_log.lesson_searches`. Lessons shown in the session-start
+briefing are not counted.
+
+Two invariants a harness must keep, because the label silently credits
+nothing otherwise: the outcome must be logged under the **same session
+identity** as the searches (one session per episode), and **within
+`memory.retrieval_log.use_window_seconds`** of them (default 1 h — an
+end-of-episode outcome cannot credit a search older than that). The result
+reports `used_ids_recorded` (ids credited to at least one search),
+`used_ids_unmatched` (nothing in the window served it),
+`used_ids_served_elsewhere` (a search in the window served it, but under
+another session id — not "never served", so the two are kept apart) and
 `used_ids_errors` (labels the storage layer refused, which is not the same
 answer as a miss); at most 50 ids are taken per call, any beyond that
-reported as `used_ids_truncated`.
+reported as `used_ids_truncated`. The label is **positive-only**: `used_ids=[]`
+is the same as omitting it (the result says so under `used_ids_reason`), and
+an outcome without `used_ids` says nothing about what was used — an
+unlabelled session is not a zero-use session.
+
+**Rule mode (2026-09-08).** The shipped synthesis clusters signals into one
+abstract lesson per `(task-type, aspect)` slot and paraphrases freely. A
+protocol that distils one situation-specific rule per episode with its
+decision-critical values intact (the "Learning on the Job" setting,
+`docs/specs/2026-09-08-learning-on-the-job.md`) opts a signal in by giving
+`memory_outcome` an `about` that starts with `rule:` — or sets
+`memory.lessons.rule_mode: true` to treat every signal that way. Rule
+signals are synthesised one call per signal under a separate prompt: the
+lesson is one `WHEN <situation> THEN <exact action>` (or `WHEN … do NOT …`
+for a failure with no known solution) sentence, `aspect` is `rule`, the
+slot key is the situation, and rules are exempt from the cross-key dedup
+gate, so look-alike situations with different actions coexist. The
+`detail` may carry a fixed block the prompt reads — `SITUATION:`,
+`VERDICT:`, `ACTIONS TAKEN:`, `CORRECT SOLUTION:`, `ACTION DIFF:`,
+`MUST INCLUDE: a; b` — and a rule that drops a `MUST INCLUDE` value is
+retried once. A retry that is empty or still drops a value fails closed, as
+does a rule whose outcome or polarity is malformed or contradicts the
+signal's verdict: that signal stays pending (`rules_failed`) instead of
+becoming guidance, and the batch's other rules still land. Default off; an
+extractor without the
+rule path synthesises such signals under the shipped prompt instead and
+the dream report says so (`rules_fallback`).
+
+Failed rule calls and valid-but-empty rule responses stay pending individually
+(`rules_failed` and `rules_empty` in the synthesis report). Plain and rule
+extraction failures do not prevent a successful route from committing. A custom
+rule extractor must return one rule per handled input and identify failed or
+empty input IDs through `last_rule_failed_ids` / `last_rule_empty_ids`; if its
+counts do not establish coverage, that route is left pending without writing
+its unmatched outputs.
 
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured,
@@ -644,3 +844,70 @@ freshness flags, which is what a caller acts on. The REST/Console reads
 > existing bank (back up first), and every connection still pins
 > `search_path` to `public` (asserted on startup).
 > `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+
+## Tool errors and refusals
+
+A memory tool call ends one of three ways: a result, a refusal returned as
+a tool error, or a success that changed nothing and says so in a `note`.
+
+**A refusal is a tool error.** It comes back with `isError: true`, and its
+text and structured content are the same JSON object:
+
+```json
+{
+  "error": "unknown_parameter",
+  "message": "unknown parameter 'limit' for memory_search; did you mean 'top_k'? Accepted: query, top_k, sources, ...",
+  "param": "limit",
+  "accepted": ["query", "top_k", "sources", "..."]
+}
+```
+
+`error` is a stable snake_case code and `message` one sentence naming the
+fix. `param`, `accepted` and `action` appear where the refusal knows them.
+The general codes are `invalid_argument`, `unknown_parameter`,
+`file_not_found` (`document_ingest`; paths resolve on the server's
+filesystem), `internal_error` (the cause stays in the daemon log) and
+`coordination_unavailable` (the board failed inside the call). A tool's own
+coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).
+On a write tool, `internal_error` and `coordination_unavailable` add
+`mutation: "unknown"`: the write may or may not have happened.
+
+**Arguments are checked before the tool runs.** Every tool's input schema
+says `additionalProperties: false`. An argument name the tool does not have
+is refused as `unknown_parameter`, with a did-you-mean suggestion and the
+accepted names. Before 0.17.0 such an argument was dropped without a word
+(`memory_search(limit=3)` returned the default 8 hits), so a caller that
+passed stray arguments now gets an error. Values are range-checked too:
+`top_k`, `memory_recent` `n` and the other counts must be at least 1
+(`top_k=0` and `memory_dream(limit=0)` are refused); `confidence` is within
+0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; `memory_fact_set`
+refuses a blank entity, attribute or value; and `memory_history` `as_of`
+takes an ISO-8601 date or epoch seconds, not words like "yesterday". Each
+is `invalid_argument` naming the parameter, never echoing its value.
+
+**A no-op stays a success, with a `note`.** The call returns its usual
+fields plus one sentence saying what happened and what to do:
+
+- `memory_store`: `empty`, `filtered_meta` (reads as a statement about the
+  memory system itself; rephrase as the fact), `below_surprise_threshold`
+  (a near-duplicate; no need to retry), `rejected`.
+- `memory_get` / `memory_reinforce`: `faded: true` (a wrong id, a forgotten
+  or evicted entry, or a file-mode bank).
+- `memory_set_add` / `memory_set_remove`: `member_invalid`,
+  `member_capped`, `member_not_found`, `member_remove_refused`.
+- `memory_graph_review`: `bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live` (also per result in a
+  batch).
+- `memory_forget` matching nothing (`deleted_count: 0` / `removed: 0`).
+- `memory_world_set`: `unsafe_source_url` (the fact is not stored; `source_url` must be http(s) or empty).
+- `memory_outcome` without Postgres or with lessons disabled (not kept; do
+  not retry).
+- `memory_supersede` / `memory_consolidate`: the refusal sentence is in
+  `note`, beside the code in `reason` (the REST routes keep it in `error`).
+
+**The board names what was wrong.** `memory_agents` and `memory_message`
+refusals say what to fix: `missing_parameter` what the action needs (`send
+needs request_id`), `unexpected_parameter` which parameter the action does
+not take and which action does, `unknown_coordination_action` the actions
+there are, and `invalid_text` which rule the body broke (blank, NUL, over
+8,192 UTF-8 bytes, not UTF-8).
