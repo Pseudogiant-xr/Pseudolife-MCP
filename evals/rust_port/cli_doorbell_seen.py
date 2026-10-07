@@ -200,6 +200,10 @@ def cases(notice_text):
     add("huge-timestamp-quiet-refusal", pending=dict(record, expires_at=10**400), receipt=b"prior\n",
         oracle_failure="OverflowError: int too large to convert to float",
         candidate=dict(writes=False, oracle_failure=None, substitution="doorbell-bounded-relevant-numbers"))
+    add("private-number-key-extra", value=dict(payload, extra={"$serde_json::private::Number": "not a number"}), writes=True)
+    for field in ["count", "version", "expires_at"]:
+        add("object-cannot-impersonate-" + field,
+            pending=dict(record, **{field: {"$serde_json::private::Number": "1"}}))
     return result
 
 

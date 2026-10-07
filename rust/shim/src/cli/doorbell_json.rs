@@ -7,9 +7,11 @@ pub(super) fn from_str(text: &str) -> Result<Value, ()> {
     // before serde applies last-value-wins object semantics.
     let bytes = text.as_bytes();
     let mut position = 0;
+    let mut keys = Vec::new();
     while position < bytes.len() {
         match bytes[position] {
             b'"' => {
+                let start = position;
                 position += 1;
                 while position < bytes.len() {
                     match bytes[position] {
@@ -20,6 +22,13 @@ pub(super) fn from_str(text: &str) -> Result<Value, ()> {
                         }
                         _ => position += 1,
                     }
+                }
+                let mut next = position;
+                while bytes.get(next).is_some_and(u8::is_ascii_whitespace) {
+                    next += 1;
+                }
+                if bytes.get(next) == Some(&b':') {
+                    keys.push(start + 1);
                 }
             }
             b'-' | b'0'..=b'9' => {
@@ -43,7 +52,36 @@ pub(super) fn from_str(text: &str) -> Result<Value, ()> {
             _ => position += 1,
         }
     }
-    serde_json::from_str(text).map_err(|_| ())
+    // serde's arbitrary_precision transport recognizes a private Number key.
+    // Prefix every real object key injectively before decoding, so a user JSON
+    // object cannot impersonate that numeric transport. Restore keys afterwards.
+    let mut encoded = String::with_capacity(text.len() + keys.len() * 6);
+    let mut start = 0;
+    for key in keys {
+        encoded.push_str(&text[start..key]);
+        encoded.push_str("\\u0000");
+        start = key;
+    }
+    encoded.push_str(&text[start..]);
+    let mut value = serde_json::from_str(&encoded).map_err(|_| ())?;
+    restore_keys(&mut value);
+    Ok(value)
+}
+
+fn restore_keys(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            *object = std::mem::take(object)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    restore_keys(&mut value);
+                    (key[1..].to_owned(), value)
+                })
+                .collect();
+        }
+        Value::Array(array) => array.iter_mut().for_each(restore_keys),
+        _ => (),
+    }
 }
 
 #[cfg(test)]
@@ -88,6 +126,23 @@ mod tests {
         assert_eq!(
             from_str(r#"{"a":1,"b":2,"a":3}"#).unwrap().to_string(),
             r#"{"a":3,"b":2}"#
+        );
+    }
+
+    #[test]
+    fn user_object_keys_cannot_impersonate_numeric_transport() {
+        for text in [
+            r#"{"$serde_json::private::Number":"1"}"#,
+            r#"{"$serde_json::private::Number":"not a number"}"#,
+            r#"{"$serde_json::private::Number":"1e99999","\u0000key":2,"key":3}"#,
+        ] {
+            let value = from_str(text).unwrap();
+            assert!(value.is_object());
+            assert!(value["$serde_json::private::Number"].is_string());
+        }
+        assert_eq!(
+            from_str(r#"{"\u0000key":2,"key":3}"#).unwrap().to_string(),
+            r#"{"\u0000key":2,"key":3}"#
         );
     }
 
