@@ -33,6 +33,14 @@ chrono.workspace = true
 unicode-casefold.workspace = true
 tokio-tungstenite = { workspace = true, optional = true }
 process-wrap.workspace = true
+tokio-postgres.workspace = true
+tokio-postgres-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+tokio-rustls.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

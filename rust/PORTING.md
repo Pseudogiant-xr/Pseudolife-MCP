@@ -642,3 +642,53 @@ resolution is prepared. No Phase 4 execution, hosted acceptance or new timing
 claim is made; previous runtime receipts retain their original identities.
 Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
 pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Shared PostgreSQL client preparation
+
+`shim/src/pg/` uses tokio-postgres 0.7.18 and tokio-postgres-rustls 0.14.0
+with the existing Rustls 0.23.45/AWS-LC stack. This avoids a second OpenSSL
+client stack, an ORM and generated queries. The dedicated `Session` has a
+10-second connection timeout, sets `lock_timeout` to five seconds and selects
+the public search path. Callers borrow its client for queries and transactions
+and must observe commit errors; there is no pool or automatic reconnect. Closing
+sends PostgreSQL Terminate; cancellation drops only this connection.
+
+The DSN grammar is pinned to the single TCP-host URIs written by
+`ops/install-autostart.ps1`, both compose files and the DSN examples in
+`docs/guide/configuration.md`, plus libpq keyword quoting for those same fields.
+Only host, port, user, password, dbname, sslmode and sslrootcert are admitted.
+Unknown configured options and unsupported modes refuse by option name with
+exit 1. Diagnostics omit DSNs, credentials, file paths and driver messages.
+
+`disable` sends no SSLRequest; `prefer` accepts plaintext only after an explicit
+`N`; every other mode requires `S` and a successful TLS handshake. Invalid
+SSLRequest responses refuse before startup/authentication. `prefer` and `require`
+without roots use encryption without CA authentication. An explicit root file,
+or the platform default `root.crt` when no explicit file is selected, enables CA
+verification, including libpq's default-root upgrade for `require`. The custom
+`verify-ca` verifier checks chain, validity and server-auth usage while omitting
+hostname verification. TLS 1.2/1.3 handshake signatures remain verified in every
+encrypted mode. `verify-full` uses Rustls chain and hostname verification.
+
+The named `pg-tls-webpki-hostnames` rule restricts verify-full to matching SAN
+`dNSName`/`iPAddress`. The native refusal identifies the rule and explains that
+libpq accepts matching legacy CN-only/IP-in-dNSName certificates. A disposable
+libpq 18 comparison retains both raw mismatches; they are intentional under this
+rule. No bespoke hostname verifier is added and `verify-ca` is unchanged. The
+`pg_client` fixture checks SAN-based positive/negative cases, both named legacy
+refusals, default roots, ambient refusals and graceful closure. It does not prove
+real database transactions.
+
+The named `pg-dsn-explicit-tls` scope refuses ambient client certificate/key and
+CRL files, PGSSL*/PGTLS* variables and libpq connection/session PG* controls by
+name. Only the platform default root file participates implicitly. The pure
+resolution module retains configured DSN, existing embedded data, then container
+order, and pins the container's own `python -m pseudolife_memory.cli` argv.
+Embedded start/stop, container process dispatch and native operator SQL remain
+unimplemented. Fixed-clock operator comparisons remain a later gate.
+
+Windows transport tests use only owned loopback fake PostgreSQL peers and
+disposable fixture CA files; no bank, daemon or trust store is changed. Linux,
+real-server TLS, full transaction/audit/state comparison, independent review and
+hosted acceptance remain pending. The Phase 2d and hold checkpoint receipts
+retain their original runtime identities.

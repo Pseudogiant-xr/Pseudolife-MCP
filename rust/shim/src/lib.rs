@@ -8,6 +8,7 @@ pub mod daemon_url;
 mod errors;
 pub mod lifecycle;
 mod owned_transport;
+pub mod pg;
 mod raw_http;
 mod recovery;
 mod subscriptions;
