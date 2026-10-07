@@ -559,6 +559,95 @@ fn own_stale_hold_is_free_but_foreign_hold_is_held() {
 }
 
 #[test]
+fn malformed_grant_or_queue_reply_releases_board_record_and_leaves_lock_reacquirable() {
+    use std::sync::{Arc, Mutex};
+
+    for state in ["held", "queued"] {
+        let home = Home::board();
+        let path = home.0.join("lease-resource.lock");
+        fs::write(&path, b"existing lock\n").unwrap();
+        let record = Arc::new(Mutex::new(None));
+        let board_record = record.clone();
+        let (url, peer) = server_raw(4, move |index, header, body| {
+            assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
+            let reply = match index {
+                0 => {
+                    assert!(header.starts_with("POST /api/coordination/register "));
+                    registered()
+                }
+                1 => {
+                    assert!(header.starts_with("POST /api/coordination/lease "));
+                    assert!(has_header(header, "X-PL-Agent", "fixture-agent"));
+                    assert!(has_header(header, "X-PL-Agent-Key", "fixture-key"));
+                    assert_eq!(body["name"], "resource");
+                    // The board commits before its HTTP 200 reply becomes malformed.
+                    *board_record.lock().unwrap() = Some(state);
+                    return (
+                        200,
+                        format!(r#"{{"state":"{state}","fence":NaN}}"#).into_bytes(),
+                    );
+                }
+                2 => {
+                    assert!(header.starts_with("POST /api/coordination/release "));
+                    assert!(has_header(header, "X-PL-Agent", "fixture-agent"));
+                    assert!(has_header(header, "X-PL-Agent-Key", "fixture-key"));
+                    assert_eq!(*body, json!({"name":"resource"}));
+                    assert_eq!(board_record.lock().unwrap().take(), Some(state));
+                    json!({"released":true})
+                }
+                _ => {
+                    assert!(header.starts_with("POST /api/coordination/leases "));
+                    assert_eq!(*body, json!({"name":"resource"}));
+                    assert!(board_record.lock().unwrap().is_none());
+                    json!({"leases":[]})
+                }
+            };
+            (200, serde_json::to_vec(&reply).unwrap())
+        });
+        let output = home
+            .board_command(&url)
+            .args([
+                "lease",
+                "run",
+                "resource",
+                "--timeout",
+                "0",
+                "--",
+                "missing-board-child",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            "lease: HTTP_REPLY_NOT_UNDERSTOOD\n"
+                .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+                .as_bytes()
+        );
+        assert!(
+            record.lock().unwrap().is_none(),
+            "board record survived malformed {state} reply"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"existing lock\n");
+        let file = fs::File::open(&path).unwrap();
+        assert!(file.try_lock().is_ok());
+        drop(file);
+        let checked = home
+            .board_command(&url)
+            .args(["lease", "check", "resource", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(checked.status.code(), Some(0));
+        assert!(checked.stderr.is_empty());
+        let report: Value = serde_json::from_slice(&checked.stdout).unwrap();
+        assert_eq!(report["held"], false);
+        assert_eq!(report["local"]["state"], "free");
+        assert_eq!(peer.join().unwrap().len(), 4);
+    }
+}
+
+#[test]
 fn nonproducer_json_reply_is_refused_without_a_report() {
     for value in [r#""\ud800""#, "NaN", "Infinity", "-Infinity", "1e400"] {
         let home = Home::board();
