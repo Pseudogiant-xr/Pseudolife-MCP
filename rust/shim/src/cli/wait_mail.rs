@@ -77,6 +77,18 @@ fn stderr(text: &str) -> io::Result<()> {
 fn write_output(writer: &mut impl Write, raw: &[u8]) -> io::Result<()> {
     writer.write_all(raw).and_then(|_| writer.flush())
 }
+fn write_then_mark<W: Write, T>(
+    mut writer: W,
+    raw: &[u8],
+    mark: impl FnOnce() -> T,
+) -> Result<T, (io::Error, W)> {
+    if let Err(error) = write_output(&mut writer, raw) {
+        // Keep the failed stdout lock alive through the caller's diagnostic.
+        return Err((error, writer));
+    }
+    drop(writer);
+    Ok(mark())
+}
 fn corrupt_record(kind: &str) -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidData,
@@ -925,22 +937,25 @@ pub fn run(argv: Vec<OsString>) -> u8 {
     #[cfg(unix)]
     let owner = io::stdout();
     #[cfg(unix)]
-    let mut stdout = {
+    let stdout = {
         use std::os::fd::AsFd;
         DescriptorWriter(owner.as_fd())
     };
     #[cfg(windows)]
-    let mut stdout = io::stdout().lock();
-    if let Err(error) = write_output(&mut stdout, &body) {
-        let _ = stderr(&format!(
-            "wait-mail: could not write the mail to stdout ({}); left it unshown.\n",
-            error_text(&error, None, false)
-        ));
-        return 2;
-    }
-    #[cfg(windows)]
-    drop(stdout);
-    if let Err(error) = mark_seen(&digest.with_extension("seen"), &watermark) {
+    let stdout = io::stdout().lock();
+    let marker = match write_then_mark(stdout, &body, || {
+        mark_seen(&digest.with_extension("seen"), &watermark)
+    }) {
+        Ok(marker) => marker,
+        Err((error, _stdout)) => {
+            let _ = stderr(&format!(
+                "wait-mail: could not write the mail to stdout ({}); left it unshown.\n",
+                error_text(&error, None, false)
+            ));
+            return 2;
+        }
+    };
+    if let Err(error) = marker {
         let details = if let (Some(from), Some(to)) = (&error.from, &error.to) {
             format!(
                 "{} -> {}",
@@ -976,6 +991,133 @@ pub fn run(argv: Vec<OsString>) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Debug, Default)]
+    struct RecordedOutput {
+        written: Vec<u8>,
+        flushed: Vec<u8>,
+        events: Vec<&'static str>,
+    }
+    #[derive(Clone, Copy, Debug)]
+    enum OutputFailure {
+        Write,
+        Flush,
+    }
+    #[derive(Debug)]
+    struct RecordingWriter {
+        output: Rc<RefCell<RecordedOutput>>,
+        failure: Option<OutputFailure>,
+    }
+    impl Write for RecordingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let mut output = self.output.borrow_mut();
+            output.events.push("write");
+            if matches!(self.failure, Some(OutputFailure::Write)) {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed"));
+            }
+            let count = bytes.len().min(2);
+            output.written.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            let mut output = self.output.borrow_mut();
+            output.events.push("flush");
+            if matches!(self.failure, Some(OutputFailure::Flush)) {
+                return Err(io::Error::other("flush failed"));
+            }
+            output.flushed = output.written.clone();
+            Ok(())
+        }
+    }
+    impl Drop for RecordingWriter {
+        fn drop(&mut self) {
+            self.output.borrow_mut().events.push("drop");
+        }
+    }
+    fn recording_writer(failure: Option<OutputFailure>) -> RecordingWriter {
+        RecordingWriter {
+            output: Rc::new(RefCell::new(RecordedOutput::default())),
+            failure,
+        }
+    }
+
+    #[test]
+    fn write_then_mark_flushes_body_and_releases_writer_before_marker_rename() {
+        let home =
+            std::env::temp_dir().join(format!("wait-mail-ordering-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let path = home.join("marker.seen");
+        let body = "peer — café 🧠\n".as_bytes();
+        let writer = recording_writer(None);
+        let output = Rc::clone(&writer.output);
+        write_then_mark(writer, body, || {
+            assert_eq!(output.borrow().flushed, body);
+            assert!(output.borrow().events.ends_with(&["flush", "drop"]));
+            assert!(!path.exists());
+            mark_seen(&path, &Integer::parse(b"3").unwrap()).unwrap();
+            output.borrow_mut().events.push("mark");
+        })
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"3\n");
+        assert!(output.borrow().events.ends_with(&["flush", "drop", "mark"]));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn write_then_mark_interrupted_marker_keeps_flushed_body_and_absent_seen() {
+        #[derive(Debug)]
+        struct Killed;
+        let home =
+            std::env::temp_dir().join(format!("wait-mail-killed-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let path = home.join("marker.seen");
+        let body = "peer — café 🧠\n".as_bytes();
+        let writer = recording_writer(None);
+        let output = Rc::clone(&writer.output);
+        let killed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = write_then_mark::<_, ()>(writer, body, || {
+                assert_eq!(output.borrow().flushed, body);
+                assert!(output.borrow().events.ends_with(&["flush", "drop"]));
+                std::panic::panic_any(Killed);
+            });
+        }))
+        .unwrap_err();
+        assert!(killed.is::<Killed>());
+        assert_eq!(output.borrow().flushed, body);
+        assert!(!path.exists());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn write_then_mark_write_failure_retains_writer_and_never_calls_marker() {
+        let writer = recording_writer(Some(OutputFailure::Write));
+        let output = Rc::clone(&writer.output);
+        let (error, writer) =
+            write_then_mark::<_, ()>(writer, b"peer\n", || panic!("marker called")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert!(output.borrow().written.is_empty());
+        assert_eq!(output.borrow().events, ["write"]);
+        output.borrow_mut().events.push("diagnostic");
+        drop(writer);
+        assert_eq!(output.borrow().events, ["write", "diagnostic", "drop"]);
+    }
+
+    #[test]
+    fn write_then_mark_flush_failure_retains_writer_and_never_calls_marker() {
+        let writer = recording_writer(Some(OutputFailure::Flush));
+        let output = Rc::clone(&writer.output);
+        let (error, writer) =
+            write_then_mark::<_, ()>(writer, b"peer\n", || panic!("marker called")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(output.borrow().written, b"peer\n");
+        assert!(output.borrow().flushed.is_empty());
+        assert!(output.borrow().events.ends_with(&["flush"]));
+        output.borrow_mut().events.push("diagnostic");
+        drop(writer);
+        assert!(output.borrow().events.ends_with(&["flush", "diagnostic", "drop"]));
+    }
+
     #[test]
     fn stdout_bytes_are_written_without_interpreter_buffer_flags() {
         let mut output = Vec::new();

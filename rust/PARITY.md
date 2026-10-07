@@ -471,6 +471,8 @@ Actual Python responses and raw differences remain in each capture. Candidate
 controls check the declared native contract. Final both-host candidate execution
 remains required; a historical replay cannot certify these substitutions.
 
+The unit-layer substitute for `tests/test_wait_mail_cli.py:361-379::test_the_body_is_out_before_the_marker_moves` is `cli::wait_mail::tests::write_then_mark_interrupted_marker_keeps_flushed_body_and_absent_seen`: a recording writer verifies the complete stdout body is flushed and the writer released before interruption at the marker step, leaving `.seen` absent. Companion `write_then_mark` units exercise the actual marker rename after successful flush and prohibit marking on write or flush failure; this contract adds no fsync requirement.
+
 ## Test-file buckets
 
 The real-bank stdio judge declares `completed-readiness-wait-notice` as a
