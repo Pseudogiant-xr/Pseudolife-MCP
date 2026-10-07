@@ -17,10 +17,16 @@ remain historical diagnostics. Native component `17459703` and capture component
 tests per OS. The exact Linux path-minute repeat passed; original raw failure
 and outside-grammar diagnostics remain retained. Those receipts precede removal
 of the unused parser and retain their original image identities. Episode runtime
-source is unchanged, but successor compilation, affected checks and image
-comparisons have not run. Fresh independent follow-up review,
-the required post-review full Python suite and current hosted/exact-master gates
-remain pending; both episode modes stay deferred. Producer/substitution details
+source is unchanged. Successor `d2e86010` passed Windows compilation, formatting,
+both Clippy configurations, 22 CLI/integration tests per feature configuration
+and a disposable-daemon string42 smoke. Its committed-head Python full suite
+on the homelab box passed: 18,203 passed, 76 skipped, exit 0, recorded in
+`~/.pseudolife-mcp/suite-results/20261007-131037-remote-d2e86010.json`.
+The `7d20ceb8` successor changes only one PARITY documentation link; the suite
+receipt remains attributed to `d2e86010`. Independent follow-up review passed.
+Current hosted/exact-master and readiness gates remain open;
+both episode modes stay deferred. The `Python-urllib/3.11`
+User-Agent is an oracle-pinned substitution. Producer/substitution details
 and the 2.667-times production line ratio are in PARITY.md.
 
 ## Episode distinct-field ordering disposition
@@ -337,7 +343,7 @@ Historical snapshot: 2026-10-06 08:57 UTC. These rows retain the observed state 
 | `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` published; `74b5998c` measured | `master` after #560 | No hosted run on `74b5998c`; historical #37315503446 failed at `ac0c64a1` | Freeze the documentation/evidence successor, repeat required final-head cells on both OSes, then require hosted validation and independent review. The current ten-stdio attempt fails five shared fixture nodes in both arms. |
 | `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
 | `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
-| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `7d20ceb8` documentation successor; runtime `d2e86010` | accepted `master` @ `0b46bb8e` | Both-OS Rust and Parity green at `7d20ceb8`; remaining CI pending. Committed `d2e86010` box Python suite: 18,203 passed, exit 0 | Require current hosted/exact-master and readiness gates before acceptance. Historical #37429259333 at `267ee9a2` remains a retained both-OS Parity failure. |
 | `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), draft | `7171d6cc` | `codex/rust-phase2b-version` | #37429570773: Rust green, Parity red on both OSes | Carry shared repairs after version is ported; investigate the additional unretained normal-transcript stderr difference with final-head raw evidence. |
 | `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), draft | `2c026331` | `codex/rust-phase2b-version` | #37429996211: Rust green, Parity red on both OSes | Apply traceback, clock and temporary-name rules; carry shared repairs after version is ported, then rebind mode evidence. |
 | `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881: Rust and Parity green on both OSes | Preserve #589 until its dependent fixture and evidence split is complete. |

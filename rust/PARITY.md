@@ -182,9 +182,17 @@ Production episode code is 512 physical lines versus 192 Python episode/title
 lines (2.667 times). The unused general value implementation is removed from
 the outgoing diff, rather than retained as shared support. These local executions
 remain bound to native component `17459703`, before that removal; they establish
-no successor-image or hosted-node execution or ported status. Fresh compilation,
-affected checks, image comparisons, follow-up review and the required post-review
-full suite remain open.
+no successor-image corpus or measurement execution or ported status. Successor
+`d2e86010` passed Windows compilation, formatting, both Clippy configurations,
+22 CLI/integration tests per feature configuration and a disposable-daemon
+string42 smoke. Its committed-head homelab-box Python full suite passed with
+18,203 passed, 76 skipped and exit 0; the receipt is
+`~/.pseudolife-mcp/suite-results/20261007-131037-remote-d2e86010.json`.
+The one-line documentation-link successor `7d20ceb8` leaves those runtime inputs
+unchanged and does not relabel that receipt. Independent follow-up review passed;
+current hosted/exact-master and readiness gates remain open.
+The fixed `Python-urllib/3.11` User-Agent is an oracle-pinned
+substitution, rather than a discovered host interpreter version.
 
 
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.
