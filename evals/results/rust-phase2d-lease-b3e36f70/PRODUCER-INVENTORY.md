@@ -1,0 +1,21 @@
+# Lease producer reduction inventory
+
+The executed b3 component narrows interpreter-only input fidelity while retaining supported producer values, authentication admission, lock/effect controls and documented exits. Named substitutions are recorded in PARITY.
+
+| Component | Reachable producer/input | Reduction and retained behavior |
+| --- | --- | --- |
+| json.rs | API json.dumps UTF-8; healthy Postgres scalar text, signed BIGINT/counts, ordinary finite clocks and bounded durations | serde_json finite UTF-8 admission; custom UTF16/32, surrogate and NaN decoder removed; malformed/nonfinite HTTP200 reply fatal HTTP_REPLY_NOT_UNDERSTOOD exit1/empty stdout/pre-state/no subsequent lease/release/lock/child |
+| view.rs ISO | suite_lock.py datetime.now().astimezone().isoformat(timespec=seconds), including offset seconds if OS zone supplies them | only YYYY-MM-DDTHH:MM:SS±HH:MM[:SS]; omit unsupported since; no conversion, retain timestamp '?' display and JSON numbers |
+| view/run infallible clocks | finite ordinary timestamp values plus already named unsupported-date substitution | removes unreachable Err/OverflowError propagation; original injected-clock Result-shaped unit assertion preserved by test wrapper; extreme-text two-ID policy retained |
+| args.rs decimal cap | Public CLI duration strings, including arbitrary leading zeros; ordinary bounded TTL/expect and potentially huge timeout | interpreter digit-count cap retired; numeric bounds retained; nonfinite timeout refuses1 before board/lock/child; no invented replacement cap |
+| board/mod/run fabricated diagnostic classes | ASCII/non-ASCII configured headers; real connection failures/closed output/timeout overflow | native-lease-diagnostics; ordinary non-ASCII fallback/security/URL priority and old exits/effects retained; malformed JSON uses separately named fatal refusal |
+| run timeout sentinel | deadline expires while waiting for owned board queue | BoardWaitError::TimedOut replaces string 'wait_timeout'; HTTP error-code allowlist remains local decode logic |
+| run POSIX signalling | actual owned child id, HUP/INT/TERM selected by existing stop lifecycle | pinned rustix1.1.5 process::kill_process(Pid,Signal); checked i32 pid conversion, same single child/grace/reap; Windows unchanged |
+| main opaque argv | OS argv may contain undecodable bytes/unpaired UTF16 | args_os collected once; clean exit2 'lease: arguments must be valid Unicode' before state/child; no opaque child passthrough |
+| lock/deferred actions | acquired Windows first byte and explicit Phase4 actions | existing UnlockFileEx kept; new release/reacquire test separate from unlock-while-open test; exact refusal line/exit/no-state for all four actions |
+
+Original tests/, conftest, production Python and oracle pin are unchanged. Port-owned expectations implement only the named http-reply-not-understood, suite-writer ISO grammar, interpreter digit-cap retirement, native-lease-diagnostics and existing two-ID python-traceback-not-contract substitutions. Old raw Python and failed candidate receipts remain historical.
+
+Still-required supported behaviors: SHA lock identity/naming, suite slots, Unicode scalar names, Python whitespace/name trimming, HTTP error-code allowlist, JSON numeric values, platform local clocks, ordinary credential-file security, R1 selected-bearer priority and R2 each present forbidden header priority. Guarded expects for invariant decimal construction, validated names, already-started child and known option arms do not admit arbitrary interpreter grammar; no new panic/input exception is introduced.
+
+The old additive CLI corpus's three interpreter-cap rows are retired under the same approved cap removal, with historical raw 7e cases unchanged. Wide finite duration rows remain exact paired comparisons. The single non-ASCII bearer JSON cell receives only the independently named reason-byte substitution; its exit, stderr, post-state, every other stdout byte and four controls remain exact. Header malformed-surrogate cells admit only the specific fatal refusal with unchanged pre-state and register-only request, before inspecting successfully parsed forbidden strings. No generic list/exit waiver or traceback broadening is added.

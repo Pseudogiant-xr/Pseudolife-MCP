@@ -869,7 +869,9 @@ Opaque OS lease arguments are refused with exit 2 and
 candidate does not pass opaque child arguments through. Deferred actions
 hold/break/delegate/designate still return exit 1 with
 `deferred in this candidate`. Windows unlock and Ctrl-C receipts at final7e are
-historical execution evidence; fresh successor validation remains pending.
+historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
+checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
+hosted acceptance and fresh review remain pending.
 Neither CLI-LEASE-core nor full CLI-LEASE is promoted by this reduction.
 
 The interpreter's 4,300-digit conversion cap is retired for lease durations.
@@ -887,4 +889,9 @@ the separately named parse refusal above. Stdout failures use
 `stdout write failed`, retaining the existing small-output exit 120, large check
 exit 70 and large list exit 1 behavior and partial-output/effect checks.
 These diagnostic substitutions do not waive unrelated output, state or exit
-mismatches. Their successor receipts are still pending.
+mismatches. Actual b3 receipts and exact producing inputs/APIs are in the
+[reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md).
+It preserves Linux raw exits 1/0 for only list-expected-extreme and
+list-waiter-extreme under the existing two-ID rule, with exact JSON companions
+and rejecting controls. The complete raw receipt SHA256 bindings are in
+functional-policy-evidence.json; no broader exit substitution is admitted.

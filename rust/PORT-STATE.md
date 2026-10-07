@@ -1220,8 +1220,13 @@ Native diagnostics replace fabricated interpreter/client exception strings;
 legacy assertion substitutions require their explicit scoped disposition.
 
 Prior final7e execution and measurements remain bound to their old runtime.
-Successor both-OS corpus, child/release/interrupt evidence, measurements and hosted
-checks remain pending; the reduction does not establish any of those results.
+The [source-bound b3 bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md)
+records actual both-OS targeted checks, 192-cell header corpora, admitted policy
+cells, successful/nonzero child and release evidence, Windows Ctrl-C and four
+recaptured check/list measurements. Its executed head is
+`b3e36f707d4e8b038c258b5378c064d62b4d977a`, tree
+`6730038c3e4b40399c6493060293670ffca9be61`. The publishing successor changes
+only evidence and documentation; hosted acceptance and fresh review remain pending.
 CLI-LEASE-core(check/list/run) and full CLI-LEASE remain deferred, and
 hold/break/delegate/designate retain their explicit exit-1 Phase 4 refusal.
 

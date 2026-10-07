@@ -1,0 +1,337 @@
+{
+  "schema": 1,
+  "executed_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+  "executed_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+  "records": [
+    {
+      "platform": "windows",
+      "name": "windows-fmt",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "fmt",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:05.114944+00:00",
+      "first_output": null,
+      "end": "2026-10-07T00:46:05.824375+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual_command_packet_sha256": "3762e4061867f71931b3f684836cfb9f2f4f30a8b9a483c9ce17491ea8afac2a"
+    },
+    {
+      "platform": "windows",
+      "name": "windows-clippy",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "clippy",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--all-targets",
+        "--",
+        "-Dwarnings"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:05.824375+00:00",
+      "first_output": "2026-10-07T00:46:06.332994+00:00",
+      "end": "2026-10-07T00:46:11.547820+00:00",
+      "log_sha256": "40ee2e19b6c6ffa2733a8ef52caf6911910d628daf45831247a1dc601c329be0",
+      "actual_command_packet_sha256": "3762e4061867f71931b3f684836cfb9f2f4f30a8b9a483c9ce17491ea8afac2a"
+    },
+    {
+      "platform": "windows",
+      "name": "windows-clippy-no-default",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "clippy",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--all-targets",
+        "--no-default-features",
+        "--",
+        "-Dwarnings"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:11.547820+00:00",
+      "first_output": "2026-10-07T00:46:11.957028+00:00",
+      "end": "2026-10-07T00:46:16.873893+00:00",
+      "log_sha256": "62b8db81a89561f5fa85a7127bed664ee9dc4608bbfa3d357b7209023d878260",
+      "actual_command_packet_sha256": "3762e4061867f71931b3f684836cfb9f2f4f30a8b9a483c9ce17491ea8afac2a"
+    },
+    {
+      "platform": "windows",
+      "name": "windows-lease-unit",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--lib",
+        "cli::lease::",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:16.874921+00:00",
+      "first_output": "2026-10-07T00:46:17.182825+00:00",
+      "end": "2026-10-07T00:46:22.800199+00:00",
+      "log_sha256": "72588912640a355007d59b8ce9fe5208f51f4605b06cdaea488e4da408b9039e",
+      "actual_command_packet_sha256": "3762e4061867f71931b3f684836cfb9f2f4f30a8b9a483c9ce17491ea8afac2a"
+    },
+    {
+      "platform": "windows",
+      "name": "windows-lease-native",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--test",
+        "lease_cli",
+        "--test",
+        "lease_board",
+        "--test",
+        "lease_reduced_inputs",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:22.801204+00:00",
+      "first_output": "2026-10-07T00:46:23.110240+00:00",
+      "end": "2026-10-07T00:46:44.779054+00:00",
+      "log_sha256": "86194ef8725f4fb1a47912b4824fc07475adabd336652d10d4ba3481df2e3f65",
+      "actual_command_packet_sha256": "3762e4061867f71931b3f684836cfb9f2f4f30a8b9a483c9ce17491ea8afac2a"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-build",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--bin",
+        "pseudolife-stdio"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:46:55.288665+00:00",
+      "first_output": "2026-10-07T00:46:55.994470+00:00",
+      "end": "2026-10-07T00:47:03.204708+00:00",
+      "log_sha256": "dcb168bb48fb17bdaaa86344c7813c4968fca833cb196a11c4caac5c31c04155",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-fmt",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "fmt",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:47:06.972395+00:00",
+      "first_output": null,
+      "end": "2026-10-07T00:47:11.993501+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-clippy",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "clippy",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--all-targets",
+        "--",
+        "-Dwarnings"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:47:11.995184+00:00",
+      "first_output": "2026-10-07T00:47:12.599781+00:00",
+      "end": "2026-10-07T00:47:17.307163+00:00",
+      "log_sha256": "54f121bb37074d18f04a98a68d19dd89866442f131c558808d201760452971e5",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-clippy-no-default",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "clippy",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "--all-targets",
+        "--no-default-features",
+        "--",
+        "-Dwarnings"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:47:17.308829+00:00",
+      "first_output": "2026-10-07T00:47:17.812999+00:00",
+      "end": "2026-10-07T00:47:22.120613+00:00",
+      "log_sha256": "7c3fb38f96caddcb589fca57198dfce0b9106b32778b72d987573d2d14de6bbf",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-lease-unit",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--lib",
+        "cli::lease::",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:47:22.122423+00:00",
+      "first_output": "2026-10-07T00:47:22.325827+00:00",
+      "end": "2026-10-07T00:47:26.830904+00:00",
+      "log_sha256": "2329bbe780173b037a31883df662a9a48f9d9861671b9e81a4538da9c0ca8675",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    },
+    {
+      "platform": "linux",
+      "name": "linux-lease-native",
+      "command": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--test",
+        "lease_cli",
+        "--test",
+        "lease_board",
+        "--test",
+        "lease_reduced_inputs",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "start": "2026-10-07T00:47:26.832581+00:00",
+      "first_output": "2026-10-07T00:47:27.236491+00:00",
+      "end": "2026-10-07T00:47:46.259533+00:00",
+      "log_sha256": "8a350aedba651a6bdfb38401e0b0bd5f9ecb1f8e824543c35b6f621c40491fcb",
+      "actual_command_packet_sha256": "843f68f48079523e7fa319a448cca141f80a173605db191c118399783f601879"
+    }
+  ],
+  "validation": {
+    "windows": {
+      "fmt": 0,
+      "clippy_default_all_targets": 0,
+      "clippy_no_default_all_targets": 0,
+      "lease_unit_passes": 7,
+      "native_lease_passes": 37
+    },
+    "linux": {
+      "fmt": 0,
+      "clippy_default_all_targets": 0,
+      "clippy_no_default_all_targets": 0,
+      "lease_unit_passes": 5,
+      "native_lease_passes": 36
+    },
+    "offline_affected_harness_passes": 91,
+    "header_cells_per_OS": 192,
+    "header_controls_rejected_per_OS": 1020,
+    "owned_core_both_OS": "whole-controller passed, successful own-window6controls, raw exact exit3 and four deferred actions",
+    "windows_CtrlC": "both raw exact130 arms; resistant child absent before helper cleanup; no helper kills; lock and board release verified",
+    "admitted_policy_cells_per_OS": 16,
+    "windows_policy_receipt_composition": "13 accepted cells from retained failed batch; corrected C3 and two JSON companions from exit0 continuation. Original failed batch/replay remain failures.",
+    "Linux_extreme_text_raw_exits": {
+      "list-expected-extreme": [
+        1,
+        0
+      ],
+      "list-waiter-extreme": [
+        1,
+        0
+      ]
+    },
+    "extreme_exit_authority": "rust/PARITY.md named exactly-two-ID python-traceback-not-contract; lease_policy_preparation.py::extreme_list_response19-43 and rejecting additive test_lease_extreme_list_exit_policy.py",
+    "scoped_wide_duration_and_nonascii_cells_per_OS": 4,
+    "measurements": {
+      "cells": 4,
+      "timed_starts": 240,
+      "warmups": 24,
+      "mutation_controls_rejected": 16,
+      "layout": "bare",
+      "profile": "debug",
+      "warm_images": true,
+      "successful_run": "functional only"
+    }
+  },
+  "first_build_output": {
+    "windows": {
+      "start": "2026-10-07T00:45:53.862986+00:00",
+      "first_output": "2026-10-07T00:45:54.170933+00:00"
+    },
+    "linux": {
+      "start": "2026-10-07T00:46:55.288665+00:00",
+      "first_output": "2026-10-07T00:46:55.994470+00:00"
+    }
+  },
+  "limits": [
+    "Windows build command record was superseded by its scoped checks driver; original build log and source/image attestation remain bound separately.",
+    "Format checks completed without output in under one second.",
+    "No local full suite or hosted acceptance is asserted."
+  ]
+}
