@@ -16,7 +16,7 @@ from . import daemon, daemon_child
 from .ci import elapsed, summarize
 from .common import child_environment, controls, distribution, lease_gate, provenance, write_result
 from .daemon import _daemon_command, corpus
-from .test_helpers import assert_child_stopped
+from .process_checks import assert_child_stopped
 
 
 TOY_HEALTH_SERVER = """

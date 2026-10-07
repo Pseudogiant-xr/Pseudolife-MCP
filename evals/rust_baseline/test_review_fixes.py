@@ -9,7 +9,7 @@ import pytest
 
 from . import ci
 from .common import ROOT, child_environment
-from .test_helpers import assert_child_stopped
+from .process_checks import assert_child_stopped
 from .transport import Stdio, TOKEN, shim_fixture
 
 
