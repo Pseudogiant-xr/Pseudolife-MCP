@@ -78,7 +78,7 @@ async fn settle(
     // cannot expire here; it is already free, exactly as after Python break.
     let short = now - 3600.0;
     let retained = now - 604800.0;
-    let departed = tx.query("DELETE FROM coordination_lease_waiters w WHERE w.name=$1 AND (NOT EXISTS (SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id) OR EXISTS (SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id AND (a.lease_until IS NULL OR a.lease_until<=CASE WHEN a.capabilities->>'resumable'='false' THEN $2 ELSE $3 END) AND a.last_activity<=CASE WHEN a.capabilities->>'resumable'='false' THEN $2 ELSE $3 END)) RETURNING w.agent_id", &[&name, &short, &retained]).await?;
+    let departed = tx.query("DELETE FROM coordination_lease_waiters w WHERE w.name=$1 AND (NOT EXISTS (SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id) OR EXISTS (SELECT 1 FROM coordination_agents a WHERE a.agent_id=w.agent_id AND (a.lease_until IS NULL OR a.lease_until<=CASE WHEN a.capabilities->>'resumable'='false' THEN $2::double precision ELSE $3::double precision END) AND a.last_activity<=CASE WHEN a.capabilities->>'resumable'='false' THEN $2::double precision ELSE $3::double precision END)) RETURNING w.agent_id", &[&name, &short, &retained]).await?;
     for row in departed {
         events.push(Event::new(
             "lease_dequeue",
