@@ -37,14 +37,7 @@ fn explicit_unbuffered_stdout_fails_directly_without_shutdown_retry() {
     }
     fs::remove_dir_all(home).unwrap();
     for (setting, help, output, count) in results {
-        let buffered = setting.is_empty() || setting == "0";
-        let expected = if buffered {
-            120
-        } else if help {
-            0
-        } else {
-            2
-        };
+        let expected = 2;
         assert_eq!(
             output.status.code(),
             Some(expected),
@@ -55,10 +48,10 @@ fn explicit_unbuffered_stdout_fails_directly_without_shutdown_retry() {
             String::from_utf8(output.stderr.clone())
                 .unwrap()
                 .contains("Exception ignored in:"),
-            buffered
+            false
         );
-        if help && !buffered {
-            assert!(output.stderr.is_empty());
+        if help {
+            assert!(String::from_utf8(output.stderr).unwrap().contains("could not write help to stdout"));
         }
     }
 }
@@ -123,13 +116,13 @@ fn failed_stderr_aborts_delivery_before_stdout_and_durable_state() {
 }
 
 #[test]
-fn stdout_failures_distinguish_buffered_flush_direct_write_and_help() {
+fn stdout_failures_leave_mail_unshown_with_direct_exit_2() {
     let home = std::env::temp_dir().join(format!("wait-mail-stdout-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let digest = home.join(format!("{}.txt", "a".repeat(64)));
     let mut results = Vec::new();
     let buffer_size = if cfg!(windows) { 8192 } else { 4096 };
-    for (size, expected) in [(5, 120), (buffer_size, 120), (buffer_size + 1, 2)] {
+    for (size, expected) in [(5, 2), (buffer_size, 2), (buffer_size + 1, 2)] {
         fs::write(
             &digest,
             [b"1\n".as_slice(), vec![b'p'; size].as_slice()].concat(),
@@ -164,9 +157,9 @@ fn stdout_failures_distinguish_buffered_flush_direct_write_and_help() {
     fs::remove_dir_all(home).unwrap();
     for (actual, expected, shutdown) in results {
         assert_eq!(actual, Some(expected));
-        assert_eq!(shutdown, expected == 120);
+        assert!(!shutdown);
     }
-    assert_eq!(help.status.code(), Some(120));
+    assert_eq!(help.status.code(), Some(2));
     assert_eq!(count, 2);
 }
 

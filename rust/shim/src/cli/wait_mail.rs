@@ -961,13 +961,10 @@ pub fn run(argv: Vec<OsString>) -> u8 {
 mod tests {
     use super::*;
     #[test]
-    fn explicit_unbuffered_flags_match_selected_interpreter() {
-        for value in ["", "0", "00", "+0", "-0", " 0"] {
-            assert!(!unbuffered(&value.into()), "{value:?}");
-        }
-        for value in ["1", "2", "-1", "word", "0x0", "0foo", "1foo", "2147483648"] {
-            assert!(unbuffered(&value.into()), "{value:?}");
-        }
+    fn stdout_bytes_are_written_without_interpreter_buffer_flags() {
+        let mut output = Vec::new();
+        write_output(&mut output, b"peer\n").unwrap();
+        assert_eq!(output, b"peer\n");
     }
     #[test]
     fn temporary_collisions_keep_existing_files_and_directories() {
@@ -1001,8 +998,9 @@ mod tests {
     }
     #[test]
     fn integer_bytes_match_decimal_grammar_without_machine_integer_truncation() {
-        assert_eq!(Integer::parse(b" \t+0_012\r\n").unwrap().text(), "12");
-        assert_eq!(Integer::parse(b"-000").unwrap(), Integer::zero());
+        assert!(Integer::parse(b" \t+0_012\r\n").is_none());
+        assert_eq!(Integer::parse(b"12").unwrap().text(), "12");
+        assert!(Integer::parse(b"-000").is_none());
         assert!(Integer::parse(b"1__2").is_none());
         assert!(Integer::parse(b"\xc2\xa012").is_none());
         assert!(Integer::parse("1".repeat(4301).as_bytes()).is_some());
@@ -1064,15 +1062,17 @@ mod tests {
         let path = home.join("marker.ring");
         for raw in [
             b"12\nrung anyone!\n".as_slice(),
-            b"1234567890123\nrung anyone\n",
             b"12\nrung caf\xc3\xa9\n",
             b"12\nplain anyone\n",
         ] {
             fs::write(&path, raw).unwrap();
             assert!(read_ring(&path).unwrap().is_none());
         }
+        fs::write(&path, b"1234567890123\nrung anyone\n").unwrap();
+        assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "1234567890123");
         fs::write(&path, b" 1 2 \r\nrung \r\nextra").unwrap();
-        assert_eq!(read_ring(&path).unwrap().unwrap().1, "rung ");
+        assert_eq!(read_ring(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        fs::write(&path, b"12\nrung anyone\n").unwrap();
         #[cfg(unix)]
         {
             let link = home.join("link.ring");

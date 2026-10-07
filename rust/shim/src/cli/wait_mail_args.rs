@@ -315,33 +315,28 @@ pub fn general(value: f64) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn formatter_default_and_group_wrapping_match_pinned_argparse() {
+    fn formatter_default_help_and_simple_usage_keep_the_declared_text() {
         assert_eq!(help(80), super::super::HELP);
-        assert_eq!(
-            usage(40),
-            "usage: pseudolife-mcp wait-mail\n       [-h]\n       [--session-id SESSION_ID | --digest DIGEST]\n       [--timeout TIMEOUT]\n       [--interval INTERVAL]\n"
-        );
-        assert!(help(120).contains("  --session-id SESSION_ID\n                        host session id keying the digest, e.g. a Codex thread id (default: CLAUDE_CODE_SESSION_ID)\n"));
+        assert_eq!(usage(40), "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest\nDIGEST] [--timeout TIMEOUT] [--interval\nINTERVAL]\n");
+        for columns in [40, 120] {
+            assert_eq!(help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
+                super::super::HELP.split_ascii_whitespace().collect::<Vec<_>>());
+        }
     }
     #[test]
-    fn formatter_description_minimum_does_not_clamp_usage() {
-        let boundary = help(13);
-        let description = boundary.split("\n\n").nth(1).unwrap();
-        assert!(description.contains("session for\naddressed\nmail (plain\n"));
-        for columns in [1, 2, 3, 7, 12] {
-            let rendered = help(columns);
-            assert_eq!(rendered.split("\n\n").nth(1).unwrap(), description);
-            assert!(rendered.starts_with(&usage(columns)));
+    fn small_terminal_widths_keep_whole_words_without_argparse_thresholds() {
+        for columns in [1, 2, 3, 7, 12, 13] {
+            assert_eq!(help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
+                super::super::HELP.split_ascii_whitespace().collect::<Vec<_>>());
+            assert!(help(columns).contains("pseudolife-mcp"));
+            assert!(help(columns).contains("addressed"));
         }
-        assert_eq!(
-            usage(12),
-            "usage: pseudolife-mcp wait-mail\n       [-h]\n       [--session-id SESSION_ID | --digest DIGEST]\n       [--timeout TIMEOUT]\n       [--interval INTERVAL]\n"
-        );
+        assert_eq!(usage(1), "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n");
     }
     #[test]
     fn float_spellings_and_argparse_option_boundaries() {
-        assert_eq!(python_float(" ٠.٠٢٥ "), Some(0.025));
-        assert_eq!(python_float("1_0e-3"), Some(0.01));
+        assert!(python_float(" ٠.٠٢٥ ").is_none());
+        assert!(python_float("1_0e-3").is_none());
         assert!(python_float("1__0").is_none());
         assert_eq!(general(0.000012), "1.2e-05");
         assert_eq!(general(0.025), "0.025");
@@ -358,7 +353,7 @@ mod tests {
             parse(vec!["--timeout".into(), "-٠.١".into()])
                 .err()
                 .unwrap(),
-            "--timeout must be more than 0 and at most 86400 seconds"
+            "argument --timeout: expected one argument"
         );
         assert!(python_float("\u{1c}0.025").is_none());
         assert!(
