@@ -70,14 +70,32 @@ def cases():
             result.append({"id": f"combined-missing-{field}-{tag}", "field": field,
                            "value": value, "action": "run", "token_file": False,
                            "registration_missing": [other], "shared_home": True})
+    for field, other in (("agent_id", "credential"), ("credential", "agent_id")):
+        result.append({"id": f"mixed-malformed-{field}-forbidden", "field": field,
+                       "value": "bad\x7fvalue", "action": "run", "token_file": False,
+                       "registration_overrides": {other: "surrogate-\ud800"}, "shared_home": True})
     return result
 
 
 def expected(case, oracle, pre_files, newline):
     """Substitute only a governed header value, after private-file admission."""
+    reply_values = [case.get("value", "")] if case["field"] != "bearer" else []
+    reply_values += list(case.get("registration_overrides", {}).values())
+    if any(isinstance(value, str) and any(0xD800 <= ord(c) <= 0xDFFF for c in value)
+           for value in reply_values):
+        return {"exit_code": 1, "stdout_b64": "",
+                "stderr_b64": base64.b64encode(b"lease: HTTP_REPLY_NOT_UNDERSTOOD" + newline).decode(),
+                "post_files_b64": dict(pre_files)}
     if (not case.get("file_terminator") and not case.get("missing_file")
             and forbidden_header(case["field"], case["value"])):
         return refusal_response(case["field"], pre_files, newline)
+    stderr = base64.b64decode(oracle["stderr_b64"], validate=True)
+    old = b"the board failed unexpectedly (UnicodeEncodeError)"
+    if (any(ord(c) > 127 for c in case.get("value", ""))
+            and old in stderr):
+        target = dict(oracle)
+        target["stderr_b64"] = base64.b64encode(stderr.replace(old, b"registration headers are not understood")).decode()
+        return target
     return oracle
 
 
@@ -224,7 +242,12 @@ def run(root, candidate, out, selected=None):
         rejected = controls(case, oracle, candidate_response, pre, newline, requests) if substituted else []
         record = {"case": case, "oracle_raw": oracle, "candidate_raw": candidate_response,
                   "pre_files_b64": pre, "oracle_requests": oracle_requests,
-                  "candidate_requests": requests, "substitution": "http-forbidden-input-refused" if substituted else None,
+                  "candidate_requests": requests,
+                  "substitution": (("http-reply-not-understood"
+                                    if b"HTTP_REPLY_NOT_UNDERSTOOD" in base64.b64decode(expected(case, oracle, pre, newline)["stderr_b64"])
+                                    else "http-forbidden-input-refused"
+                                    if forbidden_header(case["field"], case["value"])
+                                    else "native-lease-diagnostics") if substituted else None),
                   "passed": passed, "controls_rejected": rejected}
         records.append(record)
         print(json.dumps({"id": case["id"], "passed": passed, "controls_rejected": sum(rejected)}), flush=True)

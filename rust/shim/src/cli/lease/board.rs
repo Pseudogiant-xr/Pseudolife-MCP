@@ -12,22 +12,20 @@ use tokio::sync::Mutex;
 pub struct Failure {
     pub text: String,
     pub transient: bool,
-    pub code: Option<String>,
-    pub fatal_header: bool,
+    pub fatal_input: bool,
 }
 impl Failure {
     fn refused(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             transient: false,
-            code: None,
-            fatal_header: false,
+            fatal_input: false,
         }
     }
     fn forbidden(field: &str) -> Self {
         Self {
             text: format!("HTTP_FORBIDDEN_INPUT_REFUSED: invalid {field} header"),
-            fatal_header: true,
+            fatal_input: true,
             ..Self::refused("")
         }
     }
@@ -37,14 +35,14 @@ impl Failure {
     }
 }
 fn forbidden(value: &Text) -> bool {
-    value.codepoints().iter().any(|&c| c < 32 || c == 127)
+    value.chars().any(|c| c < '\u{20}' || c == '\u{7f}')
 }
 fn instance_header(field: &str, value: &Text) -> Result<reqwest::header::HeaderValue, Failure> {
     if forbidden(value) {
         return Err(Failure::forbidden(field));
     }
-    reqwest::header::HeaderValue::from_str(&value.clean())
-        .map_err(|_| Failure::refused("the board failed unexpectedly (LocalProtocolError)"))
+    reqwest::header::HeaderValue::from_str(value)
+        .map_err(|_| Failure::refused("the board header is not understood"))
 }
 struct Session {
     agent: Option<Text>,
@@ -72,17 +70,10 @@ impl Board {
             .body(body.to_string())
             .timeout(Duration::from_secs(timeout));
         if instance && let (Some(agent), Some(key)) = (&session.agent, &session.credential) {
-            // httpx encodes each instance header as ASCII before sending.
+            // Board instance headers must be ASCII before sending.
             // Registration retains the address, so cleanup fails the same way.
-            if agent
-                .codepoints()
-                .iter()
-                .chain(key.codepoints())
-                .any(|&c| c > 127)
-            {
-                return Err(Failure::refused(
-                    "the board failed unexpectedly (UnicodeEncodeError)",
-                ));
+            if agent.chars().chain(key.chars()).any(|c| !c.is_ascii()) {
+                return Err(Failure::refused("registration headers are not understood"));
             }
             request = request
                 .header("X-PL-Agent", instance_header("agent_id", agent)?)
@@ -93,25 +84,31 @@ impl Board {
                 "the daemon at {} is unreachable ({})",
                 self.url,
                 if e.is_timeout() && e.is_connect() {
-                    "ConnectTimeout"
+                    "connection timed out"
                 } else if e.is_timeout() {
-                    "ReadTimeout"
+                    "response timed out"
                 } else if e.is_connect() {
-                    "ConnectError"
+                    "connection failed"
                 } else {
-                    "RemoteProtocolError"
+                    "HTTP exchange failed"
                 }
             ),
             transient: session.answered,
-            code: None,
-            fatal_header: false,
+            fatal_input: false,
         };
         let response = request.send().await.map_err(&failure)?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await.map_err(failure)?;
         session.answered = true;
-        let payload = super::json::from_slice(&bytes).ok();
-        decode(status, payload)
+        let payload = super::json::from_slice(&bytes);
+        if status == 200 && payload.is_err() {
+            return Err(Failure {
+                text: "HTTP_REPLY_NOT_UNDERSTOOD".into(),
+                fatal_input: true,
+                ..Failure::refused("")
+            });
+        }
+        decode(status, payload.ok())
     }
     pub async fn register(&self, task: &str, project: &str) -> Result<(), Failure> {
         if self.session.lock().await.agent.is_some() {
@@ -235,8 +232,7 @@ fn decode(status: u16, payload: Option<Value>) -> Result<Value, Failure> {
             format!("{reason} ({detail})")
         },
         transient,
-        code: code.map(str::to_owned),
-        fatal_header: false,
+        fatal_input: false,
     })
 }
 pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
@@ -278,7 +274,7 @@ pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
         })
         .map_err(unusable);
     let snapshot = match snapshot {
-        Err(failure) if failure.fatal_header => return Err(failure),
+        Err(failure) if failure.fatal_input => return Err(failure),
         snapshot => snapshot,
     };
     // Only forbidden admitted headers preempt URL errors. Ordinary credential
@@ -292,21 +288,19 @@ pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {
     };
     let token = crate::credentials::decode_token(token.as_bytes()).map_err(unusable)?;
     if !token.is_ascii() {
-        return Err(Failure::refused(
-            "the board failed unexpectedly (UnicodeEncodeError)",
-        ));
+        return Err(Failure::refused("registration headers are not understood"));
     }
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,
         reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-            .map_err(|_| Failure::refused("the board failed unexpectedly (LocalProtocolError)"))?,
+            .map_err(|_| Failure::refused("the board header is not understood"))?,
     );
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .default_headers(headers)
         .build()
-        .map_err(|_| Failure::refused("the board failed unexpectedly (RuntimeError)"))?;
+        .map_err(|_| Failure::refused("the HTTP client could not be initialized"))?;
     Ok(Arc::new(Board {
         url,
         client,

@@ -51,7 +51,7 @@ fn ambiguous_run_options_use_the_active_subparser_without_creating_state() {
 }
 
 #[test]
-fn suite_holder_accepts_python_iso_date_time_forms() {
+fn suite_holder_accepts_only_the_suite_writer_shape() {
     let home = Home::new();
     fs::write(home.0.join("instance.id"), b"0123456789ab\n").unwrap();
     let file = fs::OpenOptions::new()
@@ -62,39 +62,12 @@ fn suite_holder_accepts_python_iso_date_time_forms() {
         .unwrap();
     file.lock().unwrap();
     for (started, clock) in [
-        ("2026-10-05", Some("00:00")),
-        ("20261005", Some("00:00")),
-        ("2026-W41-1", Some("00:00")),
-        ("2026W411", Some("00:00")),
-        ("2026-W41", Some("00:00")),
-        ("2026W41", Some("00:00")),
-        ("2026-10-05T11", Some("11:00")),
-        ("2026-10-05 11:12", Some("11:12")),
-        ("20261005x1112", Some("11:12")),
-        ("2026-10-05😀11:12:13", Some("11:12")),
-        ("2026-10-05T111213,123456+01:02:03.4", Some("11:12")),
-        ("2026-10-05T11:12:13.0001Z", Some("11:12")),
-        ("2026-10-05T11:12+0100", Some("11:12")),
-        ("2026-W41-1T11:12:13", Some("11:12")),
-        ("2026-10-05T25:00", None),
-        ("2026-10-05T11:99", None),
-        ("2026-02-30", None),
-        ("2026-10- 5", None),
-        ("9999-W52-7", None),
-        ("2026-10-05T11:12garbage", None),
-        ("+026-W01", None),
-        ("+026W01", None),
-        ("+026-W01T11:12", None),
-        ("2026W41111", Some("11:00")),
-        ("2026W4111111", Some("11:11")),
-        ("2026-W41-1111", Some("11:11")),
-        ("2026-10-05T11:12:13:14", Some("11:12")),
-        ("2026-10-05T001Z", Some("00:00")),
-        ("2026-10-05T11:12Z\0", Some("11:12")),
-        ("2026-10-05T11:12Z\0garbage", Some("11:12")),
-        ("2026W41111Z\0tail", Some("11:00")),
-        ("2026-10-05T11:12Zx", None),
-        ("2026-10-05T11:12+01:02\0garbage", None),
+        ("2026-10-05T11:12:13+00:00", Some("11:12")),
+        ("2026-10-05T11:12:13-00:00:30", Some("11:12")),
+        ("2026-W41-1", None),
+        ("20261005", None),
+        ("2026-10-05T25:00:13+00:00", None),
+        ("2026-02-30T11:12:13+00:00", None),
     ] {
         fs::write(
             home.0.join("full-suite.holder.json"),
@@ -426,9 +399,9 @@ fn nonzero_timeout_still_bounds_acquisition_and_never_starts_child() {
 }
 
 #[test]
-fn decimal_digit_limit_rejects_before_lock_or_child_start() {
+fn unrepresentable_durations_refuse_before_lock_or_child_start() {
     let home = Home::new();
-    let value = "0".repeat(4300) + "1";
+    let value = "9".repeat(4301);
     for option in ["--timeout", "--expect", "--ttl"] {
         let output = home.call(&[
             "lease",
@@ -439,15 +412,24 @@ fn decimal_digit_limit_rejects_before_lock_or_child_start() {
             "--",
             "missing-boundary-child",
         ]);
-        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            output.stderr,
-            native_text(&format!(
-                "{}pseudolife-mcp lease run: error: argument {option}: Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit\n",
-                include_str!("../src/cli/lease/assets/run_usage.txt")
-            ))
-        );
+        let expected = if option == "--timeout" {
+            assert_eq!(output.status.code(), Some(1));
+            "lease: timeout is out of range\n".to_owned()
+        } else {
+            assert_eq!(output.status.code(), Some(2));
+            let bounds = if option == "--ttl" {
+                "from 30 to 86400 seconds"
+            } else {
+                "from 1 to 604800 seconds"
+            };
+            format!(
+                "{}pseudolife-mcp lease run: error: argument {option}: '{}' is out of range: {bounds}\n",
+                include_str!("../src/cli/lease/assets/run_usage.txt"),
+                value
+            )
+        };
+        assert_eq!(output.stderr, native_text(&expected));
         assert!(!home.0.join("lease-resource.lock").exists());
         assert!(!home.0.join("instance.id").exists());
     }
@@ -489,7 +471,7 @@ fn clock_overflow_returns_one_before_any_state_or_child() {
         assert!(!home.0.join("instance.id").exists());
         assert_eq!(
             output.stderr,
-            native_text("OverflowError: int too large to convert to float\n")
+            native_text("lease: timeout is out of range\n")
         );
     }
 }

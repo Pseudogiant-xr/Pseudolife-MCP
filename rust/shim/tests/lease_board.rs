@@ -199,7 +199,7 @@ fn timestamp_clocks_use_local_dates_and_floor_fractional_seconds() {
 }
 
 #[test]
-fn nonascii_registration_headers_fall_back_before_lease_or_release() {
+fn nonascii_headers_fall_back_but_surrogate_replies_refuse_before_effects() {
     for (field, surrogate) in [
         ("agent_id", false),
         ("credential", false),
@@ -237,16 +237,20 @@ fn nonascii_registration_headers_fall_back_before_lease_or_release() {
             ])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(127));
         assert!(output.stdout.is_empty());
         let newline = if cfg!(windows) { "\r\n" } else { "\n" };
-        assert_eq!(
-            String::from_utf8(output.stderr).unwrap(),
-            format!(
-                "lease: board skipped: the board failed unexpectedly (UnicodeEncodeError); waiting on the local lock for 'resource' alone (not FIFO){newline}lease: command not found: missing-review-child{newline}"
-            )
-        );
-        assert!(home.0.join("lease-resource.lock").exists());
+        if surrogate {
+            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(
+                output.stderr,
+                format!("lease: HTTP_REPLY_NOT_UNDERSTOOD{newline}").as_bytes()
+            );
+            assert!(!home.0.join("lease-resource.lock").exists());
+        } else {
+            assert_eq!(output.status.code(), Some(127));
+            assert_eq!(output.stderr, format!("lease: board skipped: registration headers are not understood; waiting on the local lock for 'resource' alone (not FIFO){newline}lease: command not found: missing-review-child{newline}").as_bytes());
+            assert!(home.0.join("lease-resource.lock").exists());
+        }
         assert_eq!(peer.join().unwrap().len(), 1);
     }
 }
@@ -555,7 +559,7 @@ fn own_stale_hold_is_free_but_foreign_hold_is_held() {
 }
 
 #[test]
-fn python_json_holder_values_never_disappear_from_the_check() {
+fn nonproducer_json_reply_is_refused_without_a_report() {
     for value in [r#""\ud800""#, "NaN", "Infinity", "-Infinity", "1e400"] {
         let home = Home::board();
         let raw = format!(r#"{{"leases":[{{"name":"resource","holder":{{"label":{value}}},"expected_end":NaN}}]}}"#).into_bytes();
@@ -570,19 +574,20 @@ fn python_json_holder_values_never_disappear_from_the_check() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(1));
-        assert!(output.stderr.is_empty());
-        let text = String::from_utf8(output.stdout).unwrap();
-        assert!(text.contains("\"held\": true"), "{text}");
-        assert!(text.contains("\"available\": true"), "{text}");
-        assert!(text.contains("\"expected_end\": NaN"), "{text}");
-        assert!(!text.contains("not a JSON object"));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            "lease: HTTP_REPLY_NOT_UNDERSTOOD\n"
+                .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+                .as_bytes()
+        );
         assert_eq!(peer.join().unwrap().len(), 1);
     }
 }
 
 #[test]
-fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
-    for (name, detail) in [
+fn surrogate_replies_are_refused_without_aliasing_or_state_changes() {
+    for (name, _detail) in [
         (b"\\ud800".as_slice(), "character '\\ud800' in position 0"),
         (b"ab\\udfff".as_slice(), "character '\\udfff' in position 2"),
         (b"\\ud800\\ud800".as_slice(), "characters in position 0-1"),
@@ -615,12 +620,9 @@ fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
             let output = command.output().unwrap();
             assert_eq!(output.status.code(), Some(1));
             assert!(output.stdout.is_empty());
-            let terminal = format!(
-                "UnicodeEncodeError: 'utf-8' codec can't encode {detail}: surrogates not allowed\n"
-            );
             assert_eq!(
                 output.stderr,
-                terminal
+                "lease: HTTP_REPLY_NOT_UNDERSTOOD\n"
                     .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
                     .as_bytes()
             );
@@ -647,10 +649,14 @@ fn raw_surrogate_name_cannot_alias_a_scalar_and_discount_its_holder() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stderr.is_empty());
-    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["held"], true);
-    assert_eq!(report["local"]["state"], "free");
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        "lease: HTTP_REPLY_NOT_UNDERSTOOD\n"
+            .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+            .as_bytes()
+    );
+    assert_eq!(fs::read(home.0.join("lease-_-31237b17.lock")).unwrap(), b"");
     assert_eq!(peer.join().unwrap().len(), 1);
 }
 
@@ -699,14 +705,11 @@ fn exact_stdout_buffer_boundary_is_buffered_through_8192_bytes() {
         ready.send(()).unwrap();
         let output = child.wait_with_output().unwrap();
         let (code, diagnostic) = if target <= 8192 {
-            (
-                120,
-                "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\r\nOSError: [Errno 22] Invalid argument\r\n",
-            )
+            (120, "lease: stdout write failed\r\n")
         } else {
             (
                 70,
-                "lease: check of 'resource' failed (OSError: [Errno 22] Invalid argument); neither held nor free is known\r\n",
+                "lease: check of 'resource' failed (stdout write failed); neither held nor free is known\r\n",
             )
         };
         assert_eq!(output.status.code(), Some(code), "target {target}");
@@ -745,7 +748,7 @@ fn large_list_closed_stdout_returns_one_with_terminal_error() {
     ready.send(()).unwrap();
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, b"OSError: [Errno 22] Invalid argument\r\n");
+    assert_eq!(output.stderr, b"stdout write failed\r\n");
     assert_eq!(peer.join().unwrap().len(), 1);
 }
 
@@ -777,12 +780,7 @@ fn nonascii_stamp_does_not_discount_an_existing_board_holder() {
 
 #[test]
 fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
-    for (queue, kind) in [
-        ("1", "int"),
-        ("1.5", "float"),
-        ("true", "bool"),
-        ("NaN", "float"),
-    ] {
+    for (queue, _kind) in [("1", "int"), ("1.5", "float"), ("true", "bool")] {
         let home = Home::board();
         let raw = format!(r#"{{"leases":[{{"name":"resource","holder":{{"label":"h"}},"queued":1,"queue":{queue}}}]}}"#).into_bytes();
         let (url, peer) = server_raw(1, move |_, header, _| {
@@ -797,7 +795,7 @@ fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
         assert_eq!(output.status.code(), Some(70));
         assert!(output.stdout.is_empty());
         let text = format!(
-            "lease: check of 'resource' failed (TypeError: '{kind}' object is not iterable); neither held nor free is known\n"
+            "lease: check of 'resource' failed (queue is not understood); neither held nor free is known\n"
         );
         let expected = if cfg!(windows) {
             text.replace('\n', "\r\n")
@@ -835,14 +833,11 @@ fn closed_stdout_matches_small_flush_and_large_check_failures() {
         ready.send(()).unwrap();
         let output = child.wait_with_output().unwrap();
         let (code, expected) = if length == 0 {
-            (
-                120,
-                "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\r\nOSError: [Errno 22] Invalid argument\r\n",
-            )
+            (120, "lease: stdout write failed\r\n")
         } else {
             (
                 70,
-                "lease: check of 'resource' failed (OSError: [Errno 22] Invalid argument); neither held nor free is known\r\n",
+                "lease: check of 'resource' failed (stdout write failed); neither held nor free is known\r\n",
             )
         };
         assert_eq!(output.status.code(), Some(code));

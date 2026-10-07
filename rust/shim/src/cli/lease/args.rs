@@ -55,12 +55,6 @@ fn duration_digits(text: &str) -> Result<(&str, u64), String> {
             repr(text)
         ));
     }
-    if digits.len() > 4300 {
-        return Err(format!(
-            "Exceeds the limit (4300 digits) for integer string conversion: value has {} digits; use sys.set_int_max_str_digits() to increase the limit",
-            digits.len()
-        ));
-    }
     Ok((digits, factor))
 }
 

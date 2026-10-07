@@ -23,23 +23,11 @@ fn write(text: &str, stderr: bool) -> std::io::Result<()> {
     }
 }
 static OUTPUT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-fn output_error(error: &std::io::Error) -> String {
-    if cfg!(windows) && error.kind() == std::io::ErrorKind::BrokenPipe {
-        "OSError: [Errno 22] Invalid argument".into()
-    } else if error.kind() == std::io::ErrorKind::BrokenPipe {
-        "BrokenPipeError: [Errno 32] Broken pipe".into()
-    } else {
-        format!("OSError: {error}")
-    }
+fn output_error(_error: &std::io::Error) -> String {
+    "stdout write failed".into()
 }
 fn flush_failure(error: &std::io::Error) {
-    let _ = write(
-        &format!(
-            "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n{}\n",
-            output_error(error)
-        ),
-        true,
-    );
+    let _ = write(&format!("lease: {}\n", output_error(error)), true);
 }
 fn out(text: &str, stderr: bool) {
     if let Err(error) = write(text, stderr) {

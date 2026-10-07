@@ -7,13 +7,19 @@
   ],
   "preparation_head": "a6cdf024fb09836a4428268086f39ae71493ca8c",
   "status": "deferred",
-  "acceptance": "Preparation only; no current executable or CI coverage asserted.",
+  "acceptance": "Historical preparation and final7e evidence retained; reduced successor execution and final hosted acceptance pending.",
   "timestamp_display_substitution": {
-    "scope": ["expected_end", "enqueued_at"],
+    "scope": [
+      "expected_end",
+      "enqueued_at"
+    ],
     "contract": "Chrono platform local zone; HH:MM today, YYYY-MM-DD HH:MM otherwise; floor fractional seconds; unsupported calendar values display ?; JSON numbers unchanged.",
     "timezone": "POSIX supported TZ settings included; Windows CRT-only overrides excluded.",
-    "historical_exception_cases": ["list-expected-extreme", "list-waiter-extreme"],
-    "final_head_status": "pending-recapture"
+    "historical_exception_cases": [
+      "list-expected-extreme",
+      "list-waiter-extreme"
+    ],
+    "final_head_status": "historical-final7e-matched; reduced-successor-pending"
   },
   "cases": [
     {
@@ -29,7 +35,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-0-json",
@@ -44,7 +52,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-1-text",
@@ -59,7 +69,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-1-json",
@@ -74,7 +86,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-2-text",
@@ -89,7 +103,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-2-json",
@@ -104,7 +120,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-3-text",
@@ -119,7 +137,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-3-json",
@@ -134,7 +154,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-4-text",
@@ -149,7 +171,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "I3-4-json",
@@ -164,7 +188,9 @@
       "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
     },
     {
       "id": "list-expected-extreme",
@@ -180,7 +206,7 @@
       "retained_receipt_sha256": "0c2e7d8d35feb63c73e356a4d8eb5e0df068c8cb47da2951827f580b1dd97def",
       "retained_platform": "linux",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "list-waiter-extreme",
@@ -196,7 +222,7 @@
       "retained_receipt_sha256": "0c2e7d8d35feb63c73e356a4d8eb5e0df068c8cb47da2951827f580b1dd97def",
       "retained_platform": "linux",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "approved-timeout-overflow-traceback",
@@ -211,7 +237,7 @@
       "retained_receipt_sha256": "4a0c669e89fca575c7f02edaabe29d41ee4ad3635ca8dbce949b3f2b1c431a64",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "C3-large-list-closed-stdout",
@@ -226,7 +252,7 @@
       "retained_receipt_sha256": "4a0c669e89fca575c7f02edaabe29d41ee4ad3635ca8dbce949b3f2b1c431a64",
       "retained_platform": "windows",
       "retained_result": "historical-policy-match",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-DEL-agent_id",
@@ -243,7 +269,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-DEL-credential",
@@ -260,7 +286,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-CR-agent_id",
@@ -277,7 +303,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-CR-credential",
@@ -294,7 +320,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-LF-agent_id",
@@ -311,7 +337,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-LF-credential",
@@ -328,7 +354,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-NUL-agent_id",
@@ -345,7 +371,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "D3-NUL-credential",
@@ -362,7 +388,7 @@
       "retained_platform": "windows",
       "retained_candidate_exit": 75,
       "retained_result": "implementation-pending",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     },
     {
       "id": "lease-run-existing-successful-child",
@@ -376,7 +402,7 @@
       "retained_receipt_sha256": "03d5c9540e99eca7f4f0cfbc0ab2dcb9b6dc1da482c360b83e81770742ca1cb3",
       "retained_platform": "windows",
       "retained_result": "incomplete-missing-invocation-windows",
-      "final_head_status": "pending-recapture"
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
     }
   ],
   "final7e_bounded_evidence": {
@@ -415,5 +441,17 @@
         "linux": "0a819e13c9a1fcf8fc238f64a74447970ab413ef47b46d038faa093d55d67e44"
       }
     }
+  },
+  "producer_admission": {
+    "policy": "http-reply-not-understood",
+    "grammar": "finite UTF-8 serde_json; healthy own coordination fields",
+    "http_200_parse_failure": {
+      "exit_code": 1,
+      "stdout": "",
+      "stderr_lf": "lease: HTTP_REPLY_NOT_UNDERSTOOD\n",
+      "effects": "pre-state unchanged; no local fallback, lock creation or child; no subsequent lease/release request"
+    },
+    "successfully_parsed_forbidden_headers": "http-forbidden-input-refused remains required before incomplete registration fallback",
+    "status": "implemented; successor-proof-pending"
   }
 }

@@ -39,7 +39,7 @@ def cli_binding(root, oracle_root, *, extra_helpers=None, callbacks=()):
     helpers = {"evals/rust_port/cli_process.py": [Path(__file__), cli_binding, cases, observe, paired_cases, run, prepared_command, reset_home,
                     fixture_env, file_path, checked_files, snapshot, remove_root_link, byte_payload, candidate_controls],
                "evals/rust_port/cli_corpus.py": [corpus],
-               "evals/rust_port/lease_corpus.py": [lease_corpus.cases],
+               "evals/rust_port/lease_corpus.py": [lease_corpus.cases, lease_corpus.expected_response],
                "evals/rust_port/cli_public.py": [public_summary],
                "evals/rust_port/cli_version.py": [cli_version.make_prepare, cli_version.seed_context, cli_version.cases],
                "evals/rust_port/harness.py": [capture_platform, compare, isolated_env, run_cli, write_new],
@@ -378,7 +378,8 @@ def candidate_controls(records):
     """Mutate captured candidate observations, retaining the oracle unchanged."""
     result = []
     for record in records:
-        expected = record["oracle"]["response"]
+        from .lease_corpus import expected_response
+        expected = expected_response(record["id"], record["oracle"]["response"])
         observed = record["candidate"]["response"]
         for field in ("exit_code", "stdout_b64", "stderr_b64", "post_files_b64"):
             mutated = copy.deepcopy(observed)
@@ -409,9 +410,16 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None, process_scope
     for case in spec:
         arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare, process_scope=process_scope)
                 for arm, command in commands.items()}
-        differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
+        from .lease_corpus import expected_response
+        expected = byte_payload(arms["oracle"])
+        target_response = expected_response(case["id"], expected["response"])
+        if target_response is not expected["response"]:
+            expected = {**expected, "response": target_response}
+        differences = compare(expected, byte_payload(arms["candidate"]), BYTE_POLICY)
         records.append({"id": case["id"], "mode": case["mode"], **arms,
-                        "differences": differences, "passed": not differences})
+                        "differences": differences, "passed": not differences,
+                        "substitution": ("native-lease-diagnostics"
+                                         if target_response is not arms["oracle"]["response"] else None)})
     controls = candidate_controls(records)
     return {"records": records, "candidate_output_controls": controls,
             "passed": all(record["passed"] for record in records) and all(c["rejected"] for c in controls)}

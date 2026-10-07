@@ -1165,8 +1165,8 @@ to be native. This candidate makes neither promotion.
 Accepted master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75` is integrated by
 ordinary merge, preserving CLI-VERSION acceptance. Actual Windows/Linux
 execution remains bound to `7e6927b7b72db62569281d3477dc8e8924c82292`, tree
-`34b24d60d854e28448079bfc0c8e8eea83551d47`; later evidence/docs/comparison
-additions leave the Rust production/Cargo/assets component unchanged.
+`34b24d60d854e28448079bfc0c8e8eea83551d47`; evidence/docs/comparison
+additions through `04f0532b` leave that Rust production/Cargo/assets component unchanged.
 
 [Committed bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
 records both-OS successful-child own-window/repeat proof and six controls,
@@ -1182,7 +1182,7 @@ retained cells and rejects 32 wrong-exit controls. Successful-run timing is
 unmeasured. Numerical claims are limited to the committed samples/recipes;
 the removed historical untracked timing table is not restored.
 
-Current physical lease production lines at 7e total **2,932** across the same
+Historical physical lease production lines at 7e total **2,932** across the same
 seven files, before their test-only modules: args352, board369, json693,
 lock240, mod76, run395 and view807. Comments/blanks count; assets, dispatch,
 fixtures and test modules do not. The historical Python lease_cli denominator
@@ -1206,3 +1206,29 @@ counterexamples, old-base hosted help/parser failures, mounted POSIX private-hom
 failure and cached CRLF assets remain retained. Frozen68's clock cell matched,
 but its whole Windows driver failed an assertion; its continuation separately
 failed, so neither whole run passed. Final7e proof has separate actual identities.
+
+### Lease producer reduction successor; acceptance pending
+
+The successor replaces the custom UTF-16/32/surrogate/nonfinite JSON decoder
+with finite UTF-8 serde_json admission and narrows suite holder dates to the
+suite writer's seconds-resolution ISO shape. The synthetic CPython ISO fixture
+is removed. Named HTTP reply refusal preserves fail-closed malformed reply
+handling; successful JSON parsing retains forbidden-header admission and private
+credential-file security. Opaque arguments use args_os with a clean refusal,
+board wait timeouts use a typed variant, and POSIX child signals use rustix.
+Native diagnostics replace fabricated interpreter/client exception strings;
+legacy assertion substitutions require their explicit scoped disposition.
+
+Prior final7e execution and measurements remain bound to their old runtime.
+Successor both-OS corpus, child/release/interrupt evidence, measurements and hosted
+checks remain pending; the reduction does not establish any of those results.
+CLI-LEASE-core(check/list/run) and full CLI-LEASE remain deferred, and
+hold/break/delegate/designate retain their explicit exit-1 Phase 4 refusal.
+
+The reduced successor's physical production count is **2037** across the same
+seven lease files, before test-only blocks: args346, board363, json22, lock240, mod64, run398, view604.
+Comments/blanks count; assets, dispatch and tests do not. Against the historical
+1,889-line Python lease module this is 2037/1,889=1.07835; including its
+147-line OS-lock helper gives 2037/2,036=1.00049. The Python denominator
+includes deferred actions. These are source size counts, not runtime or parity
+measurements.

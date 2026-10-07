@@ -107,7 +107,9 @@ def public_summary(receipt):
             inventory.append({"id": case["id"], "mode": case["mode"],
                               **({"argv": case["argv"]} if not case["mode"].startswith("lease-") else {}),
                               **{key: case[key] for key in ("layout_kind", "manifest_kind") if key in case},
-                              "passed": record["passed"], "difference_count": len(record["differences"])})
+                              "passed": record["passed"], "difference_count": len(record["differences"]),
+                              **({"substitution": "native-lease-diagnostics"}
+                                 if record.get("substitution") == "native-lease-diagnostics" else {})})
         fields = ("exit_code", "stdout_b64", "stderr_b64", "post_files_b64")
         controls = receipt["candidate_output_controls"]
         require(len(controls) == len(expected) * len(fields)

@@ -43,8 +43,8 @@ def test_refusal_keeps_raw_oracle_and_rejects_each_output_and_effect_mutation(fi
                           ["/api/coordination/lease", *requests])
 
 
-@pytest.mark.parametrize("value", ["ordinary", "é", "\ud800"])
-def test_ordinary_nonascii_and_surrogate_are_exact_raw_comparisons(value):
+@pytest.mark.parametrize("value", ["ordinary", "é"])
+def test_ordinary_ascii_and_nonascii_without_error_diagnostic_are_exact(value):
     case = {"field": "agent_id", "value": value}
     raw = {"exit_code": 127, "stdout_b64": "", "stderr_b64": "cmF3", "post_files_b64": {}}
     assert expected(case, raw, {}, b"\n") is raw
@@ -72,7 +72,7 @@ def test_combined_url_and_partial_reply_cases_preserve_fatal_and_ordinary_bounda
     for field in ("agent_id", "credential"):
         fatal = inputs[f"combined-partial-{field}-forbidden"]
         assert expected(fatal, raw, {}, b"\n") == refusal_response(field, {}, b"\n")
-        for tag in ("empty", "nonascii", "surrogate"):
+        for tag in ("empty", "nonascii"):
             assert expected(inputs[f"combined-partial-{field}-{tag}"], raw, {}, b"\n") is raw
         assert expected(inputs[f"combined-missing-{field}-forbidden"], raw, {}, b"\n") == refusal_response(field, {}, b"\n")
         assert expected(inputs[f"combined-missing-{field}-valid"], raw, {}, b"\n") is raw

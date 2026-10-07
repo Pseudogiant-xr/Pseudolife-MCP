@@ -63,8 +63,8 @@ def cases():
     add("lease-run-bad-lock-directory", "run", ["sample", "--no-board", *command],
         files={"blocked": ""}, deltas={"PSEUDOLIFE_LEASE_LOCK_DIR": "{home}/blocked"})
     for option in ("timeout", "expect", "ttl"):
-        add("lease-run-digit-limit-" + option, "run",
-            ["sample", "--" + option, "0" * 4300 + "1", *command])
+        add("lease-run-wide-duration-" + option, "run",
+            ["sample", "--" + option, "9" * 32, *command])
     add("lease-run-cannot-execute-file", "run", ["sample", "--no-board", "--", "{home}/blocked"], files={"blocked": ""})
     add("lease-check-nonascii-bearer", "check", ["sample", "--json"],
         deltas={"PSEUDOLIFE_MCP_TOKEN": "bearer-é", "PSEUDOLIFE_MCP_TOKEN_FILE": None})
@@ -81,3 +81,21 @@ def cases():
     add("lease-run-missing-command", "run", ["sample"])
     add("lease-check-rejects-command", "check", ["sample", *command])
     return result
+
+
+def expected_response(case_id, raw):
+    """Apply only the named native diagnostic to one retained non-ASCII cell.
+
+    Inputs, exits, files, stderr and all remaining stdout bytes stay exact.
+    The retired CPython digit-cap cells are historical; wide finite durations
+    continue through the ordinary exact paired corpus.
+    """
+    if case_id != "lease-check-nonascii-bearer":
+        return raw
+    stdout = base64.b64decode(raw["stdout_b64"], validate=True)
+    old = b'"reason": "the board failed unexpectedly (UnicodeEncodeError)"'
+    if stdout.count(old) != 1:
+        return raw
+    expected = dict(raw)
+    expected["stdout_b64"] = base64.b64encode(stdout.replace(old, b'"reason": "registration headers are not understood"')).decode()
+    return expected

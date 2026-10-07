@@ -13,8 +13,11 @@ pub fn truth(value: &Value) -> bool {
         Value::Object(v) => !v.is_empty(),
     }
 }
+fn integer(value: &Value) -> bool {
+    matches!(value, Value::Bool(_)) || value.as_number().is_some_and(|n| n.is_i64() || n.is_u64())
+}
 fn pystr(value: &Value) -> String {
-    value.python(false)
+    super::super::version::python_text(value, false)
 }
 pub fn clean(value: &Value, limit: usize) -> String {
     clean_text(&pystr(value), limit)
@@ -76,29 +79,25 @@ fn number(value: &Value) -> Option<f64> {
 }
 // Daemon timestamps are Unix seconds, displayed in the platform's local zone.
 // Unsupported calendar values display '?' rather than interpreter exceptions.
-fn clock(stamp: f64) -> Result<String, &'static str> {
-    clock_in_zone(stamp, &Local, Local::now().date_naive())
+fn clock(stamp: f64) -> String {
+    clock_text_in_zone(stamp, &Local, Local::now().date_naive())
 }
-fn clock_in_zone<Tz: TimeZone>(
-    stamp: f64,
-    zone: &Tz,
-    today: chrono::NaiveDate,
-) -> Result<String, &'static str> {
+fn clock_text_in_zone<Tz: TimeZone>(stamp: f64, zone: &Tz, today: chrono::NaiveDate) -> String {
     if !stamp.is_finite() || stamp < i64::MIN as f64 || stamp >= -(i64::MIN as f64) {
-        return Ok("?".into());
+        return "?".into();
     }
     let Some(local) = zone.timestamp_opt(stamp.floor() as i64, 0).single() else {
-        return Ok("?".into());
+        return "?".into();
     };
     let Some(local) = local.naive_utc().checked_add_offset(local.offset().fix()) else {
-        return Ok("?".into());
+        return "?".into();
     };
     let format = if local.date() == today {
         "%H:%M"
     } else {
         "%Y-%m-%d %H:%M"
     };
-    Ok(local.format(format).to_string())
+    local.format(format).to_string()
 }
 pub fn now() -> f64 {
     std::time::SystemTime::now()
@@ -136,44 +135,44 @@ pub fn holder(holder: &Value, now: f64) -> String {
     }
     text
 }
-pub fn expected(stamp: &Value, now: f64, stale: bool) -> Result<String, &'static str> {
+pub fn expected(stamp: &Value, now: f64, stale: bool) -> String {
     let Some(stamp) = number(stamp) else {
-        return Ok(String::new());
+        return String::new();
     };
-    Ok(format!(
+    format!(
         ", expected end {}{}",
-        clock(stamp)?,
+        clock(stamp),
         if stale || stamp < now {
             " (stale: past it)"
         } else {
             ""
         }
-    ))
+    )
 }
-fn waiter(entry: &Value) -> Result<String, &'static str> {
+fn waiter(entry: &Value) -> String {
     let mut text = who(entry);
     if let Some(since) = number(&entry["enqueued_at"]) {
-        text += &format!(" since {}", clock(since)?);
+        text += &format!(" since {}", clock(since));
     }
     if truth(&entry["purpose"]) {
         text += &format!(", purpose \"{}\"", clean(&entry["purpose"], 240));
     }
-    Ok(text)
+    text
 }
-pub fn queued_notice(name: &str, reply: &Value) -> Result<String, &'static str> {
+pub fn queued_notice(name: &str, reply: &Value) -> String {
     let position = &reply["position"];
     let queued = &reply["queued"];
-    let place = if position.is_integer() && queued.is_integer() {
+    let place = if integer(position) && integer(queued) {
         format!("position {} of {}", pystr(position), pystr(queued))
     } else {
         "queued".into()
     };
     let situation = if reply["holder"].is_object() {
-        holder(&reply["holder"], now()) + &expected(&reply["holder"]["expected_end"], now(), false)?
+        holder(&reply["holder"], now()) + &expected(&reply["holder"]["expected_end"], now(), false)
     } else {
         "no holder right now; the board is passing it down the queue".into()
     };
-    Ok(format!(
+    format!(
         "lease: waiting for {} on the board ({place}); {}",
         super::repr(name),
         if reply["holder"].is_object() {
@@ -181,11 +180,22 @@ pub fn queued_notice(name: &str, reply: &Value) -> Result<String, &'static str> 
         } else {
             situation
         }
-    ))
+    )
 }
 
 pub fn json_text(value: &Value) -> String {
-    value.pretty(0) + "\n"
+    use std::fmt::Write;
+    let mut text = String::new();
+    for c in format!("{value:#}").chars() {
+        if c.is_ascii() {
+            text.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                let _ = write!(text, "\\u{unit:04x}");
+            }
+        }
+    }
+    text + "\n"
 }
 fn suite_directory() -> PathBuf {
     std::env::var_os("PSEUDOLIFE_SUITE_LOCK_DIR")
@@ -305,196 +315,29 @@ fn local_text(local: &Value) -> String {
     )
 }
 
-// Python's fromisoformat accepts basic/calendar/week dates, one arbitrary
-// separator, reduced-precision times and fractional seconds or UTC offsets.
-// Only the original hour and minute are displayed; no timezone conversion occurs.
+// The suite writes datetime.now().astimezone().isoformat(timespec="seconds").
+// Preserve its clock without a timezone conversion; other strings omit since.
 fn iso_clock(text: &Text) -> Option<String> {
-    // CPython sanitizes a surrogate only at the first possible date separator;
-    // every other surrogate must still fail UTF-8 admission.
-    let separator = [7, 8, 10].into_iter().find(|&i| {
-        text.codepoints()
-            .get(i)
-            .is_some_and(|c| (0xd800..=0xdfff).contains(c))
-    });
-    let sanitized: String = text
-        .codepoints()
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| {
-            if separator == Some(i) {
-                Some('T')
-            } else {
-                char::from_u32(c)
-            }
-        })
-        .collect::<Option<_>>()?;
-    let text = sanitized.as_str();
-    fn digits(bytes: &[u8]) -> Option<u32> {
-        bytes.iter().try_fold(0, |value, byte| {
-            byte.is_ascii_digit()
-                .then(|| value * 10 + u32::from(byte - b'0'))
-        })
-    }
-    // Follow CPython 3.11's separator selection before validating the date.
-    // A digit separator is ambiguous with an ISO weekday; the digit-run
-    // parity and extended-week dash rule select the boundary, not date validity.
-    fn date_end(bytes: &[u8]) -> Option<usize> {
-        if bytes.len() < 7 {
-            return None;
-        }
-        if bytes.len() == 7 {
-            return Some(7);
-        }
-        if bytes[4] == b'-' {
-            if bytes[5] != b'W' {
-                return Some(10);
-            }
-            if bytes.len() > 8 && bytes[8] == b'-' {
-                if bytes.len() == 9 {
-                    return None;
-                }
-                return Some(if bytes.get(10).is_some_and(u8::is_ascii_digit) {
-                    8
-                } else {
-                    10
-                });
-            }
-            Some(8)
-        } else if bytes[4] == b'W' {
-            let end = (7..bytes.len())
-                .find(|&i| !bytes[i].is_ascii_digit())
-                .unwrap_or(bytes.len());
-            Some(if end < 9 {
-                end
-            } else if end % 2 == 0 {
-                7
-            } else {
-                8
-            })
-        } else {
-            Some(8)
-        }
-    }
-    // The C parser reads a separator after each two-digit component and can
-    // treat surplus digits after seconds as a fraction without a decimal mark.
-    // Its nonnegative trailing marker is allowed for the clock when a timezone
-    // follows, but rejected for a timezone or a clock without a timezone.
-    fn time(bytes: &[u8], end: usize) -> Option<([u32; 3], bool)> {
-        let mut fields = [0; 3];
-        let mut pos = 0;
-        let mut separated = false;
-        for (i, field) in fields.iter_mut().enumerate() {
-            *field = digits(bytes.get(pos..pos + 2)?)?;
-            pos += 2;
-            let separator = bytes.get(pos).copied().unwrap_or(0);
-            pos += 1;
-            if i == 0 {
-                separated = separator == b':';
-            }
-            if pos >= end {
-                return Some((fields, separator != 0));
-            }
-            if separated && separator == b':' {
-                continue;
-            }
-            if matches!(separator, b'.' | b',') {
-                break;
-            }
-            if separated {
-                return None;
-            }
-            pos -= 1;
-        }
-        let fraction_end = end.min(pos + 6);
-        digits(bytes.get(pos..fraction_end)?)?;
-        pos = fraction_end;
-        while bytes.get(pos).is_some_and(u8::is_ascii_digit) {
-            pos += 1;
-        }
-        Some((fields, bytes.get(pos).copied().unwrap_or(0) != 0))
-    }
     let bytes = text.as_bytes();
-    let year = digits(bytes.get(..4)?)? as i32;
-    if !(1..=9999).contains(&year) {
+    if !matches!(bytes.len(), 25 | 28) || bytes.get(10) != Some(&b'T') {
         return None;
     }
-    let end = date_end(bytes)?;
-    let date = text.get(..end)?;
-    let separated = bytes[4] == b'-';
-    let pos = 4 + usize::from(separated);
-    let valid = if bytes.get(pos) == Some(&b'W') {
-        let week = digits(bytes.get(pos + 1..pos + 3)?)?;
-        let weekday = if end > pos + 3 {
-            let day_pos = pos + 3 + usize::from(separated);
-            if separated && bytes.get(pos + 3) != Some(&b'-') {
-                return None;
-            }
-            digits(bytes.get(day_pos..day_pos + 1)?)?
-        } else {
-            1
-        };
-        let weekday = match weekday {
-            1 => chrono::Weekday::Mon,
-            2 => chrono::Weekday::Tue,
-            3 => chrono::Weekday::Wed,
-            4 => chrono::Weekday::Thu,
-            5 => chrono::Weekday::Fri,
-            6 => chrono::Weekday::Sat,
-            7 => chrono::Weekday::Sun,
-            _ => return None,
-        };
-        chrono::NaiveDate::from_isoywd_opt(year, week, weekday)
-            .is_some_and(|date| (1..=9999).contains(&date.year()))
-    } else {
-        let pattern = if separated { "dddd-dd-dd" } else { "dddddddd" };
-        date.len() == pattern.len()
-            && date.bytes().zip(pattern.bytes()).all(|(c, p)| {
-                if p == b'd' {
-                    c.is_ascii_digit()
-                } else {
-                    c == p
-                }
-            })
-            && chrono::NaiveDate::parse_from_str(
-                date,
-                if separated { "%Y-%m-%d" } else { "%Y%m%d" },
-            )
-            .is_ok()
-    };
-    if !valid {
+    chrono::NaiveDateTime::parse_from_str(text.get(..19)?, "%Y-%m-%dT%H:%M:%S").ok()?;
+    let offset = bytes.get(19..)?;
+    if !matches!(offset[0], b'+' | b'-') || offset[3] != b':' {
         return None;
     }
-    let remaining = &text[end..];
-    if remaining.is_empty() {
-        return Some("00:00".into());
+    fn pair(bytes: &[u8]) -> Option<u32> {
+        (bytes.len() == 2 && bytes.iter().all(u8::is_ascii_digit))
+            .then(|| u32::from(bytes[0] - b'0') * 10 + u32::from(bytes[1] - b'0'))
     }
-    let remaining = &remaining[remaining.chars().next()?.len_utf8()..];
-    let zone_pos = remaining.find(['+', '-', 'Z']).unwrap_or(remaining.len());
-    let (fields, trailing) = time(remaining.as_bytes(), zone_pos)?;
-    if fields[0] > 23 || fields[1] > 59 || fields[2] > 59 {
+    if pair(&offset[1..3])? > 23 || pair(&offset[4..6])? > 59 {
         return None;
     }
-    if zone_pos == remaining.len() {
-        if trailing {
-            return None;
-        }
-    } else {
-        let zone = &remaining[zone_pos..];
-        if zone.starts_with('Z') {
-            // CPython checks the byte after Z for NUL, including the implicit
-            // terminator. Whole-string surrogate admission already ran above.
-            if zone.as_bytes().get(1).is_some_and(|&byte| byte != 0) {
-                return None;
-            }
-        } else {
-            let zone = &zone[1..];
-            let (fields, trailing) = time(zone.as_bytes(), zone.len())?;
-            if trailing || fields[0] * 3600 + fields[1] * 60 + fields[2] >= 86400 {
-                return None;
-            }
-        }
+    if offset.len() == 9 && (offset[6] != b':' || pair(&offset[7..9])? > 59) {
+        return None;
     }
-    Some(format!("{:02}:{:02}", fields[0], fields[1]))
+    Some(text.get(11..16)?.to_owned())
 }
 pub async fn check(args: &Args) -> i32 {
     let name = args.name.as_deref().unwrap_or("");
@@ -502,10 +345,10 @@ pub async fn check(args: &Args) -> i32 {
     let mut report = json!({"available":false,"reason":Value::Null,"holder":Value::Null,"expected_end":Value::Null,"stale":false,"queued":0,"queue":json!([])});
     let mut reason = None;
     match board::connect(false) {
-        Err(e) if e.fatal_header => return e.report(),
+        Err(e) if e.fatal_input => return e.report(),
         Err(e) => reason = Some(e.text),
         Ok(client) => match client.leases(Some(name)).await {
-            Err(e) if e.fatal_header => return e.report(),
+            Err(e) if e.fatal_input => return e.report(),
             Err(e) => reason = Some(e.text),
             Ok((leases, _)) => {
                 report["available"] = json!(true);
@@ -556,45 +399,19 @@ pub async fn check(args: &Args) -> i32 {
         ];
         if report["available"] == true {
             if !report["holder"].is_null() {
-                let expected =
-                    match expected(&report["expected_end"], now(), report["stale"] == true) {
-                        Ok(text) => text,
-                        Err(error) => return failed_check(name, error),
-                    };
+                let expected = expected(&report["expected_end"], now(), report["stale"] == true);
                 lines.push(format!("  board: held by {}{}{}",holder(&report["holder"],now()),expected,if stale{"; stale: the local lock is free, so this record outlived its holder and lapses at its ttl"}else{""}));
                 if truth(&report["queued"]) {
-                    let kind = match &report["queue"] {
-                        Value::Bool(_) => Some("bool"),
-                        Value::Number(n) => Some(
-                            if matches!(n, super::json::Number::Ordinary(v) if !v.to_string().contains(['.','e','E']))
-                            {
-                                "int"
-                            } else {
-                                "float"
-                            },
-                        ),
-                        Value::Null => Some("NoneType"),
-                        _ => None,
-                    };
-                    if let Some(kind) = kind {
-                        return failed_check(
-                            name,
-                            &format!("TypeError: '{kind}' object is not iterable"),
-                        );
+                    if !report["queue"].is_array() {
+                        return failed_check(name, "queue is not understood");
                     }
-                    let waiting = report["queue"].as_array().map_or_else(
-                        || Ok(Vec::new()),
-                        |q| {
-                            q.iter()
-                                .filter(|e| e.is_object())
-                                .map(waiter)
-                                .collect::<Result<Vec<_>, _>>()
-                        },
-                    );
-                    let waiting = match waiting {
-                        Ok(text) => text.join("; "),
-                        Err(error) => return failed_check(name, error),
-                    };
+                    let waiting = report["queue"].as_array().map_or_else(String::new, |q| {
+                        q.iter()
+                            .filter(|e| e.is_object())
+                            .map(waiter)
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    });
                     lines.push(format!(
                         "  board queue ({}): {}",
                         pystr(&report["queued"]),
@@ -677,12 +494,12 @@ pub async fn list(args: &Args) -> i32 {
     let mut leases = vec![];
     let mut truncated = false;
     match board::connect(false) {
-        Err(e) if e.fatal_header => return e.report(),
+        Err(e) if e.fatal_input => return e.report(),
         Err(e) => reason = Some(e.text),
         Ok(client) => {
             url = Some(client.url.clone());
             match client.leases(args.name.as_deref()).await {
-                Err(e) if e.fatal_header => return e.report(),
+                Err(e) if e.fatal_input => return e.report(),
                 Err(e) => reason = Some(e.text),
                 Ok((l, t)) => {
                     leases = l;
@@ -692,13 +509,7 @@ pub async fn list(args: &Args) -> i32 {
         }
     }
     for lease in &mut leases {
-        let name = match lease["name"].utf8() {
-            Ok(name) => name,
-            Err(error) => {
-                super::say(&error);
-                return 1;
-            }
-        };
+        let name = lease["name"].as_str().expect("validated UTF-8 name");
         lease["local_lock"] = local
             .get(&lock::file_name(name))
             .cloned()
@@ -719,15 +530,7 @@ pub async fn list(args: &Args) -> i32 {
         for lease in &leases {
             let name = clean(&lease["name"], 120);
             let expected = if lease["holder"].is_object() {
-                match expected(&lease["expected_end"], now(), lease["stale"] == true) {
-                    Ok(text) => text,
-                    Err(error) => {
-                        // Python raises outside list's board error boundary.
-                        // Retain its terminal error; the full traceback remains unmatched.
-                        super::say(error);
-                        return 1;
-                    }
-                }
+                expected(&lease["expected_end"], now(), lease["stale"] == true)
             } else {
                 String::new()
             };
@@ -743,20 +546,14 @@ pub async fn list(args: &Args) -> i32 {
             let queue: Vec<_> = lease["queue"]
                 .as_array()
                 .map_or_else(Vec::new, |q| q.iter().filter(|e| e.is_object()).collect());
-            let queued = if lease["queued"].is_integer() {
+            let queued = if integer(&lease["queued"]) {
                 lease["queued"].clone()
             } else {
                 json!(queue.len() as u64)
             };
             if truth(&queued) {
                 let queued = pystr(&queued);
-                let waiting = match queue.into_iter().map(waiter).collect::<Result<Vec<_>, _>>() {
-                    Ok(text) => text.join("; "),
-                    Err(error) => {
-                        super::say(error);
-                        return 1;
-                    }
-                };
+                let waiting = queue.into_iter().map(waiter).collect::<Vec<_>>().join("; ");
                 lines.push(if waiting.is_empty() {
                     format!("  queue ({queued})")
                 } else {
@@ -806,6 +603,15 @@ pub async fn list(args: &Args) -> i32 {
 }
 
 #[cfg(test)]
+fn clock_in_zone<Tz: TimeZone>(
+    stamp: f64,
+    zone: &Tz,
+    today: chrono::NaiveDate,
+) -> Result<String, &'static str> {
+    Ok(clock_text_in_zone(stamp, zone, today))
+}
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn timestamp_clock_formats_injected_local_zone_and_today() {
@@ -836,31 +642,22 @@ mod tests {
     }
 
     #[test]
-    fn holder_iso_clock_matches_cpython_311_grammar_grid() {
-        // Expectations captured with datetime.fromisoformat, including its
-        // week-date separator disambiguation and rejected lexical forms.
-        let grid = super::super::json::from_str(include_str!(
-            "../../../tests/fixtures/lease_iso_clock_cpython311.json"
-        ))
-        .unwrap();
-        let failures: Vec<_> = grid["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|case| {
-                let super::super::json::Value::String(input) = &case["input"] else {
-                    panic!("expected string input");
-                };
-                let expected = case["clock"].as_str();
-                let actual = super::iso_clock(input);
-                (actual.as_deref() != expected).then(|| {
-                    format!(
-                        "{}: expected {expected:?}, got {actual:?}",
-                        case["input"].python(false)
-                    )
-                })
-            })
-            .collect();
-        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    fn holder_clock_accepts_only_the_suite_writer_shape() {
+        for input in ["2026-10-05T11:12:13+01:00", "2026-10-05T11:12:13-00:00:30"] {
+            assert_eq!(
+                super::iso_clock(&input.to_owned()).as_deref(),
+                Some("11:12")
+            );
+        }
+        for input in [
+            "2026-W41-1",
+            "20261005",
+            "2026-10-05T11",
+            "2026-10-05T11:12:13Z",
+            "2026-02-30T11:12:13+00:00",
+            "2026-10-05T11:12:13+00:60",
+        ] {
+            assert_eq!(super::iso_clock(&input.to_owned()), None);
+        }
     }
 }

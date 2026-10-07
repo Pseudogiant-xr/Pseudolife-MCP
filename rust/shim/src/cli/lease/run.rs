@@ -11,10 +11,14 @@ use tokio::{
 };
 
 enum RunError {
-    ForbiddenHeader(String),
+    RefusedInput(String),
     TimedOut,
     Lock(String),
     CannotRun(i32, String),
+}
+enum BoardWaitError {
+    Failure(board::Failure),
+    TimedOut,
 }
 struct Stops {
     #[cfg(unix)]
@@ -84,7 +88,7 @@ async fn wait_board(
     board: &Board,
     args: &Args,
     deadline: Option<Deadline>,
-) -> Result<(), board::Failure> {
+) -> Result<(), BoardWaitError> {
     let project = view::printable(&std::env::var("PSEUDOLIFE_AGENT_PROJECT").unwrap_or_default());
     let mut failing = None;
     let mut notice = Instant::now();
@@ -101,43 +105,31 @@ async fn wait_board(
                     return Ok(());
                 }
                 if Instant::now() >= notice {
-                    say(
-                        &view::queued_notice(args.name.as_deref().unwrap_or(""), &reply).map_err(
-                            |_| board::Failure {
-                                text: "the board failed unexpectedly (OverflowError)".into(),
-                                transient: false,
-                                code: None,
-                                fatal_header: false,
-                            },
-                        )?,
-                    );
+                    say(&view::queued_notice(
+                        args.name.as_deref().unwrap_or(""),
+                        &reply,
+                    ));
                     notice = Instant::now() + Duration::from_secs(60);
                 }
             }
-            Err(e) if !e.transient => return Err(e),
+            Err(e) if !e.transient => return Err(BoardWaitError::Failure(e)),
             Err(e) => {
                 let start = *failing.get_or_insert_with(Instant::now);
                 if start.elapsed() >= Duration::from_secs(120) {
-                    return Err(board::Failure {
+                    return Err(BoardWaitError::Failure(board::Failure {
                         text: format!(
                             "the board kept failing for {} ({})",
                             view::span(start.elapsed().as_secs_f64()),
                             e.text
                         ),
                         transient: false,
-                        code: None,
-                        fatal_header: false,
-                    });
+                        fatal_input: false,
+                    }));
                 }
             }
         }
         if pause(5, deadline).await.is_err() {
-            return Err(board::Failure {
-                text: String::new(),
-                transient: true,
-                code: Some("wait_timeout".into()),
-                fatal_header: false,
-            });
+            return Err(BoardWaitError::TimedOut);
         }
     }
 }
@@ -236,10 +228,20 @@ fn exit_status(status: std::process::ExitStatus) -> i32 {
     }
 }
 #[cfg(unix)]
-#[allow(unsafe_code)]
 fn send_signal(child: &mut Child, signal: i32) {
-    if let Some(pid) = child.id() {
-        let _ = unsafe { libc::kill(pid as i32, signal) };
+    use rustix::process::{Pid, Signal, kill_process};
+    let signal = match signal {
+        1 => Signal::HUP,
+        2 => Signal::INT,
+        15 => Signal::TERM,
+        _ => return,
+    };
+    if let Some(pid) = child
+        .id()
+        .and_then(|pid| i32::try_from(pid).ok())
+        .and_then(Pid::from_raw)
+    {
+        let _ = kill_process(pid, signal);
     }
 }
 #[cfg(windows)]
@@ -285,17 +287,19 @@ async fn work(
     });
     let mut skipped = None;
     match board::connect(args.no_board) {
-        Err(e) if e.fatal_header => return Err(RunError::ForbiddenHeader(e.text)),
+        Err(e) if e.fatal_input => return Err(RunError::RefusedInput(e.text)),
         Err(reason) => skipped = Some(reason.text),
         Ok(client) => {
             *board = Some(client.clone());
             match wait_board(&client, &args, deadline).await {
                 Ok(()) => *renewer = Some(Renewer::start(client, args.clone())),
-                Err(e) if e.fatal_header => return Err(RunError::ForbiddenHeader(e.text)),
-                Err(e) if e.code.as_deref() == Some("wait_timeout") => {
+                Err(BoardWaitError::Failure(e)) if e.fatal_input => {
+                    return Err(RunError::RefusedInput(e.text));
+                }
+                Err(BoardWaitError::TimedOut) => {
                     return Err(RunError::TimedOut);
                 }
-                Err(e) => skipped = Some(e.text),
+                Err(BoardWaitError::Failure(e)) => skipped = Some(e.text),
             }
         }
     }
@@ -336,11 +340,10 @@ pub async fn run(args: Args) -> i32 {
         ));
         return 64;
     }
-    // The enclosing-run guard precedes Python's clock conversion. Overflow
-    // still fails before connecting, acquiring a lock or starting a child.
-    // Interpreter traceback presentation is explicitly deferred.
+    // Invalid timeout bounds fail after the enclosing-run guard and before
+    // connecting, acquiring a lock or starting a child.
     if args.timeout.is_some_and(|seconds| !seconds.is_finite()) {
-        say("OverflowError: int too large to convert to float");
+        say("lease: timeout is out of range");
         return 1;
     }
     let mut stops = match Stops::new() {
@@ -362,7 +365,7 @@ pub async fn run(args: Args) -> i32 {
         }
     };
     let code = match result {
-        Err(RunError::ForbiddenHeader(message)) => {
+        Err(RunError::RefusedInput(message)) => {
             say(&format!("lease: {message}"));
             return 1;
         }

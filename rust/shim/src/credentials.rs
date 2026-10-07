@@ -319,7 +319,7 @@ fn open_failure(error: io::Error) -> CredentialError {
         "configured credential file is unavailable"
     })
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn open_token(path: &Path) -> Result<CredentialSnapshot, CredentialError> {
     open_token_checked(path, |_| Ok(()))
 }
@@ -372,7 +372,7 @@ fn open_token_checked(
     };
     snapshot_file_checked(file, check)
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn snapshot_file(file: File) -> Result<CredentialSnapshot, CredentialError> {
     snapshot_file_checked(file, |_| Ok(()))
 }

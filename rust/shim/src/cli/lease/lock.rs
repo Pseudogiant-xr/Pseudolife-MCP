@@ -261,3 +261,7 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "lock_release_tests.rs"]
+mod release_tests;
