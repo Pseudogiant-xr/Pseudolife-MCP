@@ -274,6 +274,44 @@ and label candidate substitutions explicitly.
 
 ## Types and serialization
 
+The SQL-first maintainer sent candidate is pinned separately to Python
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75`. For this leaf, status, the four
+application headers and body bytes are exact: no object sorting, rounding,
+Unicode normalization, timestamp substitution or semantic JSON comparison.
+Database-observed JSONB member order is retained. SQL orders by descending
+`created_at`, then ascending `message_id`; expired/read/acknowledged/repudiated
+messages are not filtered. UUID and datetime `default=str` cases are named
+supplemental serializer producers, not claims about the current SQL columns.
+
+The maintainer approved `config-yaml-typed`: use the maintained pure Rust
+`yaml-rust2 = 0.13.0`, without its encoding feature, instead of the deprecated
+serde_yaml stack or a bespoke YAML parser. Its presentation events retain
+quoting and tags before the safe loader constructs values. The audited fields
+are `coordination.enabled`, `coordination.allowed_principals`, and
+`coordination.maintainer.rp_id/origin`; missing fields/files use AppConfig's
+defaults. Explicit tags are outside this candidate's configuration domain.
+Duplicate keys, wrong audited field/section types, multiple documents and
+unquoted YAML 1.1/1.2 disagreements fail startup with `config-yaml-typed`.
+The disagreement corpus includes yes/no/on/off, leading-zero/0o/0b integers,
+base-60 numbers, underscored numbers, differing exponent forms and timestamps;
+quoted equivalents remain strings. Plain integer spellings that the YAML
+loader would turn into strings are explicitly refused, so they cannot satisfy
+an audited string field. Unused ordinary sections retain the
+Python loader's ignored-field behavior. The first disposable smoke cell used
+JSON-as-YAML and is not evidence for this later YAML reader. The
+[upstream parser API](https://docs.rs/yaml-rust2/0.13.0/yaml_rust2/parser/index.html)
+documents the event/style information this policy uses.
+
+For eligible original assertions, `evals/rust_port/pytest_plugin.py` passes
+the unchanged ASGI request through `sent_http.py` to a real owned native HTTP
+process on a generated disposable bank. It never replaces a Python service
+method with Rust. Direct Python internal/Recorder assertions remain oracle
+tests. Additional paired HTTP/SQL tests own equivalent generated banks
+sequentially and check unchanged durable state after each arm. No production
+shadow is enabled: Python remains the serving implementation until the full
+comparison, snapshot/export, TLS and rollback gates in the accepted decision
+brief pass. Embedding-ranked reads remain deferred with no numerical claim.
+
 | Python behaviour | Rust contract |
 |---|---|
 | Absent key, explicit `None`, empty string/list/object | Preserve each distinction at the boundary; do not insert defaults during comparison. |
@@ -908,8 +946,9 @@ Only host, port, user, password, dbname, sslmode and sslrootcert are admitted.
 Unknown configured options and unsupported modes refuse by option name with
 exit 1. Diagnostics omit DSNs, credentials, file paths and driver messages.
 
-`disable` sends no SSLRequest; `prefer` accepts plaintext only after an explicit
-`N`; every other mode requires `S` and a successful TLS handshake. Invalid
+`disable` sends no SSLRequest; `prefer` follows the accepted negotiation rule
+below, retaining root checks on its TLS attempt and allowing one fresh plaintext
+retry. Every strict mode requires `S` and a successful TLS handshake. Invalid
 SSLRequest responses refuse before startup/authentication. `prefer` and `require`
 without roots use encryption without CA authentication. An explicit root file,
 or the platform default `root.crt` when no explicit file is selected, enables CA
@@ -962,3 +1001,40 @@ missing-row result creates no audit/time fields. Subsequent mutations require
 the identical clock seam in both arms, all-row/byte comparison and rejecting
 controls. Delegate/designate, container cancellation, ambiguous COMMIT and full
 mode acceptance remain pending; prior transport measurements are historical.
+
+## Maintainer sent JSONB read domain
+
+The native sent leaf uses **bounded-jsonb-depth**: at most 2048 nested JSONB
+containers per proof or wake column. A presentation scan counts only brackets
+outside strings before allocation; exceeding the bound yields the existing
+private 503 class. serde_json's recursion override is paired with pinned
+serde_stacker 0.1.14; a pinned stacker 0.1.25 stack covers decoding, conversion,
+encoding and recursive drop, including error paths. Depth 200 must serve;
+the boundary controls separately report policy outcomes, not exact emulation
+of Python's stack-dependent recursion limit.
+
+**jsonb-no-digit-limit** preserves arbitrary precision integers without a
+4,300-digit read cap. Direct SQL injection above Python's decoder limit is a
+named policy control, not exact response parity. The canonical Python send
+body decoder and board write path are the producer controls; their exceptions,
+admission and rollback must be observed rather than inferred from raw SQL.
+Unchanged ordinary SQL/ordered-ID responses still require exact HTTP bytes.
+
+Typed config uses pinned pure-Rust regex-lite 0.1.9 for the anchored PyYAML
+6.0.3 scalar resolver predicates. yaml-rust2 owns parsing and construction;
+the predicates identify resolver disagreement, not a replacement Python YAML
+loader. Valid digit-prefixed strings remain strings, quoted values retain
+their meaning, and audited allowed-principal names strip, lowercase, deduplicate
+in first-seen order and reject blanks like the Python configuration producer.
+
+### PostgreSQL prefer negotiation
+
+The shared native client retains available-root verification during a TLS
+attempt. In the approved libpq18 domain, `prefer` may then try one fresh
+plaintext connection after failed TLS negotiation or a server startup/auth
+ErrorResponse other than `cannot_connect_now`. This matches libpq's transport
+state, rather than removing CA checks from the TLS attempt. The existing
+connect deadline covers both attempts; strict modes never retry plaintext.
+The named policies `pg-dsn-explicit-tls` and `pg-tls-webpki-hostnames` remain
+explicit, including the SAN-only divergence for verify-full. See PARITY.md
+for pinned upstream source and historical versus candidate proof scope.

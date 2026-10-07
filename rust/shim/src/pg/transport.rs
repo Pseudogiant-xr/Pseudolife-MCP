@@ -5,6 +5,10 @@ use std::{
     future::Future,
     io,
     pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
@@ -16,18 +20,57 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 
 type Secure = <MakeRustlsConnect as MakeTlsConnect<Socket>>::Stream;
 type SecureConnect = <MakeRustlsConnect as MakeTlsConnect<Socket>>::TlsConnect;
+#[derive(Clone)]
 pub(super) struct Negotiator {
     tls: MakeRustlsConnect,
     mode: SslMode,
+    established: Arc<AtomicBool>,
 }
 impl Negotiator {
     pub(super) fn new(tls: MakeRustlsConnect, mode: SslMode) -> Self {
-        Self { tls, mode }
+        Self {
+            tls,
+            mode,
+            established: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    pub(super) fn established(&self) -> bool {
+        self.established.load(Ordering::Acquire)
     }
 }
+
+#[derive(Debug)]
+struct TlsAttemptFailed(io::Error);
+impl std::fmt::Display for TlsAttemptFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PostgreSQL TLS attempt failed")
+    }
+}
+impl std::error::Error for TlsAttemptFailed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+pub(super) fn handshake_failed(error: &tokio_postgres::Error) -> bool {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = cause {
+        if current.is::<TlsAttemptFailed>()
+            || current
+                .downcast_ref::<io::Error>()
+                .and_then(io::Error::get_ref)
+                .is_some_and(|inner| inner.is::<TlsAttemptFailed>())
+        {
+            return true;
+        }
+        cause = current.source();
+    }
+    false
+}
+
 pub(super) struct Connect {
     tls: SecureConnect,
     mode: SslMode,
+    established: Arc<AtomicBool>,
 }
 pub(super) enum Stream {
     Plain(Socket),
@@ -38,12 +81,14 @@ impl MakeTlsConnect<Socket> for Negotiator {
     type TlsConnect = Connect;
     type Error = Infallible;
     fn make_tls_connect(&mut self, hostname: &str) -> Result<Connect, Infallible> {
+        self.established.store(false, Ordering::Release);
         Ok(Connect {
             tls: <MakeRustlsConnect as MakeTlsConnect<Socket>>::make_tls_connect(
                 &mut self.tls,
                 hostname,
             )?,
             mode: self.mode,
+            established: self.established.clone(),
         })
     }
 }
@@ -55,12 +100,15 @@ impl TlsConnect<Socket> for Connect {
         Box::pin(async move {
             socket.write_all(&[0, 0, 0, 8, 4, 210, 22, 47]).await?;
             match socket.read_u8().await? {
-                b'S' => self
-                    .tls
-                    .connect(socket)
-                    .await
-                    .map(Box::new)
-                    .map(Stream::Secure),
+                b'S' => {
+                    let stream = self
+                        .tls
+                        .connect(socket)
+                        .await
+                        .map_err(|error| io::Error::other(TlsAttemptFailed(error)))?;
+                    self.established.store(true, Ordering::Release);
+                    Ok(Stream::Secure(Box::new(stream)))
+                }
                 b'N' if self.mode == SslMode::Prefer => Ok(Stream::Plain(socket)),
                 b'N' => Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,

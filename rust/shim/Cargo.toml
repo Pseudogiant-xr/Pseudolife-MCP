@@ -39,6 +39,14 @@ rustls.workspace = true
 rustls-pemfile.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+yaml-rust2.workspace = true
+regex-lite.workspace = true
+serde_stacker.workspace = true
+stacker.workspace = true
 
 [dev-dependencies]
 tokio-rustls.workspace = true

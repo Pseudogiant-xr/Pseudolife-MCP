@@ -26,6 +26,127 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
+## Phase 4 integration of accepted PostgreSQL repair
+
+Phase 4 merges accepted master
+`bde0cf327dff2cb16736d342938fb9e0c19f7569` through ordinary additive history.
+The shared PostgreSQL module is identical to that accepted source, including
+the libpq18 `prefer` negotiation repair; Phase 4 carries no separate repair.
+Strict TLS modes, explicit DSN/ambient refusal and SAN-only hostname policies
+remain unchanged. The local hold helpers retain Phase 4 visibility and board
+failure codes while receiving master's inherited-SIGINT handling.
+
+The `19f14fa0` hold/break and `90fd0082` delegate/designate receipts remain
+historical. In particular, `90fd0082` inherited the `0341ad38` wrong-CA `prefer`
+defect; its durable operator cells used `sslmode=disable`. They do not validate
+this merged client or imply TLS acceptance. New-image execution, every control
+touching the PostgreSQL client, independent review and hosted acceptance remain
+unrun or pending. The `fixed-clock-replay`, `hold-mirror-best-effort` and exact
+minted-field/name-suffix rules below remain in force. No parity row is promoted.
+
+## Maintainer sent native candidate
+
+The SQL-first endpoint oracle is `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+The bounded native `serve` entry point owns the listener, request admission,
+query limits, initialized-bank SQL projection and exact response bytes for
+`GET /api/maintainer/sent`. It uses the committed shared PostgreSQL module
+from `0341ad38e04df356360b1d3cbd4b51b5faefa5b4`, with explicit DSN/TLS
+and the named `pg-dsn-explicit-tls` and SAN-only
+`pg-tls-webpki-hostnames` policies; no Python implementation is called.
+
+The transport oracle is libpq 18.6 (observed version 180006), upstream
+[`REL_18_6`, commit `724edf9bde9d356724ad384a2e196edc3c9f80f7`](https://github.com/postgres/postgres/tree/724edf9bde9d356724ad384a2e196edc3c9f80f7).
+Available roots trigger peer verification in
+[`fe-secure-openssl.c:930,976,1352–1353`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-secure-openssl.c#L1352).
+For `prefer`, failed TLS retries a fresh plaintext connection
+([`fe-connect.c:3856–3862`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-connect.c#L3856));
+a server startup/authentication ErrorResponse also selects the next encryption
+method except `cannot_connect_now`
+([`4134–4162`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-connect.c#L4134)).
+Native keeps available-root validation and one `prefer` retry within the
+existing connect deadline; `require`, `verify-ca` and `verify-full` never
+retry plaintext. Invalid SSLRequest replies and pre-connect configuration
+refusals do not retry. `allow` remains explicitly deferred. Real owned PG
+controls assert both whole HTTP bytes and `pg_stat_ssl`; protocol unit controls
+are not TLS acceptance evidence.
+
+Historical frozen `55f28613` Linux controls served exact HTTP/SQL bytes over
+DNS/IP SAN TLS and retained named legacy-name refusals. Its wrong-CA `prefer`
+control exposed Python HTTP200 over plaintext versus native HTTP503. That
+receipt does not validate the later retry repair, which still needs its own
+exact source/image proof and independent review. Broader recovery/concurrency,
+graceful shutdown, snapshot/export and cutover acceptance remain deferred.
+Its first Windows disposable cell matched a nonempty SQL result against the
+Python store plus JSON contract, and verified process-tree/database cleanup.
+That cell used JSON-as-YAML and does not establish whole HTTP oracle parity,
+YAML parity, the later candidate source, Linux execution or performance.
+Subsequent Windows candidate controls executed the whole Python ASGI/SQL
+response against real native HTTP on separate sequential disposable banks:
+33 additive controls passed, including exact bytes, ordered IDs, SQL proof
+failures, admission, installer YAML and named startup refusals. The nine-case
+native serializer corpus and one eligible immutable tokenless sent GET node
+also passed. These are bounded local checks; independent review, hosted checks,
+snapshot refresh convergence and graceful shutdown remain pending.
+
+Source integration of accepted master `59a8624e` retains its lease/version
+admission and the sent candidate through an ordinary merge. The earlier local
+Windows controls belong to `6a582f7f` and do not validate this combined source.
+The sent/PG implementation and lock remain unchanged; the combined entrypoint
+and inherited dependency features require a fresh bounded Windows gate before
+acceptance. Snapshot recovery/concurrency, graceful shutdown and real TLS
+integration remain pending.
+
+Pinned Python `serve` parses no trailing flags: it calls `run_daemon()` and
+reads `PSEUDOLIFE_MCP_HOST`, `PORT`, `DATABASE_URL`, `CONFIG`, `TOKEN`, `TOKENS`
+and `TRUST_BIND` using the `PSEUDOLIFE_MCP_` prefix. The candidate follows this
+entry point; no new Python mode or command-line flags are introduced.
+All other paths, including `/health`, return HTTP 501 with the same body:
+`{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}`.
+The candidate retains malformed/unsupported explicit DSNs as read-unavailable
+configuration: it starts the listener and reaches private 503 only after the
+usual admission gates, with `pg-dsn-explicit-tls` alone on stderr. It does not
+change Python startup policy. Actual pinned daemon measurements used Python
+3.11.17 and four synthetic DSNs (malformed, invalid port, unsupported option,
+`allow` with an unreachable loopback endpoint); all reached the admitted 503.
+The `python:3.12-slim` daemon image was unavailable in the existing cache, so
+that runtime remains unmeasured. Unsupported typed YAML still refuses startup.
+
+Only the sent GET implements application work. The owned sent path retains
+pre-dispatch method/body refusals: an authenticated valid or bodyless POST
+returns the pinned known-route `400 invalid_request`; this implements no POST
+operation and does not imply another route. Nonfinite/invalid-UTF8 POST bodies
+remain outside the tested GET contract.
+Affirmative readiness is a flushed stdout JSON notice, verified against the
+fixture's nonce, listener port and owned process. Fixture shutdown uses the
+existing process-tree owner; graceful signal shutdown remains separately
+unverified. No installation, production shadow or cutover is enabled.
+
+All boundaries in this candidate remain deferred in the validated register.
+
+| Boundary | Candidate coverage | Status | Notes |
+|---|---|---|---|
+| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | deferred | candidate; review/hosted checks pending |
+| Supplemental serialization | Five production-codec cases plus four test-only UUID/timestamp/nonfinite cases; no sent SQL reachability is claimed for those fixtures | deferred | candidate; historical nine-case corpus retained; successor checks required |
+| Query limit | `ascii-limit`: ASCII decimal digits, optional sign and ASCII whitespace, default 50 and clamp 1..200; substitution for pinned `web/routes.py:31` Python `int()` | deferred | candidate; underscores/Unicode digits/Unicode whitespace fall back to 50; no CPython digit cap emulation |
+| Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | deferred | candidate; approved substitution; bounded Windows controls passed |
+| JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | deferred | candidate; named read domain; depth 200 exact, boundary policy controls separate |
+| JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | deferred | candidate; named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
+| Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | deferred | candidate; one mapped node passed locally; no native claim for internal nodes |
+| Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred | |
+| Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred | |
+
+Actual JSONB object keys remain ordinary application data, including
+`$serde_json::private::Number`. The decoder reversibly prefixes object keys
+before serde validation and removes exactly that prefix before projection;
+values and database-observed member order remain unchanged. This avoids serde's
+internal arbitrary-precision number tag without normalizing response bytes.
+The one shared serde feature addition relative to the accepted base is
+`unbounded_depth`; only the sent JSONB decoder disables the recursion limit,
+inside the named 2048-container bound and stack protection. The unused
+`tokio-postgres/with-serde_json-1` feature is removed so row decoding cannot
+bypass this decoder. Canonical send admission and paired whole HTTP
+controls cover numeric-string, text, numeric-value and nested object cases.
+
 ## Parity rows
 
 BASE and RULES record the completed phase 0 instruments and measurements; historical evidence from PR #540 retains its original pin. Phase 0b evidence review and all ten CI checks passed at 9a62ed02, as recorded in PORT-STATE.md; subsequent PR updates require fresh review and current-merge-ref CI. Broader production behavior rows remain deferred; named retirements and scoped substitutions are explicit. The SDK preflight retirement is authorized by the 2026-10-05 phase 2 decision; other unfinished behavior remains deferred. `P` means real process/wire eligible nodes; `I` means Python internals requiring additive wire cases or Rust unit equivalents; `A` means artifact/static contract. Paths below are repository-relative.
@@ -470,6 +591,8 @@ seed bytes; other cases keep the named parity policies and exact comparison.
 Actual Python responses and raw differences remain in each capture. Candidate
 controls check the declared native contract. Final both-host candidate execution
 remains required; a historical replay cannot certify these substitutions.
+
+The unit-layer substitute for `tests/test_wait_mail_cli.py:361-379::test_the_body_is_out_before_the_marker_moves` is `cli::wait_mail::tests::write_then_mark_interrupted_marker_keeps_flushed_body_and_absent_seen`: a recording writer verifies the complete stdout body is flushed and the writer released before interruption at the marker step, leaving `.seen` absent. Companion `write_then_mark` units exercise the actual marker rename after successful flush and prohibit marking on write or flush failure; this contract adds no fsync requirement.
 
 ## Test-file buckets
 
@@ -1009,6 +1132,26 @@ Implementation after the version gate:
 
 Static preparation checks do not run a daemon, child command or native binary.
 Existing tests and the existing eval harness remain byte-identical.
+
+## Lease inherited SIGINT producer contract
+
+POSIX background commands started by a non-interactive shell, including
+`ops/remote-suite.sh` and commands launched under `nohup`, can inherit
+`SIGINT = SIG_IGN`. That disposition is an admitted producer input.
+The pinned CPython 3.11.17 oracle's
+[`signal_get_set_handlers`](https://github.com/python/cpython/blob/v3.11.17/Modules/signalmodule.c)
+reads the inherited dispositions and installs `default_int_handler` only
+when SIGINT was `SIG_DFL`; an inherited `SIG_IGN` stays ignored. Python's
+`lease_cli.py::_install_stop_handlers` changes only SIGHUP and SIGTERM.
+
+The native substitution for Python startup and `KeyboardInterrupt` uses an
+OS disposition query before Tokio SIGINT registration: an inherited ignore
+keeps SIGINT ignored, while a normal disposition retains the existing
+interrupt cleanup and exit 130. SIGHUP and SIGTERM retain their existing
+handlers. `shim/tests/lease_sigint.rs` supplies separate actual-binary
+ignored and default-disposition controls with child and lock cleanup checks.
+This source change supplies no acceptance receipt or parity-row promotion;
+merged-runtime recapture of both A21 dispositions remains required.
 
 ## Lease timestamp display substitution
 

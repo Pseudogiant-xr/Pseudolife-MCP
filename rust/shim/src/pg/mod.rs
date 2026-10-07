@@ -74,7 +74,7 @@ fn connection_error(error: tokio_postgres::Error) -> Error {
     Error::Connection
 }
 
-/// One dedicated connection. No pooling, schema changes or automatic reconnect.
+/// One dedicated connection. No pooling, schema changes or post-startup reconnect.
 /// A borrowed transaction pins this client; its caller must observe commit.
 pub struct Session {
     client: Option<Client>,
@@ -88,11 +88,32 @@ impl Session {
     /// changing process-global environment or touching the operator's files.
     pub async fn open_in(dsn: &Dsn, environment: &TlsEnvironment) -> Result<Self, Error> {
         let tls = transport::Negotiator::new(tls::connector(dsn, environment)?, dsn.mode);
-        let (client, connection) =
-            tokio::time::timeout(Duration::from_secs(10), dsn.config().connect(tls))
-                .await
-                .map_err(|_| Error::Connection)?
-                .map_err(connection_error)?;
+        // libpq18 prefer tries plaintext once after a failed TLS attempt. Keep
+        // both attempts inside the existing connect deadline; never retry a
+        // configuration refusal, invalid SSLRequest reply or session setup.
+        let connect = async {
+            match dsn.config().connect(tls.clone()).await {
+                Err(error)
+                    if dsn.mode == SslMode::Prefer
+                        && (transport::handshake_failed(&error)
+                            || (tls.established()
+                                && error.as_db_error().is_some_and(|error| {
+                                    error.code()
+                                        != &tokio_postgres::error::SqlState::CANNOT_CONNECT_NOW
+                                }))) =>
+                {
+                    let mut plaintext = dsn.config().clone();
+                    plaintext.ssl_mode(tokio_postgres::config::SslMode::Disable);
+                    plaintext.ssl_negotiation(tokio_postgres::config::SslNegotiation::Postgres);
+                    plaintext.connect(tls).await
+                }
+                result => result,
+            }
+        };
+        let (client, connection) = tokio::time::timeout(Duration::from_secs(10), connect)
+            .await
+            .map_err(|_| Error::Connection)?
+            .map_err(connection_error)?;
         let session = Self {
             client: Some(client),
             driver: tokio::spawn(connection),
