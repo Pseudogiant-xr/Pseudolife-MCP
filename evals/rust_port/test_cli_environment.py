@@ -1,5 +1,6 @@
 """The reported environment remains bound to the admitted CLI launch."""
 import base64
+from contextlib import contextmanager
 import json
 import sys
 
@@ -14,7 +15,7 @@ def case():
             "pre_files_b64": {}, "normalizations": []}
 
 
-@pytest.mark.parametrize("boundary", ["capture", "poststate"])
+@pytest.mark.parametrize("boundary", ["capture", "context-exit", "poststate"])
 @pytest.mark.parametrize("mutation", ["add", "remove", "change", "owned-url", "no-spawn"])
 def test_environment_mutations_refuse_after_launch(tmp_path, monkeypatch, boundary, mutation):
     commands = {"oracle": [sys.executable]}
@@ -39,6 +40,12 @@ def test_environment_mutations_refuse_after_launch(tmp_path, monkeypatch, bounda
         else:
             env["PSEUDOLIFE_MCP_NO_SPAWN"] = "0"
 
+    @contextmanager
+    def scope(spec, home):
+        yield
+        if boundary == "context-exit":
+            mutate()
+
     def capture(*args, **kwargs):
         launches.append(dict(kwargs["env"]))
         if boundary == "capture":
@@ -53,9 +60,10 @@ def test_environment_mutations_refuse_after_launch(tmp_path, monkeypatch, bounda
 
     monkeypatch.setattr(cli_process, "run_cli", capture)
     monkeypatch.setattr(cli_process, "snapshot", collect)
-    with pytest.raises(ValueError, match="effective environment changed"):
+    with pytest.raises(ValueError, match="effective environment changed|owned daemon"):
         cli_process.observe(case(), commands["oracle"], commands, root=tmp_path,
-                            home=tmp_path / "home", url="http://127.0.0.1:49152", prepare=prepare)
+                            home=tmp_path / "home", url="http://127.0.0.1:49152",
+                            prepare=prepare, process_scope=scope)
     assert len(launches) == 1
     assert launches[0]["PSEUDOLIFE_MCP_DAEMON_URL"] == "http://127.0.0.1:49152"
     assert launches[0]["PSEUDOLIFE_MCP_NO_SPAWN"] == "1"

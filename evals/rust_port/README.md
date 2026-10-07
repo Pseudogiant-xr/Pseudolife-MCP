@@ -384,6 +384,33 @@ Linux collection failure remains private and is excluded from acceptance.
 
 ## Combined version capture scope
 
+The additive `evals.rust_port.lease_headers` lane runs the public candidate
+against a disposable loopback HTTP peer and retains genuine pinned Python
+captures unchanged before policy comparison. The approved
+`http-forbidden-input-refused` substitution requires exact exit 1, empty
+stdout, field-only stderr and unchanged pre-state, without lease/release
+requests or child launch. The corpus retains the eight DEL/CR/LF/NUL instance
+cases, all C0 bytes and folded values in the three approved fields,
+bearer-file inputs, and check/list propagation.
+
+The approved `http-reply-not-understood` policy takes priority for malformed
+surrogate registration replies, including mixed malformed/forbidden fields:
+exit 1, empty stdout, `lease: HTTP_REPLY_NOT_UNDERSTOOD` plus the platform
+newline, unchanged pre-state and only the registration request needed to
+receive the reply. Successfully parsed forbidden fields still take the
+header refusal before incomplete-pair fallback. Selected ordinary non-ASCII
+registration cases retain local fallback under `native-lease-diagnostics`,
+substituting only the named registration-header reason bytes; every unaffected
+stream, exit and state field remains exact. Unaffected ordinary bearer-file
+cases compare the full raw response exactly. See the
+[producer admission contract](../../rust/PARITY.md#lease-producer-admission-and-native-refusals).
+
+Output/file/request mutation controls accompany every substituted response.
+The Parity job runs this separate lane without a database or daemon. Private
+credential fixtures use OS-native temporary storage; existing corpus
+normalizations and Python source are unchanged. This scoped lane does not
+promote CLI-LEASE or establish its deferred action, timing or lifecycle gates.
+
 Frozen `5220b5ee` Windows/Linux CLI cells cover 28 exact byte/state cases and
 112 rejected mutations per OS. Thirteen version cases include a Python-
 shaped marker and native image with canonical console missing, plus a valid

@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+pub mod lease;
 mod version;
 pub mod wait_mail;
 
@@ -29,7 +30,6 @@ const DEFERRED_MODES: &[&str] = &[
     "import",
     "episode-start",
     "episode-end",
-    "lease",
     "maintainer",
 ];
 

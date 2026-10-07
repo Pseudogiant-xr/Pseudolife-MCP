@@ -1,0 +1,12 @@
+usage: pseudolife-mcp lease list [-h] [--json] [NAME]
+
+Show the board's leases (holder, purpose, age, expected end, queue) beside the
+local lock files, each probed held or free, and the test suite's own lock.
+Without a board, local state only.
+
+positional arguments:
+  NAME        show only this lease
+
+options:
+  -h, --help  show this help message and exit
+  --json      print one JSON report

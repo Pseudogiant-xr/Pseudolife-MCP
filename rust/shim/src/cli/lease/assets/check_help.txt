@@ -1,0 +1,14 @@
+usage: pseudolife-mcp lease check [-h] [--json] NAME
+
+The launch gate: print the lease's holder (OS lock and board) and its expected
+end, and exit 0 when it is free, 1 when it is held, or 70 when the check
+itself failed. The local lock decides wherever its file exists; a board holder
+beside a free lock is shown as stale. For full-suite the test suite's own lock
+is probed, with its holder record.
+
+positional arguments:
+  NAME        the lease to check
+
+options:
+  -h, --help  show this help message and exit
+  --json      print one JSON report

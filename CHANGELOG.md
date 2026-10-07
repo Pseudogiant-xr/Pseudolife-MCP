@@ -19,6 +19,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   leave mail unshown with exit 2. Temporary-file collision retries are bounded.
   The mode remains deferred while its reduced candidate is validated.
 
+### Added (2026-10-07 — native lease candidate and help drift guards)
+
+- Add a scoped native Rust `lease check`, `lease list` and `lease run`
+  candidate, shared isolated lease test homes and pinned Python help/usage
+  drift guards. The candidate remains uninstalled and
+  [CLI-LEASE stays deferred](rust/PORT-STATE.md#lease-shared-fixture-and-help-guard-follow-up).
+
+### Fixed (2026-10-07 — clean up refused native lease replies)
+
+- The experimental native `lease run` candidate makes a best-effort board
+  release after a malformed grant or queue reply, retaining exit 1 and empty
+  stdout instead of leaving its board record until expiry.
+
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 
 - The experimental native `version` command reports an installed runtime only

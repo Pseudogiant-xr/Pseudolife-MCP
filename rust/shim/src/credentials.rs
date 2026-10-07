@@ -139,13 +139,20 @@ impl CredentialProvider {
         self.0.path.as_deref()
     }
     pub fn snapshot(&self) -> Result<CredentialSnapshot, CredentialError> {
+        self.snapshot_checked(|_| Ok(()))
+    }
+    /// Additional lease admission runs after private-file checks, before decoding.
+    pub(crate) fn snapshot_checked(
+        &self,
+        check: fn(&[u8]) -> Result<(), CredentialError>,
+    ) -> Result<CredentialSnapshot, CredentialError> {
         let _guard = self
             .0
             .lock
             .lock()
             .map_err(|_| CredentialError("configured credential file is unavailable"))?;
         match self.path() {
-            Some(path) => open_token(path),
+            Some(path) => open_token_checked(path, check),
             None => Ok(CredentialSnapshot {
                 token: self.0.token.clone(),
                 generation: self.0.generation.clone(),
@@ -312,7 +319,14 @@ fn open_failure(error: io::Error) -> CredentialError {
         "configured credential file is unavailable"
     })
 }
+#[cfg(all(test, unix))]
 fn open_token(path: &Path) -> Result<CredentialSnapshot, CredentialError> {
+    open_token_checked(path, |_| Ok(()))
+}
+fn open_token_checked(
+    path: &Path,
+    check: fn(&[u8]) -> Result<(), CredentialError>,
+) -> Result<CredentialSnapshot, CredentialError> {
     reject_ancestor_redirects(path)?;
     if inspect_redirect(path).map_err(open_failure)? {
         return Err(CredentialError(
@@ -356,9 +370,16 @@ fn open_token(path: &Path) -> Result<CredentialSnapshot, CredentialError> {
             Err(error) => return Err(open_failure(error)),
         }
     };
-    snapshot_file(file)
+    snapshot_file_checked(file, check)
 }
+#[cfg(all(test, unix))]
 fn snapshot_file(file: File) -> Result<CredentialSnapshot, CredentialError> {
+    snapshot_file_checked(file, |_| Ok(()))
+}
+fn snapshot_file_checked(
+    file: File,
+    check: fn(&[u8]) -> Result<(), CredentialError>,
+) -> Result<CredentialSnapshot, CredentialError> {
     let info = file.metadata().map_err(open_failure)?;
     if !info.is_file() || is_redirect(&info) {
         return Err(CredentialError(
@@ -392,6 +413,7 @@ fn snapshot_file(file: File) -> Result<CredentialSnapshot, CredentialError> {
     file.take((MAX_TOKEN_BYTES + 1) as u64)
         .read_to_end(&mut data)
         .map_err(open_failure)?;
+    check(&data)?;
     let token = decode_token(&data)?;
     Ok(CredentialSnapshot {
         token: Some(token),
