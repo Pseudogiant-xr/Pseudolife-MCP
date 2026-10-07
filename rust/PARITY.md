@@ -1262,7 +1262,19 @@ existing bank marker without importing the host's pg0 package.
 
 The named **`native-pg-diagnostics`** rule replaces generic psycopg class names
 with safe native PG diagnostics, retaining exit 1, empty stdout and stderr-only
-placement. Coordination refusal codes remain exact. Failure controls must
+placement. This substitution replaces only the parenthesized exception class
+at `pseudolife_memory/lease_cli.py:1639` (`_operator`); it does not add a
+`lease: ` prefix. A Windows Python 3.11.9 / psycopg 3.3.4 whole-command
+`lease designate resource fixture-agent`, with explicit DSN `not-a-dsn`,
+observed `ProgrammingError` before connection setup. Its stdout is empty,
+exit is 1, and stderr is the designate deprecation line followed by
+`cannot open the bank (ProgrammingError)`. Native DSN admission must use
+`cannot open the bank (PostgreSQL DSN is not understood)`; the port-owned
+control asserts the same streams, exit, ordering and unchanged files,
+without a socket or listener. `designate` retains its deprecation
+before the refusal. Coordination refusal codes and their surrounding bytes
+remain exact. The separate named embedded refusal retains its specified
+diagnostic. Failure controls must
 compare every durable row, raw stream and local file; no row or time field is
 dropped. Transport loss around COMMIT needs an actual outcome/rollback control
 before acceptance; preparation is not a guarantee about an unobserved commit.
@@ -1295,9 +1307,11 @@ listener and output controls have not run; neither compilation nor a whole
 delegate command has run. Mutation proof requires `fixed-clock-replay` and
 exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
 images retain their original source identities and do not validate this
-changed runtime. The former port-owned operator deferral assertion remains
-unchanged pending its explicit Phase 4 update; original Python and tests are
-unchanged. No lease mode is promoted.
+changed runtime. The port-owned operator deferral assertion is replaced by
+the approved explicit malformed-DSN refusal control, retaining exact exit,
+streams, deprecation ordering and unchanged local files; this control has not
+run on the successor. Original Python and tests retain accepted master bytes.
+No lease mode is promoted.
 
 ## Episode merge-forward validation boundary
 

@@ -147,14 +147,14 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
         }
         Ok(resolution::Target::Container) => return container(arguments).await,
         Err(error) => {
-            say(&format!("lease: cannot open the bank ({error})"));
+            say(&format!("cannot open the bank ({error})"));
             return 1;
         }
     };
     let mut session = match pg::Session::open(&dsn).await {
         Ok(session) => session,
         Err(error) => {
-            say(&format!("lease: cannot open the bank ({error})"));
+            say(&format!("cannot open the bank ({error})"));
             return 1;
         }
     };
@@ -193,19 +193,19 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
             0
         }
         Err(store::Error::Refused(code)) => {
-            say(&format!("lease: {} refused: {code}", args.action));
+            say(&format!("{} refused: {code}", args.action));
             1
         }
         Err(store::Error::Database) => {
             say(&format!(
-                "lease: {} failed (PostgreSQL transaction failed); nothing was changed",
+                "{} failed (PostgreSQL transaction failed); nothing was changed",
                 args.action
             ));
             1
         }
         Err(store::Error::Clock) => {
             say(&format!(
-                "lease: {} failed (system clock unavailable); nothing was changed",
+                "{} failed (system clock unavailable); nothing was changed",
                 args.action
             ));
             1

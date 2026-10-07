@@ -132,23 +132,28 @@ fn malformed_list_reply_refuses_without_reporting_local_free() {
     }
 }
 #[test]
-fn operator_actions_have_exact_refusal_before_state() {
+fn operator_actions_refuse_invalid_explicit_dsn_before_state() {
     for (arguments, diagnostic) in [
         (
             vec!["lease", "break", "resource"],
-            "pseudolife-stdio: lease action 'break' is deferred in this candidate\n",
+            "cannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
         (
             vec!["lease", "delegate", "resource", "fixture-agent"],
-            "pseudolife-stdio: lease action 'delegate' is deferred in this candidate\n",
+            "cannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
         (
             vec!["lease", "designate", "resource", "fixture-agent"],
-            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\npseudolife-stdio: lease action 'delegate' is deferred in this candidate\n",
+            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\ncannot open the bank (PostgreSQL DSN is not understood)\n",
         ),
     ] {
         let home = Home::new();
-        let output = home.call(&arguments);
+        let output = home
+            .command()
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", "not-a-dsn")
+            .args(&arguments)
+            .output()
+            .unwrap();
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         assert_eq!(output.stderr, text(diagnostic));
