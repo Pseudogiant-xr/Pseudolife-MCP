@@ -1068,8 +1068,7 @@ mod tests {
     fn write_then_mark_interrupted_marker_keeps_flushed_body_and_absent_seen() {
         #[derive(Debug)]
         struct Killed;
-        let home =
-            std::env::temp_dir().join(format!("wait-mail-killed-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!("wait-mail-killed-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&home).unwrap();
         let path = home.join("marker.seen");
         let body = "peer — café 🧠\n".as_bytes();
@@ -1115,7 +1114,12 @@ mod tests {
         assert!(output.borrow().events.ends_with(&["flush"]));
         output.borrow_mut().events.push("diagnostic");
         drop(writer);
-        assert!(output.borrow().events.ends_with(&["flush", "diagnostic", "drop"]));
+        assert!(
+            output
+                .borrow()
+                .events
+                .ends_with(&["flush", "diagnostic", "drop"])
+        );
     }
 
     #[test]
