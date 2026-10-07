@@ -46,7 +46,7 @@ def test_exact_comparator_requires_owned_headers_status_and_valid_length():
     actual["status"] = True
     del actual["headers"]["x-content-type-options"]
     actual["headers"]["content-length"] = "0"
-    assert compare_response(expected, actual) == ["status", "headers/content-length",
+    assert compare_response(expected, actual) == ["status", "headers/members", "headers/content-length",
                                                  "headers/x-content-type-options", "body_length"]
 
 
