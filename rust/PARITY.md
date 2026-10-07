@@ -694,8 +694,9 @@ Integration of master `57c007ff292cffdbb6755911bd54de837a00f9a5` retains #611 re
 
 The prompt receipt candidate now parses the hook payload and shim-owned pending
 record as standard JSON, with bounded relevant numbers and ordinary native
-parser depth. These are approved substitutions; fresh native proof is pending
-and `doorbell-prompt-seen` remains deferred. Historical CPython captures retain
+parser depth. These are approved substitutions; bounded Windows native checks
+pass, while broader proof is pending and `doorbell-prompt-seen` remains deferred.
+Historical CPython captures retain
 their raw inputs, outputs, failures and source identities.
 
 | Named substitution | Producer and supported domain | Refusal and controls |
@@ -703,16 +704,31 @@ their raw inputs, outputs, failures and source identities.
 | `doorbell-standard-json` | UTF-8 host-hook forwarding and the shim's fixed-scalar pending writer. Reject NaN, Infinity, overflowing float tokens and lone surrogate escapes anywhere, including keys, ignored extras and overwritten duplicate values; valid escaped surrogate pairs remain supported. | Exit 0, empty streams, zero daemon requests. Invalid stdin creates no new files; invalid pending preserves pending/receipt bytes after the ordinary lock may be created. Token and whole-input controls are prepared. |
 | `doorbell-ignore-python-digit-limit` | External metadata may contain ignored integers; fixed pending fields have separate numeric admission. Ignored integer tokens have no Python environment digit limit within the existing 65536-byte stdin / 8192-character pending caps. | An otherwise valid input writes the normal nonce-plus-LF marker and lock regardless of `PYTHONINTMAXSTRDIGITS`; 640/641/4300/4301/5001/65000-digit stdin and large pending-extra controls retain the raw Python outcome separately. |
 | `doorbell-bounded-relevant-numbers` | Daemon SQL counts and current finite timestamps. Count is positive u64, v3 maintainer is an integer in 1..count; timestamps are nonnegative finite f64 numbers or u64 integers. Legacy integer +86400 uses checked addition and exact equality, including mixed float comparisons. | Beyond-u64 relevant integers and checked-add overflow invalidate pending with exit 0 and empty streams, preserving pending/receipt bytes; an ordinary lock may exist. Exact 2**54 expiry distinctions, u64 edges and huge-timestamp controls are prepared. |
-| `doorbell-native-nesting-bound` | Fixed pending records are shallow; arbitrary hook metadata is admitted under serde's default recursion budget of 128. Every container consumes the budget and serde rejects when it reaches zero, so 127 nested containers are supported and the 128th is refused. | The same quiet stdin/pending refusal rules apply. Boundary controls count the root object as a container. No CPython recursion frame accounting or extra parser thread remains. |
+| `doorbell-native-nesting-bound` | Fixed pending records are shallow; arbitrary hook metadata is admitted under serde's default recursion budget of 128. Windows native parser unit checks accept 127 nested arrays and refuse 128 and 2000. The source-derived budget also counts object containers. | The same quiet stdin/pending refusal rules apply. Whole-input boundary controls counting the root object remain unexecuted. No CPython recursion frame accounting or extra parser thread remains. |
 
 Duplicate keys still take the last value without moving the first key position.
 Legacy rewrites retain the original fixed-field order, appended upgrade fields,
-compact serialization, finite generated number formatting and final LF; byte
-controls are prepared and must be verified natively before acceptance. This
+compact serialization, finite generated number formatting and final LF; the
+fixed-field native serialization unit check passes, while full legacy rewrite
+byte controls remain unexecuted and required before acceptance. This
 change grants no serialization substitution. Path expansion, private-file gates,
 codepoint file limits, interprocess locks, atomic staging and the production
 rollback allowlist remain in place. The interpreter-wide Windows errno sweep is
 replaced by bounded tests around the same unchanged raw-code allowlist.
+
+On Windows, native source `d0c4c5d8f7cded926a4363828db480784e3ccb95`, tree
+`519e33819eedc998d214cc1ae6692d83c5e8d1bf`, passes formatting, cargo check and
+all-target Clippy under default and no-default features. Each feature selection
+passes nine doorbell parser/number/serialization unit checks, twelve CLI and
+version-admission checks, and one bounded Windows rollback-allowlist check.
+The default debug image also matches the pinned Python oracle for the existing
+`version2-positive` cell: exact empty streams, pending/receipt bytes, private
+file checks and cleanup. This is one end-to-end cell, not the full corpus.
+The initial range-pattern lint and missing oracle-metadata environment failure
+remain retained; the syntax-only range repair and configured metadata rerun
+pass. Both-OS corpus, interruption controls, required full suite, fresh review,
+current-head CI and fresh measurements remain pending. No full-suite pass is
+claimed.
 
 ## Lease phase 2c policy preparation
 

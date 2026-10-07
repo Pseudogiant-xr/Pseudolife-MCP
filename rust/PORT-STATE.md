@@ -6,7 +6,8 @@ The doorbell candidate's source now uses the four approved producer domains
 listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
 Preparation removes the cloned CPython value/parser model and retains private
 files, locking, atomic replacement and the production rollback allowlist.
-Fresh Windows/Linux native proof, interruption controls, full-suite validation,
+Bounded Windows native checks and one positive receipt cell pass. Broader
+Windows/Linux native proof, interruption controls, full-suite validation,
 independent review and current-head CI are pending; the mode remains deferred.
 
 Accepted master `0b46bb8e` is integrated locally. Four code conflicts were
@@ -15,8 +16,22 @@ resolved in `evals/rust_baseline/cli_measurement.py`,
 `rust/shim/src/main.rs`; accepted version admission and warm-image behavior
 were retained with the doorbell paths. The doorbell's residual `users` calls now
 use the accepted native account lookup and real uid mechanism. A local full
-suite is required after these manual code resolutions. No native execution or
-new performance measurement has occurred for this reduced source.
+suite is required after these manual code resolutions.
+
+Exact accepted master `59a8624eecd336686acac3846b75334e643b94d6` is subsequently
+integrated in local merge `a6d3a21136533259ed983ebca5d66c7b413cbf40`. Two code
+conflicts retain both leaf modules and combine the exact doorbell positive
+preparation with accepted owned lease check/list preparation in the shared
+measurement helper. No new input or serialization substitution is added.
+Native source `d0c4c5d8f7cded926a4363828db480784e3ccb95`, tree
+`519e33819eedc998d214cc1ae6692d83c5e8d1bf`, passes Windows formatting, check and
+all-target Clippy under both feature configurations; each passes nine doorbell
+unit checks, twelve CLI/admission checks and the bounded rollback-allowlist
+check. The default image passes only the existing `version2-positive` Python
+comparison cell. Native parser unit checks execute the 127-array success and
+128-array refusal boundary; whole-input root-object boundaries remain pending.
+No full suite, Linux proof or new performance measurement was run. Both images
+were frozen before the shared build target was reused.
 
 The captures, fault outcomes and line counts below describe the historical
 CPython-compatible candidate before producer reduction; they do not validate

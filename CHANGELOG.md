@@ -15,8 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The experimental native `doorbell-prompt-seen` candidate accepts standard
   finite JSON, bounded relevant integers and the native parser depth budget;
   unsupported input quietly leaves receipts unchanged. Ignored integer extras
-  no longer depend on Python's digit-limit environment setting. Native proof
-  remains pending and the mode remains deferred.
+  no longer depend on Python's digit-limit environment setting. Bounded Windows
+  native checks and one positive receipt cell pass; broader native proof and
+  current-head CI remain pending, and the mode remains deferred.
 
 ### Added (2026-10-07 — native lease candidate and help drift guards)
 
