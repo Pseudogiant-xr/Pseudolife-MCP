@@ -1,5 +1,973 @@
 # Rust port state
 
+## Episode integration with accepted lease master
+
+Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged forward,
+retaining the native lease check/list/run dispatch and the accepted version
+routing. Episode leaf source (`cli/episode.rs` and `cli/episode_input.rs`) is
+byte-identical to `d2e8601095121a959154a6edf059714ac3010631`. The episode runtime
+change is limited to registering both CLI modules beside each other; `main.rs`
+retains episode routing before opaque-tail conversion and lease routing before
+ordinary dispatch. Master lease production source and version source are retained.
+No general interpreter parser is restored, and original production Python,
+original tests and the pinned oracle remain unchanged.
+
+The shared process adapter retains lease lock-scope/environment admission and
+episode process timing together. Measurement admission keeps separate exact
+lease check/list fixtures and episode-end callbacks/readback; neither fixture
+inherits the other's state checks. Both CHANGELOG histories and the workflow's
+lease corpus plus fresh episode executable selection are retained.
+
+Windows validation executed the exact source merge
+`77fec51ee7077c12c60f419ea0c478e8b8e84c9a`, tree
+`25713c6dc66f86022fc4cd00cd9f4c058ba0be8d`, on 2026-10-07. Formatting,
+locked/offline all-target check and warning-denied all-target Clippy passed in
+default/no-default configurations. Each configuration passed 13 CLI library tests
+and 54 integration tests across episode, lease, dispatch and version. The shared
+measurement/process-adapter selection passed 256 tests with 12 skips. Tests ran
+serially; build jobs were two with incremental compilation disabled.
+
+The initial `e170d674` Rust gates passed, but its instrument selection failed
+17 episode cases because lease file setup required a key absent from the exact
+admitted episode case. The corrected merge restores the optional-file default;
+all original assertions remain unchanged. That first failure is retained separately
+and is not relabelled as a pass. Default/no-default debug images at `77fec51e`
+are 20,398,080/19,231,232 bytes, with SHA256
+`ebdfe2444df9b3c3636bf6c3885987942cfdff518fbfacf176517a475cf901e7` and
+`8e81222823fd4c3e211eee991b4dee792d23d354ca3884dba8304507c9f11281`.
+
+The box full-suite result still belongs to `d2e86010`: 18,203 passed, 76 skipped,
+exit 0. Historical native `17459703`/capture `63922667` measurements retain their
+own image/source identities. No merge-head performance result is claimed. The
+`d2e86010` full suite is accepted for the unchanged episode leaf; fresh independent
+review and hosted merge-ref CI remain pending. The documentation
+successor records these results without changing runtime or instrument inputs;
+execution remains attributed to `77fec51e`. Both episode modes remain deferred.
+
+## Episode producer grammar reduction
+
+Episode now admits the audited hook ordinary-JSON object with string
+`session_id` and missing/null/string `cwd`. It uses typed serde_json fields,
+retains the minimal real-filesystem surrogate/string codec and observable
+path/title/body behavior. The unused general Python value wrapper/parser and
+their module declaration are removed; this tree has no lease parser consumer.
+The VERSION formatting helper returns to its accepted private visibility.
+The interpreter-depth/integer-env native assertions are retired under the
+explicit test exception; original Python/eval assertions are unchanged.
+Synthetic numeric/non-finite/deep inputs and native167/numeric42 measurements
+remain historical diagnostics. Native component `17459703` and capture component
+`63922667` now have both-OS local string42 closure and warm three-by-ten receipts,
+32 admitted corpus pairs with 128 rejected controls per OS, and 201 targeted
+tests per OS. The exact Linux path-minute repeat passed; original raw failure
+and outside-grammar diagnostics remain retained. Those receipts precede removal
+of the unused parser and retain their original image identities. Episode runtime
+source is unchanged. Successor `d2e86010` passed Windows compilation, formatting,
+both Clippy configurations, 22 CLI/integration tests per feature configuration
+and a disposable-daemon string42 smoke. Its committed-head Python full suite
+on the homelab box passed: 18,203 passed, 76 skipped, exit 0, recorded in
+`~/.pseudolife-mcp/suite-results/20261007-131037-remote-d2e86010.json`.
+The `7d20ceb8` successor changes only one PARITY documentation link; the suite
+receipt remains attributed to `d2e86010`. Independent follow-up review passed.
+Current hosted/exact-master and readiness gates remain open;
+both episode modes stay deferred. The `Python-urllib/3.11`
+User-Agent is an oracle-pinned substitution. Producer/substitution details
+and the 2.667-times production line ratio are in PARITY.md.
+
+## Episode distinct-field ordering disposition
+
+The additive associated-wire comparator permits order differences among
+distinct field names. The strict ordered-pair comparator and its original
+tests remain diagnostics; duplicates and case collisions reject before any
+mapping conversion. The 57-ID Accept boundary and exact request line,
+terminator, body-read bytes, auth/routing, values and other presence remain.
+Raw evidence is retained, and both episode modes remain deferred pending
+final functional, measurement, review and hosted gates.
+
+## Historical episode wire preparation after delegated disposition
+
+The new wire comparator applies named field-name association and the exact
+57-case absent-Accept versus candidate `*/*` disposition. The episode health
+client disables generated redirect Referer; that source change is uncompiled
+and both modes remain deferred.
+The accepted VERSION row and the original `758aa642` preparation remain below.
+
+Static header controls cover every admitted ID, all other added-header/value
+rejections and duplicate/case-collision failure. Historical raw header replay
+matches 56/57 per OS, retaining the old Referer mismatch; Linux full wire
+additionally retains the title-minute mismatch. Raw receipt hashes/status are
+unchanged, with no new runtime result. The comparator preserves pair order
+where lossless pairs exist; historical dictionary captures cannot establish
+duplicate absence or full framing. Application audit at exact master finds no
+field-specific Accept/Referer read in the 128 Python files; external observers
+are not covered by that result.
+
+The additive Referer executable node is collected but not run. Final-head
+both-OS compiled/raw proofs, body/header/chunk controls, measurements/floors,
+line ratio, independent review, publication checks and hosted CI remain
+required, as does the manual source-conflict local-full gate recorded below.
+
+## Historical episode preparation at 758aa642
+
+The episode branch integrates exact master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+Configured forbidden bearer controls now have the agreed named exit-1 refusal;
+episode runtime acceptance remains unvalidated and both modes stay deferred.
+The accepted CLI-VERSION row and its final proof below are preserved.
+
+`PORTING.md` records the refusal/title-minute instances and direct group-12
+header/chunk-framing carryover. `evals/rust_port/episode_policy_cases.json`
+lists all 57 outside-policy raw-header IDs per OS. Title checking requires two
+distinct raw Python minutes and each arm's numeric/local window, without
+clearing any surrounding bytes. The retained cwd-12 windows remain incomplete.
+No HTTPS, proxy/trust, locale-default stdin or full wire claim is added.
+
+Additive `test_episode_executable.py` nodes use the shared isolated environment,
+owned subprocess and exact file snapshot helpers. Both-OS hosted parity is
+wired to provide the freshly built candidate explicitly. Only pure policy
+controls and the current-source help drift guard were run during preparation;
+no executable nodes, builds or services ran. Original oracle tests/conftest and
+existing eval assertions remain unchanged from the integrated master.
+
+The merge resolved source conflicts in `main.rs` (preserving master's opaque
+argv/unknown-mode dispatch plus episode routing) and `cli_measurement.py`
+(preserving master's warmed image/state protocol plus episode owned-state
+callbacks). The repository's manual-source-conflict local-full gate therefore
+remains outstanding, along with both-OS default/no-default Rust checks, final
+raw episode proofs, hosted outcomes, committed paired measurements/floors,
+fresh line-ratio accounting, independent review and publication checks.
+Historical measurements, failures and their source identities remain below;
+none certify this preparation.
+
+## Historical episode leaf candidate
+
+Native `episode-start` and `episode-end` are implemented before shim attachment
+on the reviewed version dependency `db0d59cb`. Earlier uncommitted-source diagnostics
+against Python `eb0c13e9` (0.17.0/schema 55) match 83 process pairs and reject 332
+candidate-output controls on each platform. Comparisons cover exact CLI
+invocation, environment, streams, exit and home-file bytes, plus HTTP method,
+target, application body and required credential/redirect behavior. Raw generic
+HTTP framing and implicit headers remain diagnostic; no identical-wire claim or
+CLI normalization is made. Actual local-minute title values are retained without
+clock injection or replacement. Owned peer and process cleanup is verified.
+
+The native process tests, shared helper tests, format checks and locked
+clippy pass on both hosts. Existing Python episode/title tests remain unchanged
+and in-process; no native-routing credit is assigned to them. The dedicated leaf
+has 440 production lines and the shared JSON wrapper/parser has 733, versus 192
+in the two Python reference modules (1173/192 = 6.10938, excluding tests and
+existing dispatch glue). That historical parser derived from a separate lease
+candidate; it had no production lease consumer in this tree. The configured
+integer-limit repair and parser itself have since been removed.
+The Python denominator contains title behavior outside these leaves; this is a
+size observation, not a coverage claim.
+
+Independent review blocked the first candidate after 37 additional paired Windows
+diagnostics and retained abnormal-termination captures. Nested JSON can overflow
+the main stack; accepted control/folded authorization values suppress the POST;
+relative-parent and non-ASCII drive titles differ; and a lone-surrogate cwd drops
+the start request. A subsequent repair preserves the measured public JSON depth
+boundary on an owned larger-stack thread and fixes the path/title handling. Both
+hosts retain all 83 original matches, 53 additional required-boundary matches
+and two nested-key matches. The three authorization-value mismatches remain;
+the corrected source has not received independent follow-up review.
+
+A later watched regression found that Unicode argv collection ran before episode
+selection: ignored opaque tails caused exit 101 on Linux and Windows. Episode
+selection now reads only the first OS argument before that collection; known
+episode modes ignore every tail, while other modes keep their existing argv
+handling. Eight no-network process pairs per host match the pinned public module
+and source-verified public main entry, covering both episode modes, opaque tails,
+absent keys and exact invalid-origin errors. The focused native regression and
+existing dispatcher tests pass on both hosts. The earlier 83-case receipts retain
+their original source and binary identities; they were not rerun for this repair.
+Independent follow-up review and the remaining authorization/clock decisions are
+still pending.
+
+The subsequent review found three further defects: configured integer limits
+changed whether requests were sent, the health JSON decoder admitted too much
+nesting, and lowercase extended UNC prefixes changed Windows titles. The current
+repair honors valid configured integer limits, applies the public caller's
+989-container bound to health text, and treats extended UNC prefixes without
+case sensitivity. Both hosts match 24 of 27 focused process pairs; the remaining
+three are the existing configured-bearer mismatches. All 18 additional health
+boundary pairs match on each host. Two native unit tests and five episode
+process tests pass per host; the existing three dispatcher tests also pass on
+Linux. Formatting and warning-denied clippy pass on both hosts. These current
+diagnostics preserve raw captures and do not upgrade historical corpus bindings
+or establish committed acceptance. Independent review verified these three
+repairs and found a further active-health-response timeout defect.
+
+The health and POST clients now use separate connect and read timeouts instead
+of total deadlines, retaining 250 ms and 5 s respectively. Current public-process
+diagnostics on Windows and Linux with Rust 1.94.0 match nine of eleven pairs:
+active health and POST bodies, stalled bodies, immediate success, health 503,
+health redirects, POST 503 and refused POST redirects. Two native unit tests,
+five episode process tests, three dispatch tests and formatting pass per host.
+The body change removes the demonstrated total-body cutoff; it does not provide
+socket inactivity semantics through the whole reply. Active partial headers and
+a valid partial chunk-size line still suppress the native POST while Python
+sends it, with every peer gap below 250 ms and completion after 250 ms. Both
+remaining mismatches are captured on both hosts, alongside the earlier RED
+body failure. The replacement-backend route was stopped on proxy compatibility;
+no dependency, HTTP parser or TLS implementation was added. Current independent
+review and the configured-bearer and minute-clock decisions remain pending.
+
+An earlier Linux repair capture crossed a local-minute boundary between arms:
+both titles match their own recorded invocation minutes, but their POST bodies
+differ. That raw mismatch remains unmatched; a later matching run does not
+establish equality across minute transitions. No clock normalization is adopted.
+
+The independent diagnostic captures confirm invalid/cold-origin behavior and
+same- and cross-origin redirect boundaries without changing fixture admission.
+The bounded committed-source closure proof and measurements below are now
+recorded; registry and workflow integration and current CI remain pending.
+HTTPS/proxy/trust behavior, locale-default stdin and socket inactivity across
+headers/chunk framing remain
+unresolved. The body-stall controls above do not establish those boundaries. No
+exclusion is adopted, and both episode modes remain deferred in the register.
+
+### Current bounded episode evidence
+
+The ordinary 83-row corpus was rerun against committed body-inactivity repair
+`ca9898cedc455508c3dfaab2f55b27e5656224da`, tree
+`9d62c97c7f325cc512f25a584ef6bdba0ed5f3dd`, using the retained final binaries.
+Windows matches all 83 declared comparisons; Linux matches 82 and retains the
+`episode-key-11-episode-start` title-body mismatch across a local-minute boundary.
+All 332 candidate-output controls are rejected per host. The unchanged comparator
+checks declared argv/stdin/environment, complete home bytes, exit and streams,
+HTTP method/path/body bytes and Content-Type/Authorization values. Its existing
+required-header projection lowercases header names. Both hosts retain 57 cases
+with other raw header differences outside that comparator, including implicit
+headers and casing; complete framing equality is not compared.
+`episode-current-committed-result.md` and
+`episode-current-committed-manifest.json` retain those exact observations; the
+Linux clock failure remains unmatched, without normalization or exclusion.
+
+The authenticated nonblank input case `episode-key-7-episode-end` also passes one
+owned-daemon pair and four candidate controls on each host. Its exact argv is
+`episode-end --help ignored`, and stdin is `{"session_id": 42}` without a newline,
+with the existing synthetic bearer recorded as an explicit input. Before each
+arm, the supported API seeds session 42 with one empty root titled
+`fixture-episode`. After each public CLI invocation, API and storage readback
+independently show zero episodes, a non-null session `ended_at`,
+`end_reason="end"` and the corresponding root membership retained. Generated
+IDs and timestamps remain raw observations for independent state assertions;
+database bytes are not compared across arms. The original one-pair receipts are
+`episode-owned-nonblank-manifest.json` and
+`episode-owned-nonblank-linux-manifest.json`.
+
+The reviewed measurement instrument is committed at
+`e21afa4ae8319824037b546f917705fa4eae8789`, tree
+`0c4b6f5b1ac20d1c867c385a1be8d73252dacfd4`, with current Rust source unchanged
+from the repair above. Both hosts bind the genuine lexical virtualenv parent and
+actual CLI children to Python oracle
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55), and preserve
+source/helper/runtime/executable identities before and after capture. The
+retained Windows debug executable SHA256 is
+`19f223282e9a1c5a55b53f939c36f570548309b2e86ad85b8a795fe5d43b321d`; the
+retained Linux ELF SHA256 is
+`79a8393d257c1a4df4a4b74a3ef9424c3406a6a3c5b1b789760587d9c0399b10`.
+These bindings do not attest the compiler or profile-producing build invocation.
+
+Windows and Linux plumbing smokes and final measurements exit zero. Each final
+uses two untimed controls and three repeats of ten alternating pairs, with
+30 timed observations per arm and 62 independently verified root closures per
+host. Every invocation must produce exit zero, empty stdout/stderr and unchanged
+complete home bytes as well as the accepted closure state; equal wrong outcomes
+are rejected. Preparation, reopening and state probes remain outside timing.
+Fresh per-instance database authentication, rejection of the exposed default,
+factory restoration and cleanup of owned databases, daemons, children, PostgreSQL
+processes and private parents are verified, with no new home residue. The first
+Linux smoke stopped before service startup because its lease command was absent
+from PATH; its failure is retained, and the private PATH repair's distinct
+attempt2 smoke passes without changing the committed instrument.
+
+The following are instrument-reported descriptive debug measurements against an
+already running owned daemon with warm filesystem caches. Timing includes owned
+process setup, complete output collection and clean exit. The observed median
+floor is the range of repeat-block medians, not a confidence interval or a causal
+speedup claim; these results do not establish release-profile performance.
+
+| Host | Python median ms / floor ms | Rust median ms / floor ms |
+| --- | --- | --- |
+| Windows | 211.7635 / 21.8746 | 57.6518 / 8.3546 |
+| Linux | 256.0708 / 4.5309 | 70.1477 / 1.4285 |
+
+Local untracked receipt `episode-measurement-windows-3x10.json` has SHA256
+`6802b8b2eb8b40b652819177db80c51d0c9a21c122e53d4a9ce3378b35c3a909`;
+`episode-measurement-linux-3x10.json` has SHA256
+`9e827467b9d3603f81855bcd4770d2a9f949c7b5835b8c42b7dc4e8e2c7a1f60`.
+Raw captures and failed attempts remain retained. This evidence covers an
+authenticated nonblank request closing an empty root, not closure of stored
+entries, complete episode-mode acceptance or full HTTP header/framing equality.
+That historical source had 440 dedicated Rust lines plus 733 JSON wrapper/parser
+lines, totaling 1,173,
+against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
+excluding tests/assets and dispatch. The broader title denominator caveat above
+still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
+the future full PR's independent review remain open; both modes stay deferred.
+## Wait-mail preparation on accepted master (2026-10-07)
+
+The producer reduction now implements unsigned ASCII watermarks by numeric
+value, including leading zeros and without a digit limit. Seen markers use
+ASCII byte stripping and empty-to-zero reads; digest/ring LF framing remains
+exact. Other substitutions include finite ASCII numeric options,
+positive ASCII terminal dimensions with invalid input falling back to 80,
+simple help wrapping, direct stdout failure exit 2 and a native temporary-file
+collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
+each deliberate substitution. The approved 4,301-digit assertion and exact Rust
+and Python legacy-test exception patches have been applied. The shared checker
+binds 19 changed corpus cases to explicit candidate contracts while retaining
+actual Python observations and raw differences. Final native validation is required
+before candidate test acceptance. New Rust and candidate-only process nodes are
+prepared but have not run. The mode remains deferred.
+
+The wait-mail branch now includes accepted master `0b46bb8e` and its corrected
+Linux descendant cleanup. The Windows help-template checkout fix preserves
+the existing LF fixture and assertions. This is preparation; wait-mail remains
+`deferred`, and every prior failure and measurement keeps its original binding.
+
+Merge-forward conflict: `main.rs` now uses the accepted `args_os` dispatch and
+invalid-mode diagnostic, then passes native wait-mail its unchanged `OsString`
+arguments. The reviewed head `271e9ae0f9452680fcdab93fbcb3cf81501f32df`
+completed the remote box full suite: receipt
+`20261007-134344-remote-271e9ae0.json`, exit 0, 18,203 passed and 76 skipped.
+That receipt belongs to the reviewed head, not its `7d879147` forward or the
+combined batch successor. Failed checked stderr diagnostics exit 120; a
+post-stdout seen-failure diagnostic can fail after delivery and before ledger
+append. `error_text` retains Python-shaped OS diagnostics as declared native
+substitutions in PARITY.
+
+The new additive CI nodes check actual native Unicode delivery/stdout/`.seen`
+and bounded per-arm clocks, plus `COLUMNS=80` help against Python. The existing
+deterministic wait-mail assertions run with an explicit binary in that lane.
+The process comparator now wires only the named delivery-clock, source-suffix
+and Linux terminal-traceback fields. New admission/rejection and process-lane
+self-checks run during preparation; historical-input replay uses the current
+checker without launching native processes. Native execution, both-OS recapture,
+positive paired measurements and current-head hosted checks remain pending.
+Historical private receipts cited below cannot certify this candidate.
+
+## Historical wait-mail leaf candidate and captures
+
+Native `wait-mail` is implemented before shim attachment on dependency
+`db0d59cb`, against immutable Python `eb0c13e9` (0.17.0/schema 55). The first
+candidate's diagnostic corpus matched 54/54 Windows pairs and 52/54 Linux pairs,
+with 216 rejected candidate-output controls per host; two Linux clock differences
+remain raw failures. These counts describe that earlier source, not a new full
+corpus run after the focused repairs.
+
+The repaired candidate refuses opaque session bytes before filesystem access,
+matches the UnicodeEncodeError terminal detail and exit, and uses the pinned
+eight-character temporary-name format with exclusive creation and collision
+retries. Focused process captures retain unmatched Python traceback frames,
+independent random suffixes and wall-clock values. No comparison normalization
+or exclusion has been adopted. Owned homes, listeners and processes were cleaned.
+Targeted native tests, locked clippy and format checks pass on both platforms;
+existing Python tests remain unchanged and in-process.
+
+Fresh independent review found seven further defects. The follow-up candidate
+uses interruptible POSIX reads and non-restarting SIGINT handling, restores
+private listener mode 0600, aborts on failed diagnostics, distinguishes buffered
+stdout flush failures from direct write failures, propagates help write failures,
+pre-scans ambiguous optional tokens, and preserves opaque parser-error escapes.
+The previous reviewed source captures matched 55/55 Windows corpus pairs and
+51/55 Linux pairs, with 220 rejected candidate-output controls per host. The four Linux
+failures retain clock differences; separate focused captures still retain random
+temporary suffix and Python traceback differences. A subsequent independent
+review accepted those fixes and found terminal-width,
+unbuffered-output and opaque digest-path differences. The previous candidate renders
+help/usage for COLUMNS, honors the selected interpreter's PYTHONUNBUFFERED flag
+semantics, and preserves surrogateescape in setup paths. Focused public probes
+match 19/19 Windows and 21/21 Linux pairs. Its 61-case corpus matches 60/61 Windows
+and 59/61 Linux pairs, with 244 rejected mutation controls per host; all three
+remaining corpus failures retain clock fields. These counts belong to the binary
+before the later description-width repair, not a rerun of the current source.
+Follow-up review accepted those changes and found the help description's missing
+minimum width of 11 at narrow COLUMNS values. The current repair applies that
+minimum only to the description, with additive public cases at widths 1, 2, 3, 7,
+12 and 13; usage and option layout retain their separate rules. Current focused
+results match 9/9 public pairs on each host, with two formatter tests and six
+additive cases passing per host (24 rejected candidate mutations each). Those
+focused results and the earlier 61-row captures remain unchanged.
+
+A later diagnostic corpus binds committed instrument `3abddc5d` to the unchanged
+final binaries and the pinned 0.17.0 oracle. Its 67 rows match 66/67 Windows pairs
+and 64/67 Linux pairs, with all 268 candidate-output mutations rejected on each
+platform. Both runs exit 1 and retain complete output and home-file observations.
+Windows fails `wait-mail-large-watermark`; Linux fails
+`wait-mail-non-ascii-space-body`, `wait-mail-delayed-ring` and
+`wait-mail-delayed-digest`. Each differs only in stderr's wall-clock second and
+the ledger epoch, by one ASCII byte per field. These four raw failures have not
+been waived, normalized or excluded.
+
+The local untracked receipts are
+`wait-mail-current-committed-windows-matrix.json` (SHA-256
+`6a1d4b8f8b47f1029bef9d9b78e12a46b092d29c90285a01d7907cd440d570bc`) and
+`wait-mail-current-committed-linux-matrix.json` (SHA-256
+`a10d1f1841a3f0e28ef4e390c6fd2be140c55e999df7f02eb73e851bf428cebd`).
+`wait-mail-current-committed-manifest.json` retains runtime, helper, corpus,
+source and binary bindings before and after capture, raw counts and cleanup;
+`wait-mail-current-committed-failure-classification.json` retains the differing
+byte ranges. They supplement the earlier evidence without replacing it.
+
+The positive `wait-mail-unicode-delivery` row delivers the exact peer body and
+advances `.seen` on both platforms. This proves local digest/ring-to-stdout/seen
+delivery at an unavailable daemon URL; new actual daemon mail delivery remains
+unverified. Successful delivery always prints runtime HH:MM:SS and appends a
+ledger epoch, while `cli_measurement` requires every sample's output and home
+bytes to equal its earlier control. Positive delivery timing therefore remains
+blocked by the pending group 7 clock-policy decision. No positive timing adapter,
+normalization or substitute timing run has been started. The existing question
+remains pending; group 8 random-suffix and group 9 traceback decisions, fresh
+review and full-mode acceptance remain deferred. The feasibility assessment is
+retained as `wait-mail-positive-measurement-feasibility.md`.
+
+The initial pre-code proof used a wrong-source console launcher and is rejected.
+Later public module invocations have child source/blob/bytecode bindings and a
+deterministic delivery proof, but do not retroactively satisfy that sequencing
+requirement. The generic process fixture is unchanged. The dedicated Rust
+production sections contain 1,036 + 424 = 1,460 physical lines before their test
+modules, versus 306 in the Python leaf (4.77124). Test modules, the test-only help
+constant and help assets are excluded; the shared CLI and main files separately
+add 14 lines and remove one. This is a
+size observation, not coverage.
+
+Follow-up review, committed-source acceptance, routed/additive CI integration,
+measurements and the remaining byte-policy decisions are pending. The mode
+remains deferred in the parity register.
+## Briefing and prompt-hook candidate
+
+The hook candidate remains deferred. Its producer reduction replaces the
+private Python JSON domain and stack thread with bounded strict parsing,
+retains valid ignored large integers, and implements the named typed-markdown,
+ASCII-numeric, first-line-cursor and native-output-failure substitutions in
+PORTING.md. Windows validation of `64f5a6a2` passed the native build, formatting,
+both Clippy configurations, 12 CLI unit tests, six hook integration tests and
+the first public prompt cell. The 13 offline policy checks also passed; these
+checks do not establish both-platform or mode acceptance.
+
+The subsequent master-forward integration of `59a8624e` adds the accepted
+native lease source and shared credential/dependency changes. The binary
+entrypoint keeps synchronous hook/version dispatch and starts a separate
+current-thread runtime for the lease leaf. The hook production modules and
+all 18 original hook admissions are unchanged. Its 118 offline policy and
+fake measurement checks passed after restoring the mode-specific diagnostic;
+the initial one-test failure remains historical. The combined source at
+`273e6533` passed Windows formatting, all-target check and Clippy with both
+feature configurations, 19 CLI unit tests and 55 hook/dispatch/version/lease
+contracts. The first contract run lacked the existing oracle metadata setting
+and failed; its log is retained separately from the successful rerun. The
+`64f5a6a2` gates keep their original attribution. Fresh review, hosted checks
+and the committed-head remote Python full suite remain required.
+
+At `64f5a6a2`, the dedicated hook production was 944 lines before test modules
+(911 for briefing_hook plus 33 for hook_json), down from 1,811 under the same
+counting rule. All 12 remove/narrow inventory sites are addressed; the 12 keep sites
+retain their operational contracts. The prior 1,813 count included two blank
+separator lines; neither count is a readiness or performance claim.
+
+The branch merges accepted master forward. The earlier `0b46bb8e` integration
+resolved four code conflicts in the measurement helper, CLI dispatcher, pytest
+adapter and binary entrypoint. The later `59a8624e` merge at `273e6533` resolved
+two code conflicts (`cli_measurement.py` and `cli.rs`) and two documentation
+conflicts (CHANGELOG.md and PARITY.md), plus a manual lease wrapper in main.rs;
+a committed-head remote Python full suite is still required,
+separately from hosted Rust correctness and both-platform parity checks. The merged
+adapter preserves version routing and all 18 hook admissions (26 selected
+nodes total); the
+measurement helper preserves image warmups and owned briefing fixtures.
+The leaves dispatch before the proxy enters its Tokio runtime, removing the
+hook thread without nesting runtimes. CPU-light self-checks alone do not
+establish runtime correctness, security or readiness.
+
+The subsequent health/header repair keeps non-JSON `/health` quiet and preserves
+valid degraded JSON 503 handling, while malformed consumed JSON payloads retain
+the named diagnostic. Redirects emit no Referer. C0/DEL/folded bearer inputs use
+`http-forbidden-input-refused`; HTTP field association and the explicit 53-ID
+`hook-absent-accept-wildcard` ledger are documented in PARITY.md. Raw Python
+expectations and historical failures remain unchanged. Production hook source
+is 951 lines before test modules (918 plus 33), using the same trimmed-boundary
+count as the earlier 944-line source; the transport repair adds seven lines.
+
+The repair passed its first disposable Windows malformed-health execution cell
+before the remaining gates: nine hook contracts with each feature configuration,
+formatting, default/no-default all-target check and warning-denied Clippy, and
+103 focused Python policy/wire/briefing instrument checks. These checks exercised
+quiet health refusal, JSON 503, malformed payload, redirect headers and bearer
+refusal against owned scripted peers. They establish no broad corpus, timing,
+Linux, hosted or committed-head remote full-suite result. Earlier `273e6533`
+unit/lease/version gates and the `6ab79123` Python instrument gate retain their
+own attribution; the old remote suite does not validate the repair.
+The published `6ab79123` hosted Parity jobs failed a stale eight-node total
+assertion after the hook admissions increased selection to 26. The port-owned
+version assertion now checks the three version admissions, uniqueness and
+existing boundaries without pinning total selection; its 12 focused tests pass.
+The two hosted failures remain historical and fresh hosted checks are required.
+
+### Historical briefing candidate evidence
+
+The native `briefing` and `prompt-hook` leaves target the
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remain deferred.
+Independent review requested changes. The repair preserves argparse prescan
+priority, spaced unknown values, COLUMNS-dependent formatting, body inactivity
+budgets, and measured buffered/unbuffered output behavior. Response-header
+inactivity still differs: reqwest applies a deadline across the response head.
+Ordinary large or unbuffered output failures still differ in Python traceback
+prefixes. Those historical runs retained configured bearer-header, nonstring and
+lone-surrogate differences. The current named substitutions above supersede
+the prior unapproved-rule description without replacing its raw evidence.
+
+The completed repair matrix is exact in 77/83 Windows and 78/87 Linux pairs;
+its 50/53 core corpus and 13/15 focused corpus are bound to the preceding binary.
+The 32 signed-zero digit pairs and one independent positive request/cursor pair
+per host remain attributed to the preceding formatter binary. The subsequent
+COLUMNS grammar and narrow-help whitespace repair passes all eight review cells
+and six relevant parser-limit cells on each current binary, with no requests
+and 56 rejected output/file controls per host. Five focused helper checks, one
+public formatter process check, formatting and warning-denied clippy pass on
+both hosts. Earlier native checks retain their original binary attribution. These are scripted-peer diagnostics;
+broader real-daemon acceptance, persistent multi-turn sequencing and hosted CI
+remain outstanding; the bounded positive proof and debug timing below do not
+close those gates. Existing Python tests and the generic
+CLI fixture remain unchanged; daemon-backed routing is not claimed.
+
+The external subprocess adapter now admits 18 collected existing prompt-hook
+nodes (17 hook cases and the help-listing case), with an exact argv allowlist
+per node. They pass unchanged on Python and on each native binary on Windows
+and Linux; each routed selection makes 21 actual candidate calls, including
+three sequential cursor advances. Of 19 eligible baseline nodes, Windows
+passes 18 and skips the symlink case because the host cannot create symlinks;
+Linux passes all 19; an additional private adapter run passes the symlink
+node on Linux. That node remains outside the tracked admission.
+This scripted-peer coverage does not establish full-mode acceptance.
+
+Automatic CLI receipt selection includes the five historical dispatcher nodes
+and all 18 current subprocess admissions, sorted without duplicates. Runtime
+validation derives the exact expected version from the selected pinned
+pyproject while retaining source-origin and installed-distribution equality.
+The prepared dispatcher component passes all 23 nodes on Python and native
+Windows and Linux, with 26 actual CLI calls per arm. These uncommitted-candidate
+proofs are preparatory: the full runner still requires committed clean Rust
+source before it can emit an acceptance receipt.
+
+Dedicated hook production contains 1,030 physical lines plus a 76-line JSON
+caller wrapper and a reused 707-line JSON data module, or 1,813 total. This
+includes separator blanks before test modules; the earlier 1,811-line total
+excluded two such blanks. Against the shared pinned Python `briefing_cli.py`
+module (251 lines), the ratio is 7.22311. Tests, assets and dispatch are excluded.
+This count covers both `briefing` and `prompt-hook`, with no ratio target.
+
+The first credential-file proof refused an unprotected Windows token file and
+is rejected as positive-path evidence. Later env-token proofs establish actual
+GETs and cursor effects after implementation began, without repairing the
+required proof-before-implementation sequence. Follow-up review is pending.
+
+The bounded owned-daemon nonempty `briefing` pair now passes on Windows and
+Linux against Python 0.17.0/schema 55 at the oracle above. One synthetic world
+fact is seeded through pinned production storage APIs without embedding
+computation. Independently expected stdout is 67 Windows bytes and 65 Linux
+bytes, with exit 0, empty stderr, unchanged home files, four rejected output/file
+controls, identical endpoint responses before/after and verified owned cleanup.
+Local untracked proof evidence is
+`briefing-committed-daemon-nonempty-windows-proof.json` and
+`briefing-committed-daemon-nonempty-linux-proof.json`; this bounded result does
+not retroactively repair the earlier proof-before-implementation sequence.
+
+The existing CLI instrument at
+`840cccf85ec99bd5e8e97cb820d3a1d899005de3`, tree
+`941df01bc9eed839946ac5b6eadad5d81501b4db`, completes the same owned-daemon bare
+fixture with three repeats of ten cold-start-to-exit samples per arm on each OS,
+alternating arms and retaining the existing repeat floors. The 1x1 plumbing
+smokes remain separate. Exact arm-level controls are retained; the instrument
+compares every invocation's output and prepared environment/home to its control
+before appending the timing row. Timed rows do not retain individual raw streams
+or full post-file payloads. All bounded fixture resources were cleaned up.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `briefing-measurement-windows-3x10.json` | `3287483ee5ad27ad28281fb9d87bbd8728de7ce766cb2c4e590ea80a4baad395` |
+| Linux | `briefing-measurement-linux-3x10.json` | `9de318f28132f03bc563e711629d3591104dd379dde3e9c115d9086dc07994ca` |
+
+Native executable SHA256 is
+`4c8757f9268464c8c04d01e70287ea474649e51fe2888ac1e6a7f7e80d509ac6` on Windows
+and `d3e73627e849aeff812eb6cb013722fc9811c59ab1b12b4eb2c06c1e0f061315` on Linux.
+The retained evidence supports debug/unoptimized builds; producing Cargo
+invocation/profile/options attestation remains incomplete for both final
+executables. Local `briefing-retained-build-attestation.md` records that limit;
+`briefing-{windows,linux}-measurement-result.md` and the corresponding audit JSON
+files retain the descriptive results and source/runtime/helper bindings. No
+release-profile or general speed claim is made.
+
+The current local core corpus passes 50/53 declared comparisons per OS, with
+three configured bearer failures. Raw request headers also differ outside that
+comparator; full wire equality is unproven. Configured C0/DEL/folded bearer refusal now has the named
+`http-forbidden-input-refused` disposition; its three historical raw failures
+remain retained. Pending groups 10 (unmatched
+traceback prefixes) and 12 (response-head/chunk-framing inactivity) remain
+historical; briefing header failures were measured, while its chunk-framing gap
+is inferred from the shared client. Broader daemon/cursor sequencing and hosted
+acceptance remain open. The reduced source next needs committed-head runtime checks
+and the remaining full-mode gates; `briefing` and `prompt-hook` remain deferred.
+## Doorbell prompt receipt candidate
+
+The doorbell candidate's source now uses the four approved producer domains
+listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
+Preparation removes the cloned CPython value/parser model and retains private
+files, locking, atomic replacement and the production rollback allowlist.
+Earlier source-bound Windows native checks and one positive receipt cell pass.
+The Fable125 repaired Windows leaf has bounded native and paired process proof;
+actual symlink rejection and POSIX empty-HOME/effective-uid proof remain unproved. Broader
+Windows/Linux native proof, interruption controls, required merge gates,
+independent review and current-head CI are pending; the mode remains deferred.
+
+Accepted master `0b46bb8e` is integrated locally. Four code conflicts were
+resolved in `evals/rust_baseline/cli_measurement.py`,
+`evals/rust_port/cli_dispatch.py`, `evals/rust_port/pytest_plugin.py` and
+`rust/shim/src/main.rs`; accepted version admission and warm-image behavior
+were retained with the doorbell paths. The doorbell's residual `users` calls now
+use the accepted native account lookup; private receipt ownership now matches
+Python's effective uid. The historical hand resolutions retain their own gate
+attribution below; no passing full suite is claimed.
+
+Exact accepted master `59a8624eecd336686acac3846b75334e643b94d6` is subsequently
+integrated in local merge `a6d3a21136533259ed983ebca5d66c7b413cbf40`. Two code
+conflicts retain both leaf modules and combine the exact doorbell positive
+preparation with accepted owned lease check/list preparation in the shared
+measurement helper. No new input or serialization substitution is added.
+Native source `d0c4c5d8f7cded926a4363828db480784e3ccb95`, tree
+`519e33819eedc998d214cc1ae6692d83c5e8d1bf`, passes Windows formatting, check and
+all-target Clippy under both feature configurations; each passes nine doorbell
+unit checks, twelve CLI/admission checks and the bounded rollback-allowlist
+check. The default image passes only the existing `version2-positive` Python
+comparison cell. Native parser unit checks execute the 127-array success and
+128-array refusal boundary; whole-input root-object boundaries remain pending.
+No full suite, Linux proof or new performance measurement was run. Both images
+were frozen before the shared build target was reused.
+
+The original master-forward conflict resolutions were code changes in
+`rust/shim/src/cli.rs` and `evals/rust_baseline/cli_measurement.py`; the
+`CHANGELOG.md` and `rust/PARITY.md` conflicts were documentation. The original
+Rust conflict therefore invokes the native merge gate: formatting, check,
+all-target Clippy and cargo test with default and no-default features on the
+hand-resolved merge `a6d3a211`, with exact hunks below. The later recorded
+Windows gate belongs to `d0c4c5d8`, not to that merge or this repair. The Python
+measurement conflict also needs targeted `test_cli_measurement.py`,
+`test_cli_measurement_warm.py` and `test_cli_measurement_doorbell.py` validation.
+These native and touched-harness gates remain required; no Python full-suite
+pass is inferred from a Rust-only conflict. Earlier `0b46bb8e` resolutions in
+Python dispatch/pytest helpers and Rust `main.rs` retain their separate native
+and affected-harness obligations. All future Cargo commands use Rust 1.94.0,
+incremental disabled, two jobs and the shared target directory.
+
+Quoted original master-forward code hunks (including the removed conflict
+markers, rather than a reconstruction of the accepted result; blank context
+lines are displayed empty to avoid trailing whitespace):
+
+```diff
+diff --git a/evals/rust_baseline/cli_measurement.py b/evals/rust_baseline/cli_measurement.py
+remerge CONFLICT (content): Merge conflict in evals/rust_baseline/cli_measurement.py
+index da6edb6b..895ec9d9 100644
+--- a/evals/rust_baseline/cli_measurement.py
++++ b/evals/rust_baseline/cli_measurement.py
+@@ -157,15 +157,11 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
+                "evals/rust_port/provenance.py": [require_import_root, require_instrument_binding, runtime_metadata],
+                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-=======
+     if fixture_url is not None:
+         from . import transport
+         helpers["evals/rust_port/cli_process.py"].extend([fixture_env, file_path])
+         helpers["evals/rust_port/harness.py"].append(_base_url)
+         helpers["evals/rust_baseline/transport.py"] = [Path(transport.__file__)]
+-    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+     layout = getattr(args, "layout", "bare")
+     doorbell = mode == "doorbell-prompt-seen"
+     doorbell_binding = None
+@@ -194,12 +190,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+     if fixture_url is None and (prepare is None) != (case is None):
+         raise ValueError("prepared measurement requires both a callback and a recorded case")
+     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-                             or (not doorbell and (case.get("environment_deltas") or case.get("pre_files_b64")))):
+-=======
+-                             or (fixture_url is None and case.get("environment_deltas"))
+-                             or (fixture_url is None and case.get("pre_files_b64"))):
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
++                             or (not doorbell and fixture_url is None
++                                 and (case.get("environment_deltas") or case.get("pre_files_b64")))):
+         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
+     case = copy.deepcopy(case)
+     prepared_controls = {}
+@@ -239,20 +231,6 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                 binding = None
+             else:
+                 reset_home(active_home)
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-                env = isolated_env(active_home)
+-                env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+-                            "PYTHONDONTWRITEBYTECODE": "1"})
+-                if doorbell:
+-                    if case != expected_case:
+-                        raise ValueError("doorbell recorded case changed during measurement")
+-                    env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
+-                    for relative, encoded in case["pre_files_b64"].items():
+-                        path = file_path(home, relative)
+-                        path.parent.mkdir(parents=True, exist_ok=True)
+-                        path.write_bytes(base64.b64decode(encoded, validate=True))
+-=======
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+                 prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
+                 if fixture_url is not None:
+                     env = fixture_env(active_home, prefixes, fixture_url)
+@@ -264,6 +242,14 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                     env = isolated_env(active_home)
+                     env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                                 "PYTHONDONTWRITEBYTECODE": "1"})
++                    if doorbell:
++                        if case != expected_case:
++                            raise ValueError("doorbell recorded case changed during measurement")
++                        env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
++                        for relative, encoded in case["pre_files_b64"].items():
++                            path = file_path(home, relative)
++                            path.parent.mkdir(parents=True, exist_ok=True)
++                            path.write_bytes(base64.b64decode(encoded, validate=True))
+                 try:
+                     prepared_case = copy.deepcopy(case) if fixture_url is not None else case
+                     selected, selected_identity, original_identity = prepared_command(
+@@ -415,11 +401,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+             "candidate_executable": binary, "python_executable": python_identity,
+             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
+             "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+             **({"doorbell_preparation_binding": doorbell_binding} if doorbell else {}),
+-=======
+             **({"fixture_url": fixture_url} if fixture_url is not None else {}),
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+             "resource_check": resource,
+             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
+             "samples_per_repeat": args.samples, "runs": runs,
+
+diff --git a/rust/shim/src/cli.rs b/rust/shim/src/cli.rs
+remerge CONFLICT (content): Merge conflict in rust/shim/src/cli.rs
+index 6bdafe1b..b1d1a453 100644
+--- a/rust/shim/src/cli.rs
++++ b/rust/shim/src/cli.rs
+@@ -3,11 +3,8 @@ use std::fmt::Write as _;
+ use std::io::{self, Write};
+ use std::process::ExitCode;
+
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+ mod doorbell_seen;
+-=======
+ pub mod lease;
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+ mod version;
+
+ const HELP: &str = include_str!("cli_help.txt");
+```
+
+The Fable125 successor adds root-based empty POSIX HOME expansion
+in both the receipt and credential paths, lexical absolute ancestry preserving
+`..`, and effective-uid private-file admission. Additive unit and process
+controls accompany the repair. A valid-session/non-string-prompt/no-home
+Python RuntimeError divergence is named `python-traceback-not-contract`, with
+raw Python and native expectations kept separate. A refused input writes no
+receipt, so the doorbell clears by expiry instead of by prompt arrival.
+The deleted exhaustive `rust/shim/tests/fixtures/doorbell_windows_errno.json`
+fixture remains listed in historical manifests;
+those manifests and their private raw receipts retain their original identities.
+The 44 native checks and first real `version2-positive` cell above retain only
+their executed `d0c4c5d8` source attribution.
+
+Repaired Windows leaf `710970c9aff67183a389cf13301600d814215ca2`, tree
+`03ff27dc3941e6946fc17c90e8f7881d14067830`, separately passes formatting,
+both-feature all-target check/Clippy, targeted native doorbell/dispatch/version,
+credential and lease tests, the bounded touched-harness tests, and a real
+`version2-positive` comparison for each frozen feature image. Each image also
+passes the four non-string/no-home, string/no-home, invalid-session/no-home
+and non-string/resolvable-home controls, including separate Python/native
+exit expectations and unchanged state. The initial formatting failure on
+`5f22c5b0` remains retained; its successor changes only additive-test formatting.
+The disposable Windows symlink fixture failed with WinError 1314, so absolute
+and cwd-relative paths crossing `link/../digests` remain unproved. No elevation
+or retry was used. POSIX empty-HOME and differing real/effective-uid execution,
+broader corpus/interruption proof, fresh review and hosted CI remain pending.
+No new measurement, full-suite pass or mode acceptance is claimed.
+
+The repaired leaf remains unintegrated. The current integration decision is
+one batch from master `94b8cc90` containing reviewed #601, #604 and #605 heads,
+with every shared dispatch/eval admission retained. The batch requires its own
+Rust and touched-harness gates, hosted CI and fresh dispatch-glue review;
+leaf receipts retain their exact source attribution. No individual #605
+master-forward or disjoint shortcut is claimed.
+
+
+The captures and fault outcomes below describe the historical
+CPython-compatible candidate before producer reduction; they do not validate
+the reduced source. Integer-limit, unsupported JSON and recursion expectations
+are superseded only by the four named domains; raw evidence remains retained.
+
+Native `doorbell-prompt-seen` is implemented against the
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remains deferred.
+Historical local ordinary captures at `5803ea08767316078d9b3f4877c4db5376a489bf`
+bind the genuine 0.17.0 runtime, current loaded helpers, Rust/Cargo inputs and
+final binaries before and after capture. Their declared exit/stream/complete
+home-file comparisons are exact, with no added normalization or exclusions.
+
+The untracked pair totals and ratios are omitted from public claims; their raw
+receipts remain private historical evidence. Those captures include configured
+integer limits and signed zero, stdin/pending-file
+counterexamples and the Windows surrogate username path. Separate historical
+first-cell proofs on both OSes retain the original version2-positive stdin and
+pending JSON plus LF, and capture the actual nonce-plus-LF receipt, unchanged
+pending bytes and `0` lock. They prove this bounded positive receipt behavior,
+not daemon-dependent delivery or full-mode acceptance.
+
+Untracked local corpus files are
+`doorbell-current-committed-windows-corpus.json` (SHA256
+`5f0f28f86320c6332aa2062107fd141ab36a951c5130673ee18d245828b53787`)
+and `doorbell-current-committed-linux-corpus.json` (SHA256
+`0019e66ed831bf24fcc00749c3db043e019612b983b95a0ad2d8afe648cc95ea`).
+The artifact/source index is `doorbell-briefing-current-committed-manifest.json`.
+The retained Windows executable SHA256 is
+`a3665b4b2beba79da35e48d85ac44527f6628e04eea7af83e14195ace20d6b89`;
+the Linux executable SHA256 is
+`dc63a31c2ef33e2cb485ede4d22dc5408fdc5b1211f1051da36f5d72f7ad28b4`.
+
+The approved measurement instrument is committed at
+`e28a2bbfc3212571a26a5dcb48c92f9a43455761`, tree
+`03e07d2e2b664cb684ea153c0c2e556d8b8c37b6`. It reuses the exact positive case
+and recreates its recorded pending bytes through the pinned private writer.
+Both OSes completed a separate 1x1 plumbing smoke and a 3x10 alternating paired
+capture, with two untimed controls per receipt, exit 0 and verified cleanup.
+The initial Linux smoke stopped before timing because the private launcher PATH
+lacked the pinned CLI entry point; its failed artifacts remain intact. After a
+private PATH correction, attempt2 passed with separate archive names; no tracked
+repair was needed.
+
+The historical local timing captures remain in private evidence, bound to their
+original debug-path binaries. Their producing compiler and build profile are
+not attested; these cells establish no general performance or speedup claim.
+
+Captured untimed controls retain exit 0, empty stdout/stderr and complete pre/post
+home snapshots matching across arms and OSes: unchanged LF-terminated pending
+JSON, a 33-byte nonce-plus-LF seen marker and a one-byte `0` lock. Recorded file
+metadata is `private=true`, `nlink=1`, with mode `0o600` on Linux and `0o666` on
+Windows. ACL entries were not captured; Windows mode alone does not prove ACL
+privacy. Timed samples were checked programmatically against the untimed bytes,
+state and environment, including metadata checks outside the unchanged timer.
+Their retained rows contain timing, size, arm order, execution identity and a
+files/environment validator; raw per-sample stdout, stderr, exit and complete
+file snapshots were not retained. Validator flags cannot reconstruct those absent
+raw captures.
+
+Untracked local final receipts are `doorbell-measurement-windows-final.json`
+(SHA256 `6a8adf72a2aabe9abf10c2597cd0056511ce5dcaf1a09f8b4c24209948ec316a`)
+and `doorbell-measurement-linux-final.json`
+(SHA256 `37750ec024d35920666d31f64bf6176e8cb4d5ca8fe3d2cde629016c7d3763ec`).
+`doorbell-measurement-audit.json` retains the recalculated summaries, scoped clean
+instrument/production bindings and unchanged runtime/helper/binary identities;
+the broad oracle dirty flag describes its eval overlay. These files are local
+evidence, not tracked or published acceptance assets.
+
+A separate local Linux process-interruption capture at
+`fccb8cad64f3c553f86bc6886b64b7446dc270f9` traces four genuine Python/native Rust
+invocations: each arm stops at the owned receipt rename syscall entry and at its
+successful exit. Both stops follow observed successful staged-file `fsync` and
+`close`. The capture reuses the existing version2-positive stdin and privately
+prepared pending bytes, with a prior `prior\n` seen receipt. Oracle, runtime,
+loaded helper, committed Rust source and retained executable bindings match
+before and after each cell; the executable hashes above remain unchanged.
+
+At entry, the prior seen bytes survive alongside a complete nonce-plus-LF staged
+orphan; the pending bytes remain unchanged. At successful exit, seen contains
+the complete new receipt and the staged file is absent. Every interrupted child
+ends with SIGKILL (-9); all six traced thread IDs, including both Rust CLONE
+threads, are reaped and absent. Each ordinary untraced retry returns exit 0 with
+empty stdout/stderr, demonstrating reusable locking and a complete nonce-plus-LF
+receipt. Entry retries preserve the original orphan. Complete pre/post/retry
+file bytes, raw names, streams, selected private metadata and syscall facts were
+archived before removing all four verified owned fixtures. Captured files pass
+private validation with mode `0o600`, `nlink=1` and uid/gid 1000; ACL entries were
+not captured.
+
+The raw entry file maps differ at the actual orphan names: Python
+`digests/.bell-r9s9lzww` and Rust
+`digests/.bell-17709f2064ff4a179d88337c3476b445`. Their bytes match, but neither
+name nor its metadata key is normalized or excluded. Successful-exit file maps
+and selected metadata match exactly. Raw absolute syscall operands and process
+facts remain different and retained. The first Python-entry supervisor recorded
+proof exit 0 before its outer WSL exit-recording wrapper failed with exit 1; that
+failure remains intact. A private shell-file launcher completed the remaining
+three cells with outer exit 0, without repeating the first cell. An initial
+private audit also failed on Windows parsing of a Linux path; `PurePosixPath`
+corrected that audit without changing or rerunning the proof.
+
+Untracked local receipts are `doorbell-atomic-python-entry.json`,
+`doorbell-atomic-python-success-exit.json`, `doorbell-atomic-rust-entry.json` and
+`doorbell-atomic-rust-success-exit.json`. The summary is
+`doorbell-atomic-interruption-audit.json` (SHA256
+`b72de20e3cbd903725b12eed6f1ded916ff91ee2fc952e5fe770089749124f14`);
+the raw artifact index is `doorbell-atomic-interruption-manifest.json` (SHA256
+`d3ce7ba88e28975e8031371263df200f3ec67f163ceb8de81ea64156ba28422f`).
+This bounded Linux process-interruption evidence does not prove Windows
+interruption, power-loss persistence, post-rename directory sync or full-mode
+fault acceptance.
+
+Separate fault and metadata probes retain fourteen unmatched Python traceback
+cases and two legacy migration clock-byte differences per platform. Native
+exception paths match the observed exit, state and final diagnostic line,
+including platform newline; interpreter traceback frames remain unmatched.
+These cases are not accepted or excluded. The Windows missing-home RuntimeError
+probe also retains unmatched traceback frames. Four Windows symlink cases lack
+creation privilege and remain unproven. Windows interruption during atomic
+replacement remains unproven.
+
+The preceding candidate passed seven native unit tests, three existing dispatch
+tests and nine additive fixture/control tests on both hosts, plus formatting and
+warning-denied clippy. Follow-up review found that valid signed-zero integer
+limits still suppressed receipts. Parsing the limit as a signed integer repairs
+`-0` and `-0000`; new source-bound probes match all 12 Windows and 10 Linux pairs,
+including stdin and pending-file counterexamples. Seven native unit tests pass
+again on each host, with explicit signed-zero boundary regressions. These narrow
+checks preceded the committed ordinary captures above.
+Original tests and the generic process fixture remain unchanged. Initial
+independent review requested changes; the measurement instrument subsequently
+received scoped approval. Full-mode fault/traceback,
+migration clock policy, hosted CI and evidence-successor
+review remain outstanding. No ported status or full-port claim follows from
+the ordinary corpus, bounded positive or interruption proofs, or debug-path
+measurements.
+
+The external pytest adapter now routes the four unchanged CoordinationPrompt
+hook nodes through their original shell launcher and marker-writing Python
+runner to the native process. Python and routed arms pass all four nodes on
+Windows and Linux; each arm observes sixteen hooks and twelve child calls.
+Fixture, public-mode and shell-capability controls pass 22 tests per host.
+Linux controls use an external bridge to the existing Git metadata; the two
+initial Git-path failures remain recorded. The hook adapter has independent
+review approval; its assertions do not settle the byte and fault gaps above.
+
+Automatic CLI dispatch now selects the five historical dispatcher nodes plus
+the four admitted hook nodes, with deterministic ordering and no duplicates.
+Its runtime gate derives the package version from the selected pinned source
+and retains Python 3.11, source-origin and installed-distribution checks.
+Preparatory `process_tests` captures pass all nine nodes in Python and native
+arms on both hosts, with 33 dispatcher controls passing per host. The candidate
+source was dirty in those preparatory captures; their historical status is
+unchanged. The later scoped committed evidence above does not turn these
+component captures into full acceptance receipts.
+
+The repaired source has 380 physical lines in `doorbell_seen.rs`, 305 in
+`doorbell_files.rs` and 165 in `doorbell_json.rs`, including comments, blanks
+and additive tests. Production before each file's first test-only module is
+303, 278 and 86 lines respectively. Dispatch and assets are separate. These
+are directly recountable source sizes, with no native/Python ratio or parity
+claim. The earlier local `doorbell-line-ratio-counts.json` remains private
+historical evidence for the removed compatibility model.
+
 The version branch targets the current Python oracle at master
 `3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
 Historical phase 1 close-out evidence retains
@@ -73,7 +1041,7 @@ the outstanding hosted CI or CLI-VERSION acceptance gates.
 
 ## Historical Phase 2c publication snapshot
 
-Historical snapshot: 2026-10-06 08:57 UTC. These rows retain the observed state at that time, with subsequent #560 merge disposition already recorded. Its cleanup repair later passed hosted checks and both candidate-routed suites. Current version state is recorded below; a run validates only its recorded head.
+Historical snapshot: 2026-10-06 08:57 UTC, except the episode row updated on 2026-10-07. The other rows retain the observed state at that time, with subsequent #560 merge disposition already recorded. Its cleanup repair later passed hosted checks and both candidate-routed suites. Current version state is recorded below; a run validates only its recorded head.
 
 | Branch | PR | Published head | Base | Rust workflow run / status | Next action |
 |---|---|---|---|---|---|
@@ -81,7 +1049,7 @@ Historical snapshot: 2026-10-06 08:57 UTC. These rows retain the observed state 
 | `codex/rust-phase2b-version` | [#600](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/600), draft | `db0d59cb` published; `74b5998c` measured | `master` after #560 | No hosted run on `74b5998c`; historical #37315503446 failed at `ac0c64a1` | Freeze the documentation/evidence successor, repeat required final-head cells on both OSes, then require hosted validation and independent review. The current ten-stdio attempt fails five shared fixture nodes in both arms. |
 | `codex/rust-phase2b-wait-mail` | [#601](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/601), draft | `9861ced9` | `codex/rust-phase2b-version` | #37428816392: both Rust jobs failed; Parity skipped | Carry the help-fixture LF correction and shared Linux cleanup repair, then rebase after version is ported and recapture. |
 | `codex/rust-phase2b-lease` | [#602](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/602), draft | `a6cdf024` | `codex/rust-phase2b-version` | #37428908416: Rust green, Parity red on both OSes | Apply the named policies; carry registration and Windows path-admission repairs after version is ported, then capture final-head mode evidence. |
-| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `267ee9a2` | `codex/rust-phase2b-version` | #37429259333: Rust green, Parity red on both OSes | Apply clock/header rules; carry shared repairs after version is ported, then capture final-head mode evidence. |
+| `codex/rust-phase2b-episode` | [#603](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/603), draft | `7d20ceb8` documentation successor; runtime `d2e86010` | accepted `master` @ `0b46bb8e` | All 14 hosted checks passed at `7d20ceb8`. Committed `d2e86010` box Python suite: 18,203 passed, exit 0 | The subsequent documentation correction requires its own hosted checks and current-master readiness checks. Historical #37429259333 at `267ee9a2` remains a retained both-OS Parity failure. |
 | `codex/rust-phase2b-briefing-hook` | [#604](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/604), draft | `7171d6cc` | `codex/rust-phase2b-version` | #37429570773: Rust green, Parity red on both OSes | Carry shared repairs after version is ported; investigate the additional unretained normal-transcript stderr difference with final-head raw evidence. |
 | `codex/rust-phase2b-doorbell-seen` | [#605](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/605), draft | `2c026331` | `codex/rust-phase2b-version` | #37429996211: Rust green, Parity red on both OSes | Apply traceback, clock and temporary-name rules; carry shared repairs after version is ported, then rebind mode evidence. |
 | `codex/rust-phase2b-fixture` | [#606](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/606), draft | `1ff47a1a` | `codex/rust-phase2` @ `c9705e88` | #37430021881: Rust and Parity green on both OSes | Preserve #589 until its dependent fixture and evidence split is complete. |

@@ -3,8 +3,13 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod briefing_hook;
+mod doorbell_seen;
+mod episode;
+mod hook_json;
 pub mod lease;
 mod version;
+pub mod wait_mail;
 
 const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
@@ -12,9 +17,6 @@ const DEFERRED_MODES: &[&str] = &[
     "embedded",
     "coordination-recovery",
     "board-audit",
-    "briefing",
-    "prompt-hook",
-    "doorbell-prompt-seen",
     "doctor",
     "connect",
     "invite",
@@ -27,9 +29,6 @@ const DEFERRED_MODES: &[&str] = &[
     "backup",
     "export",
     "import",
-    "episode-start",
-    "episode-end",
-    "wait-mail",
     "maintainer",
 ];
 
@@ -92,8 +91,16 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "wait-mail" {
+        return Some(ExitCode::from(wait_mail::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if matches!(mode, "shim" | "channel") {
         return None;
+    }
+    if matches!(mode, "briefing" | "prompt-hook") {
+        return Some(briefing_hook::run(mode));
     }
     if matches!(mode, "help" | "-h" | "--help") {
         return Some(
@@ -116,6 +123,9 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
                 ExitCode::FAILURE
             },
         );
+    }
+    if mode == "doorbell-prompt-seen" {
+        return Some(doorbell_seen::run());
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
@@ -141,4 +151,12 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
             ExitCode::FAILURE
         },
     )
+}
+
+/// Hook leaves read stdin before making an unauthenticated health request.
+pub async fn dispatch_episode(mode: Option<&str>) -> Option<ExitCode> {
+    match mode {
+        Some(mode @ ("episode-start" | "episode-end")) => Some(episode::run(mode).await),
+        _ => None,
+    }
 }

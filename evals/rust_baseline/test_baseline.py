@@ -16,6 +16,7 @@ from . import daemon, daemon_child
 from .ci import elapsed, summarize
 from .common import child_environment, controls, distribution, lease_gate, provenance, write_result
 from .daemon import _daemon_command, corpus
+from .process_checks import assert_child_stopped
 
 
 TOY_HEALTH_SERVER = """
@@ -103,30 +104,7 @@ class BaselineTests(unittest.TestCase):
         return pid_file, [sys.executable, "-c", command]
 
     def assert_child_stopped(self, pid_file):
-        import psutil
-        self.assertTrue(pid_file.exists(), "toy child did not start")
-        try:
-            child = psutil.Process(int(pid_file.read_text()))
-        except psutil.NoSuchProcess:
-            return
-        try:
-            child.wait(timeout=2)
-        except (psutil.NoSuchProcess, psutil.TimeoutExpired):
-            pass
-        try:
-            alive = child.is_running() and child.status() != psutil.STATUS_ZOMBIE
-        except psutil.NoSuchProcess:
-            alive = False
-        try:
-            self.assertFalse(alive, "owned descendant survived")
-        finally:
-            # A watched RED must not leave its synthetic child behind.
-            if alive:
-                try:
-                    child.kill()
-                    child.wait(timeout=5)
-                except psutil.NoSuchProcess:
-                    pass
+        assert_child_stopped(pid_file)
 
     def test_unrelated_http_200_cannot_satisfy_readiness(self):
         with launcher_directory() as directory, unrelated_listener() as port:

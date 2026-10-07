@@ -367,7 +367,7 @@ pub async fn run(args: Args) -> i32 {
     let code = match result {
         Err(RunError::RefusedInput(message)) => {
             say(&format!("lease: {message}"));
-            return 1;
+            1
         }
         Ok(code) => code,
         Err(RunError::TimedOut) => {

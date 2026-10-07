@@ -1,3 +1,5 @@
 # The embedded help asset is translated to platform newlines by the dispatcher.
 shim/src/cli_help.txt text eol=lf
+# The wait-mail formatter compares its LF template before stream translation.
+shim/src/cli/wait_mail_help.txt text eol=lf
 shim/src/cli/lease/assets/*.txt text eol=lf

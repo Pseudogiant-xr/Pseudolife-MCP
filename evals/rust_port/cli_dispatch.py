@@ -11,6 +11,7 @@ import time
 import tomllib
 
 from .cli_corpus import corpus
+from . import pytest_plugin
 from .harness import (Policy, capture_platform, compare, execute, isolated_env,
                       replay, write_new)
 from .phase1_receipts import candidate_identity, command_identity, pytest_outcomes
@@ -21,7 +22,8 @@ from .stdio_capture import require_phase1_source
 
 def selected_nodes():
     manifest = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
-    return [node for node, boundary in manifest["mapped"].items() if boundary == "cli-main-process"]
+    mapped = {node for node, boundary in manifest["mapped"].items() if boundary == "cli-main-process"}
+    return sorted(mapped | set(pytest_plugin.CLI_SUBPROCESS_NODES) | pytest_plugin.CLI_HOOK_NODES)
 
 
 def process_tests(command, root, directory, label):
@@ -63,20 +65,25 @@ def judge_sensitivity_controls(records):
     return controls
 
 
-def run(root, command, candidate_root, evidence_directory, resource):
-    source = require_phase1_source(root)
-    require_import_root(root)
-    runtime = runtime_metadata(root)
+def require_cli_runtime(root):
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    runtime = runtime_metadata(root)
     if sys.version_info[:2] != (3, 11) or not runtime["source_origin_matches_selected_root"] \
             or runtime["package_runtime_version"] != version \
             or runtime["distribution_versions"]["pseudolife-mcp"] != version:
         raise RuntimeError("CLI capture requires the genuine pinned installed package runtime")
+    return runtime
+
+
+def run(root, command, candidate_root, evidence_directory, resource):
+    source = require_phase1_source(root)
+    require_import_root(root)
+    runtime = require_cli_runtime(root)
     python = [sys.executable, "-m", "pseudolife_memory.cli"]
     identity = candidate_identity(command, candidate_root)
     python_identity = command_identity(python, root)
     spec = corpus()
-    watched = ("tests/test_cli_dispatch.py", "tests/conftest.py")
+    watched = tuple(sorted({node.split("::", 1)[0] for node in selected_nodes()} | {"tests/conftest.py"}))
     hashes = lambda: {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in watched}
     before = hashes()
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-") as temporary:
