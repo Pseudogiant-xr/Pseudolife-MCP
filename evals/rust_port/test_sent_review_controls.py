@@ -32,8 +32,8 @@ def test_normalized_principal_http_bytes(prefix, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("name", ["1_agent", "123_name"])
 def test_digit_name_http_bytes(prefix, tmp_path, monkeypatch, name):
-    config = {"coordination": {"allowed_principals": [name], **CONFIG["coordination"]}}
-    paired(prefix, tmp_path, monkeypatch, config=config, token=None, tokens="synthetic-name:" + name,
+    configuration = f"coordination:\n  allowed_principals: [{name}]\n  maintainer:\n    rp_id: localhost\n    origin: http://localhost\n"
+    paired(prefix, tmp_path, monkeypatch, configuration=configuration, token=None, tokens="synthetic-name:" + name,
            requests=[{"headers": {"Authorization": "Bearer synthetic-name"}}])
 
 

@@ -105,11 +105,11 @@ def prefix(request):
     return selected
 
 
-def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, token=TOKEN, tokens=None, proof="falsy-corpus", missing=False, stored=()):
+def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, configuration=None, token=TOKEN, tokens=None, proof="falsy-corpus", missing=False, stored=()):
     from pseudolife_memory.utils.config import load_config
     from pseudolife_memory.principals import parse_token_map
     config = CONFIG if config is None else config
-    text = json.dumps(config)
+    text = json.dumps(config) if configuration is None else configuration
     path = tmp_path / "oracle-config.yaml"
     path.write_text(text, encoding="utf-8")
     cfg = load_config(path)
