@@ -134,7 +134,7 @@ name the refusal, title-minute and separate direct group-12 instances;
 [the case ledger](../evals/rust_port/episode_policy_cases.json) retains all
 57 outside-policy raw-header case IDs per OS. Both episode modes remain
 deferred. Static checker tests do not rebind historical receipts or establish
-runtime acceptance. New `test_episode_executable.py` nodes launch the candidate
+runtime acceptance. New [episode executable nodes](../evals/rust_port/test_episode_executable.py) launch the candidate
 when explicitly configured in the both-OS hosted lane; that wiring has not yet
 run on the prepared head. The original ten in-process episode/title nodes and
 all existing eval assertions remain unchanged.
