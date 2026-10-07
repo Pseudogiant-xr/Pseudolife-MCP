@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+<<<<<<< HEAD
 ### Fixed (2026-10-07 — native episode bearer refusal)
 
 - The experimental native episode hooks refuse configured bearers containing
@@ -20,6 +21,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   matching Python's header absence. The comparison instrument records named
   field-name association and the delegated 57-case absent-Accept versus exact
   `*/*` substitution, rejecting other header changes and duplicate/case collisions.
+=======
+### Changed (2026-10-07 — native wait-mail producer scope)
+
+- The experimental native `wait-mail` reads unsigned decimal, LF-framed
+  coordination records without an interpreter digit limit. Corrupt records
+  refuse delivery with exit 2; numeric options use finite ASCII decimal values,
+  invalid terminal dimensions fall back to 80 columns, and stdout failures
+  leave mail unshown with exit 2. Temporary-file collision retries are bounded.
+  The mode remains deferred while its reduced candidate is validated.
+>>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
 
 ### Added (2026-10-07 — native lease candidate and help drift guards)
 

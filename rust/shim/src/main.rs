@@ -19,6 +19,11 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if arguments.first().is_some_and(|mode| mode == "wait-mail") {
+        return ExitCode::from(pseudolife_stdio::cli::wait_mail::run(
+            arguments.into_iter().skip(1).collect(),
+        ));
+    }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
         let Some(lease_arguments) = arguments
             .iter()

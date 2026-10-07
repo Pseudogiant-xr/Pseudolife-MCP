@@ -1,5 +1,6 @@
 # Rust port state
 
+<<<<<<< HEAD
 ## Episode integration with accepted lease master
 
 Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged forward,
@@ -305,6 +306,130 @@ against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
 excluding tests/assets and dispatch. The broader title denominator caveat above
 still applies. Policy groups 5, 7 and 12, remaining integration, current CI and
 the future full PR's independent review remain open; both modes stay deferred.
+=======
+## Wait-mail preparation on accepted master (2026-10-07)
+
+The producer reduction now implements canonical unsigned ASCII watermarks
+without a digit limit, exact writer LF framing, finite ASCII numeric options,
+positive ASCII terminal dimensions with invalid input falling back to 80,
+simple help wrapping, direct stdout failure exit 2 and a native temporary-file
+collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
+each deliberate substitution. The approved 4,301-digit assertion and exact Rust
+and Python legacy-test exception patches have been applied. The shared checker
+binds 19 changed corpus cases to explicit candidate contracts while retaining
+actual Python observations and raw differences. Final native validation is required
+before candidate test acceptance. New Rust and candidate-only process nodes are
+prepared but have not run. The mode remains deferred.
+
+The wait-mail branch now includes accepted master `0b46bb8e` and its corrected
+Linux descendant cleanup. The Windows help-template checkout fix preserves
+the existing LF fixture and assertions. This is preparation; wait-mail remains
+`deferred`, and every prior failure and measurement keeps its original binding.
+
+Merge-forward conflict: `main.rs` now uses the accepted `args_os` dispatch and
+invalid-mode diagnostic, then passes native wait-mail its unchanged `OsString`
+arguments. This manually resolved source conflict requires one later WSL full
+suite on the committed final candidate; it has not run.
+
+The new additive CI nodes check actual native Unicode delivery/stdout/`.seen`
+and bounded per-arm clocks, plus `COLUMNS=80` help against Python. The existing
+deterministic wait-mail assertions run with an explicit binary in that lane.
+The process comparator now wires only the named delivery-clock, source-suffix
+and Linux terminal-traceback fields. New admission/rejection and process-lane
+self-checks run during preparation; historical-input replay uses the current
+checker without launching native processes. Native execution, both-OS recapture,
+positive paired measurements and current-head hosted checks remain pending.
+Historical private receipts cited below cannot certify this candidate.
+
+## Historical wait-mail leaf candidate and captures
+
+Native `wait-mail` is implemented before shim attachment on dependency
+`db0d59cb`, against immutable Python `eb0c13e9` (0.17.0/schema 55). The first
+candidate's diagnostic corpus matched 54/54 Windows pairs and 52/54 Linux pairs,
+with 216 rejected candidate-output controls per host; two Linux clock differences
+remain raw failures. These counts describe that earlier source, not a new full
+corpus run after the focused repairs.
+
+The repaired candidate refuses opaque session bytes before filesystem access,
+matches the UnicodeEncodeError terminal detail and exit, and uses the pinned
+eight-character temporary-name format with exclusive creation and collision
+retries. Focused process captures retain unmatched Python traceback frames,
+independent random suffixes and wall-clock values. No comparison normalization
+or exclusion has been adopted. Owned homes, listeners and processes were cleaned.
+Targeted native tests, locked clippy and format checks pass on both platforms;
+existing Python tests remain unchanged and in-process.
+
+Fresh independent review found seven further defects. The follow-up candidate
+uses interruptible POSIX reads and non-restarting SIGINT handling, restores
+private listener mode 0600, aborts on failed diagnostics, distinguishes buffered
+stdout flush failures from direct write failures, propagates help write failures,
+pre-scans ambiguous optional tokens, and preserves opaque parser-error escapes.
+The previous reviewed source captures matched 55/55 Windows corpus pairs and
+51/55 Linux pairs, with 220 rejected candidate-output controls per host. The four Linux
+failures retain clock differences; separate focused captures still retain random
+temporary suffix and Python traceback differences. A subsequent independent
+review accepted those fixes and found terminal-width,
+unbuffered-output and opaque digest-path differences. The previous candidate renders
+help/usage for COLUMNS, honors the selected interpreter's PYTHONUNBUFFERED flag
+semantics, and preserves surrogateescape in setup paths. Focused public probes
+match 19/19 Windows and 21/21 Linux pairs. Its 61-case corpus matches 60/61 Windows
+and 59/61 Linux pairs, with 244 rejected mutation controls per host; all three
+remaining corpus failures retain clock fields. These counts belong to the binary
+before the later description-width repair, not a rerun of the current source.
+Follow-up review accepted those changes and found the help description's missing
+minimum width of 11 at narrow COLUMNS values. The current repair applies that
+minimum only to the description, with additive public cases at widths 1, 2, 3, 7,
+12 and 13; usage and option layout retain their separate rules. Current focused
+results match 9/9 public pairs on each host, with two formatter tests and six
+additive cases passing per host (24 rejected candidate mutations each). Those
+focused results and the earlier 61-row captures remain unchanged.
+
+A later diagnostic corpus binds committed instrument `3abddc5d` to the unchanged
+final binaries and the pinned 0.17.0 oracle. Its 67 rows match 66/67 Windows pairs
+and 64/67 Linux pairs, with all 268 candidate-output mutations rejected on each
+platform. Both runs exit 1 and retain complete output and home-file observations.
+Windows fails `wait-mail-large-watermark`; Linux fails
+`wait-mail-non-ascii-space-body`, `wait-mail-delayed-ring` and
+`wait-mail-delayed-digest`. Each differs only in stderr's wall-clock second and
+the ledger epoch, by one ASCII byte per field. These four raw failures have not
+been waived, normalized or excluded.
+
+The local untracked receipts are
+`wait-mail-current-committed-windows-matrix.json` (SHA-256
+`6a1d4b8f8b47f1029bef9d9b78e12a46b092d29c90285a01d7907cd440d570bc`) and
+`wait-mail-current-committed-linux-matrix.json` (SHA-256
+`a10d1f1841a3f0e28ef4e390c6fd2be140c55e999df7f02eb73e851bf428cebd`).
+`wait-mail-current-committed-manifest.json` retains runtime, helper, corpus,
+source and binary bindings before and after capture, raw counts and cleanup;
+`wait-mail-current-committed-failure-classification.json` retains the differing
+byte ranges. They supplement the earlier evidence without replacing it.
+
+The positive `wait-mail-unicode-delivery` row delivers the exact peer body and
+advances `.seen` on both platforms. This proves local digest/ring-to-stdout/seen
+delivery at an unavailable daemon URL; new actual daemon mail delivery remains
+unverified. Successful delivery always prints runtime HH:MM:SS and appends a
+ledger epoch, while `cli_measurement` requires every sample's output and home
+bytes to equal its earlier control. Positive delivery timing therefore remains
+blocked by the pending group 7 clock-policy decision. No positive timing adapter,
+normalization or substitute timing run has been started. The existing question
+remains pending; group 8 random-suffix and group 9 traceback decisions, fresh
+review and full-mode acceptance remain deferred. The feasibility assessment is
+retained as `wait-mail-positive-measurement-feasibility.md`.
+
+The initial pre-code proof used a wrong-source console launcher and is rejected.
+Later public module invocations have child source/blob/bytecode bindings and a
+deterministic delivery proof, but do not retroactively satisfy that sequencing
+requirement. The generic process fixture is unchanged. The dedicated Rust
+production sections contain 1,036 + 424 = 1,460 physical lines before their test
+modules, versus 306 in the Python leaf (4.77124). Test modules, the test-only help
+constant and help assets are excluded; the shared CLI and main files separately
+add 14 lines and remove one. This is a
+size observation, not coverage.
+
+Follow-up review, committed-source acceptance, routed/additive CI integration,
+measurements and the remaining byte-policy decisions are pending. The mode
+remains deferred in the parity register.
+>>>>>>> 7d879147fef0afea1fac300c154d3b05ca7e7999
 
 The version branch targets the current Python oracle at master
 `3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
