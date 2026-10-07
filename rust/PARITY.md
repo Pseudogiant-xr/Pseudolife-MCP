@@ -167,7 +167,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
 | CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
-| CLI-LEASE | 4 remainder | Native hold and offline break source prepared; delegate/designate still explicitly refuse exit 1 with `deferred in this candidate`. Break admits external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; hold/break whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
+| CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
@@ -1304,12 +1304,14 @@ read-only process probe, and releases without signalling that PID. Its board
 mirror registers `lease-hold@<instance-id>`, renews and notifies the concerned
 peers asynchronously; local exclusion ends before bounded board cleanup.
 The parser and pinned Python help guards include hold/break/delegate and the
-`designate` deprecation alias. The hold checkpoint retained break/delegate/
-designate exit-1 deferrals; the following operator preparation replaces only
-break's action deferral. Delegate/designate remain deferred.
+`designate` deprecation alias. The historical hold checkpoint retained break/
+delegate/designate exit-1 deferrals. Subsequent operator preparation supersedes
+those implementation deferrals; acceptance of all four actions remains deferred.
 
-The named `hold-mirror-best-effort` rule preserves local ownership: a configured
-forbidden bearer refuses before acquiring or creating a lock/stamp; a failure
+The named `hold-mirror-best-effort` rule follows the producer contract in
+`pseudolife_memory/lease_cli.py:964` (`BoardMirror`) and local release ordering in
+`pseudolife_memory/lease_cli.py:1285-1324` (`_hold`). It preserves local ownership:
+a configured forbidden bearer refuses before acquiring or creating a lock/stamp; a failure
 observed after acquisition, including forbidden registration headers or
 `HTTP_REPLY_NOT_UNDERSTOOD`, stops only the mirror. The hold keeps its lock,
 leaves the followed PID running and retains its normal exits. Core refusal
@@ -1326,8 +1328,9 @@ rows' `agent_id` plus the chain links derived from that identity. Each arm
 must receive a canonical UUID4 hex ID and a 43-character URL-safe token;
 the stored credential hash must equal SHA-256 of its actual issued token.
 Each arm also validates the exact display name produced by its label, one
-space and its own `agent_id[:8]` suffix; only that eight-character UUID echo
-is semantic.
+space and its own `agent_id[:8]` suffix. The producer is `_board_name` at
+`pseudolife_memory/storage/coordination.py:623`, with the derivation at lines
+627-628; only that eight-character UUID echo is semantic.
 Every captured audit chain must independently verify its original payload
 text, hashes and links before semantic comparison, with exact event kinds,
 order, sequence and all other columns. Request-body bytes, CLI streams,
@@ -1335,8 +1338,8 @@ lock/child behavior and all unrelated rows remain exact. This rule does not
 permit replacing entropy sources or discarding unrelated state differences.
 Mirrored hold whole-command acceptance remains pending.
 
-This is source preparation, with no Phase 4 native execution or acceptance
-claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
+This historical hold checkpoint was source preparation, with no Phase 4 native
+execution or acceptance claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
 public-process/state corpora, Windows interruption and PostgreSQL transaction/
 audit/ownership controls remain pending. Linux runtime gates run on the
 existing homelab machine; nextest remains in hosted CI. The Phase 2d runtime

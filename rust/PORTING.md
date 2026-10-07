@@ -922,10 +922,11 @@ The new branch prepares native hold and the full action parser/help surface
 against the pending Phase 2d base. Hold follows an external PID without
 signalling it; its asynchronous mirror preserves local ownership under the
 named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
-The hold checkpoint retained break/delegate/designate exit-1 deferrals. Break
-source is now prepared as described below; delegate/designate remain deferred.
-No Phase 4 execution, hosted acceptance or new timing
-claim is made; previous runtime receipts retain their original identities.
+The historical hold checkpoint retained break/delegate/designate exit-1
+deferrals. Subsequent operator preparation supersedes those implementation
+deferrals; acceptance of all four actions remains deferred.
+At that checkpoint, no Phase 4 execution, hosted acceptance or new timing
+claim was made; previous runtime receipts retain their original identities.
 Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
 pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
 
