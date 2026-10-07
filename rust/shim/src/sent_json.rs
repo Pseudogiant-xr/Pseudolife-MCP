@@ -12,9 +12,12 @@ pub enum Json {
     String(String),
     Array(Vec<Json>),
     Object(Vec<(String, Json)>),
-    // Only named supplemental fixture producers exercise default=str controls.
+    // Supplemental default=str producers are not reachable from sent SQL.
+    #[cfg(test)]
     FixtureUuid(uuid::Uuid),
+    #[cfg(test)]
     FixtureTimestamp(chrono::NaiveDateTime),
+    #[cfg(test)]
     FixtureUtcTimestamp(chrono::DateTime<chrono::Utc>),
 }
 
@@ -49,18 +52,24 @@ fn quoted(text: &str, out: &mut String) {
     out.push('"');
 }
 
-fn float(value: f64, out: &mut String) {
+fn float(value: f64, out: &mut String) -> Result<(), InvalidInteger> {
+    #[cfg(not(test))]
+    if !value.is_finite() {
+        return Err(InvalidInteger);
+    }
+    #[cfg(test)]
     if value.is_nan() {
         out.push_str("NaN");
-        return;
+        return Ok(());
     }
+    #[cfg(test)]
     if value.is_infinite() {
         out.push_str(if value.is_sign_negative() {
             "-Infinity"
         } else {
             "Infinity"
         });
-        return;
+        return Ok(());
     }
     if value == 0.0 {
         out.push_str(if value.is_sign_negative() {
@@ -68,7 +77,7 @@ fn float(value: f64, out: &mut String) {
         } else {
             "0.0"
         });
-        return;
+        return Ok(());
     }
     // Reshape Rust's shortest decimal to Python repr's exponent window.
     // Acceptance still requires the independently captured exact corpus.
@@ -111,6 +120,7 @@ fn float(value: f64, out: &mut String) {
             out.push_str(&significant[point..]);
         }
     }
+    Ok(())
 }
 
 fn append(value: &Json, out: &mut String) -> Result<(), InvalidInteger> {
@@ -128,7 +138,7 @@ fn append(value: &Json, out: &mut String) -> Result<(), InvalidInteger> {
             }
             out.push_str(value);
         }
-        Json::Float(value) => float(*value, out),
+        Json::Float(value) => float(*value, out)?,
         Json::String(value) => quoted(value, out),
         Json::Array(values) => {
             out.push('[');
@@ -152,7 +162,9 @@ fn append(value: &Json, out: &mut String) -> Result<(), InvalidInteger> {
             }
             out.push('}');
         }
+        #[cfg(test)]
         Json::FixtureUuid(value) => quoted(&value.to_string(), out),
+        #[cfg(test)]
         Json::FixtureTimestamp(value) => {
             let mut text = value.format("%Y-%m-%d %H:%M:%S").to_string();
             let micros = value.and_utc().timestamp_subsec_micros();
@@ -161,6 +173,7 @@ fn append(value: &Json, out: &mut String) -> Result<(), InvalidInteger> {
             }
             quoted(&text, out);
         }
+        #[cfg(test)]
         Json::FixtureUtcTimestamp(value) => {
             let mut text = value.format("%Y-%m-%d %H:%M:%S").to_string();
             let micros = value.timestamp_subsec_micros();

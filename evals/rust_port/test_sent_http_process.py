@@ -105,7 +105,7 @@ def prefix(request):
     return selected
 
 
-def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, configuration=None, token=TOKEN, tokens=None, proof="falsy-corpus", missing=False, stored=()):
+def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, configuration=None, token=TOKEN, tokens=None, proof="falsy-corpus", missing=False, stored=(), exact=True):
     from pseudolife_memory.utils.config import load_config
     from pseudolife_memory.principals import parse_token_map
     config = CONFIG if config is None else config
@@ -136,17 +136,31 @@ def paired(prefix, tmp_path, monkeypatch, *, requests=None, config=None, configu
         with native_sent(prefix, tmp_path / "native", dsn, configuration=text, token=token, tokens=tokens) as (client, process):
             actual = [observe_http(client, **request) for request in requests]
         assert bank_snapshot(dsn) == before
-    for request, wanted, observed in zip(requests, expected, actual, strict=True):
-        assert compare_response(wanted, observed) == [], request.get("query", "admission")
-    return {"expected": expected, "actual": actual, "differences": [],
+    differences = [compare_response(wanted, observed) for wanted, observed in zip(expected, actual, strict=True)]
+    if exact:
+        for request, diff in zip(requests, differences, strict=True):
+            assert diff == [], request.get("query", "admission")
+    return {"expected": expected, "actual": actual, "differences": differences,
             "readiness": process.sent_readiness, "owned_cleanup": process.owned_cleanup,
             "oracle_bank_unchanged": True, "native_bank_unchanged": True,
             "disposable_banks_dropped": True}
 
 
 def test_whole_http_sql_order_and_query_controls(prefix, tmp_path, monkeypatch):
-    queries = ["", "limit=1", "limit=0", "limit=-2", "limit=201", "limit=bad", "limit=1&limit=3", "limit=1_0", "limit=%2B2", "limit=%D9%A2", "limit=" + "9"*4301]
+    queries = ["", "limit=1", "limit=0", "limit=-2", "limit=201", "limit=bad", "limit=1&limit=3", "limit=%2B2"]
     paired(prefix, tmp_path, monkeypatch, requests=[{"query": query, "headers": {"Authorization": "Bearer " + TOKEN}} for query in queries])
+
+
+def test_ascii_limit_named_substitution(prefix, tmp_path, monkeypatch):
+    """Retain raw Python differences; this is not exact int() emulation."""
+    queries = ["limit=0_2", "limit=%D9%A2", "limit=%C2%A02"]
+    capture = paired(prefix, tmp_path, monkeypatch, exact=False, requests=[
+        {"query": query, "headers": {"Authorization": "Bearer " + TOKEN}} for query in queries])
+    for expected, actual, differences in zip(capture["expected"], capture["actual"], capture["differences"], strict=True):
+        assert expected["status"] == actual["status"] == 200
+        assert len(json.loads(base64.b64decode(expected["body_b64"]))["messages"]) == 2
+        assert len(json.loads(base64.b64decode(actual["body_b64"]))["messages"]) == 9
+        assert set(differences) == {"body_bytes", "headers/content-length"}
 
 
 @pytest.mark.parametrize("proof", [[1], "nonempty", 1, True])

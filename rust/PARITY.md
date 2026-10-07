@@ -84,6 +84,15 @@ and `TRUST_BIND` using the `PSEUDOLIFE_MCP_` prefix. The candidate follows this
 entry point; no new Python mode or command-line flags are introduced.
 All other paths, including `/health`, return HTTP 501 with the same body:
 `{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}`.
+The candidate retains malformed/unsupported explicit DSNs as read-unavailable
+configuration: it starts the listener and reaches private 503 only after the
+usual admission gates, with `pg-dsn-explicit-tls` alone on stderr. It does not
+change Python startup policy. Actual pinned daemon measurements used Python
+3.11.17 and four synthetic DSNs (malformed, invalid port, unsupported option,
+`allow` with an unreachable loopback endpoint); all reached the admitted 503.
+The `python:3.12-slim` daemon image was unavailable in the existing cache, so
+that runtime remains unmeasured. Unsupported typed YAML still refuses startup.
+
 Only the sent GET implements application work. The owned sent path retains
 pre-dispatch method/body refusals: an authenticated valid or bodyless POST
 returns the pinned known-route `400 invalid_request`; this implements no POST
@@ -97,7 +106,8 @@ unverified. No installation, production shadow or cutover is enabled.
 | Boundary | Candidate coverage | Status |
 |---|---|---|
 | Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | candidate; review/hosted checks pending |
-| Supplemental serialization | Nine exact native cases: escaping, float spelling, separators, producer order, large integers, named UUID/timestamp `default=str` | bounded Windows controls passed |
+| Supplemental serialization | Five production-codec cases plus four test-only UUID/timestamp/nonfinite cases; no sent SQL reachability is claimed for those fixtures | historical nine-case corpus retained; successor checks required |
+| Query limit | `ascii-limit`: ASCII decimal digits, optional sign and ASCII whitespace, default 50 and clamp 1..200; substitution for pinned `web/routes.py:31` Python `int()` | underscores/Unicode digits/Unicode whitespace fall back to 50; no CPython digit cap emulation |
 | Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | approved substitution; bounded Windows controls passed |
 | JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | named read domain; depth 200 exact, boundary policy controls separate |
 | JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
@@ -109,8 +119,12 @@ Actual JSONB object keys remain ordinary application data, including
 `$serde_json::private::Number`. The decoder reversibly prefixes object keys
 before serde validation and removes exactly that prefix before projection;
 values and database-observed member order remain unchanged. This avoids serde's
-internal arbitrary-precision number tag without changing shared serde features
-or normalizing response bytes. Canonical send admission and paired whole HTTP
+internal arbitrary-precision number tag without normalizing response bytes.
+The one shared serde feature addition relative to the accepted base is
+`unbounded_depth`; only the sent JSONB decoder disables the recursion limit,
+inside the named 2048-container bound and stack protection. The unused
+`tokio-postgres/with-serde_json-1` feature is removed so row decoding cannot
+bypass this decoder. Canonical send admission and paired whole HTTP
 controls cover numeric-string, text, numeric-value and nested object cases.
 
 ## Parity rows

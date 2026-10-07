@@ -27,7 +27,7 @@ struct Config {
     allowed: Vec<String>,
     rp_id: String,
     origin: String,
-    dsn: Option<pg::Dsn>,
+    dsn: Option<Result<pg::Dsn, pg::Error>>,
 }
 impl Config {
     fn load() -> Result<Self, String> {
@@ -81,8 +81,7 @@ impl Config {
         let dsn = env::var("PSEUDOLIFE_MCP_DATABASE_URL")
             .ok()
             .filter(|s| !s.is_empty())
-            .map(|s| pg::Dsn::parse(&s).map_err(|e| e.to_string()))
-            .transpose()?;
+            .map(|s| pg::Dsn::parse(&s));
         Ok(Self {
             token,
             tokens,
@@ -193,8 +192,17 @@ fn policy_refusal(error: &pg::Error) -> Option<&'static str> {
         pg::Error::Connection | pg::Error::SessionSetup | pg::Error::Shutdown => None,
     }
 }
-async fn open_session(dsn: &pg::Dsn) -> Option<pg::Session> {
-    match pg::Session::open(dsn).await {
+async fn open_session(dsn: &Result<pg::Dsn, pg::Error>) -> Option<pg::Session> {
+    let result = match dsn {
+        Ok(dsn) => pg::Session::open(dsn).await,
+        Err(error) => {
+            if let Some(policy) = policy_refusal(error) {
+                crate::stderrln!("pseudolife-stdio serve: {policy}");
+            }
+            return None;
+        }
+    };
+    match result {
         Ok(session) => Some(session),
         Err(error) => {
             if let Some(policy) = policy_refusal(&error) {
@@ -441,23 +449,7 @@ fn row(r: pg::Row) -> Result<maintainer_sent::Row, ()> {
         repudiated_at: get!("repudiated_at"),
     })
 }
-// Decimal zero code points from the pinned Python 3.11 Unicode database.
-fn decimal(c: char) -> Option<u8> {
-    const ZEROES: &[u32] = &[
-        0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
-        0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
-        0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0,
-        0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0,
-        0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0,
-        0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0,
-    ];
-    ZEROES.iter().find_map(|zero| {
-        (c as u32)
-            .checked_sub(*zero)
-            .filter(|n| *n < 10)
-            .map(|n| n as u8)
-    })
-}
+// ascii-limit: a named substitution for pinned web/routes.py:31 int() coercion.
 fn limit(query: Option<&str>) -> i64 {
     let decode = |s: &str| {
         percent_encoding::percent_decode_str(&s.replace('+', " "))
@@ -474,31 +466,18 @@ fn limit(query: Option<&str>) -> i64 {
     let Some(text) = selected else {
         return 50;
     };
-    let text = text.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c));
+    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
     let (negative, digits) = if let Some(s) = text.strip_prefix('-') {
         (true, s)
     } else {
         (false, text.strip_prefix('+').unwrap_or(text))
     };
-    let mut count = 0;
-    let mut value: i64 = 0;
-    let mut previous_digit = false;
-    for c in digits.chars() {
-        if c == '_' && previous_digit {
-            previous_digit = false;
-            continue;
-        }
-        let Some(n) = decimal(c) else {
-            return 50;
-        };
-        count += 1;
-        value = (value * 10 + i64::from(n)).min(201);
-        previous_digit = true;
-    }
-    // The pinned Python interpreter's decimal conversion limit is 4300 digits.
-    if !previous_digit || count > 4300 {
+    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
         return 50;
     }
+    let value = digits
+        .bytes()
+        .fold(0i64, |n, c| (n * 10 + i64::from(c - b'0')).min(201));
     if negative { 1 } else { value.clamp(1, 200) }
 }
 async fn handle(
@@ -731,6 +710,27 @@ async fn serve() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ascii_limit_substitution() {
+        for (query, expected) in [
+            ("", 50),
+            ("limit=0", 1),
+            ("limit=-2", 1),
+            ("limit=201", 200),
+            ("limit=%20%2B2%09", 2),
+            ("limit=1&limit=3", 3),
+            ("limit=1_0", 50),
+            ("limit=%D9%A2", 50),
+            ("limit=%F0%91%BD%91", 50),
+            ("limit=%C2%A02", 50),
+            ("limit=+", 50),
+            ("limit=%2B", 50),
+        ] {
+            assert_eq!(limit(Some(query)), expected, "{query}");
+        }
+        assert_eq!(limit(Some(&format!("limit={}", "9".repeat(4301)))), 200);
+    }
 
     #[test]
     fn named_policy_diagnostics_do_not_include_values_or_paths() {

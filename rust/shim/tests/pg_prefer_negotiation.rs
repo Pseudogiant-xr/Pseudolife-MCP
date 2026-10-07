@@ -1,5 +1,9 @@
 //! Protocol retry boundaries; these controls do not prove PostgreSQL TLS parity.
 use pseudolife_stdio::pg::{Dsn, Error, Session, TlsEnvironment};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -129,4 +133,102 @@ async fn prefer_sslrequest_error_never_retries_plaintext() {
 #[tokio::test]
 async fn prefer_plaintext_auth_error_has_no_second_plaintext_attempt() {
     no_retry("prefer", b"N", true).await;
+}
+
+// Each row exercises the actual Session::open_in guard and SSLRequest arm.
+// The fixture certificate only enables strict-mode connector construction;
+// malformed handshakes prove no certificate acceptance or real PG behavior.
+#[tokio::test]
+async fn each_sslmode_pins_negotiation_errors_and_attempt_counts() {
+    let directory =
+        std::env::temp_dir().join(format!("plbench-pg-protocol-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&directory).unwrap();
+    let root = directory.join("root.crt");
+    std::fs::write(&root, include_bytes!("fixtures/pg_protocol_root.pem")).unwrap();
+    for mode in ["disable", "prefer", "require", "verify-ca", "verify-full"] {
+        for reply in [
+            b"N".as_slice(),
+            b"X".as_slice(),
+            b"Sinvalid TLS record".as_slice(),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let config = dsn(&listener, mode);
+            let environment = TlsEnvironment {
+                default_directory: Some(directory.clone()),
+                ambient_controls: vec![],
+            };
+            let count = Arc::new(AtomicUsize::new(0));
+            let recorded = count.clone();
+            let expected = if mode == "prefer" && reply[0] == b'S' {
+                2
+            } else {
+                1
+            };
+            let disabled = mode == "disable";
+            let prefer = mode == "prefer";
+            let name = reply_name(reply[0]);
+            let reply = reply.to_vec();
+            let server = tokio::spawn(async move {
+                for attempt in 0..expected {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    recorded.fetch_add(1, Ordering::SeqCst);
+                    if disabled || attempt == 1 {
+                        startup(&mut stream).await;
+                        send(
+                            &mut stream,
+                            b'E',
+                            b"SFATAL\0C28000\0Mfixture authentication refusal\0\0",
+                        )
+                        .await;
+                    } else {
+                        let mut request = [0; 8];
+                        stream.read_exact(&mut request).await.unwrap();
+                        assert_eq!(request, SSL_REQUEST);
+                        stream.write_all(&reply).await.unwrap();
+                        if prefer && reply[0] == b'N' {
+                            startup(&mut stream).await;
+                            send(
+                                &mut stream,
+                                b'E',
+                                b"SFATAL\0C28000\0Mfixture authentication refusal\0\0",
+                            )
+                            .await;
+                        }
+                    }
+                    drop(stream);
+                }
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                        .await
+                        .is_err()
+                );
+            });
+            assert!(
+                matches!(
+                    tokio::time::timeout(
+                        Duration::from_secs(3),
+                        Session::open_in(&config, &environment)
+                    )
+                    .await
+                    .unwrap(),
+                    Err(Error::Connection)
+                ),
+                "{mode} {name}"
+            );
+            tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(count.load(Ordering::SeqCst), expected, "{mode}");
+        }
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+fn reply_name(reply: u8) -> &'static str {
+    match reply {
+        b'N' => "server N",
+        b'X' => "garbage",
+        _ => "handshake failure",
+    }
 }
