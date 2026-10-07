@@ -10,6 +10,10 @@ use tokio::{
     time::Instant,
 };
 
+#[cfg(unix)]
+#[path = "sigint.rs"]
+mod sigint;
+
 enum RunError {
     RefusedInput(String),
     TimedOut,
@@ -22,7 +26,7 @@ enum BoardWaitError {
 }
 struct Stops {
     #[cfg(unix)]
-    interrupt: tokio::signal::unix::Signal,
+    interrupt: Option<tokio::signal::unix::Signal>,
     #[cfg(unix)]
     terminate: tokio::signal::unix::Signal,
     #[cfg(unix)]
@@ -32,7 +36,13 @@ impl Stops {
     fn new() -> io::Result<Self> {
         Ok(Self {
             #[cfg(unix)]
-            interrupt: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
+            interrupt: if sigint::ignored()? {
+                None
+            } else {
+                Some(tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::interrupt(),
+                )?)
+            },
             #[cfg(unix)]
             terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
             #[cfg(unix)]
@@ -42,7 +52,15 @@ impl Stops {
     async fn wait(&mut self) -> i32 {
         #[cfg(unix)]
         {
-            tokio::select! {_=self.interrupt.recv()=>2,_=self.terminate.recv()=>15,_=self.hangup.recv()=>1}
+            let interrupt = async {
+                match &mut self.interrupt {
+                    Some(signal) => {
+                        let _ = signal.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {_=interrupt=>2,_=self.terminate.recv()=>15,_=self.hangup.recv()=>1}
         }
         #[cfg(windows)]
         {

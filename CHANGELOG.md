@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Fixed (2026-10-07 — inherited native lease SIGINT ignore)
+
+- The experimental native `lease run` preserves an inherited POSIX SIGINT
+  ignore, matching Python startup for background commands. Ordinary Ctrl-C
+  retains interrupt cleanup and exit 130; native lease acceptance remains
+  deferred.
+
 ### Fixed (2026-10-07 — native episode bearer refusal)
 
 - The experimental native episode hooks refuse configured bearers containing
