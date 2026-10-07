@@ -794,9 +794,7 @@ fn noniterable_queue_is_a_failed_check_without_a_partial_report() {
             .unwrap();
         assert_eq!(output.status.code(), Some(70));
         assert!(output.stdout.is_empty());
-        let text = format!(
-            "lease: check of 'resource' failed (queue is not understood); neither held nor free is known\n"
-        );
+        let text = "lease: check of 'resource' failed (queue is not understood); neither held nor free is known\n".to_owned();
         let expected = if cfg!(windows) {
             text.replace('\n', "\r\n")
         } else {
