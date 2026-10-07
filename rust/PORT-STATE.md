@@ -17,10 +17,13 @@ entrypoint keeps synchronous hook/version dispatch and starts a separate
 current-thread runtime for the lease leaf. The hook production modules and
 all 18 original hook admissions are unchanged. Its 118 offline policy and
 fake measurement checks passed after restoring the mode-specific diagnostic;
-the initial one-test failure remains historical. No build or native execution
-has run on this combined source, so the `64f5a6a2` gates above do not validate
-the integration. Fresh review, a bounded Windows gate and the committed-head
-homelab-box Python full suite remain required.
+the initial one-test failure remains historical. The combined source at
+`273e6533` passed Windows formatting, all-target check and Clippy with both
+feature configurations, 19 CLI unit tests and 55 hook/dispatch/version/lease
+contracts. The first contract run lacked the existing oracle metadata setting
+and failed; its log is retained separately from the successful rerun. The
+`64f5a6a2` gates keep their original attribution. Fresh review, hosted checks
+and the committed-head Python full suite on dev-playground remain required.
 
 The dedicated hook production is now 944 lines before test modules (911 for
 briefing_hook plus 33 for hook_json), down from 1,811 under the same counting
@@ -30,7 +33,7 @@ separator lines; neither count is a readiness or performance claim.
 
 The branch merges accepted master forward. Four code conflicts were resolved
 in the measurement helper, CLI dispatcher, pytest adapter and binary entrypoint;
-a committed-head Python full suite on the homelab box is still required,
+a committed-head Python full suite on dev-playground is still required,
 separately from hosted Rust correctness and both-platform parity checks. The merged
 adapter preserves version routing and all 18 hook admissions (26 selected
 nodes total); the

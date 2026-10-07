@@ -730,10 +730,15 @@ and original admissions unchanged, while adding the accepted lease source,
 shared credential checks and dependency features. The synchronous entrypoint
 starts a separate current-thread runtime only for the lease leaf; hook/version
 dispatch remains before the proxy runtime. The combined source has 118 passing
-offline checks, with its initial diagnostic mismatch retained separately; it
-has no new native validation. Historical `64f5a6a2` execution does not certify
-the integration. Fresh independent review, a bounded Windows gate, committed-
-head box Python suite and remaining both-platform proof are still required.
+offline checks, with its initial diagnostic mismatch retained separately.
+Combined source `273e6533` passed Windows formatting, all-target check and
+Clippy under default/no-default features, 19 CLI unit tests and 55 targeted
+hook, dispatch, version and lease contracts. The initial contract failure from
+an omitted existing oracle metadata setting is retained alongside the passing
+rerun; source, tests and oracle were unchanged. Historical `64f5a6a2` execution
+retains its original attribution. Fresh independent review, hosted checks,
+the committed-head Python suite on dev-playground and remaining both-platform
+proof are still required.
 ## Lease phase 2c policy preparation
 
 CLI-LEASE and the lease mode row remain deferred. The named decisions in
