@@ -16,7 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   finite JSON, bounded relevant integers and the native parser depth budget;
   unsupported input quietly leaves receipts unchanged. Ignored integer extras
   no longer depend on Python's digit-limit environment setting. Bounded Windows
-  native checks and one positive receipt cell pass; broader native proof and
+  native checks and one positive receipt cell pass on the earlier source;
+  the path-admission repair and additive controls are source-only and untested.
+  Empty POSIX HOME stays root-based, symlink checks retain parent components,
+  and private-file ownership uses the effective uid. Broader native proof and
   current-head CI remain pending, and the mode remains deferred.
 
 ### Added (2026-10-07 — native lease candidate and help drift guards)

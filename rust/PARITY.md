@@ -699,6 +699,27 @@ pass, while broader proof is pending and `doorbell-prompt-seen` remains deferred
 Historical CPython captures retain
 their raw inputs, outputs, failures and source identities.
 
+The Fable125 successor repairs empty POSIX HOME expansion in the receipt and
+credential paths: expansion is root-based, never relative to the cwd. Receipt
+symlink admission uses lexical absolute paths retaining `..`, including Windows
+drive-relative and root-relative inputs. POSIX private-file ownership matches
+Python's `geteuid`. These repairs and their additive controls are source-only;
+no execution of this candidate is claimed. File order, lock timing, private
+modes/ACLs, hard-link rejection and serialization domains are unchanged.
+
+The named `python-traceback-not-contract` control preserves Python's raw
+RuntimeError exit 1 for a valid session with a non-string prompt and an
+unresolvable home. Rust checks the prompt first and returns exit 0 with empty
+streams; both leave existing state untouched and write no receipt or lock.
+The control is separate from the four producer domains below. Companion cells
+keep valid-string/no-home, invalid-session/no-home and non-string/resolvable-home
+outcomes distinct, and reject wrong exits, streams and file mutations. Their
+actual process execution remains pending in `cli_doorbell_fable125.py`.
+
+A refused input writes no receipt. The doorbell therefore clears by expiry
+instead of by prompt arrival for that input; quiet refusal does not confirm
+arrival, reading or mailbox acknowledgment.
+
 | Named substitution | Producer and supported domain | Refusal and controls |
 | --- | --- | --- |
 | `doorbell-standard-json` | UTF-8 host-hook forwarding and the shim's fixed-scalar pending writer. Reject NaN, Infinity, overflowing float tokens and lone surrogate escapes anywhere, including keys, ignored extras and overwritten duplicate values; valid escaped surrogate pairs remain supported. | Exit 0, empty streams, zero daemon requests. Invalid stdin creates no new files; invalid pending preserves pending/receipt bytes after the ordinary lock may be created. Token and whole-input controls are prepared. |
@@ -715,6 +736,9 @@ change grants no serialization substitution. Path expansion, private-file gates,
 codepoint file limits, interprocess locks, atomic staging and the production
 rollback allowlist remain in place. The interpreter-wide Windows errno sweep is
 replaced by bounded tests around the same unchanged raw-code allowlist.
+The deleted exhaustive `rust/shim/tests/fixtures/doorbell_windows_errno.json`
+fixture remains listed in historical manifests;
+those manifests describe their original source and are not current inventories.
 
 On Windows, native source `d0c4c5d8f7cded926a4363828db480784e3ccb95`, tree
 `519e33819eedc998d214cc1ae6692d83c5e8d1bf`, passes formatting, cargo check and
@@ -726,7 +750,10 @@ The default debug image also matches the pinned Python oracle for the existing
 file checks and cleanup. This is one end-to-end cell, not the full corpus.
 The initial range-pattern lint and missing oracle-metadata environment failure
 remain retained; the syntax-only range repair and configured metadata rerun
-pass. Both-OS corpus, interruption controls, required full suite, fresh review,
+pass. The 44 native checks and this first real cell retain the `d0c4c5d8`
+attribution; they do not validate the Fable125 successor. Both-OS corpus,
+interruption controls, the native and touched-harness merge gates quoted in
+PORT-STATE.md, fresh review,
 current-head CI and fresh measurements remain pending. No full-suite pass is
 claimed.
 

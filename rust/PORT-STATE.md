@@ -6,8 +6,9 @@ The doorbell candidate's source now uses the four approved producer domains
 listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
 Preparation removes the cloned CPython value/parser model and retains private
 files, locking, atomic replacement and the production rollback allowlist.
-Bounded Windows native checks and one positive receipt cell pass. Broader
-Windows/Linux native proof, interruption controls, full-suite validation,
+Earlier source-bound Windows native checks and one positive receipt cell pass.
+The Fable125 path-admission repair is source-only and has not been executed. Broader
+Windows/Linux native proof, interruption controls, required merge gates,
 independent review and current-head CI are pending; the mode remains deferred.
 
 Accepted master `0b46bb8e` is integrated locally. Four code conflicts were
@@ -15,8 +16,9 @@ resolved in `evals/rust_baseline/cli_measurement.py`,
 `evals/rust_port/cli_dispatch.py`, `evals/rust_port/pytest_plugin.py` and
 `rust/shim/src/main.rs`; accepted version admission and warm-image behavior
 were retained with the doorbell paths. The doorbell's residual `users` calls now
-use the accepted native account lookup and real uid mechanism. A local full
-suite is required after these manual code resolutions.
+use the accepted native account lookup; private receipt ownership now matches
+Python's effective uid. The historical hand resolutions retain their own gate
+attribution below; no passing full suite is claimed.
 
 Exact accepted master `59a8624eecd336686acac3846b75334e643b94d6` is subsequently
 integrated in local merge `a6d3a21136533259ed983ebca5d66c7b413cbf40`. Two code
@@ -33,25 +35,161 @@ comparison cell. Native parser unit checks execute the 127-array success and
 No full suite, Linux proof or new performance measurement was run. Both images
 were frozen before the shared build target was reused.
 
-The captures, fault outcomes and line counts below describe the historical
+The original master-forward conflict resolutions were code changes in
+`rust/shim/src/cli.rs` and `evals/rust_baseline/cli_measurement.py`; the
+`CHANGELOG.md` and `rust/PARITY.md` conflicts were documentation. The original
+Rust conflict therefore invokes the native merge gate: formatting, check,
+all-target Clippy and cargo test with default and no-default features on the
+hand-resolved merge `a6d3a211`, with exact hunks below. The later recorded
+Windows gate belongs to `d0c4c5d8`, not to that merge or this repair. The Python
+measurement conflict also needs targeted `test_cli_measurement.py`,
+`test_cli_measurement_warm.py` and `test_cli_measurement_doorbell.py` validation.
+These native and touched-harness gates remain required; no Python full-suite
+pass is inferred from a Rust-only conflict. Earlier `0b46bb8e` resolutions in
+Python dispatch/pytest helpers and Rust `main.rs` retain their separate native
+and affected-harness obligations. All future Cargo commands use Rust 1.94.0,
+incremental disabled, two jobs and the shared target directory.
+
+Quoted original master-forward code hunks (including the removed conflict
+markers, rather than a reconstruction of the accepted result; blank context
+lines are displayed empty to avoid trailing whitespace):
+
+```diff
+diff --git a/evals/rust_baseline/cli_measurement.py b/evals/rust_baseline/cli_measurement.py
+remerge CONFLICT (content): Merge conflict in evals/rust_baseline/cli_measurement.py
+index da6edb6b..895ec9d9 100644
+--- a/evals/rust_baseline/cli_measurement.py
++++ b/evals/rust_baseline/cli_measurement.py
+@@ -157,15 +157,11 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
+                "evals/rust_port/provenance.py": [require_import_root, require_instrument_binding, runtime_metadata],
+                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-=======
+     if fixture_url is not None:
+         from . import transport
+         helpers["evals/rust_port/cli_process.py"].extend([fixture_env, file_path])
+         helpers["evals/rust_port/harness.py"].append(_base_url)
+         helpers["evals/rust_baseline/transport.py"] = [Path(transport.__file__)]
+-    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+     layout = getattr(args, "layout", "bare")
+     doorbell = mode == "doorbell-prompt-seen"
+     doorbell_binding = None
+@@ -194,12 +190,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+     if fixture_url is None and (prepare is None) != (case is None):
+         raise ValueError("prepared measurement requires both a callback and a recorded case")
+     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-                             or (not doorbell and (case.get("environment_deltas") or case.get("pre_files_b64")))):
+-=======
+-                             or (fixture_url is None and case.get("environment_deltas"))
+-                             or (fixture_url is None and case.get("pre_files_b64"))):
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
++                             or (not doorbell and fixture_url is None
++                                 and (case.get("environment_deltas") or case.get("pre_files_b64")))):
+         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
+     case = copy.deepcopy(case)
+     prepared_controls = {}
+@@ -239,20 +231,6 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                 binding = None
+             else:
+                 reset_home(active_home)
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+-                env = isolated_env(active_home)
+-                env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+-                            "PYTHONDONTWRITEBYTECODE": "1"})
+-                if doorbell:
+-                    if case != expected_case:
+-                        raise ValueError("doorbell recorded case changed during measurement")
+-                    env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
+-                    for relative, encoded in case["pre_files_b64"].items():
+-                        path = file_path(home, relative)
+-                        path.parent.mkdir(parents=True, exist_ok=True)
+-                        path.write_bytes(base64.b64decode(encoded, validate=True))
+-=======
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+                 prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
+                 if fixture_url is not None:
+                     env = fixture_env(active_home, prefixes, fixture_url)
+@@ -264,6 +242,14 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+                     env = isolated_env(active_home)
+                     env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                                 "PYTHONDONTWRITEBYTECODE": "1"})
++                    if doorbell:
++                        if case != expected_case:
++                            raise ValueError("doorbell recorded case changed during measurement")
++                        env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
++                        for relative, encoded in case["pre_files_b64"].items():
++                            path = file_path(home, relative)
++                            path.parent.mkdir(parents=True, exist_ok=True)
++                            path.write_bytes(base64.b64decode(encoded, validate=True))
+                 try:
+                     prepared_case = copy.deepcopy(case) if fixture_url is not None else case
+                     selected, selected_identity, original_identity = prepared_command(
+@@ -415,11 +401,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None):
+             "candidate_executable": binary, "python_executable": python_identity,
+             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
+             "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+             **({"doorbell_preparation_binding": doorbell_binding} if doorbell else {}),
+-=======
+             **({"fixture_url": fixture_url} if fixture_url is not None else {}),
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+             "resource_check": resource,
+             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
+             "samples_per_repeat": args.samples, "runs": runs,
+
+diff --git a/rust/shim/src/cli.rs b/rust/shim/src/cli.rs
+remerge CONFLICT (content): Merge conflict in rust/shim/src/cli.rs
+index 6bdafe1b..b1d1a453 100644
+--- a/rust/shim/src/cli.rs
++++ b/rust/shim/src/cli.rs
+@@ -3,11 +3,8 @@ use std::fmt::Write as _;
+ use std::io::{self, Write};
+ use std::process::ExitCode;
+
+-<<<<<<< aad5b243 (fix(rust): preserve object keys in receipt JSON admission)
+ mod doorbell_seen;
+-=======
+ pub mod lease;
+->>>>>>> 59a8624e (Merge pull request #602 from Pseudogiant-xr/codex/rust-phase2b-lease)
+ mod version;
+
+ const HELP: &str = include_str!("cli_help.txt");
+```
+
+The Fable125 source-only successor adds root-based empty POSIX HOME expansion
+in both the receipt and credential paths, lexical absolute ancestry preserving
+`..`, and effective-uid private-file admission. Additive unit and process
+controls are prepared but unexecuted. A valid-session/non-string-prompt/no-home
+Python RuntimeError divergence is named `python-traceback-not-contract`, with
+raw Python and native expectations kept separate. A refused input writes no
+receipt, so the doorbell clears by expiry instead of by prompt arrival.
+The deleted exhaustive `rust/shim/tests/fixtures/doorbell_windows_errno.json`
+fixture remains listed in historical manifests;
+those manifests and their private raw receipts retain their original identities.
+The 44 native checks and first real `version2-positive` cell above retain only
+their executed `d0c4c5d8` source attribution. No new candidate gate, image,
+measurement, full-suite pass or mode acceptance is claimed.
+
+
+The captures and fault outcomes below describe the historical
 CPython-compatible candidate before producer reduction; they do not validate
 the reduced source. Integer-limit, unsupported JSON and recursion expectations
 are superseded only by the four named domains; raw evidence remains retained.
 
 Native `doorbell-prompt-seen` is implemented against the
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remains deferred.
-Current committed ordinary captures at `5803ea08767316078d9b3f4877c4db5376a489bf`
+Historical local ordinary captures at `5803ea08767316078d9b3f4877c4db5376a489bf`
 bind the genuine 0.17.0 runtime, current loaded helpers, Rust/Cargo inputs and
 final binaries before and after capture. Their declared exit/stream/complete
 home-file comparisons are exact, with no added normalization or exclusions.
 
-| OS | Exact ordinary pairs | Rejected exit/stream/file mutations | Exit / cleanup |
-| --- | ---: | ---: | --- |
-| Windows | 110/110 | 440/440 | 0 / verified |
-| Linux | 109/109 | 436/436 | 0 / verified |
-
-These rows include configured integer limits and signed zero, stdin/pending-file
-counterexamples and the Windows surrogate username path. Separate committed
+The untracked pair totals and ratios are omitted from public claims; their raw
+receipts remain private historical evidence. Those captures include configured
+integer limits and signed zero, stdin/pending-file
+counterexamples and the Windows surrogate username path. Separate historical
 first-cell proofs on both OSes retain the original version2-positive stdin and
 pending JSON plus LF, and capture the actual nonce-plus-LF receipt, unchanged
 pending bytes and `0` lock. They prove this bounded positive receipt behavior,
@@ -192,18 +330,13 @@ source was dirty in those preparatory captures; their historical status is
 unchanged. The later scoped committed evidence above does not turn these
 component captures into full acceptance receipts.
 
-The three leaf modules contain 1,297 physical production lines, including
-comments and blank lines but excluding tests and assets: receipt handling 330,
-private file machinery 239 and JSON-domain compatibility 728. Dispatch adds four
-lines separately. The pinned Python mode module `codex_doorbell_state.py` has
-369 lines, giving a module ratio of 3.515; that denominator includes unported
-reservation and resolution paths. The relevant callable footprint is 186 lines
-there plus 129 selected external-helper lines, giving a scoped ratio of
-1,297 / 315 = 4.117. Excluding the 728-line JSON compatibility helper gives
-569 / 315 = 1.806; Python standard-library JSON source is not added to the
-denominator. Local `doorbell-line-ratio-counts.json` records source hashes,
-function ranges and counting rules. These labelled counts imply no ratio target
-or ported status.
+The repaired source has 380 physical lines in `doorbell_seen.rs`, 305 in
+`doorbell_files.rs` and 165 in `doorbell_json.rs`, including comments, blanks
+and additive tests. Production before each file's first test-only module is
+303, 278 and 86 lines respectively. Dispatch and assets are separate. These
+are directly recountable source sizes, with no native/Python ratio or parity
+claim. The earlier local `doorbell-line-ratio-counts.json` remains private
+historical evidence for the removed compatibility model.
 
 The version branch targets the current Python oracle at master
 `3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.

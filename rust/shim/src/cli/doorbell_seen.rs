@@ -172,6 +172,16 @@ fn current(path: &Path, thread: &str) -> Result<Value, Failure> {
     Ok(record)
 }
 
+#[cfg(not(windows))]
+fn posix_home(value: std::ffi::OsString) -> PathBuf {
+    // POSIX expanduser strips HOME's trailing slash, then restores a root
+    // slash even when HOME is explicitly empty.
+    if value.is_empty() {
+        PathBuf::from("/")
+    } else {
+        PathBuf::from(value)
+    }
+}
 fn home() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -184,11 +194,10 @@ fn home() -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .or_else(dirs::home_dir)
+        env::var_os("HOME").map(posix_home).or_else(dirs::home_dir)
     }
 }
+
 fn directory() -> Result<PathBuf, Failure> {
     if let Some(value) = env::var_os("PSEUDOLIFE_DIGEST_DIR").filter(|v| !v.is_empty()) {
         let path = PathBuf::from(value);
@@ -346,6 +355,26 @@ mod tests {
         assert!(notice_text("2", "a", "3", true, "1").contains("Recipient turn state unknown."));
         assert!(
             notice_text("2", "a", "3", true, "1").ends_with("only receive confirms it. [notice a]")
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod fable125_home_controls {
+    use super::*;
+
+    #[test]
+    fn empty_home_expansion_is_root_based() {
+        let root = posix_home(std::ffi::OsString::new());
+        assert_eq!(root, Path::new("/"));
+        assert_eq!(
+            root.join(".pseudolife-mcp/digests"),
+            Path::new("/.pseudolife-mcp/digests")
+        );
+        assert_eq!(root.join("digests"), Path::new("/digests"));
+        assert_eq!(
+            posix_home("/fixture/home".into()),
+            Path::new("/fixture/home")
         );
     }
 }

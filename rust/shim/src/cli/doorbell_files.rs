@@ -6,8 +6,46 @@ use std::{
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, ()>;
+fn lexical_absolute(path: &Path) -> Result<std::path::PathBuf> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    #[cfg(windows)]
+    {
+        use std::path::Component;
+        let append = |base: &Path, tail: &Path| {
+            // PathBuf::join normalizes .. for verbatim Windows prefixes.
+            // Append raw path text so even those ancestors remain inspectable.
+            let mut text = base.as_os_str().to_os_string();
+            if !text.to_string_lossy().ends_with(['/', '\\']) {
+                text.push("\\");
+            }
+            text.push(tail.as_os_str());
+            std::path::PathBuf::from(text)
+        };
+        let mut components = path.components();
+        if let Some(Component::Prefix(prefix)) = components.next() {
+            // Resolve only the drive's cwd; keep the supplied .. components
+            // visible to the ancestry check, as Python Path.absolute does.
+            let base = std::path::absolute(Path::new(prefix.as_os_str())).map_err(|_| ())?;
+            return Ok(append(&base, components.as_path()));
+        }
+        let cwd = std::env::current_dir().map_err(|_| ())?;
+        if path.has_root() {
+            let prefix = cwd.components().next().ok_or(())?;
+            let mut text = prefix.as_os_str().to_os_string();
+            text.push(path.as_os_str());
+            return Ok(std::path::PathBuf::from(text));
+        }
+        Ok(append(&cwd, path))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(std::env::current_dir().map_err(|_| ())?.join(path))
+    }
+}
 fn no_symlink(path: &Path) -> Result<()> {
-    let absolute = std::path::absolute(path).map_err(|_| ())?;
+    let absolute = lexical_absolute(path)?;
     for ancestor in absolute.ancestors() {
         if fs::symlink_metadata(ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(());
@@ -92,7 +130,7 @@ fn open(path: &Path, write: bool, create: bool) -> Result<File> {
             file.set_permissions(fs::Permissions::from_mode(0o600))
                 .map_err(|_| ())?;
         }
-        if m.uid() != rustix::process::getuid().as_raw() || m.mode() & 0o077 != 0 {
+        if m.uid() != rustix::process::geteuid().as_raw() || m.mode() & 0o077 != 0 {
             return Err(());
         }
     }
@@ -235,5 +273,33 @@ fn unlock(file: &File) {
     // SAFETY: the handle remains live; these coordinates match try_lock.
     unsafe {
         windows_sys::Win32::Storage::FileSystem::UnlockFile(file.as_raw_handle() as _, 0, 0, 1, 0);
+    }
+}
+
+#[cfg(test)]
+mod fable125_path_controls {
+    use super::*;
+
+    #[test]
+    fn lexical_absolute_retains_parent_components() {
+        let relative = Path::new("fable125-link/../digests");
+        let absolute = lexical_absolute(relative).unwrap();
+        assert!(absolute.is_absolute());
+        assert!(absolute.ancestors().any(|p| p.ends_with("fable125-link")));
+        assert_eq!(lexical_absolute(&absolute).unwrap(), absolute);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_and_root_relative_keep_parent_components() {
+        let cwd = std::env::current_dir().unwrap();
+        let prefix = cwd.components().next().unwrap();
+        let drive_relative = Path::new(prefix.as_os_str()).join("fable125-link/../digests");
+        let rooted = Path::new("\\fable125-link\\..\\digests");
+        for path in [drive_relative.as_path(), rooted] {
+            let absolute = lexical_absolute(path).unwrap();
+            assert!(absolute.is_absolute());
+            assert!(absolute.ancestors().any(|p| p.ends_with("fable125-link")));
+        }
     }
 }
