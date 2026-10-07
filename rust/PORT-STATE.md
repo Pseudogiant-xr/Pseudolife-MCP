@@ -39,8 +39,8 @@ are 20,398,080/19,231,232 bytes, with SHA256
 The box full-suite result still belongs to `d2e86010`: 18,203 passed, 76 skipped,
 exit 0. Historical native `17459703`/capture `63922667` measurements retain their
 own image/source identities. No merge-head performance result is claimed. The
-merge's full Python suite remains pending on the approved isolated Linux suite
-machine, as do fresh independent review and hosted merge-ref CI. The documentation
+`d2e86010` full suite is accepted for the unchanged episode leaf; fresh independent
+review and hosted merge-ref CI remain pending. The documentation
 successor records these results without changing runtime or instrument inputs;
 execution remains attributed to `77fec51e`. Both episode modes remain deferred.
 
