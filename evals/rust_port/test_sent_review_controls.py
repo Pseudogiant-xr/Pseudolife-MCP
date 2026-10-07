@@ -110,6 +110,18 @@ def pg_open_observation(prefix, private, dsn, *, ambient=None, default_file=None
     return actual, b"".join(diagnostics), process.owned_cleanup
 
 
+@pytest.mark.parametrize("dsn", [
+    "host='unterminated",
+    "host=127.0.0.1 port=0 user=fixture dbname=plbench_refusal sslmode=disable",
+    "host=127.0.0.1 port=1 user=fixture dbname=plbench_refusal unknown_option=1",
+    "host=127.0.0.1 port=1 user=fixture dbname=plbench_refusal sslmode=allow",
+], ids=["invalid-dsn", "invalid-option", "unsupported-option", "deferred-allow"])
+def test_dsn_parse_policy_keeps_listener_and_private_503(prefix, tmp_path, dsn):
+    actual, diagnostics, _ = pg_open_observation(prefix, tmp_path, dsn)
+    assert_private_503(actual)
+    assert diagnostics.splitlines() == [b"pseudolife-stdio serve: pg-dsn-explicit-tls"] * 2
+
+
 @pytest.mark.parametrize("control", ["PGSSLMODE", "PGTLSCONTROL", "PGPASSWORD"])
 def test_ambient_pg_policy_keeps_private_503(prefix, tmp_path, control):
     actual, error, _ = pg_open_observation(prefix, tmp_path,
