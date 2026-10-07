@@ -166,7 +166,7 @@ jobs:
           $env:PSEUDOLIFE_RUST_BINARY = $candidatePath
           $env:PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT = $oracleSource
           $env:PSEUDOLIFE_WAIT_MAIL_NATIVE_REQUIRED = '1'
-          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py
+          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
           $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
