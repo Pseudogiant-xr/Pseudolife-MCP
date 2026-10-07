@@ -103,17 +103,19 @@ fixture's nonce, listener port and owned process. Fixture shutdown uses the
 existing process-tree owner; graceful signal shutdown remains separately
 unverified. No installation, production shadow or cutover is enabled.
 
-| Boundary | Candidate coverage | Status |
-|---|---|---|
-| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | candidate; review/hosted checks pending |
-| Supplemental serialization | Five production-codec cases plus four test-only UUID/timestamp/nonfinite cases; no sent SQL reachability is claimed for those fixtures | historical nine-case corpus retained; successor checks required |
-| Query limit | `ascii-limit`: ASCII decimal digits, optional sign and ASCII whitespace, default 50 and clamp 1..200; substitution for pinned `web/routes.py:31` Python `int()` | underscores/Unicode digits/Unicode whitespace fall back to 50; no CPython digit cap emulation |
-| Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | approved substitution; bounded Windows controls passed |
-| JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | named read domain; depth 200 exact, boundary policy controls separate |
-| JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
-| Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | one mapped node passed locally; no native claim for internal nodes |
-| Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred |
-| Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred |
+This candidate summary does not promote a surface-register status.
+
+| Boundary | Candidate coverage | Candidate state | Notes |
+|---|---|---|---|
+| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | candidate | review/hosted checks pending |
+| Supplemental serialization | Five production-codec cases plus four test-only UUID/timestamp/nonfinite cases; no sent SQL reachability is claimed for those fixtures | candidate | historical nine-case corpus retained; successor checks required |
+| Query limit | `ascii-limit`: ASCII decimal digits, optional sign and ASCII whitespace, default 50 and clamp 1..200; substitution for pinned `web/routes.py:31` Python `int()` | candidate | underscores/Unicode digits/Unicode whitespace fall back to 50; no CPython digit cap emulation |
+| Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | candidate | approved substitution; bounded Windows controls passed |
+| JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | candidate | named read domain; depth 200 exact, boundary policy controls separate |
+| JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | candidate | named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
+| Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | candidate | one mapped node passed locally; no native claim for internal nodes |
+| Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred | |
+| Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred | |
 
 Actual JSONB object keys remain ordinary application data, including
 `$serde_json::private::Number`. The decoder reversibly prefixes object keys
