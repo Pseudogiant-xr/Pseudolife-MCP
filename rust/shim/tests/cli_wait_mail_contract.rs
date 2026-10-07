@@ -44,11 +44,10 @@ fn explicit_unbuffered_stdout_fails_directly_without_shutdown_retry() {
             "setting={setting:?}, help={help}"
         );
         assert_eq!(count, 2);
-        assert_eq!(
-            String::from_utf8(output.stderr.clone())
+        assert!(
+            !String::from_utf8(output.stderr.clone())
                 .unwrap()
-                .contains("Exception ignored in:"),
-            false
+                .contains("Exception ignored in:")
         );
         if help {
             assert!(

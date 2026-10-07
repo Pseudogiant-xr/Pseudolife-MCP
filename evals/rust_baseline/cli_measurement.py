@@ -14,7 +14,7 @@ from .common import lease_gate, provenance
 from .shim_measurement import artifact_identity, metric_cells
 from evals.rust_port.cli_corpus import STREAM_CONTRACT
 from evals.rust_port.cli_process import (
-    checked_metadata, cli_binding, file_path, prepared_command, remove_root_link, reset_home, snapshot,
+    checked_metadata, cli_binding, file_path, fixture_env, prepared_command, remove_root_link, reset_home, snapshot,
 )
 from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
@@ -50,13 +50,21 @@ def restore_state(home, files, directories):
             path.write_bytes(base64.b64decode(encoded, validate=True))
 
 
-def measure(args, resource, *, prepare=None, case=None):
+def measure(args, resource, *, prepare=None, case=None, fixture_url=None, record_invocation=None):
     mode = getattr(args, "mode", "help")
     warm_images = mode == "version" or getattr(args, "warm_images", False)
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
     if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv) \
             or argv[0] not in {mode, "--" + mode}:
         raise ValueError("measurement argv must name the selected CLI mode")
+    wait_delivery = fixture_url is not None
+    if wait_delivery:
+        from evals.rust_port.wait_mail_measurement import measurement_case, project_invocation
+        from evals.rust_port.harness import _base_url
+        _base_url(fixture_url)
+        if mode != "wait-mail" or case != measurement_case() or argv != case["argv"] \
+                or prepare is not None or not warm_images or getattr(args, "layout", "bare") != "bare":
+            raise ValueError("daemon delivery measurement requires the retained wait-mail case and equal warmups")
     root = args.oracle_root.resolve()
     pin = require_phase1_source(root)
     require_import_root(root)
@@ -80,6 +88,11 @@ def measure(args, resource, *, prepare=None, case=None):
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
                "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+    if wait_delivery:
+        from evals.rust_port import wait_mail_policy, cli_wait_mail
+        helpers.update({"evals/rust_port/wait_mail_measurement.py": [measurement_case, project_invocation],
+                        "evals/rust_port/wait_mail_policy.py": [wait_mail_policy.delivery_projection],
+                        "evals/rust_port/cli_wait_mail.py": [cli_wait_mail.cases]})
     instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     layout = getattr(args, "layout", "bare")
     if layout == "installed" and prepare is None:
@@ -89,15 +102,16 @@ def measure(args, resource, *, prepare=None, case=None):
         case = next(row for row in cases() if row["id"] == "version-default-commit")
         case["argv"] = list(argv)
         prepare = make_prepare(root, pin["oracle_head"])
-    if (prepare is None) != (case is None):
+    if not wait_delivery and (prepare is None) != (case is None):
         raise ValueError("prepared measurement requires both a callback and a recorded case")
     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
-                             or case.get("environment_deltas") or case.get("pre_files_b64")):
+                             or case.get("environment_deltas") or (not wait_delivery and case.get("pre_files_b64"))):
         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
     prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
     warmups = []
+    raw_invocations = []
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
         home = directory / "cli-home"
@@ -123,6 +137,18 @@ def measure(args, resource, *, prepare=None, case=None):
                 selected_identity = installed[arm]["selected_identity"]
                 original_identity = installed[arm]["original_identity"]
                 binding = copy.deepcopy(installed[arm]["binding"])
+            elif wait_delivery:
+                reset_home(active_home)
+                env = fixture_env(active_home, {"oracle": commands["python"], "candidate": commands["rust"]}, fixture_url)
+                for relative, value in case["pre_files_b64"].items():
+                    path = file_path(active_home, relative)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(base64.b64decode(value, validate=True))
+                selected = commands[arm]
+                selected_identity = original_identity = command_identity(selected, root)
+                binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
+                           "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
+                                         "cwd": str(root), "command_identity": selected_identity}}
             elif prepare is None:
                 reset_home(active_home)
                 env = isolated_env(active_home)
@@ -157,22 +183,38 @@ def measure(args, resource, *, prepare=None, case=None):
             input_options = {"stdin": base64.b64decode(case.get("stdin_b64", ""), validate=True)} \
                 if case is not None else {}
             try:
+                arguments = [argument.format_map({"home": str(active_home)}) for argument in argv] if wait_delivery else argv
+                wall_started = time.time() if wait_delivery else None
                 started = time.perf_counter() if timed else None
-                response = run_cli(selected, argv, cwd=root, env=env, timeout=10, **input_options)
+                response = run_cli(selected, arguments, cwd=root, env=env, timeout=10, **input_options)
                 elapsed = (time.perf_counter() - started) * 1000 if timed else None
+                wall_finished = time.time() if wait_delivery else None
                 after = snapshot(active_home)
+                compared_after = after
+                if wait_delivery:
+                    raw_invocations.append({"arm": arm, "label": label, "timed": timed,
+                                            "argv": arguments, "environment": copy.deepcopy(env),
+                                            "pre_files_b64": before, "response": copy.deepcopy(response),
+                                            "post_files_b64": after, "wall_window": [wall_started, wall_finished]})
+                    if record_invocation is not None:
+                        record_invocation(copy.deepcopy(raw_invocations[-1]))
+                    response, policy = project_invocation(case, response, before, after,
+                                                         [wall_started, wall_finished],
+                                                         "windows" if sys.platform == "win32" else "linux")
+                    raw_invocations[-1]["policy_instance"] = policy
+                    compared_after = response["post_files_b64"]
                 if reuse and file_identity(selected) != identities[arm]:
                     raise RuntimeError("CLI warmed executable file identity changed")
                 if command_identity(selected, root) != selected_identity \
                         or command_identity(commands[arm], root) != original_identity:
                     raise RuntimeError("CLI executable changed during measurement capture")
-                state = {"environment": copy.deepcopy(env), "pre_files_b64": before, "post_files_b64": after}
+                state = {"environment": copy.deepcopy(env), "pre_files_b64": before, "post_files_b64": compared_after}
                 if reuse and state != state_controls[arm]:
                     raise RuntimeError("CLI files or environment changed during measurement")
                 if control:
                     state_controls[arm] = state
                 if binding is not None:
-                    binding["post_files_b64"] = after
+                    binding["post_files_b64"] = compared_after
                 return response, elapsed, binding
             finally:
                 remove_root_link(active_home)
@@ -239,12 +281,17 @@ def measure(args, resource, *, prepare=None, case=None):
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
             "warmups": warmups, "state_controls": state_controls,
+            **({"fixture_url": fixture_url, "raw_invocations": raw_invocations,
+                "named_policy": "nondeterministic-bytes-semantic",
+                "delivery_scope": "Exact retained seeded coordination records in an owned daemon fixture"}
+               if wait_delivery else {}),
             "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state."
                               if warm_images else "Historical per-invocation fixture reset; no explicit image warmup.",
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
-            "limitations": ["Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
+            "limitations": ["Fresh public CLI process delivering recorded mail in an owned daemon fixture; no model execution."
+                             if wait_delivery else "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
                              if warm_images else "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
