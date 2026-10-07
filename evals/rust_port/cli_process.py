@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+from contextlib import nullcontext
+import inspect
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,8 @@ import stat
 import sys
 import time
 import tomllib
+
+from pseudolife_memory.credentials import _write_token_file
 
 from .cli_corpus import corpus
 from .cli_public import public_summary
@@ -24,16 +28,18 @@ STATE_POLICY = "cli-state-compared"
 BYTE_POLICY = Policy(source_text_paths=(), ignored_values=())
 
 
-def cli_binding(root, oracle_root, *, extra_helpers=None):
-    from . import cli_version, harness, processes, stdio_daemon
+def cli_binding(root, oracle_root, *, extra_helpers=None, callbacks=()):
+    from . import cli_version, harness, lease_corpus, processes, stdio_daemon
     from evals import memory_policy_bench, memory_policy_daemon
     from evals.rust_baseline import daemon, daemon_child
     from evals.rust_baseline.common import child_environment, lease_gate
     from pseudolife_memory.storage import schema
     from tests.fake_embedder import FakeSentenceTransformer
     from tests.pg_defaults import default_admin_url
-    helpers = {"evals/rust_port/cli_process.py": [Path(__file__), prepared_command, reset_home, snapshot, remove_root_link],
+    helpers = {"evals/rust_port/cli_process.py": [Path(__file__), cli_binding, cases, observe, paired_cases, run, prepared_command, reset_home,
+                    fixture_env, file_path, checked_files, snapshot, remove_root_link, byte_payload, candidate_controls],
                "evals/rust_port/cli_corpus.py": [corpus],
+               "evals/rust_port/lease_corpus.py": [lease_corpus.cases, lease_corpus.expected_response],
                "evals/rust_port/cli_public.py": [public_summary],
                "evals/rust_port/cli_version.py": [cli_version.make_prepare, cli_version.seed_context, cli_version.cases],
                "evals/rust_port/harness.py": [capture_platform, compare, isolated_env, run_cli, write_new],
@@ -50,12 +56,24 @@ def cli_binding(root, oracle_root, *, extra_helpers=None):
                "evals/rust_port/stdio_daemon.py": [stdio_daemon.main]}
     for name, loaded in (extra_helpers or {}).items():
         helpers.setdefault(name, []).extend(loaded)
+    for callback in callbacks:
+        if callback is not None:
+            actual = inspect.unwrap(callback)
+            path = inspect.getsourcefile(actual)
+            if path is None:
+                raise RuntimeError("CLI capture callback source unavailable")
+            try:
+                relative = Path(path).resolve(strict=True).relative_to(Path(__file__).resolve().parents[2]).as_posix()
+            except (OSError, ValueError) as error:
+                raise RuntimeError("CLI capture callback loaded from another instrument tree") from error
+            helpers.setdefault(relative, []).append(actual)
     owners = processes.execution_sources()[1:]
     try:
         production = {path.resolve().relative_to(Path(oracle_root).resolve()).as_posix(): [path] for path in owners}
     except ValueError as error:
         raise RuntimeError("CLI ownership helper loaded from another production tree") from error
-    production.update({"pseudolife_memory/storage/schema.py": [schema.dsn_database_name,
+    production.update({"pseudolife_memory/credentials.py": [_write_token_file],
+                       "pseudolife_memory/storage/schema.py": [schema.dsn_database_name,
                           schema.refuse_production_database, schema.assert_disposable_database],
                        "tests/pg_defaults.py": [default_admin_url],
                        "tests/fake_embedder.py": [FakeSentenceTransformer]})
@@ -157,8 +175,7 @@ def fixture_env(home, commands, url):
         Path(env["XDG_RUNTIME_DIR"]).chmod(0o700)
     from evals.rust_baseline.transport import TOKEN
     token = Path(env["PSEUDOLIFE_MCP_TOKEN_FILE"])
-    token.write_bytes(TOKEN.encode("ascii"))
-    token.chmod(0o600)
+    _write_token_file(token, TOKEN)
     return env
 
 
@@ -173,6 +190,9 @@ def cases(modes=("help",)):
     if "version" in modes:
         from .cli_version import cases as version_cases
         result.extend(version_cases())
+    if "lease" in modes:
+        from .lease_corpus import cases as lease_cases
+        result.extend(lease_cases())
     return result
 
 
@@ -247,7 +267,7 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     return selected, identity, original_identity
 
 
-def observe(case, command, commands, *, root, home, url, prepare=None, process_timing=None):
+def observe(case, command, commands, *, root, home, url, prepare=None, process_scope=None, process_timing=None):
     # Both arms occupy the same disposable path, reset before each launch. Path
     # text remains contractual; no broad home/path replacement is permitted.
     reset_home(home)
@@ -279,6 +299,18 @@ def observe(case, command, commands, *, root, home, url, prepare=None, process_t
                 raise ValueError("case file and directory environment overrides must remain inside the home")
     from .harness import _base_url
     _base_url(url)
+    admitted_env = copy.deepcopy(env)
+
+    def admit_environment():
+        for key, value in (("PSEUDOLIFE_MCP_DAEMON_URL", url), ("PSEUDOLIFE_MCP_NO_SPAWN", "1")):
+            if {name: cell for name, cell in env.items() if name.upper() == key} != {key: value}:
+                raise ValueError("CLI child must retain the owned daemon and no-spawn policy")
+        if len({key.upper() for key in env}) != len(env):
+            raise ValueError("CLI environment contains case aliases")
+        if env != admitted_env:
+            raise ValueError("CLI effective environment changed after admission")
+
+    admit_environment()
     for relative, encoded in case.get("pre_files_b64", {}).items():
         path = file_path(home, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,25 +320,31 @@ def observe(case, command, commands, *, root, home, url, prepare=None, process_t
         selected, identity, original_identity = prepared_command(
             case, original, commands, root=root, home=home, env=env, prepare=prepare)
         resolved_executable = Path(selected[0]).resolve(strict=True)
-        original_executable = Path(original[0])
-        if not original_executable.is_absolute():
-            original_executable = Path(shutil.which(original[0]) or root / original[0])
-        original_resolved_executable = original_executable.resolve(strict=True)
-        for key, value in (("PSEUDOLIFE_MCP_DAEMON_URL", url), ("PSEUDOLIFE_MCP_NO_SPAWN", "1")):
-            matching = {name: cell for name, cell in env.items() if name.upper() == key}
-            if matching != {key: value}:
-                raise ValueError("CLI child must retain the owned daemon and no-spawn policy")
+        original_path = Path(original[0])
+        if not original_path.is_absolute():
+            original_path = Path(shutil.which(original[0]) or root / original[0])
+        original_resolved = original_path.resolve(strict=True)
+        # The preparer already admits only the verified version changes;
+        # freeze that complete environment before an optional lock context.
+        admitted_env = copy.deepcopy(env)
+        admit_environment()
         arguments = [arg.format_map(values) for arg in case["argv"]]
         before = snapshot(home)
-        if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
-                or Path(selected[0]).resolve(strict=True) != resolved_executable \
-                or original_executable.resolve(strict=True) != original_resolved_executable:
-            raise ValueError("CLI command changed before process launch")
-        launch_env = copy.deepcopy(env)
-        response = run_cli(selected, arguments, cwd=root, env=env,
-                           timeout=case.get("timeout_seconds", 10),
-                           stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True),
-                           **({"process_timing": process_timing} if process_timing is not None else {}))
+        # Snapshots retain actual bytes outside the owned Windows lock scope.
+        with nullcontext() if process_scope is None else process_scope(copy.deepcopy(case), home):
+            list(checked_files(home))
+            admit_environment()
+            if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
+                    or Path(selected[0]).resolve(strict=True) != resolved_executable \
+                    or original_path.resolve(strict=True) != original_resolved:
+                raise ValueError("CLI command changed during process context entry")
+            launch_env = copy.deepcopy(env)
+            response = run_cli(selected, arguments, cwd=root, env=env,
+                               timeout=case.get("timeout_seconds", 10),
+                               stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True),
+                               **({"process_timing": process_timing} if process_timing is not None else {}))
+            admit_environment()
+        admit_environment()
         if "expected_stdout" in case:
             version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
             expected = case["expected_stdout"].format(version=version)
@@ -315,14 +353,11 @@ def observe(case, command, commands, *, root, home, url, prepare=None, process_t
             if response != {"exit_code": 0, "stdout_b64": base64.b64encode(expected.encode("utf-8")).decode("ascii"),
                             "stderr_b64": ""}:
                 raise RuntimeError("CLI response does not match the case's exact expected fallback")
-        if env != launch_env:
-            raise ValueError("CLI effective environment changed during capture")
         response["post_files_b64"] = snapshot(home)
-        if env != launch_env:
-            raise ValueError("CLI effective environment changed during poststate collection")
+        admit_environment()
         if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
                 or Path(selected[0]).resolve(strict=True) != resolved_executable \
-                or original_executable.resolve(strict=True) != original_resolved_executable:
+                or original_path.resolve(strict=True) != original_resolved:
             raise RuntimeError("CLI executable changed during capture")
         return {"request": copy.deepcopy(case), "environment": launch_env,
                 "pre_files_b64": before, "response": response,
@@ -344,7 +379,8 @@ def candidate_controls(records):
     """Mutate captured candidate observations, retaining the oracle unchanged."""
     result = []
     for record in records:
-        expected = record["oracle"]["response"]
+        from .lease_corpus import expected_response
+        expected = expected_response(record["id"], record["oracle"]["response"])
         observed = record["candidate"]["response"]
         for field in ("exit_code", "stdout_b64", "stderr_b64", "post_files_b64"):
             mutated = copy.deepcopy(observed)
@@ -368,22 +404,29 @@ def candidate_controls(records):
     return result
 
 
-def paired_cases(spec, commands, *, root, home, url, prepare=None):
+def paired_cases(spec, commands, *, root, home, url, prepare=None, process_scope=None):
     records = []
     if not spec or len({case["id"] for case in spec}) != len(spec):
         raise ValueError("CLI process corpus needs nonempty unique case ids")
     for case in spec:
-        arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare)
+        arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare, process_scope=process_scope)
                 for arm, command in commands.items()}
-        differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
+        from .lease_corpus import expected_response
+        expected = byte_payload(arms["oracle"])
+        target_response = expected_response(case["id"], expected["response"])
+        if target_response is not expected["response"]:
+            expected = {**expected, "response": target_response}
+        differences = compare(expected, byte_payload(arms["candidate"]), BYTE_POLICY)
         records.append({"id": case["id"], "mode": case["mode"], **arms,
-                        "differences": differences, "passed": not differences})
+                        "differences": differences, "passed": not differences,
+                        "substitution": ("native-lease-diagnostics"
+                                         if target_response is not arms["oracle"]["response"] else None)})
     controls = candidate_controls(records)
     return {"records": records, "candidate_output_controls": controls,
             "passed": all(record["passed"] for record in records) and all(c["rejected"] for c in controls)}
 
 
-def run(root, command, candidate_root, spec, resource, *, prepare=None):
+def run(root, command, candidate_root, spec, resource, *, prepare=None, process_scope=None):
     from evals.rust_baseline import daemon, transport
     from evals.rust_baseline.daemon import disposable_database, launched_daemon, private_directory
     from .full_bank import private_home_overrides
@@ -405,21 +448,21 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
                "evals/rust_baseline/daemon_child.py": [Path(daemon.__file__).with_name("daemon_child.py")],
                "evals/rust_baseline/transport.py": [Path(transport.__file__)],
                "evals/rust_port/full_bank.py": [private_home_overrides]}
-    binding = cli_binding(candidate_root, root, extra_helpers=helpers)
     if prepare is None and any(case.get("mode") == "version" for case in spec):
         from .cli_version import make_prepare
         prepare = make_prepare(root, source["oracle_head"])
+    binding = cli_binding(candidate_root, root, extra_helpers=helpers, callbacks=(prepare, process_scope))
     with disposable_database() as dsn, private_directory() as private:
         with launched_daemon(dsn, private, source_root=root, env_extra=private_home_overrides(private),
                              child_module="evals.rust_port.stdio_daemon", startup_timeout=90) as (_, url, cleanup):
             result = paired_cases(spec, commands, root=root, home=Path(private) / "cli-home", url=url,
-                                  prepare=prepare)
+                                  prepare=prepare, process_scope=process_scope)
     cleanup["database_dropped"] = True
     if command_identity(commands["oracle"], root) != identities["oracle"] or \
             candidate_identity(command, candidate_root) != identities["candidate"]:
         raise RuntimeError("CLI executable or candidate source changed during capture")
     require_phase1_source(root)
-    if cli_binding(candidate_root, root, extra_helpers=helpers) != binding:
+    if cli_binding(candidate_root, root, extra_helpers=helpers, callbacks=(prepare, process_scope)) != binding:
         raise RuntimeError("CLI instrument changed during corpus capture")
     return {"schema": 1, **source, "capture_platform": capture_platform(),
             "capture_runtime": runtime, "resource_check": resource, "command_identities": identities,
@@ -441,7 +484,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="private exact raw receipt path")
     parser.add_argument("--public-out", type=Path, help="allowlisted summary requiring complete help/version coverage")
     parser.add_argument("--corpus", type=Path)
-    parser.add_argument("--modes", nargs="+", choices=("help", "version"), default=["help"])
+    parser.add_argument("--modes", nargs="+", choices=("help", "version", "lease"), default=["help"])
     clearance = parser.add_mutually_exclusive_group(required=True)
     clearance.add_argument("--board-checked-at")
     clearance.add_argument("--offline-resource-checked-at")

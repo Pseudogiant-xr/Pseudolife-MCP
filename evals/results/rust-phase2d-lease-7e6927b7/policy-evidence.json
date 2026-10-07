@@ -1,0 +1,1766 @@
+{
+  "schema": 1,
+  "status": "bounded-policy-proof-hosted-acceptance-pending",
+  "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+  "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "oracle_schema": 55,
+  "core_ported": false,
+  "extreme_list_rule": {
+    "name": "python-traceback-not-contract",
+    "case_ids": [
+      "list-expected-extreme",
+      "list-waiter-extreme"
+    ],
+    "allowed_raw_exits": {
+      "oracle": 1,
+      "candidate": 0
+    },
+    "contract": "Only these two text cells may replace a validated Python OverflowError exit 1 with native exit 0, exact independently specified question-mark text, empty stderr and unchanged state. Normal Python outcomes and both JSON companions stay exact. All other list exit differences fail."
+  },
+  "comparison_helper": "evals/rust_port/lease_policy_preparation.py",
+  "additive_control": "evals/rust_port/test_lease_extreme_list_exit_policy.py",
+  "comparison_helper_sha256": "880d989477eba7eb04a6f2177bf4898f23900590a1adbf490025dbc0dbab92e1",
+  "platforms": {
+    "windows": {
+      "python": "3.11.9",
+      "python_executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "oracle_production_and_tests_match_pin": true,
+      "raw_receipt": {
+        "sha256": "97bfcefebe9a397eb1323df10c93687dd276ac4ab128c9c0b79c98bb0171d45f",
+        "bytes": 439448
+      },
+      "producing_private_adapter_sha256": "f9ef2eec0f00a5a4d5df7731aae9146d94ec3dcb0389f159e7bd956c6f83f033",
+      "retained_capture_source_sha256": "58634b2dce619d6add75ac8aaf537dd8bebda2a032096ef14cd90ad24f9461df",
+      "producing_retained_capture_AST_sha256": "8e2b3002809fa2b88510f13ae5ad8024658c43b2a80b206610ca8408f617e23d",
+      "actual_instrument_files_sha256": {
+        "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+        "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+        "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+        "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+        "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+        "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+        "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+        "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+        "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+        "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+        "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+        "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+        "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+        "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+        "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+        "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+        "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+        "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+        "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+        "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+        "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+        "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+        "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+        "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+        "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+        "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+        "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+        "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+        "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+        "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+        "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+        "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+        "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+        "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+        "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+        "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+        "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+        "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+        "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+        "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+        "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+        "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+        "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+        "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+        "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+        "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+        "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+        "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+        "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+        "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+        "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+        "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+        "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+        "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+        "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+        "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+        "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+        "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+        "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+        "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+        "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+        "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+        "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+        "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+        "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+        "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+        "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+        "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+        "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+        "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+        "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+        "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+        "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+        "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+        "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+        "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+        "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+        "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+        "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+        "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+        "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+        "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+        "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+        "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+        "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+        "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+        "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+        "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+        "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+        "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+        "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+        "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+        "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+        "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+        "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+        "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+        "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+        "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+        "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+        "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+        "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+        "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+        "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+      },
+      "controller_exit": 0,
+      "raw_before_policy": true,
+      "normalizations": [],
+      "accepted_cases": 16,
+      "observed_comparator_matches": 16,
+      "recorded_controls_rejected": 80,
+      "offline_wrong_exit_controls_rejected": 16,
+      "cases": [
+        {
+          "id": "I3-0-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "094329800426e75fa4109e6394c501388f3ed71a37ba09c5c4dfc4b0465259e7",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "c785e8d8357d586c639aab14bc159c68b46aa13f668fce6e1ef4c93a449749c5",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "c785e8d8357d586c639aab14bc159c68b46aa13f668fce6e1ef4c93a449749c5",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328186.2721524,
+              1791328186.8472233
+            ],
+            "candidate": [
+              1791328186.8472233,
+              1791328186.9589043
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "40f2a94072531cc5327d0bd6fd65f130503d1a2e501aa4cb2b9166cdc057cf35",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "I3-0-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "094329800426e75fa4109e6394c501388f3ed71a37ba09c5c4dfc4b0465259e7",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "c785e8d8357d586c639aab14bc159c68b46aa13f668fce6e1ef4c93a449749c5",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "c785e8d8357d586c639aab14bc159c68b46aa13f668fce6e1ef4c93a449749c5",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328186.9609077,
+              1791328187.5507884
+            ],
+            "candidate": [
+              1791328187.5517943,
+              1791328187.6979623
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "40f2a94072531cc5327d0bd6fd65f130503d1a2e501aa4cb2b9166cdc057cf35",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "I3-1-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "03d482f91b98425107b9540bda823aa2aaabfc17cb71890e1b074b31487da9cc",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "e58a99a67c09b4d1ba65abc35ca36c9c2da02822fe4ae45aa53489ffe74b1abc",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "e58a99a67c09b4d1ba65abc35ca36c9c2da02822fe4ae45aa53489ffe74b1abc",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328187.6995425,
+              1791328188.2822587
+            ],
+            "candidate": [
+              1791328188.2822587,
+              1791328188.3931818
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "112886efd40682d31c07448cdbbb2883f24e503ca6ea2455cbf114f3036f03e5",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "I3-1-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "03d482f91b98425107b9540bda823aa2aaabfc17cb71890e1b074b31487da9cc",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "e58a99a67c09b4d1ba65abc35ca36c9c2da02822fe4ae45aa53489ffe74b1abc",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "e58a99a67c09b4d1ba65abc35ca36c9c2da02822fe4ae45aa53489ffe74b1abc",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328188.3951836,
+              1791328188.9758818
+            ],
+            "candidate": [
+              1791328188.9778817,
+              1791328189.0912757
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "112886efd40682d31c07448cdbbb2883f24e503ca6ea2455cbf114f3036f03e5",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "I3-2-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "9e03e19203823f165fb92592bbf6dc5d84172299f7209e5ba5f6644a2c28f905",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1408,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+              "stdout_bytes": 0,
+              "stderr_bytes": 99,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328189.093277,
+              1791328189.688985
+            ],
+            "candidate": [
+              1791328189.689489,
+              1791328189.7991037
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d23ad3ffd954c0c79955226459c7fe35aa15868cd84b1ed9eace718fe53e38b2",
+            "bytes": 99
+          }
+        },
+        {
+          "id": "I3-2-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "9e03e19203823f165fb92592bbf6dc5d84172299f7209e5ba5f6644a2c28f905",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1408,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+              "stdout_bytes": 0,
+              "stderr_bytes": 99,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328189.8031044,
+              1791328190.3651192
+            ],
+            "candidate": [
+              1791328190.3671906,
+              1791328190.4857087
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d23ad3ffd954c0c79955226459c7fe35aa15868cd84b1ed9eace718fe53e38b2",
+            "bytes": 99
+          }
+        },
+        {
+          "id": "I3-3-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "9e03e19203823f165fb92592bbf6dc5d84172299f7209e5ba5f6644a2c28f905",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1408,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+              "stdout_bytes": 0,
+              "stderr_bytes": 99,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328190.488714,
+              1791328191.0665908
+            ],
+            "candidate": [
+              1791328191.0690937,
+              1791328191.185179
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d23ad3ffd954c0c79955226459c7fe35aa15868cd84b1ed9eace718fe53e38b2",
+            "bytes": 99
+          }
+        },
+        {
+          "id": "I3-3-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "9e03e19203823f165fb92592bbf6dc5d84172299f7209e5ba5f6644a2c28f905",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1408,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+              "stdout_bytes": 0,
+              "stderr_bytes": 99,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "86eabcbb3b9d0ebd4564124586654cf606d17fa2065c1703da26789c07ddf393",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328191.1891873,
+              1791328191.7571661
+            ],
+            "candidate": [
+              1791328191.7591639,
+              1791328191.8691676
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d23ad3ffd954c0c79955226459c7fe35aa15868cd84b1ed9eace718fe53e38b2",
+            "bytes": 99
+          }
+        },
+        {
+          "id": "I3-4-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "61746cef71cbbe708fdfda830fe0da0e5f4de2b1e5389ace649b810ff1482070",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "4ca64d64cb2af6116d8748cc8e39bb168529fac3618beda21709e9c89833d428",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "4ca64d64cb2af6116d8748cc8e39bb168529fac3618beda21709e9c89833d428",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328191.8731709,
+              1791328192.473054
+            ],
+            "candidate": [
+              1791328192.4765584,
+              1791328192.5950541
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d90180e439750f26921842072b36f764e5e11932fbf38dce4e44197f826065d4",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "I3-4-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "61746cef71cbbe708fdfda830fe0da0e5f4de2b1e5389ace649b810ff1482070",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1414,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "4ca64d64cb2af6116d8748cc8e39bb168529fac3618beda21709e9c89833d428",
+              "stdout_bytes": 0,
+              "stderr_bytes": 105,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "4ca64d64cb2af6116d8748cc8e39bb168529fac3618beda21709e9c89833d428",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328192.6000643,
+              1791328193.1710513
+            ],
+            "candidate": [
+              1791328193.1730483,
+              1791328193.282795
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "d90180e439750f26921842072b36f764e5e11932fbf38dce4e44197f826065d4",
+            "bytes": 105
+          }
+        },
+        {
+          "id": "list-expected-extreme",
+          "disposition": "passed-raw-exact",
+          "comparator": "extreme_list_response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "c5a6a6d0d4ec7153d93f47010b248d13e7ad998ad722e3a49ec619c9d1648064",
+              "stdout_bytes": 240,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "c5a6a6d0d4ec7153d93f47010b248d13e7ad998ad722e3a49ec619c9d1648064",
+              "stdout_bytes": 240,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "c5a6a6d0d4ec7153d93f47010b248d13e7ad998ad722e3a49ec619c9d1648064",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328193.2863014,
+              1791328193.8586965
+            ],
+            "candidate": [
+              1791328193.8627,
+              1791328193.9788651
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "list-waiter-extreme",
+          "disposition": "passed-raw-exact",
+          "comparator": "extreme_list_response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "1c25aaafe5bba48b6481f25b5fb1ee7804cd682eb83ffecf732237bdd3184910",
+              "stdout_bytes": 253,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "1c25aaafe5bba48b6481f25b5fb1ee7804cd682eb83ffecf732237bdd3184910",
+              "stdout_bytes": 253,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "1c25aaafe5bba48b6481f25b5fb1ee7804cd682eb83ffecf732237bdd3184910",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328193.9838707,
+              1791328194.582671
+            ],
+            "candidate": [
+              1791328194.5861783,
+              1791328194.7078562
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "approved-timeout-overflow-traceback",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "31e5e4ec15f1f652d5882ef8cd7fd78ceec2c4c30f138cd3c30eb3fbc2ef6352",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1107,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "ece549e97d8bf3501f1c9dbf910bd7aba47ff5fc23106fd2e98e54a00c9378ee",
+              "stdout_bytes": 0,
+              "stderr_bytes": 50,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "ece549e97d8bf3501f1c9dbf910bd7aba47ff5fc23106fd2e98e54a00c9378ee",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328194.7150972,
+              1791328194.8839521
+            ],
+            "candidate": [
+              1791328194.88746,
+              1791328195.0001209
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "3d7c8bfca8cbcf751d756347b4a0c03e86121442760a1cb2f4ab532b646a3d4d",
+            "bytes": 50
+          }
+        },
+        {
+          "id": "C3-large-list-closed-stdout",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "2830c57a5332016976f25779bdd153f33896dd9ff0c9686ffe735a8f70b3d63c",
+              "stdout_bytes": null,
+              "stderr_bytes": 941,
+              "post_file_count": 67
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "fa27578cffa74fdff69bb7bc6547e2d006d21dd123090843d09c0433f4796656",
+              "stdout_bytes": null,
+              "stderr_bytes": 38,
+              "post_file_count": 67
+            }
+          },
+          "candidate_expected_response_sha256": "fa27578cffa74fdff69bb7bc6547e2d006d21dd123090843d09c0433f4796656",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328195.0060966,
+              1791328195.4207602
+            ],
+            "candidate": [
+              1791328195.4262674,
+              1791328195.597275
+            ]
+          },
+          "ordinary_open_stdout_matched": true,
+          "terminal": {
+            "sha256": "266b493ebb1b7fb934d59acd12599cecb8785c95ff327741b365860df906d732",
+            "bytes": 38
+          }
+        },
+        {
+          "id": "list-expected-json",
+          "disposition": "passed-raw-exact",
+          "comparator": "exact-response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "cd20d1e19224e7afce73be7eaa02a4dd3e3b9e6291a0ccb710ad9fbb7015e5ee",
+              "stdout_bytes": 570,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "cd20d1e19224e7afce73be7eaa02a4dd3e3b9e6291a0ccb710ad9fbb7015e5ee",
+              "stdout_bytes": 570,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "cd20d1e19224e7afce73be7eaa02a4dd3e3b9e6291a0ccb710ad9fbb7015e5ee",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328195.6037848,
+              1791328196.232563
+            ],
+            "candidate": [
+              1791328196.2370734,
+              1791328196.3463016
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "list-waiter-json",
+          "disposition": "passed-raw-exact",
+          "comparator": "exact-response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "572fc01e65760be335e5c9ec7da3760fd791db3a29dd994450b1e3ff27f226ef",
+              "stdout_bytes": 671,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "572fc01e65760be335e5c9ec7da3760fd791db3a29dd994450b1e3ff27f226ef",
+              "stdout_bytes": 671,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "572fc01e65760be335e5c9ec7da3760fd791db3a29dd994450b1e3ff27f226ef",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328196.35391,
+              1791328196.9840772
+            ],
+            "candidate": [
+              1791328196.988714,
+              1791328197.1318054
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        }
+      ],
+      "cleanup": {
+        "temporary_home_removed": true,
+        "HTTP_thread_stopped": true,
+        "candidate_image_unchanged": true,
+        "daemon_launched": false,
+        "database_created": false
+      }
+    },
+    "linux": {
+      "python": "3.11.15",
+      "python_executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "oracle_production_and_tests_match_pin": true,
+      "raw_receipt": {
+        "sha256": "0a819e13c9a1fcf8fc238f64a74447970ab413ef47b46d038faa093d55d67e44",
+        "bytes": 405461
+      },
+      "producing_private_adapter_sha256": "f9ef2eec0f00a5a4d5df7731aae9146d94ec3dcb0389f159e7bd956c6f83f033",
+      "retained_capture_source_sha256": "58634b2dce619d6add75ac8aaf537dd8bebda2a032096ef14cd90ad24f9461df",
+      "producing_retained_capture_AST_sha256": "8e2b3002809fa2b88510f13ae5ad8024658c43b2a80b206610ca8408f617e23d",
+      "actual_instrument_files_sha256": {
+        "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+        "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+        "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+        "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+        "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+        "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+        "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+        "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+        "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+        "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+        "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+        "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+        "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+        "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+        "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+        "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+        "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+        "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+        "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+        "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+        "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+        "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+        "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+        "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+        "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+        "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+        "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+        "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+        "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+        "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+        "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+        "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+        "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+        "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+        "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+        "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+        "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+        "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+        "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+        "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+        "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+        "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+        "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+        "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+        "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+        "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+        "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+        "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+        "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+        "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+        "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+        "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+        "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+        "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+        "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+        "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+        "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+        "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+        "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+        "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+        "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+        "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+        "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+        "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+        "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+        "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+        "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+        "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+        "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+        "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+        "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+        "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+        "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+        "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+        "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+        "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+        "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+        "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+        "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+        "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+        "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+        "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+        "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+        "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+        "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+        "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+        "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+        "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+        "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+        "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+        "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+        "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+        "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+        "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+        "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+        "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+        "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+        "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+        "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+        "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+        "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+        "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+        "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+      },
+      "controller_exit": 0,
+      "raw_before_policy": true,
+      "normalizations": [],
+      "accepted_cases": 16,
+      "observed_comparator_matches": 16,
+      "recorded_controls_rejected": 80,
+      "offline_wrong_exit_controls_rejected": 16,
+      "cases": [
+        {
+          "id": "I3-0-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "d1f043e0e115c8887ff30a30d665ec12077767302efa42f22de5e2e1722b4da3",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "ca08d010b6a48cefd3467071903cae175ee0f70f52bd6bee8621f9b2391b50db",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "ca08d010b6a48cefd3467071903cae175ee0f70f52bd6bee8621f9b2391b50db",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328322.0717797,
+              1791328322.6924522
+            ],
+            "candidate": [
+              1791328322.692917,
+              1791328326.0906048
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "edabdafa8522956fac6e64fbbc5c80244326d43c97484a2b51d6a1f376bc6743",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "I3-0-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "d1f043e0e115c8887ff30a30d665ec12077767302efa42f22de5e2e1722b4da3",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "ca08d010b6a48cefd3467071903cae175ee0f70f52bd6bee8621f9b2391b50db",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "ca08d010b6a48cefd3467071903cae175ee0f70f52bd6bee8621f9b2391b50db",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328326.0916028,
+              1791328326.6644044
+            ],
+            "candidate": [
+              1791328326.6649432,
+              1791328329.9717097
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "edabdafa8522956fac6e64fbbc5c80244326d43c97484a2b51d6a1f376bc6743",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "I3-1-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "6bf33130241ac498305aa2b2b983ba0067fe57fcd9f4af099734e86b32a1f594",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "edc25ccdf59eedee94c8336a63fafcbf8bc81d43f7da93118c5184a1b7ae252c",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "edc25ccdf59eedee94c8336a63fafcbf8bc81d43f7da93118c5184a1b7ae252c",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328329.9727995,
+              1791328330.5408
+            ],
+            "candidate": [
+              1791328330.5414274,
+              1791328333.856468
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "36736b4cc51e4031172f712b84befeeff9ba40232ad48ab3ecccc3fb5aab0585",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "I3-1-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "6bf33130241ac498305aa2b2b983ba0067fe57fcd9f4af099734e86b32a1f594",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "edc25ccdf59eedee94c8336a63fafcbf8bc81d43f7da93118c5184a1b7ae252c",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "edc25ccdf59eedee94c8336a63fafcbf8bc81d43f7da93118c5184a1b7ae252c",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328333.8578808,
+              1791328334.4251745
+            ],
+            "candidate": [
+              1791328334.4259362,
+              1791328337.7955048
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "36736b4cc51e4031172f712b84befeeff9ba40232ad48ab3ecccc3fb5aab0585",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "I3-2-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "ce935015bf54ccc9e89951f7088a1d4c9309a5c47021c88a404a0047b7bf602a",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1440,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+              "stdout_bytes": 0,
+              "stderr_bytes": 98,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328337.7970512,
+              1791328338.3567555
+            ],
+            "candidate": [
+              1791328338.3577464,
+              1791328341.58648
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "722116092861bcd45af45af05b33fbdd16d42a49deb571effc7e3354004fabc7",
+            "bytes": 98
+          }
+        },
+        {
+          "id": "I3-2-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "ce935015bf54ccc9e89951f7088a1d4c9309a5c47021c88a404a0047b7bf602a",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1440,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+              "stdout_bytes": 0,
+              "stderr_bytes": 98,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328341.588291,
+              1791328342.15718
+            ],
+            "candidate": [
+              1791328342.1581905,
+              1791328345.3873894
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "722116092861bcd45af45af05b33fbdd16d42a49deb571effc7e3354004fabc7",
+            "bytes": 98
+          }
+        },
+        {
+          "id": "I3-3-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "ce935015bf54ccc9e89951f7088a1d4c9309a5c47021c88a404a0047b7bf602a",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1440,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+              "stdout_bytes": 0,
+              "stderr_bytes": 98,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328345.3894303,
+              1791328345.963492
+            ],
+            "candidate": [
+              1791328345.9645822,
+              1791328349.1565998
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "722116092861bcd45af45af05b33fbdd16d42a49deb571effc7e3354004fabc7",
+            "bytes": 98
+          }
+        },
+        {
+          "id": "I3-3-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "ce935015bf54ccc9e89951f7088a1d4c9309a5c47021c88a404a0047b7bf602a",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1440,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+              "stdout_bytes": 0,
+              "stderr_bytes": 98,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "5c5d6ea4e048769ace96c274c02a2cd2e92f39abd98c9fad1f02783240b53ccf",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328349.1591115,
+              1791328349.7544384
+            ],
+            "candidate": [
+              1791328349.7562664,
+              1791328352.9672074
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "722116092861bcd45af45af05b33fbdd16d42a49deb571effc7e3354004fabc7",
+            "bytes": 98
+          }
+        },
+        {
+          "id": "I3-4-text",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "28cf50d04bbeb48ca3709cda0d8cc8ceecbafd4964525614df0095f649c2b8bb",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "8570ef23dd770eb54c1097cdded8bd7e9dbd8a2c31de358fb5bd0e947ba14831",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "8570ef23dd770eb54c1097cdded8bd7e9dbd8a2c31de358fb5bd0e947ba14831",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328352.9699428,
+              1791328353.543597
+            ],
+            "candidate": [
+              1791328353.5449471,
+              1791328356.7849562
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "c0f336f33ef94f21f3be41e94fc6d063a001efe0b2cadbefd40e28d48b762251",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "I3-4-json",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "28cf50d04bbeb48ca3709cda0d8cc8ceecbafd4964525614df0095f649c2b8bb",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1446,
+              "post_file_count": 3
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "8570ef23dd770eb54c1097cdded8bd7e9dbd8a2c31de358fb5bd0e947ba14831",
+              "stdout_bytes": 0,
+              "stderr_bytes": 104,
+              "post_file_count": 3
+            }
+          },
+          "candidate_expected_response_sha256": "8570ef23dd770eb54c1097cdded8bd7e9dbd8a2c31de358fb5bd0e947ba14831",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328356.787698,
+              1791328357.355328
+            ],
+            "candidate": [
+              1791328357.356811,
+              1791328360.6042423
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "c0f336f33ef94f21f3be41e94fc6d063a001efe0b2cadbefd40e28d48b762251",
+            "bytes": 104
+          }
+        },
+        {
+          "id": "list-expected-extreme",
+          "disposition": "passed-by-policy",
+          "comparator": "extreme_list_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "cf878a8b1892cb2319f572861ce862c69148230654e25faf63e787342cd6b301",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1890,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "52a0bb7605b46b478242b8e6c581b095bc201135d7c0e2f356e5b0b9f4ceb808",
+              "stdout_bytes": 216,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "52a0bb7605b46b478242b8e6c581b095bc201135d7c0e2f356e5b0b9f4ceb808",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328360.6074245,
+              1791328361.177771
+            ],
+            "candidate": [
+              1791328361.179347,
+              1791328364.3541255
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "list-waiter-extreme",
+          "disposition": "passed-by-policy",
+          "comparator": "extreme_list_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "f3bb0d2935896dce47eec6fbb9088956a9477eec138c6fb806ff0fd3c7714e89",
+              "stdout_bytes": 0,
+              "stderr_bytes": 2125,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "5e669aea241d9073181cb5249411ed1bebde61c691b9ff630be3fc53ac54792b",
+              "stdout_bytes": 228,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "5e669aea241d9073181cb5249411ed1bebde61c691b9ff630be3fc53ac54792b",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328364.3572454,
+              1791328364.939404
+            ],
+            "candidate": [
+              1791328364.9417424,
+              1791328368.1903398
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "approved-timeout-overflow-traceback",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "8afee5140a37dba8fd3a79ac5d030b2699be76a2ef21dc39b2f52f179775e4e0",
+              "stdout_bytes": 0,
+              "stderr_bytes": 1132,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "2caf45aed36715ecd4247121e26792451e6679926e53d4f6598ba28464a49739",
+              "stdout_bytes": 0,
+              "stderr_bytes": 49,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "2caf45aed36715ecd4247121e26792451e6679926e53d4f6598ba28464a49739",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328368.1937063,
+              1791328368.586245
+            ],
+            "candidate": [
+              1791328368.5882313,
+              1791328371.8986368
+            ]
+          },
+          "ordinary_open_stdout_matched": null,
+          "terminal": {
+            "sha256": "30db6767e5379f717c7202a630f79e1e38d8306d9e8bd995db6c6a937c5bb30f",
+            "bytes": 49
+          }
+        },
+        {
+          "id": "C3-large-list-closed-stdout",
+          "disposition": "passed-by-policy",
+          "comparator": "traceback_response",
+          "raw_response_equal": false,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 1,
+              "response_sha256": "c085034dfc63874185c41792b8043260ce8e79cc030dae2cad300f4c12f33d32",
+              "stdout_bytes": null,
+              "stderr_bytes": 970,
+              "post_file_count": 67
+            },
+            "candidate": {
+              "exit_code": 1,
+              "response_sha256": "73096820d64a95fdcdce6a73e4631561f1e5170255b681321cdce5b748d20a0f",
+              "stdout_bytes": null,
+              "stderr_bytes": 40,
+              "post_file_count": 67
+            }
+          },
+          "candidate_expected_response_sha256": "73096820d64a95fdcdce6a73e4631561f1e5170255b681321cdce5b748d20a0f",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328371.9023423,
+              1791328372.3466225
+            ],
+            "candidate": [
+              1791328372.3487093,
+              1791328372.485747
+            ]
+          },
+          "ordinary_open_stdout_matched": true,
+          "terminal": {
+            "sha256": "93281cd88b983e0dea76ab3af45ffb93fca391956ecca98f2f81151e31043f2f",
+            "bytes": 40
+          }
+        },
+        {
+          "id": "list-expected-json",
+          "disposition": "passed-raw-exact",
+          "comparator": "exact-response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "7387fd467f8d82a49b434682490cb9b3450dd793b204832907e78d965f5c25f1",
+              "stdout_bytes": 518,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "7387fd467f8d82a49b434682490cb9b3450dd793b204832907e78d965f5c25f1",
+              "stdout_bytes": 518,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "7387fd467f8d82a49b434682490cb9b3450dd793b204832907e78d965f5c25f1",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328372.4902065,
+              1791328373.0391178
+            ],
+            "candidate": [
+              1791328373.04164,
+              1791328376.4024494
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        },
+        {
+          "id": "list-waiter-json",
+          "disposition": "passed-raw-exact",
+          "comparator": "exact-response",
+          "raw_response_equal": true,
+          "raw_responses": {
+            "oracle": {
+              "exit_code": 0,
+              "response_sha256": "92bae6f95c4f03bee5bc10630238b7a2ea662b9f80c8d92ced9ec30b1e185813",
+              "stdout_bytes": 614,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            },
+            "candidate": {
+              "exit_code": 0,
+              "response_sha256": "92bae6f95c4f03bee5bc10630238b7a2ea662b9f80c8d92ced9ec30b1e185813",
+              "stdout_bytes": 614,
+              "stderr_bytes": 0,
+              "post_file_count": 2
+            }
+          },
+          "candidate_expected_response_sha256": "92bae6f95c4f03bee5bc10630238b7a2ea662b9f80c8d92ced9ec30b1e185813",
+          "five_output_state_request_controls_rejected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "offline_wrong_exit_rejected": true,
+          "environment_pre_files_requests_exact": true,
+          "invocation_windows": {
+            "oracle": [
+              1791328376.407231,
+              1791328376.963518
+            ],
+            "candidate": [
+              1791328376.9661067,
+              1791328380.391905
+            ]
+          },
+          "ordinary_open_stdout_matched": null
+        }
+      ],
+      "cleanup": {
+        "temporary_home_removed": true,
+        "HTTP_thread_stopped": true,
+        "candidate_image_unchanged": true,
+        "daemon_launched": false,
+        "database_created": false
+      }
+    }
+  }
+}

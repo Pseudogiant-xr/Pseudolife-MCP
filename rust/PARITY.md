@@ -45,7 +45,8 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
-| CLI-LEASE | 2 | OS lock truth, crash release, FIFO tickets, board mirror, check/run/hold/list/break and child status. `lease_cli.py`, `os_lock.py` | `test_lease_cli.py`, `test_lease_cli_board.py`, `test_coordination_leases.py`, `test_coordination_leases_api.py` mixed/I; subprocess nodes suitable after dispatcher audit | deferred |
+| CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
+| CLI-LEASE | 4 remainder | Complete action set; `hold`, `break`, `delegate` and `designate` explicitly refuse exit 1 with `deferred in this candidate`, without Python/silent fallback. This candidate loses those actions until Phase 4. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; full mode requires every action native plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
@@ -784,3 +785,216 @@ These source-level observations remain deferred and add no merge gates.
 The subsequent integration of master `7b0abf921fe4bd4ef1c84864eef118309b400705` inherits the reviewed #607 users runtime/dependency changes without a conflict: 5 of the 341 capture-bound paths differed at `181a50d1` from executed `5220b5ee` (`rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`), while the other 336 and all 146 original production/test guard paths remain exact. The `5220b5ee` measurements remain historical source-bound executions and do not validate the inherited users implementation or this combined tree; current hosted CI and fresh review are required.
 
 Integration of master `57c007ff292cffdbb6755911bd54de837a00f9a5` retains #611 readiness evidence, #607 users and #608 executable resolution. Of the 341 paths bound to executed `5220b5ee`, 11 now differ (`evals/rust_port/phase1.py`, `evals/rust_port/phase1_receipts.py`, `evals/rust_port/stdio_judge.py`, `rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`, `rust/shim/src/lifecycle.rs`, `rust/shim/tests/auth_windows_private_state/mod.rs`, `rust/shim/tests/nonboard_final_assertions.rs`); 330 remain exact, including all 146 original production/test guard paths. Incoming changes from reviewed `181a50d1` affect 9 bound paths. The old timing images and captures remain historical executions of `5220b5ee`, without acceptance claims for this combined tree.
+
+## Lease phase 2c policy preparation
+
+CLI-LEASE and the lease mode row remain deferred. The named decisions in
+PORTING.md supersede historical references to unapproved groups 1, 3, 4 and 13;
+they do not promote any historical receipt to current-head acceptance. The
+23 retained instances below are preparation only: 14 traceback matches under
+the approved contract (12 newly admitted and two earlier approved), eight
+candidate refusals still requiring implementation, and one clock comparison
+incomplete without captured invocation windows and a second oracle run.
+
+| Case ID | Named policy | Governed fields | Retained disposition |
+| --- | --- | --- | --- |
+| `I3-0-text` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-0-json` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-1-text` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-1-json` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-2-text` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-2-json` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-3-text` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-3-json` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-4-text` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `I3-4-json` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `list-expected-extreme` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `list-waiter-extreme` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `approved-timeout-overflow-traceback` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `C3-large-list-closed-stdout` | `python-traceback-not-contract` | `stderr.traceback_header, stderr.traceback_frames` | historical-policy-match; final-head recapture pending |
+| `D3-DEL-agent_id` | `http-forbidden-input-refused` | `agent_id` | implementation-pending; final-head recapture pending |
+| `D3-DEL-credential` | `http-forbidden-input-refused` | `credential` | implementation-pending; final-head recapture pending |
+| `D3-CR-agent_id` | `http-forbidden-input-refused` | `agent_id` | implementation-pending; final-head recapture pending |
+| `D3-CR-credential` | `http-forbidden-input-refused` | `credential` | implementation-pending; final-head recapture pending |
+| `D3-LF-agent_id` | `http-forbidden-input-refused` | `agent_id` | implementation-pending; final-head recapture pending |
+| `D3-LF-credential` | `http-forbidden-input-refused` | `credential` | implementation-pending; final-head recapture pending |
+| `D3-NUL-agent_id` | `http-forbidden-input-refused` | `agent_id` | implementation-pending; final-head recapture pending |
+| `D3-NUL-credential` | `http-forbidden-input-refused` | `credential` | implementation-pending; final-head recapture pending |
+| `lease-run-existing-successful-child` | `nondeterministic-bytes-semantic` | `post_files_b64/ran.json/t` | incomplete-missing-invocation-windows; final-head recapture pending |
+
+The JSON ledger retains each source receipt basename and SHA256, platform,
+terminal/diagnostic bytes, named field and exact shape/bound. The raw receipts
+remain unchanged; missing metadata is explicitly null. No outside-rule retained
+case was found in this scoped inventory. This is not a claim about unexamined
+inputs, current CI, full mode coverage or final-head executable behavior.
+
+Implementation after the version gate:
+
+- Add a fatal forbidden-header failure path in `shim/src/cli/lease/board.rs`,
+  inspecting the approved fields before constructing headers. Propagate it
+  through `run.rs` and `view.rs` as the named diagnostic/exit 1, before local
+  fallback, child launch or lock-file creation. Preserve the exact ordinary
+  non-ASCII and surrogate behavior, and use checked header constructors.
+- Add candidate-specific corpus inputs and expected refusal outputs in a new
+  additive module; keep the oracle raw and label the candidate substitution.
+  The retained DEL/CR/LF/NUL cases need both-platform final-head proofs.
+  New required capture IDs: `D3-DEL-bearer`, `D3-CR-bearer`, `D3-LF-bearer`,
+  `D3-NUL-bearer`, `D3-FOLDED-agent_id`, `D3-FOLDED-credential`,
+  `D3-FOLDED-bearer`. Cover remaining C0 byte values with additive controls.
+- Wire the named policies at the comparison boundary without rewriting raw
+  observations. The existing corpus rejects normalization; changing that
+  instrument is a later, explicit integration step, not done by this preparation.
+- Retain start/end Unix windows around every arm invocation of
+  `lease-run-existing-successful-child`, plus two oracle repetitions proving
+  `/t` differs and all other bytes stay exact. Validate the strict decimal shape
+  and own-window bound before any comparison; add successful-run timing only
+  after this proof. Existing child source remains unchanged.
+- Rebase only after the version branch is ported, then freeze and recapture
+  each affected case at the final head on Windows and Linux, bind the resulting
+  receipts and measurements, and verify routed/additive nodes in hosted CI.
+  Broader host/storage/concurrency/recovery/signal gates remain deferred.
+
+Static preparation checks do not run a daemon, child command or native binary.
+Existing tests and the existing eval harness remain byte-identical.
+
+## Lease timestamp display substitution
+
+Lease timestamp display uses Chrono's platform local timezone for daemon-produced
+Unix-second `expected_end` and `enqueued_at` values. Ordinary timestamps retain
+local `HH:MM` on the current local date and `YYYY-MM-DD HH:MM` on other dates;
+fractional seconds are floored before conversion. Unsupported calendar values
+display `?`, including dates outside Chrono's representable domain, instead of
+reproducing host-CRT date limits or CPython's calendar-year `OverflowError`.
+JSON replies preserve the original numeric timestamps.
+
+On POSIX, local-zone behavior includes supported `TZ` environment settings. On
+Windows, the display uses the OS timezone; CRT-only `TZ` overrides are outside
+this contract. Deterministic Rust timestamp fixtures inject their zone and
+current date through an internal helper, without a production environment or
+test switch. Public-binary fixtures cover ordinary current/other-day fractional
+timestamps and unsupported-date text/JSON behavior. This substitution applies
+only to these Unix-second lease fields; ISO holder timestamps retain their
+existing scope.
+
+The historical `list-expected-extreme` and `list-waiter-extreme` traceback rows
+above retain their original diagnostics and receipt hashes. Their former
+exception expectations are superseded for current candidates by this scoped
+timestamp substitution; historical matches do not become current-head proof.
+All other preparation policies and deferred lease actions remain separate.
+
+## Lease forbidden-header implementation candidate
+
+The native check/list/run candidate now propagates a fatal forbidden-header
+failure before local fallback, lock creation or child launch. Instance reply
+values are inspected before retaining a board session; a refused registration
+therefore sends no lease or release. Environment bearers are inspected before
+credential decoding, and file bearers after the existing private-file checks.
+The ordinary decoder's trailing CR/LF file terminator remains outside the
+header value. Checked header constructors retain ordinary non-ASCII/surrogate
+failures and unrelated fallback behavior.
+
+`evals.rust_port.lease_headers` adds executable inputs for the retained eight
+instance cases, bearer/folded/all-C0 cases and field/output/file/request mutation
+controls. It preserves raw pinned Python captures and separately labels the
+approved refusal expectation. Historical preparation rows above retain their
+old dispositions; they are not final-head acceptance receipts. CLI-LEASE
+remains deferred, including successful-child invocation windows, Windows
+unlock/Ctrl-C, hosted acceptance and measurements.
+
+## Lease final7e bounded evidence and extreme-text exit rule
+
+[The public evidence bundle](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+binds executed `7e6927b7b72db62569281d3477dc8e8924c82292`, tree
+`34b24d60d854e28448079bfc0c8e8eea83551d47`, to the actual debug images,
+genuine pinned Python, successful-child own windows/repeat/controls, exact
+nonzero child, deferred actions, release/interrupt effects and check/list
+samples. Sixteen remaining policy cells per OS match their admitted scope;
+the historical ledger remains unchanged. The eight D3 IDs are implemented
+in the additive header corpus; final hosted header/general re-execution,
+feature matrix and independent final review remain pending. Neither core
+nor full CLI-LEASE is promoted by these bounded local receipts.
+
+`python-traceback-not-contract` has one explicit additional outcome rule:
+only `list-expected-extreme` and `list-waiter-extreme` text cells may return
+native exit 0 and complete fixture text with `?`, empty stderr and unchanged
+state when the oracle raises a validated OverflowError with exit 1. The
+Linux raw exit pair is 1/0 in both cases; Windows is raw-exact 0/0. JSON
+companions remain exact, including the original numeric timestamp. Any other
+list exit-code difference fails. This narrow rule supersedes only the two
+historical extreme-text exception expectations; raw observations are preserved.
+
+| Platform | Complete final raw policy receipt SHA256 | Exact extreme-text scope |
+| --- | --- | --- |
+| Windows | `97bfcefebe9a397eb1323df10c93687dd276ac4ab128c9c0b79c98bb0171d45f` | `list-expected-extreme`, `list-waiter-extreme`: raw 0/0 |
+| Linux | `0a819e13c9a1fcf8fc238f64a74447970ab413ef47b46d038faa093d55d67e44` | `list-expected-extreme`, `list-waiter-extreme`: raw 1/0, passed by named policy |
+
+Per-cell raw response/expected hashes, actual exits, fixture bytes, original
+instrument bindings and cleanup are in `policy-evidence.json`/`policy-inputs.json`
+in the bundle. The new additive [evals/rust_port/test_lease_extreme_list_exit_policy.py](../evals/rust_port/test_lease_extreme_list_exit_policy.py)
+rejects unrelated list exit differences and malformed/no traceback; the current
+checker also replays all 32 captured cells and rejects 32 wrong-exit controls
+offline. No old test file or assertion is changed.
+
+## Lease producer admission and native refusals
+
+The current lease reduction admits finite UTF-8 daemon JSON through serde_json.
+The HTTP API emits UTF-8 JSON; healthy PostgreSQL coordination fields are Unicode
+scalar text, signed integer counts/fences and finite timestamps produced by the
+ordinary clock and bounded durations. Nonfinite numbers, malformed JSON, unpaired
+surrogates and UTF-16/32 replies are not understood. A malformed or nonfinite
+HTTP 200 reply produces exit 1, empty stdout and exactly
+`lease: HTTP_REPLY_NOT_UNDERSTOOD` plus the platform newline, before local
+fallback, lock creation or child launch. A registration request needed to receive
+that reply is permitted; an unsuccessful registration leaves no address for a
+subsequent lease/release request. If registration succeeded and a grant/queue
+reply is malformed, run releases its local lock and makes a best-effort scoped
+board release before returning the refusal, removing any committed holder or
+waiter when the board accepts cleanup. This parse-refusal policy applies only
+to HTTP 200 replies; malformed non-200 bodies retain ordinary HTTP refusal or
+transient retry/fallback handling. This named
+`http-reply-not-understood` substitution also covers a malformed surrogate reply
+containing a forbidden header field. After successful parsing, every present
+string-valued registration header still undergoes C0/DEL admission before
+incomplete-address fallback. Private credential-file checks and ordinary
+connection/URL error priority remain unchanged.
+
+This policy supersedes the ten historical I3 surrogate-name text/JSON terminal
+expectations and the registration surrogate reply expectations. Raw Python and
+old candidate receipts remain historical; none is recast as successor proof.
+Finite ordinary values, supported local timestamp formatting, JSON numeric values,
+lock identity/naming, suite slots, Python whitespace and HTTP error-code admission
+remain required. Suite holder clocks accept only the suite writer's
+`YYYY-MM-DDTHH:MM:SS±HH:MM[:SS]` shape, without timezone conversion; unsupported
+metadata omits the optional since text. The CPython ISO grammar grid is retired.
+
+Opaque OS lease arguments are refused with exit 2 and
+`lease: arguments must be valid Unicode`, before state or child effects. This
+candidate does not pass opaque child arguments through. Deferred actions
+hold/break/delegate/designate still return exit 1 with
+`deferred in this candidate`. Windows unlock and Ctrl-C receipts at final7e are
+historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
+checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
+hosted acceptance and fresh review remain pending.
+Neither CLI-LEASE-core nor full CLI-LEASE is promoted by this reduction.
+
+The interpreter's 4,300-digit conversion cap is retired for lease durations.
+Numeric TTL/expect bounds remain unchanged; nonfinite timeout conversion returns
+exit 1 with `lease: timeout is out of range` before board, lock or child effects.
+Leading zeros no longer trigger an interpreter digit-count rejection. The old
+4,301-digit leading-zero fixture remains a historical contract expectation;
+its replacement proves unrepresentable numeric durations are refused.
+
+`native-lease-diagnostics` replaces fabricated Python/httpx exception names with
+native reasons, retaining ordinary connection fallback, timeout/refusal exits
+and effects. Valid non-ASCII registration headers still fall back with
+`registration headers are not understood`; malformed surrogate JSON replies use
+the separately named parse refusal above. Stdout failures use
+`stdout write failed`, retaining the existing small-output exit 120, large check
+exit 70 and large list exit 1 behavior and partial-output/effect checks.
+These diagnostic substitutions do not waive unrelated output, state or exit
+mismatches. Actual b3 receipts and exact producing inputs/APIs are in the
+[reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md).
+It preserves Linux raw exits 1/0 for only list-expected-extreme and
+list-waiter-extreme under the existing two-ID rule, with exact JSON companions
+and rejecting controls. The complete raw receipt SHA256 bindings are in
+functional-policy-evidence.json; no broader exit substitution is admitted.
