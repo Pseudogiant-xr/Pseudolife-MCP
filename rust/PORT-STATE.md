@@ -7,7 +7,8 @@ listed in [PARITY.md](PARITY.md#doorbell-producer-domains-2026-10-07).
 Preparation removes the cloned CPython value/parser model and retains private
 files, locking, atomic replacement and the production rollback allowlist.
 Earlier source-bound Windows native checks and one positive receipt cell pass.
-The Fable125 path-admission repair is source-only and has not been executed. Broader
+The Fable125 repaired Windows leaf has bounded native and paired process proof;
+actual symlink rejection and POSIX empty-HOME/effective-uid proof remain unproved. Broader
 Windows/Linux native proof, interruption controls, required merge gates,
 independent review and current-head CI are pending; the mode remains deferred.
 
@@ -159,10 +160,10 @@ index 6bdafe1b..b1d1a453 100644
  const HELP: &str = include_str!("cli_help.txt");
 ```
 
-The Fable125 source-only successor adds root-based empty POSIX HOME expansion
+The Fable125 successor adds root-based empty POSIX HOME expansion
 in both the receipt and credential paths, lexical absolute ancestry preserving
 `..`, and effective-uid private-file admission. Additive unit and process
-controls are prepared but unexecuted. A valid-session/non-string-prompt/no-home
+controls accompany the repair. A valid-session/non-string-prompt/no-home
 Python RuntimeError divergence is named `python-traceback-not-contract`, with
 raw Python and native expectations kept separate. A refused input writes no
 receipt, so the doorbell clears by expiry instead of by prompt arrival.
@@ -170,8 +171,29 @@ The deleted exhaustive `rust/shim/tests/fixtures/doorbell_windows_errno.json`
 fixture remains listed in historical manifests;
 those manifests and their private raw receipts retain their original identities.
 The 44 native checks and first real `version2-positive` cell above retain only
-their executed `d0c4c5d8` source attribution. No new candidate gate, image,
-measurement, full-suite pass or mode acceptance is claimed.
+their executed `d0c4c5d8` source attribution.
+
+Repaired Windows leaf `710970c9aff67183a389cf13301600d814215ca2`, tree
+`03ff27dc3941e6946fc17c90e8f7881d14067830`, separately passes formatting,
+both-feature all-target check/Clippy, targeted native doorbell/dispatch/version,
+credential and lease tests, the bounded touched-harness tests, and a real
+`version2-positive` comparison for each frozen feature image. Each image also
+passes the four non-string/no-home, string/no-home, invalid-session/no-home
+and non-string/resolvable-home controls, including separate Python/native
+exit expectations and unchanged state. The initial formatting failure on
+`5f22c5b0` remains retained; its successor changes only additive-test formatting.
+The disposable Windows symlink fixture failed with WinError 1314, so absolute
+and cwd-relative paths crossing `link/../digests` remain unproved. No elevation
+or retry was used. POSIX empty-HOME and differing real/effective-uid execution,
+broader corpus/interruption proof, fresh review and hosted CI remain pending.
+No new measurement, full-suite pass or mode acceptance is claimed.
+
+The repaired leaf remains unintegrated. The current integration decision is
+one batch from master `94b8cc90` containing reviewed #601, #604 and #605 heads,
+with every shared dispatch/eval admission retained. The batch requires its own
+Rust and touched-harness gates, hosted CI and fresh dispatch-glue review;
+leaf receipts retain their exact source attribution. No individual #605
+master-forward or disjoint shortcut is claimed.
 
 
 The captures and fault outcomes below describe the historical

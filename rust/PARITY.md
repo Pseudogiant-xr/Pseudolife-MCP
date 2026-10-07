@@ -703,8 +703,12 @@ The Fable125 successor repairs empty POSIX HOME expansion in the receipt and
 credential paths: expansion is root-based, never relative to the cwd. Receipt
 symlink admission uses lexical absolute paths retaining `..`, including Windows
 drive-relative and root-relative inputs. POSIX private-file ownership matches
-Python's `geteuid`. These repairs and their additive controls are source-only;
-no execution of this candidate is claimed. File order, lock timing, private
+Python's `geteuid`. The repaired Windows leaf `710970c9` passes formatting,
+both-feature all-target check/Clippy, targeted native CLI/credential/lease tests,
+positive receipt cells and the four no-home process controls. Actual Windows
+symlink rejection remains unproved: creating the disposable fixture failed
+with WinError 1314. POSIX empty-HOME/effective-uid runtime proof remains pending.
+File order, lock timing, private
 modes/ACLs, hard-link rejection and serialization domains are unchanged.
 
 The named `python-traceback-not-contract` control preserves Python's raw
@@ -751,7 +755,8 @@ file checks and cleanup. This is one end-to-end cell, not the full corpus.
 The initial range-pattern lint and missing oracle-metadata environment failure
 remain retained; the syntax-only range repair and configured metadata rerun
 pass. The 44 native checks and this first real cell retain the `d0c4c5d8`
-attribution; they do not validate the Fable125 successor. Both-OS corpus,
+attribution; they do not validate the Fable125 successor. Its separate Windows
+proof above retains the `710970c9` source identity. Both-OS corpus,
 interruption controls, the native and touched-harness merge gates quoted in
 PORT-STATE.md, fresh review,
 current-head CI and fresh measurements remain pending. No full-suite pass is
