@@ -2206,3 +2206,34 @@ Comments/blanks count; assets, dispatch and tests do not. Against the historical
 147-line OS-lock helper gives 2037/2,036=1.00049. The Python denominator
 includes deferred actions. These are source size counts, not runtime or parity
 measurements.
+
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+The historical hold checkpoint retained break/delegate/designate exit-1
+deferrals. Subsequent operator preparation supersedes those implementation
+deferrals; acceptance of all four actions remains deferred.
+At that checkpoint, no Phase 4 execution, hosted acceptance or new timing
+claim was made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Phase 4 offline break source preparation
+
+Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged ordinarily
+into the hold/shared-PG branch. External-DSN break and retained container-host
+transport are prepared in source; reviewed PG admission/TLS and hold ownership
+remain unchanged. The named `phase4-embedded-pg-deferred` refusal and
+`native-pg-diagnostics` are described in [PARITY](PARITY.md#phase-4-offline-break-source-preparation).
+At this historical checkpoint, whole-command streams, SQL rows, audit chains,
+rollback, container cancellation and identical-clock replay were unrun. No runtime
+image or acceptance receipt was claimed; the earlier PG and Phase 2d proofs remain historical.
+At this historical break checkpoint, delegate/designate implementation remained
+deferred. Their source is now prepared as described in
+[PARITY](PARITY.md#phase-4-delegate-source-preparation); hold, break, delegate and
+the designate alias are implemented, while all lease mode acceptance remains
+deferred.

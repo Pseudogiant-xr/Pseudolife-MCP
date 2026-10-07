@@ -1,0 +1,17 @@
+usage: pseudolife-mcp lease delegate [-h] [--for DURATION] PROJECT AGENT
+
+Operator only: make the session AGENT (its id, or a unique prefix) the
+maintainer's delegate for PROJECT for DURATION, replacing any current one. Its
+urgent mail then reopens done parks in that project; holding the open
+coordinator:<project> lease grants nothing. The grant is the board lease
+delegate:<project>, which no session can take: it opens the bank directly,
+like break, and the audit log records it with the operator as its actor.
+Revoke it with: lease break delegate:<project>.
+
+positional arguments:
+  PROJECT         the project, as sessions set it on the board
+  AGENT           the session's agent id or prefix
+
+options:
+  -h, --help      show this help message and exit
+  --for DURATION  how long the grant lasts (default 1d, at most 7d)

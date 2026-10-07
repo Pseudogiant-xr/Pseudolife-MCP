@@ -26,6 +26,24 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
+## Phase 4 integration of accepted PostgreSQL repair
+
+Phase 4 merges accepted master
+`bde0cf327dff2cb16736d342938fb9e0c19f7569` through ordinary additive history.
+The shared PostgreSQL module is identical to that accepted source, including
+the libpq18 `prefer` negotiation repair; Phase 4 carries no separate repair.
+Strict TLS modes, explicit DSN/ambient refusal and SAN-only hostname policies
+remain unchanged. The local hold helpers retain Phase 4 visibility and board
+failure codes while receiving master's inherited-SIGINT handling.
+
+The `19f14fa0` hold/break and `90fd0082` delegate/designate receipts remain
+historical. In particular, `90fd0082` inherited the `0341ad38` wrong-CA `prefer`
+defect; its durable operator cells used `sslmode=disable`. They do not validate
+this merged client or imply TLS acceptance. New-image execution, every control
+touching the PostgreSQL client, independent review and hosted acceptance remain
+unrun or pending. The `fixed-clock-replay`, `hold-mirror-best-effort` and exact
+minted-field/name-suffix rules below remain in force. No parity row is promoted.
+
 ## Maintainer sent native candidate
 
 The SQL-first endpoint oracle is `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
@@ -149,7 +167,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
 | CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
-| CLI-LEASE | 4 remainder | Complete action set; `hold`, `break`, `delegate` and `designate` explicitly refuse exit 1 with `deferred in this candidate`, without Python/silent fallback. This candidate loses those actions until Phase 4. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; full mode requires every action native plus its own acceptance | deferred |
+| CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
@@ -1247,9 +1265,10 @@ metadata omits the optional since text. The CPython ISO grammar grid is retired.
 
 Opaque OS lease arguments are refused with exit 2 and
 `lease: arguments must be valid Unicode`, before state or child effects. This
-candidate does not pass opaque child arguments through. Deferred actions
-hold/break/delegate/designate still return exit 1 with
-`deferred in this candidate`. Windows unlock and Ctrl-C receipts at final7e are
+candidate does not pass opaque child arguments through. At the reduced source
+checkpoint `96356249`, hold/break/delegate/designate returned exit 1 with
+`deferred in this candidate`; the later Phase 4 implementation supersedes those
+implementation deferrals. Windows unlock and Ctrl-C receipts at final7e are
 historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
 checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
 hosted acceptance and fresh review remain pending.
@@ -1276,6 +1295,230 @@ It preserves Linux raw exits 1/0 for only list-expected-extreme and
 list-waiter-extreme under the existing two-ID rule, with exact JSON companions
 and rejecting controls. The complete raw receipt SHA256 bindings are in
 functional-policy-evidence.json; no broader exit substitution is admitted.
+
+
+## Phase 4 lease hold preparation
+
+The Phase 4 branch includes the accepted Phase 2d source base. Native
+`hold` takes the existing named local OS lock, follows an external PID using a
+read-only process probe, and releases without signalling that PID. Its board
+mirror registers `lease-hold@<instance-id>`, renews and notifies the concerned
+peers asynchronously; local exclusion ends before bounded board cleanup.
+The parser and pinned Python help guards include hold/break/delegate and the
+`designate` deprecation alias. The historical hold checkpoint retained break/
+delegate/designate exit-1 deferrals. Subsequent operator preparation supersedes
+those implementation deferrals; acceptance of all four actions remains deferred.
+
+The named `hold-mirror-best-effort` rule follows the producer contract in
+`pseudolife_memory/lease_cli.py:487-509` (`_connect`), lines 1103-1115
+(`BoardMirror` connection failure), and lines 1285-1324 (`_hold`). Hold acquires
+its local lock before attempting the mirror. An unusable configured bearer
+therefore reports board skipped after acquisition; it does not refuse local
+ownership. This corrects the earlier pre-lock bearer refusal in the historical
+Phase 4 candidate. A failure after acquisition, including forbidden registration headers or
+`HTTP_REPLY_NOT_UNDERSTOOD`, stops only the mirror. The hold keeps its lock,
+leaves the followed PID running and retains its normal exits. Core refusal
+before lock/fallback/child effects remains scoped to check/list/run. The
+additive `lease_hold.rs` controls distinguish these two admission boundaries.
+Ordinary non-ASCII registration failures also remain mirror-only.
+
+The `nondeterministic-bytes-semantic` rule applies to identities issued by
+the real daemon during mirrored hold registration. Its exact field scope is
+the registration reply's `agent_id` and `credential`, their subsequent
+`X-PL-Agent`/`X-PL-Agent-Key` echoes, `coordination_agents.agent_id` and
+`credential_hash`, lease holder IDs (including HTTP holder views), and audit
+rows' `agent_id` plus the chain links derived from that identity. Each arm
+must receive a canonical UUID4 hex ID and a 43-character URL-safe token;
+the stored credential hash must equal SHA-256 of its actual issued token.
+Each arm also validates the exact display name produced by its label, one
+space and its own `agent_id[:8]` suffix. The producer is `_board_name` at
+`pseudolife_memory/storage/coordination.py:623`, with the derivation at lines
+627-628; only that eight-character UUID echo is semantic.
+Every captured audit chain must independently verify its original payload
+text, hashes and links before semantic comparison, with exact event kinds,
+order, sequence and all other columns. Request-body bytes, CLI streams,
+lock/child behavior and all unrelated rows remain exact. This rule does not
+permit replacing entropy sources or discarding unrelated state differences.
+Mirrored hold whole-command acceptance remains pending.
+
+This historical hold checkpoint was source preparation, with no Phase 4 native
+execution or acceptance claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
+public-process/state corpora, Windows interruption and PostgreSQL transaction/
+audit/ownership controls remain pending. Linux runtime gates run on the
+existing homelab machine; nextest remains in hosted CI. The Phase 2d runtime
+receipts keep their old identities and do not validate this changed runtime.
+Full CLI-LEASE and scoped lease-core acceptance remain separate and deferred.
+
+Pending operator comparisons use the named `fixed-clock-replay` rule: both
+arms receive the identical fixed clock through the same existing test or
+OS-level injection seam. Receipts identify that clock and its source; expiry,
+audit rows and chain hashes remain exact. Cases without a shared clock seam
+remain explicitly uncompared. No production Python clock hook, timestamp
+removal or hash relaxation is introduced.
+
+## Shared PostgreSQL client preparation
+
+The named **`pg-dsn-explicit-tls`** scope admits explicit sslmode/sslrootcert in
+the installed/documented single-TCP-host DSN grammar and the platform default
+root.crt behavior. `require` verifies an available CA as `verify-ca`; `prefer`
+also verifies an available CA. Ambient client certificate/key and CRL files,
+PGSSL*/PGTLS* variables and other libpq connection/session PG* controls refuse
+with exit 1 and a diagnostic naming only the control. Unknown configured DSN
+options or modes likewise refuse by option name; none is silently ignored.
+
+`shim/tests/pg_client.rs` contains disposable SSLRequest, CA, hostname,
+default-root, named-refusal, resolution/argv and connection-closure controls.
+The first Windows preparation run passed six tests and 18 transport cells before
+the invalid-SSL-response admission fix; that run remains historical. The final
+focused test covers invalid SSL responses before startup, all five modes,
+available/missing/default/wrong CA roots and connection closure.
+
+The named **`pg-tls-webpki-hostnames`** rule restricts verify-full to WebPKI
+hostname grammar: matching SAN `dNSName` and `iPAddress`. CN-only certificates
+and IP addresses in `dNSName` refuse exit 1 with the named rule; the diagnostic
+explains libpq's matching legacy acceptance. The original disposable comparison
+retains libpq 18 success against native refusal for both certificates. The
+additive controls require the named refusal before startup and separately show
+that `verify-ca` still accepts their valid CA chains. No bespoke hostname
+verifier, timestamp/hash relaxation or certificate normalization is added.
+
+The shared-client checkpoint prepared the reusable dedicated client separately
+from break/delegate/designate transactions and embedded/container lifecycle. Real PostgreSQL rows,
+audit-chain effects, shared fixed-clock replay, Linux execution and fresh review remain pending; targeted Windows
+format, both-feature Clippy and eight PG transport tests passed. Neither full CLI-LEASE nor any
+new mode is promoted by these transport observations.
+
+## Phase 4 offline break source preparation
+
+`shim/src/cli/lease/operator/` prepares native external-DSN break with the
+reviewed shared PG client. It locks the lease before waiters, vacates the
+holder, removes departed waiters, skips revoked waiters and grants the earliest
+eligible ticket with the existing 300-second grant window. Reserved delegate/
+designated queues dequeue instead of inheriting an operator role. Mutation and
+ordered audit append share one transaction; the audit advisory lock is last,
+and success is printed only after an observed commit. Names retain Unicode,
+whitespace, length and credential-shaped-text admission before durable writes.
+Break never acquires an OS lease lock or signals its holder's process.
+
+The retained container transport uses the same Docker inspect and `docker exec`
+argv, inherited streams, terminal choice and container exit. Its Python command
+runs inside the daemon container; no host Python storage bridge or agent HTTP
+operator route is introduced. The named **`phase4-embedded-pg-deferred`** rule
+refuses an existing embedded bank with exit 1 and stderr
+`lease: break refused: phase4-embedded-pg-deferred`; it never starts, attaches to
+or stops that bank. An explicit DSN takes priority. Native detection uses the
+existing bank marker without importing the host's pg0 package.
+
+The named **`native-pg-diagnostics`** rule replaces generic psycopg class names
+with safe native PG diagnostics, retaining exit 1, empty stdout and stderr-only
+placement. This substitution replaces only the parenthesized exception class
+at `pseudolife_memory/lease_cli.py:1639` (`_operator`); it does not add a
+`lease: ` prefix. A Windows Python 3.11.9 / psycopg 3.3.4 whole-command
+`lease designate resource fixture-agent`, with explicit DSN `not-a-dsn`,
+observed `ProgrammingError` before connection setup. Its stdout is empty,
+exit is 1, and stderr is the designate deprecation line followed by
+`cannot open the bank (ProgrammingError)`. Native DSN admission must use
+`cannot open the bank (PostgreSQL DSN is not understood)`; the port-owned
+control asserts the same streams, exit, ordering and unchanged files,
+without a socket or listener. `designate` retains its deprecation
+before the refusal. Unknown DSN options use the fixed parenthesized diagnostic
+`unsupported PostgreSQL DSN option`; operator diagnostics never echo an option
+spelling supplied by the DSN, which can be a malformed password fragment.
+The no-bank line remains exactly the prefix-free producer at
+`pseudolife_memory/daemon_exec.py:40-43` and `lease_cli.py:1887-1888`.
+The designate rewrite at `lease_cli.py:1854-1859` also applies to the argv
+forwarded into the container, so its deprecation is emitted once.
+Coordination refusal codes and their surrounding bytes
+remain exact. The separate named embedded refusal retains its specified
+diagnostic. Failure controls must
+compare every durable row, raw stream and local file; no row or time field is
+dropped. Transport loss around COMMIT needs an actual outcome/rollback control
+before acceptance; preparation is not a guarantee about an unobserved commit.
+
+The additive [operator fixture plan](../evals/rust_port/lease_operator_cases.json)
+pins the first missing-row whole-command cell, queue/reserved/revocation,
+rollback, secret-boundary and container/refusal controls. Held-row comparisons
+use `fixed-clock-replay` with the same clock seam in both arms and exact audit
+hashes. No build, service or native action was executed at the original break
+source checkpoint. Subsequent targeted execution is recorded above against
+`67478612`; those receipts retain that source identity. New source repairs need
+new validation. Broader whole-command, Windows durable-state, cancellation/
+rollback coverage, final hosted gates and fresh independent review remain pending.
+Every lease mode row remains deferred.
+
+## Phase 4 delegate source preparation
+
+Native `delegate` and its deprecated `designate` alias prepare the existing
+external-DSN role grant. Both role rows lock in name order before resolving a
+registered, unrevoked recipient. The transaction removes its coordinator
+queue entry, breaks its live coordinator role, settles that queue, drops
+reserved delegate waiters, replaces the delegate and appends the ordered audit
+chain with the recipient's project/task scope. The ordinary prefix grammar,
+60-second to seven-day grant, 24-hour default, reachability warning and JSON
+field order are retained. The shared PG/TLS policy and container transport are
+unchanged; embedded banks still refuse `phase4-embedded-pg-deferred`, naming
+the requested action. Generic failures use `native-pg-diagnostics`.
+
+The original delegate successor was source preparation only. Subsequent
+compilation and whole-command receipts are recorded above against `90fd0082`
+and `67478612`; they do not validate later source repairs. Mutation proof requires `fixed-clock-replay` and
+exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
+images retain their original source identities and do not validate this
+changed runtime. The port-owned operator deferral assertion is replaced by
+the approved explicit malformed-DSN refusal control, retaining exact exit,
+streams, deprecation ordering and unchanged local files. At source checkpoint
+`3583bb6c`, that control had run only on the historical candidates; the repairs
+at that checkpoint remained unrun. Original Python
+and tests retain accepted master bytes.
+No lease mode is promoted.
+
+## Phase 4 source repair validation boundary
+
+`LeaseHome` always sets `PSEUDOLIFE_DAEMON_EXEC=1`, preventing operator tests
+without a bank from entering a real daemon container. The additive admission
+test first proves its owned synthetic Docker executable works, then requires
+both fixture constructors to refuse without invoking it. A separate owned
+transport test explicitly removes the guard to inspect designate's rewritten
+argv and single deprecation, without using a real container.
+
+The named **`lease-pid-platform-range`** rule retains Python `int()` grammar at
+`pseudolife_memory/lease_cli.py:1693-1700`: Unicode decimal digits, underscores
+between digits, surrounding whitespace and one sign. Zero and negative values
+retain the exact positive-whole-number diagnostic. Platform PID producers
+(`$$`, `$PID`, Get-Process and launchers) supply representable PIDs. Other
+positive values refuse exit 2 with the usage-shaped `not a process id` error
+before any lock, board or child effects: POSIX permits 1 through i32::MAX and
+Windows permits 1 through u32::MAX. This avoids the POSIX `os.kill` overflow at
+line 1267 and Windows DWORD truncation. Original baseline nodes are
+`tests/test_lease_cli.py::test_hold_and_check_usage_errors_exit_2`,
+`test_hold_of_a_pid_that_is_gone_releases_at_once` and
+`test_hold_keeps_the_lease_while_the_pid_lives_then_releases`.
+The port-owned boundary tests require Windows 4294967295 exit 0, POSIX exit 2
+with unchanged files, and rejection above the respective range.
+
+DB-free operator units pin all secret/ordinary vectors from unchanged
+`tests/test_coordination_secrets.py` and append's canonical material against
+the unchanged Python `coordination.audit_hash` producer, including non-ASCII
+payload and a null recipient. Audit predecessor and unrelated-payload controls
+must change the hash. At source checkpoint `3583bb6c` these controls were unrun;
+prior receipts and hosted failures retain their original identities.
+
+Accepted doorbell test repair `7a2d59b2` was merged once into this branch.
+Windows successor `58b8f9ff` passed format, check, Clippy with warnings denied
+and 196 affected Rust tests under each feature configuration. Its initial
+owned-container argv test failed because CMD consumed a trailing digit as a
+redirection descriptor; moving the fixture redirection retained the exact
+assertion, and all three admission controls then passed. Production bytes are
+unchanged from built source `5e6e62f1`.
+Whole Python/native Windows no-bank and malformed-DSN controls matched exact
+bytes except the named parenthesized native diagnostic; PID grammar refusals
+matched, and the native range refusal preceded effects. The unusable-bearer
+hold pair matched exact streams and files, retained local ownership and the
+followed child, then released normally. Its state, stream and lifecycle
+rejecting controls passed. No real container, daemon or PostgreSQL bank was
+started for these cells. Remote range/state/TLS/mirror recapture, final hosted
+gates and fresh independent review remain pending. All lease acceptance rows
+remain deferred.
 
 ## Episode merge-forward validation boundary
 

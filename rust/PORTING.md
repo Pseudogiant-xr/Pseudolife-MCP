@@ -915,6 +915,97 @@ the candidate loses those actions until Phase 4. Final hosted acceptance and
 independent review remain pending, so neither CLI-LEASE-core nor full mode
 is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
 
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+The historical hold checkpoint retained break/delegate/designate exit-1
+deferrals. Subsequent operator preparation supersedes those implementation
+deferrals; acceptance of all four actions remains deferred.
+At that checkpoint, no Phase 4 execution, hosted acceptance or new timing
+claim was made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Shared PostgreSQL client preparation
+
+`shim/src/pg/` uses tokio-postgres 0.7.18 and tokio-postgres-rustls 0.14.0
+with the existing Rustls 0.23.45/AWS-LC stack. This avoids a second OpenSSL
+client stack, an ORM and generated queries. The dedicated `Session` has a
+10-second connection timeout, sets `lock_timeout` to five seconds and selects
+the public search path. Callers borrow its client for queries and transactions
+and must observe commit errors; there is no pool or automatic reconnect. Closing
+sends PostgreSQL Terminate; cancellation drops only this connection.
+
+The DSN grammar is pinned to the single TCP-host URIs written by
+`ops/install-autostart.ps1`, both compose files and the DSN examples in
+`docs/guide/configuration.md`, plus libpq keyword quoting for those same fields.
+Only host, port, user, password, dbname, sslmode and sslrootcert are admitted.
+Unknown configured options and unsupported modes refuse by option name with
+exit 1. Diagnostics omit DSNs, credentials, file paths and driver messages.
+
+`disable` sends no SSLRequest; `prefer` follows the accepted negotiation rule
+below, retaining root checks on its TLS attempt and allowing one fresh plaintext
+retry. Every strict mode requires `S` and a successful TLS handshake. Invalid
+SSLRequest responses refuse before startup/authentication. `prefer` and `require`
+without roots use encryption without CA authentication. An explicit root file,
+or the platform default `root.crt` when no explicit file is selected, enables CA
+verification, including libpq's default-root upgrade for `require`. The custom
+`verify-ca` verifier checks chain, validity and server-auth usage while omitting
+hostname verification. TLS 1.2/1.3 handshake signatures remain verified in every
+encrypted mode. `verify-full` uses Rustls chain and hostname verification.
+
+The named `pg-tls-webpki-hostnames` rule restricts verify-full to matching SAN
+`dNSName`/`iPAddress`. The native refusal identifies the rule and explains that
+libpq accepts matching legacy CN-only/IP-in-dNSName certificates. A disposable
+libpq 18 comparison retains both raw mismatches; they are intentional under this
+rule. No bespoke hostname verifier is added and `verify-ca` is unchanged. The
+`pg_client` fixture checks SAN-based positive/negative cases, both named legacy
+refusals, default roots, ambient refusals and graceful closure. It does not prove
+real database transactions.
+
+The named `pg-dsn-explicit-tls` scope refuses ambient client certificate/key and
+CRL files, PGSSL*/PGTLS* variables and libpq connection/session PG* controls by
+name. Only the platform default root file participates implicitly. The pure
+resolution module retains configured DSN, existing embedded data, then container
+order, and pins the container's own `python -m pseudolife_memory.cli` argv.
+At the shared-client checkpoint, embedded start/stop, container process dispatch
+and native operator SQL were unimplemented. Fixed-clock operator comparisons
+remain a later gate.
+
+Windows transport tests use only owned loopback fake PostgreSQL peers and
+disposable fixture CA files; no bank, daemon or trust store is changed. Linux,
+real-server TLS, full transaction/audit/state comparison, independent review and
+hosted acceptance remain pending. The Phase 2d and hold checkpoint receipts
+retain their original runtime identities.
+
+## Offline break source preparation
+
+The [break preparation](PARITY.md#phase-4-offline-break-source-preparation) adds
+external-DSN transactions and the existing container-host deployment transport.
+The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
+has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
+`native-pg-diagnostics` without driver details or copied interpreter classes.
+Regex 1.13.1 implements the producer's existing secret-shaped-text business
+guard; unsupported look-around is expressed as explicit ASCII boundary and
+tokenize/tokenise checks, preserving match iteration. This dependency does not
+introduce a Python parser or runtime bridge. Audit payloads retain sorted UTF-8
+JSON and timestamp decimal spelling because both are hashed durable state.
+
+At the original source checkpoint `ef0f9a4b`, only locked offline dependency
+metadata and source formatting had been checked; compilation and runtime cells
+were unrun. Its additive fixture plan started with `lease break fixture-missing`
+on an owned disposable bank, whose missing-row result creates no audit/time
+fields. Subsequent mutations require the identical clock seam in both arms,
+all-row/byte comparison and rejecting controls. Delegate/designate were then
+unimplemented; subsequent implementation
+and scoped execution are recorded in [PARITY](PARITY.md#phase-4-delegate-source-preparation).
+Container cancellation, ambiguous COMMIT and full mode acceptance remain
+pending; prior transport measurements retain their original runtime identities.
+
 ## Maintainer sent JSONB read domain
 
 The native sent leaf uses **bounded-jsonb-depth**: at most 2048 nested JSONB

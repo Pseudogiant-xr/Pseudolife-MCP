@@ -14,7 +14,7 @@ use tokio::{
 #[path = "sigint.rs"]
 mod sigint;
 
-enum RunError {
+pub(super) enum RunError {
     RefusedInput(String),
     TimedOut,
     Lock(String),
@@ -24,7 +24,7 @@ enum BoardWaitError {
     Failure(board::Failure),
     TimedOut,
 }
-struct Stops {
+pub(super) struct Stops {
     #[cfg(unix)]
     interrupt: Option<tokio::signal::unix::Signal>,
     #[cfg(unix)]
@@ -33,7 +33,7 @@ struct Stops {
     hangup: tokio::signal::unix::Signal,
 }
 impl Stops {
-    fn new() -> io::Result<Self> {
+    pub(super) fn new() -> io::Result<Self> {
         Ok(Self {
             #[cfg(unix)]
             interrupt: if sigint::ignored()? {
@@ -49,7 +49,7 @@ impl Stops {
             hangup: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?,
         })
     }
-    async fn wait(&mut self) -> i32 {
+    pub(super) async fn wait(&mut self) -> i32 {
         #[cfg(unix)]
         {
             let interrupt = async {
@@ -70,9 +70,9 @@ impl Stops {
     }
 }
 #[derive(Clone, Copy)]
-struct Deadline {
-    start: Instant,
-    seconds: f64,
+pub(super) struct Deadline {
+    pub(super) start: Instant,
+    pub(super) seconds: f64,
 }
 async fn pause(poll: u64, deadline: Option<Deadline>) -> Result<(), RunError> {
     let delay = if let Some(end) = deadline {
@@ -142,6 +142,7 @@ async fn wait_board(
                         ),
                         transient: false,
                         fatal_input: false,
+                        code: None,
                     }));
                 }
             }
@@ -159,7 +160,7 @@ fn try_lock(lock: &mut Lock) -> Result<bool, RunError> {
         ))
     })
 }
-async fn wait_lock(
+pub(super) async fn wait_lock(
     lock: &mut Lock,
     name: &str,
     deadline: Option<Deadline>,
