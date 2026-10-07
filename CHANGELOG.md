@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exact-byte test routing. Other HTTP routes remain deferred; the complete
   oracle corpus and cross-platform acceptance remain pending.
 
+### Fixed (2026-10-07 — inherited native lease SIGINT ignore)
+
+- The experimental native `lease run` preserves an inherited POSIX SIGINT
+  ignore, matching Python startup for background commands. Ordinary Ctrl-C
+  retains interrupt cleanup and exit 130; native lease acceptance remains
+  deferred.
+
 ### Fixed (2026-10-07 — native episode bearer refusal)
 
 - The experimental native episode hooks refuse configured bearers containing
