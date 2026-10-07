@@ -152,11 +152,12 @@ but that interpreter domain is deliberately outside this hook contract.
 
 | Episode site | Producer/input class | Substitution or retained reason |
 |---|---|---|
-| `episode_input.rs::Hook` | External hook ordinary JSON object and string fields | Typed serde_json map; no general Python truthiness/repr, NaN/Infinity conversion, arbitrary numeric session coercion or PYTHONINTMAXSTRDIGITS setting. Duplicate string fields retain last-value semantics. |
-| `episode_input.rs::Text` and `quoted` | Hook strings and actual OS cwd spelling | serde_json byte-string decoding plus a minimal WTF-8 codepoint adapter retains escaped host surrogate units; ordinary JSON forbids raw string controls. ASCII JSON escaping and request-body spacing remain exact. This is a filesystem/string codec, not a general interpreter value model. |
-| `episode.rs::run` | Hook JSON text | The standard parser replaces the pinned989-container scan and its8MiB thread/extra runtime. Synthetic deep/numeric/non-finite cases remain historical diagnostics; no passing admission claim is made for them. |
-| `episode.rs::health` | Daemon `_build_health_payload`, `web/api.py` JSON response | UTF-8 ordinary serde_json parsing/non-null health gate, with no Python non-finite, integer-env or UTF16/32 byte-sniffing emulation. Configured remote malformed responses still refuse. |
-| `episode.rs` path/title helpers | Host cwd, real OS paths, HOME/USERPROFILE, .git directories, local clock | Retain surrogate filesystem conversion, root/UNC/separator/basename rules, nearest git directory, home/system fallback and local-minute title because they change public body bytes for actual host paths. No broad title/time normalization is added. |
+| `episode_input.rs:78` map and `:61` parser | User stdin / legacy external hook ordinary JSON object and string fields | Narrow to typed serde_json fields; no general Python truthiness/repr, NaN/Infinity conversion, arbitrary numeric session coercion or PYTHONINTMAXSTRDIGITS setting. Duplicate string fields retain last-value semantics. |
+| `episode_input.rs:7` string decoder and `:107` quoting | User stdin / hook strings and actual OS cwd spelling | Keep serde_json byte-string decoding plus a minimal WTF-8 codepoint adapter for escaped host surrogate units; ordinary JSON forbids raw string controls. ASCII JSON escaping and request-body spacing remain exact. This is a filesystem/string codec, not a general interpreter value model. |
+| `episode.rs:305` run | User stdin / hook JSON text | Remove the pinned989-container scan and its8MiB thread/extra runtime in favor of the standard parser. Synthetic deep/numeric/non-finite cases are suite diagnostics; no passing admission claim is made for them. |
+| `episode.rs:281` health | Daemon `_build_health_payload`, `web/api.py:418` JSON response | Narrow to UTF-8 ordinary serde_json parsing/non-null health gate, with no Python non-finite, integer-env or UTF16/32 byte-sniffing emulation. Configured remote malformed responses still refuse. |
+| `episode.rs:54/72/85/95` OS string conversion | OS paths / user string cwd | Keep host UTF-16/surrogateescape conversion because actual filenames can contain those units and change filesystem lookup and body bytes. |
+| `episode.rs:21/42/121/129/153/196/204/248` path/title helpers | OS cwd, user string cwd, HOME/USERPROFILE, .git directories and local clock | Keep root/UNC/separator/basename rules, nearest git directory, home/system fallback and local-minute title because they change public body bytes for actual host paths. No broad title/time normalization is added. |
 
 The shared `python_json*` implementation remains owned by other consumers;
 episode no longer imports it, Python repr or version numeric formatting. The
@@ -166,6 +167,18 @@ assertions remain unchanged, including historical corpus-presence checks. The
 numeric42 native167/2a measurements are historical; reduced-successor closure
 and measurement fixtures use the string42 producer and must be freshly bound.
 Both modes remain deferred through runtime, review and hosted acceptance.
+
+Reduced native component `17459703` passed both-OS bounded functional proofs;
+capture component `63922667` adds the exact string42 measurement admission.
+Each OS executed 32 admitted corpus pairs, 128 rejecting controls, 201 targeted
+tests, both native feature configurations and 68 independently verified closures
+in a warm three-by-ten measurement. Strict header-order differences, historical
+outside-grammar captures and the original Linux minute-boundary failure remain
+raw diagnostics; its exact isolated repeat passed without a new normalization.
+Production episode code is 512 physical lines versus 192 Python episode/title
+lines (2.667 times), with no episode dependency on the 733-line shared value
+implementation. These local executions establish no hosted-node execution or
+ported status; fresh review and the required post-review full suite remain open.
 
 
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.

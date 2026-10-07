@@ -9,9 +9,14 @@ path/title/body behavior, and no longer imports shared Python value emulation.
 The interpreter-depth/integer-env native assertions are retired under the
 explicit test exception; original Python/eval assertions are unchanged.
 Synthetic numeric/non-finite/deep inputs and native167/numeric42 measurements
-remain historical diagnostics. Reduced-successor builds, string42 actual
-closure/corpus/measurements, fresh review and hosted gates remain pending; both
-episode modes stay deferred. Producer/substitution details are in PARITY.md.
+remain historical diagnostics. Native component `17459703` and capture component
+`63922667` now have both-OS local string42 closure and warm three-by-ten receipts,
+32 admitted corpus pairs with 128 rejected controls per OS, and 201 targeted
+tests per OS. The exact Linux path-minute repeat passed; original raw failure
+and outside-grammar diagnostics remain retained. Fresh independent review,
+the required post-review full Python suite and current hosted/exact-master gates
+remain pending; both episode modes stay deferred. Producer/substitution details
+and the 2.667-times production line ratio are in PARITY.md.
 
 ## Episode distinct-field ordering disposition
 
