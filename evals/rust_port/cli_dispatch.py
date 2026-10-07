@@ -23,7 +23,7 @@ from .stdio_capture import require_phase1_source
 def selected_nodes():
     manifest = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
     mapped = {node for node, boundary in manifest["mapped"].items() if boundary == "cli-main-process"}
-    return sorted(mapped | set(pytest_plugin.CLI_SUBPROCESS_NODES))
+    return sorted(mapped | set(pytest_plugin.CLI_SUBPROCESS_NODES) | pytest_plugin.CLI_HOOK_NODES)
 
 
 def process_tests(command, root, directory, label):

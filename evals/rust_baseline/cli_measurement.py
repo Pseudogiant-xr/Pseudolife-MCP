@@ -2,7 +2,9 @@
 import argparse
 import base64
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -18,10 +20,59 @@ from evals.rust_port.cli_process import (
 )
 from evals.rust_port.harness import _base_url, capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
-from evals.rust_port.provenance import require_import_root, runtime_metadata
+from evals.rust_port.provenance import require_import_root, require_instrument_binding, runtime_metadata
 from evals.rust_port.stdio_capture import require_phase1_source
 
 
+def doorbell_fixture():
+    """Reuse the ordinary positive corpus cell, including its recorded seed."""
+    from evals.rust_port.cli_doorbell_seen import THREAD, cases
+    from pseudolife_memory.codex_doorbell_state import PendingNotice, notice_text
+    original = next(row for row in cases(notice_text) if row["id"] == "version2-positive")
+    key = hashlib.sha256(THREAD.encode()).hexdigest()
+    text = json.dumps(original["pending"], ensure_ascii=False, separators=(",", ":"))
+    seed = (text + "\n").encode()
+    case = {"id": original["id"], "mode": "doorbell-prompt-seen",
+            "argv": ["doorbell-prompt-seen", *original["argv"]], "stdin_b64": original["stdin_b64"],
+            "environment_deltas": {"PSEUDOLIFE_DIGEST_DIR": "{home}/digests"},
+            "pre_files_b64": {"digests/" + key + ".bell-pending": base64.b64encode(seed).decode()},
+            "normalizations": [], "timeout_seconds": 20}
+
+    def prepare(cell, home, env, command, commands):
+        if cell != case or env.get("PSEUDOLIFE_DIGEST_DIR") != str(home / "digests"):
+            raise ValueError("doorbell preparation requires the recorded positive case")
+        pending = PendingNotice(home / "digests", THREAD)
+        path = pending.path
+        if path != home / next(iter(case["pre_files_b64"])) or path.read_bytes() != seed:
+            raise ValueError("doorbell preparation requires the recorded pending bytes")
+        path.unlink()
+        pending._write_atomic(path, text)
+        return command
+
+    return case, prepare
+
+
+def doorbell_private_metadata(home):
+    """Opening each state file proves owner-only access and a single link."""
+    from pseudolife_memory.private_state import open_private
+    metadata = {}
+    for relative in snapshot(home):
+        descriptor = open_private(file_path(home, relative), os.O_RDONLY)
+        try:
+            info = os.fstat(descriptor)
+            metadata[relative] = {"private": True, "nlink": info.st_nlink,
+                                  "mode": oct(info.st_mode & 0o777)}
+        finally:
+            os.close(descriptor)
+    return metadata
+
+
+def doorbell_source_binding(root):
+    from pseudolife_memory.codex_doorbell_state import PendingNotice, notice_text
+    from pseudolife_memory.private_state import open_private
+    return require_instrument_binding(root, {
+        "pseudolife_memory/codex_doorbell_state.py": [PendingNotice, PendingNotice._write_atomic, notice_text],
+        "pseudolife_memory/private_state.py": [open_private]})
 def file_identity(command):
     path = Path(command[0]).resolve(strict=True)
     metadata = path.stat()
@@ -134,7 +185,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                                                    reset_home, snapshot, remove_root_link],
                "evals/rust_port/harness.py": [capture_platform, isolated_env, run_cli, write_new],
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
-               "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
+               "evals/rust_port/provenance.py": [require_import_root, require_instrument_binding, runtime_metadata],
                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
     if wait_delivery:
         from evals.rust_port import wait_mail_policy, cli_wait_mail
@@ -148,8 +199,24 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
         if episode_fixture:
             helpers["evals/rust_port/episode_corpus.py"] = [cases]
         helpers["evals/rust_baseline/transport.py"] = [Path(transport.__file__)]
-    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     layout = getattr(args, "layout", "bare")
+    doorbell = mode == "doorbell-prompt-seen"
+    doorbell_binding = None
+    if doorbell:
+        if layout != "bare":
+            raise ValueError("positive doorbell measurement requires the bare layout")
+        from evals.rust_port.cli_doorbell_seen import THREAD, assert_effect, cases
+        from pseudolife_memory.codex_doorbell_state import notice_text
+        expected_case, default_prepare = doorbell_fixture()
+        if case is None and prepare is None:
+            case, prepare = copy.deepcopy(expected_case), default_prepare
+        if case != expected_case or argv != expected_case["argv"]:
+            raise ValueError("doorbell measurement requires the exact recorded positive case")
+        original_case = next(row for row in cases(notice_text) if row["id"] == "version2-positive")
+        key = hashlib.sha256(THREAD.encode()).hexdigest()
+        helpers["evals/rust_port/cli_doorbell_seen.py"] = [cases, assert_effect]
+        doorbell_binding = doorbell_source_binding(root)
+    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     if layout == "installed" and prepare is None:
         if mode != "version":
             raise ValueError("installed CLI measurement currently covers version only")
@@ -160,8 +227,9 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
     if fixture_url is None and (prepare is None) != (case is None):
         raise ValueError("prepared measurement requires both a callback and a recorded case")
     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
-                             or (fixture_url is None and case.get("environment_deltas"))
-                             or ((fixture_url is None or mode == "briefing") and case.get("pre_files_b64"))):
+                             or (not doorbell and fixture_url is None and case.get("environment_deltas"))
+                             or (not doorbell and (fixture_url is None or mode == "briefing")
+                                 and case.get("pre_files_b64"))):
         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
     case = copy.deepcopy(case)
     prepared = prepare is not None or fixture_url is not None
@@ -238,6 +306,14 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                     env = isolated_env(active_home)
                     env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
                                 "PYTHONDONTWRITEBYTECODE": "1"})
+                    if doorbell:
+                        if case != expected_case:
+                            raise ValueError("doorbell recorded case changed during measurement")
+                        env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
+                        for relative, encoded in case["pre_files_b64"].items():
+                            path = file_path(home, relative)
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_bytes(base64.b64decode(encoded, validate=True))
                 try:
                     prepared_case = copy.deepcopy(case) if fixture_url is not None else case
                     selected, selected_identity, original_identity = prepared_command(
@@ -248,9 +324,17 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                                "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                              "effective_argv": [*selected, *argv], "cwd": str(root),
                                              "command_identity": selected_identity}}
+                    if doorbell:
+                        if case != expected_case or selected != commands[arm] \
+                                or binding["pre_files_b64"] != expected_case["pre_files_b64"]:
+                            raise ValueError("doorbell preparation changed recorded case, prefix or pending bytes")
+                        binding["private_metadata"] = {"before": doorbell_private_metadata(home)}
+                        home_identity = (home.stat().st_dev, home.stat().st_ino)
                 except BaseException:
                     remove_root_link(active_home)
                     raise
+            if doorbell and reuse:
+                home_identity = (home.stat().st_dev, home.stat().st_ino)
             before = snapshot(active_home)
             if control:
                 baseline_files = before
@@ -309,6 +393,16 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                         if response != {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""} \
                                 or binding["post_files_b64"] != binding["pre_files_b64"]:
                             raise RuntimeError("CLI episode-end requires the accepted empty streams and unchanged home")
+                    if doorbell:
+                        if case != expected_case or env != binding["environment"] \
+                                or (home.stat().st_dev, home.stat().st_ino) != home_identity:
+                            raise RuntimeError("doorbell case, home or environment changed during measurement")
+                        binding["private_metadata"]["after"] = doorbell_private_metadata(home)
+                        try:
+                            assert_effect(original_case, {**response, "post_files_b64": binding["post_files_b64"]},
+                                          key, expected_case["pre_files_b64"])
+                        except AssertionError as error:
+                            raise RuntimeError("doorbell positive receipt byte control failed") from error
                     if command_identity(selected, root) != selected_identity \
                             or command_identity(commands[arm], root) != original_identity:
                         raise RuntimeError("CLI executable changed during measurement capture")
@@ -391,6 +485,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
     measured_provenance = provenance(source_root=root)
     if cli_binding(args.candidate_root, root, extra_helpers=helpers) != instrument_binding:
         raise RuntimeError("CLI instrument changed during measurement capture")
+    if doorbell and doorbell_source_binding(root) != doorbell_binding:
+        raise RuntimeError("doorbell preparation source changed during measurement capture")
     return {"schema": 1, "status": "contaminated-plumbing-smoke" if args.smoke else "quiet-cli-pair-final",
             "capture_platform": capture_platform(), "provenance": measured_provenance,
             "cli_instrument_binding": instrument_binding,
@@ -398,6 +494,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
             "candidate_executable": binary, "python_executable": python_identity,
             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
             "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
+            **({"doorbell_preparation_binding": doorbell_binding} if doorbell else {}),
             **({"fixture_url": fixture_url} if fixture_url is not None else {}),
             **({"independent_state_checks": state_checks,
                 "database_byte_equality_claimed": False} if episode_fixture else {}),
@@ -435,7 +532,7 @@ def main():
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256")
-    parser.add_argument("--mode", choices=("help", "version"), default="help")
+    parser.add_argument("--mode", choices=("help", "version", "doorbell-prompt-seen"), default="help")
     parser.add_argument("--warm-images", action="store_true",
                         help="Reuse and warm images before each repeat; default for version, opt-in for other modes")
     parser.add_argument("--argv-json", help="Optional argv for the selected mode")

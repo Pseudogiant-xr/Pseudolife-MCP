@@ -4,9 +4,7 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     // Episode hooks ignore every tail argument, including opaque OS strings.
     let first = std::env::args_os().nth(1);
-    if let Some(code) =
-        run_episode(first.as_deref().and_then(std::ffi::OsStr::to_str))
-    {
+    if let Some(code) = run_episode(first.as_deref().and_then(std::ffi::OsStr::to_str)) {
         return code;
     }
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();

@@ -3,8 +3,9 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-mod episode;
 mod briefing_hook;
+mod doorbell_seen;
+mod episode;
 mod hook_json;
 pub mod lease;
 mod version;
@@ -16,7 +17,6 @@ const DEFERRED_MODES: &[&str] = &[
     "embedded",
     "coordination-recovery",
     "board-audit",
-    "doorbell-prompt-seen",
     "doctor",
     "connect",
     "invite",
@@ -123,6 +123,9 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
                 ExitCode::FAILURE
             },
         );
+    }
+    if mode == "doorbell-prompt-seen" {
+        return Some(doorbell_seen::run());
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
