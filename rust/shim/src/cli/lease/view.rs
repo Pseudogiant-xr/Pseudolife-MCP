@@ -1,6 +1,6 @@
 use super::json::{Text, Value, json};
 use super::{args::Args, board, lock};
-use chrono::{Datelike, Local, Offset, TimeZone};
+use chrono::{Local, Offset, TimeZone};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 pub fn truth(value: &Value) -> bool {
