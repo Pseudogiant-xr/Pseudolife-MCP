@@ -11,6 +11,18 @@ async fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
+        let Some(lease_arguments) = arguments
+            .iter()
+            .skip(1)
+            .map(|argument| argument.to_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        else {
+            pseudolife_stdio::stderrln!("lease: arguments must be valid Unicode");
+            return ExitCode::from(2);
+        };
+        std::process::exit(pseudolife_stdio::cli::lease::main(&lease_arguments).await);
+    }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
     {

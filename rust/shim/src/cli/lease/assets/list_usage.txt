@@ -1,0 +1,1 @@
+usage: pseudolife-mcp lease list [-h] [--json] [NAME]
