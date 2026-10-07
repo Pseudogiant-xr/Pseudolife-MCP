@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 mod common;
 use common::LeaseHome as Home;
+use common::cli::native_text as text;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -58,10 +59,6 @@ fn reply_once(raw: &'static [u8]) -> (String, thread::JoinHandle<String>) {
         header
     });
     (url, peer)
-}
-fn text(line: &str) -> Vec<u8> {
-    line.replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
-        .into_bytes()
 }
 #[test]
 fn malformed_reply_refuses_before_effects_but_valid_forbidden_fields_keep_r2() {

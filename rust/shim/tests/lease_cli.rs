@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 mod common;
 use common::LeaseHome as Home;
+use common::cli::native_text;
 use serde_json::Value;
 use std::fs;
 
@@ -238,14 +239,6 @@ fn seven_days_is_a_run_expectation_and_operator_actions_remain_deferred() {
         vec!["lease", "delegate", "resource", "fixture-agent"],
     ] {
         assert_eq!(home.call(&arguments).status.code(), Some(1));
-    }
-}
-
-fn native_text(value: &str) -> Vec<u8> {
-    if cfg!(windows) {
-        value.replace('\n', "\r\n").into_bytes()
-    } else {
-        value.as_bytes().to_vec()
     }
 }
 

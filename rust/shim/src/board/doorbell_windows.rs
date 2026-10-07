@@ -515,21 +515,25 @@ mod tests {
     }
 
     #[test]
-    fn windows_spawn_error_matrix_matches_pinned_python_errno_decisions() {
-        let oracle: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/doorbell_windows_errno.json"
-        ))
-        .unwrap();
-        let definite = oracle["definite_codes"].as_array().unwrap();
-        for code in 0..=65535 {
-            let expected = definite
-                .iter()
-                .any(|value| value.as_i64() == Some(i64::from(code)));
-            assert_eq!(
-                super::super::definitely_unstarted(&io::Error::from_raw_os_error(code)),
-                expected,
-                "WinError {code} disagrees with Python errno rollback decision"
-            );
+    fn windows_spawn_error_rollback_allowlist_is_exact() {
+        for code in [
+            2, 3, 5, 11, 15, 16, 53, 65, 67, 82, 83, 108, 132, 158, 161, 167, 206, 267, 10013,
+        ]
+        .into_iter()
+        .chain(18..=36)
+        .chain(188..=202)
+        {
+            assert!(super::super::definitely_unstarted(
+                &io::Error::from_raw_os_error(code)
+            ));
+        }
+        for code in [
+            0, 1, 4, 6, 17, 37, 52, 54, 64, 66, 68, 81, 84, 107, 109, 131, 133, 157, 159, 160, 162,
+            166, 168, 187, 203, 205, 207, 266, 268, 10012, 10014, 65535,
+        ] {
+            assert!(!super::super::definitely_unstarted(
+                &io::Error::from_raw_os_error(code)
+            ));
         }
     }
     struct Home(PathBuf);

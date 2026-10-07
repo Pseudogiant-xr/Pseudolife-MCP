@@ -1,6 +1,6 @@
 //! Bounded, coherent bearer snapshots. Diagnostics never include credential bytes.
 #[cfg(unix)]
-mod unix_accounts;
+pub(crate) mod unix_accounts;
 
 use sha2::{Digest, Sha256};
 #[cfg(not(windows))]
@@ -262,6 +262,12 @@ fn expand_user_with(
         })
     }
     .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+    // POSIX expanduser with HOME="" is root-based, never cwd-relative.
+    let root = if !windows && root.as_os_str().is_empty() {
+        PathBuf::from("/")
+    } else {
+        root
+    };
     Ok(root.join(components.as_path()))
 }
 
@@ -861,5 +867,33 @@ mod tests {
         assert!(new.token.as_deref() == Some("new-fixture-token"));
         assert_ne!(old.generation, new.generation);
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod fable125_home_controls {
+    use super::*;
+
+    #[test]
+    fn empty_posix_home_expansion_is_root_based() {
+        for (input, expected) in [
+            ("~", "/"),
+            ("~/token", "/token"),
+            ("~/.pseudolife-mcp/token", "/.pseudolife-mcp/token"),
+        ] {
+            let expanded =
+                expand_user_with(Path::new(input), Some(Path::new("")), None, false, |_| None)
+                    .unwrap();
+            assert_eq!(expanded, Path::new(expected));
+        }
+        let unchanged = expand_user_with(
+            Path::new("relative/token"),
+            Some(Path::new("")),
+            None,
+            false,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(unchanged, Path::new("relative/token"));
     }
 }

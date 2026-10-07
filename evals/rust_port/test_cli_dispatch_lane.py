@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from evals.rust_port import cli_corpus, harness, pytest_plugin
+from evals.rust_port import cli_corpus, cli_dispatch, harness, pytest_plugin
 
 
 def test_cli_environment_selector_and_explicit_override(monkeypatch):
@@ -28,6 +28,110 @@ def test_public_cli_subprocess_adapter_routes_only_public_entrypoints():
     assert pytest_plugin.public_cli_arguments([sys.executable, "-m", "pseudolife_memory.doctor_cli"]) is None
     assert pytest_plugin.boundary("tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes") is None
     assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") == "cli-main-process"
+
+
+@pytest.mark.parametrize("drift", [None, "hook", "runner", "launcher", "pythonpath"])
+def test_doorbell_hook_adapter_refuses_fixture_drift(tmp_path, drift):
+    import os
+    import sys
+    root = tmp_path / "source"
+    runner, marker = tmp_path / "consume.py", tmp_path / "helper-launched"
+    runner.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+                      "from pseudolife_memory.cli import main\nmain()\n", encoding="utf-8")
+    launcher = tmp_path / "consume.sh"
+    launcher.write_text(f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" '
+                        f'"{runner.as_posix()}" "$@"\n', encoding="utf-8")
+    env = dict(PSEUDOLIFE_SHIM_LAUNCHER=launcher.as_posix(), PYTHONPATH=str(root))
+    command = ["bash", str(root / "plugin/hooks/coordination-prompt.sh")]
+    if drift == "hook":
+        command.append("--changed")
+    elif drift in {"runner", "launcher"}:
+        (runner if drift == "runner" else launcher).write_text("changed\n", encoding="utf-8")
+    elif drift == "pythonpath":
+        env["PYTHONPATH"] += os.pathsep + "ambient-source"
+    if drift:
+        with pytest.raises(pytest.UsageError, match="changed"):
+            pytest_plugin.doorbell_hook_environment(command, env, root, tmp_path)
+    else:
+        assert pytest_plugin.doorbell_hook_environment(command, env, root, tmp_path) == runner
+    assert not marker.exists()  # Validation must not fabricate the helper's marker.
+
+
+def test_doorbell_child_adapter_rejects_mode_drift_before_candidate(tmp_path):
+    import json
+    import os
+    import sys
+    source = tmp_path / "source"
+    package = source / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "cli.py").write_text("def main(): raise RuntimeError('oracle fallback')\n")
+    adapter = tmp_path / "adapter"
+    adapter.mkdir()
+    (adapter / "sitecustomize.py").write_text(pytest_plugin.doorbell_child_source(), encoding="utf-8")
+    runner, marker = tmp_path / "consume.py", tmp_path / "helper-launched"
+    runner.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+                      "from pseudolife_memory.cli import main\nmain()\n", encoding="utf-8")
+    candidate = tmp_path / "candidate.py"
+    launched = tmp_path / "candidate-launched"
+    candidate.write_text(f"from pathlib import Path\nPath({str(launched)!r}).write_text('yes')\n")
+    witness, config = tmp_path / "witness", adapter / "config.json"
+    config.write_text(json.dumps(dict(runner=str(runner), cli_source=str(package / "cli.py"),
+                                     prefix=[sys.executable, str(candidate)], timeout=10,
+                                     witness=str(witness))))
+    result = subprocess.run([sys.executable, str(runner), "doctor"],
+                            env=dict(os.environ, PYTHONPATH=os.pathsep.join(map(str, (adapter, source))),
+                                     PSEUDOLIFE_PORT_HOOK_CONFIG=str(config)),
+                            capture_output=True, timeout=10)
+    assert result.returncode != 0 and b"changed public mode" in result.stderr
+    assert marker.read_text() == "yes" and not launched.exists() and not witness.exists()
+
+
+def test_doorbell_adapter_preserves_missing_shell_skip(monkeypatch):
+    module = SimpleNamespace(shutil=SimpleNamespace(which=lambda name: None))
+    request = SimpleNamespace(node=SimpleNamespace(module=module,
+                                                   callspec=SimpleNamespace(params={"platform_hook": "windows"})))
+    pytest_plugin._route_doorbell_hook(request, monkeypatch, ["candidate"])
+    module.bash_exe = lambda: pytest.skip("Bash is not installed")
+    request.node.callspec.params["platform_hook"] = "posix"
+    with pytest.raises(pytest.skip.Exception, match="Bash is not installed"):
+        pytest_plugin._route_doorbell_hook(request, monkeypatch, ["candidate"])
+
+
+def test_cli_dispatch_includes_exact_admitted_hooks_without_duplicates(monkeypatch):
+    historical = {node for node, mode in pytest_plugin.MANIFEST["mapped"].items()
+                  if mode == "cli-main-process"}
+    admitted = pytest_plugin.CLI_HOOK_NODES
+    nodes = cli_dispatch.selected_nodes()
+    subprocess_nodes = set(pytest_plugin.CLI_SUBPROCESS_NODES)
+    assert len(historical) == 8 and len(admitted) == 4 and len(subprocess_nodes) == 18
+    assert nodes == sorted(historical | admitted | subprocess_nodes) and len(nodes) == 30
+    monkeypatch.setattr(pytest_plugin, "CLI_HOOK_NODES", admitted | historical)
+    assert cli_dispatch.selected_nodes() == nodes
+    monkeypatch.setattr(pytest_plugin, "CLI_HOOK_NODES", set())
+    assert cli_dispatch.selected_nodes() == sorted(historical | subprocess_nodes)
+
+
+@pytest.mark.parametrize("drift", [None, "package", "distribution", "origin", "python"])
+@pytest.mark.parametrize("version", ["0.17.0", "0.17.1+pin"])
+def test_cli_dispatch_runtime_requires_the_selected_pin(tmp_path, monkeypatch, drift, version):
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
+    runtime = dict(source_origin_matches_selected_root=True, package_runtime_version=version,
+                   distribution_versions={"pseudolife-mcp": version})
+    if drift == "package":
+        runtime["package_runtime_version"] = "0.16.1"
+    elif drift == "distribution":
+        runtime["distribution_versions"]["pseudolife-mcp"] = "0.16.1"
+    elif drift == "origin":
+        runtime["source_origin_matches_selected_root"] = False
+    elif drift == "python":
+        monkeypatch.setattr(cli_dispatch.sys, "version_info", (3, 12, 0))
+    monkeypatch.setattr(cli_dispatch, "runtime_metadata", lambda root: runtime)
+    if drift:
+        with pytest.raises(RuntimeError, match="genuine pinned installed package runtime"):
+            cli_dispatch.require_cli_runtime(tmp_path)
+    else:
+        assert cli_dispatch.require_cli_runtime(tmp_path) is runtime
 
 
 def test_global_cli_selector_refuses_deferred_doctor(monkeypatch):
@@ -120,3 +224,123 @@ def test_help_asset_stays_canonical_in_autocrlf_checkout(tmp_path):
                     f"--prefix={checkout.as_posix()}/", "--", "rust/shim/src/cli_help.txt"],
                    cwd=source, check=True)
     assert (checkout / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
+
+
+def prompt_subprocess_request(monkeypatch, dispatched, node=None):
+    node = node or "tests/test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor[cli]"
+    finalizers = []
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: dispatched.append((args, kwargs)))
+    request = SimpleNamespace(
+        config=SimpleNamespace(_port_cli_prefix=["candidate"]),
+        node=SimpleNamespace(nodeid=node),
+        getfixturevalue=lambda name: monkeypatch,
+        addfinalizer=finalizers.append)
+    pytest_plugin._port_selected_boundary.__wrapped__(request)
+    return finalizers
+
+
+def test_prompt_subprocess_admission_is_bounded_to_supported_nodes():
+    node = "tests/test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor[cli]"
+    admitted = pytest_plugin.CLI_SUBPROCESS_NODES
+    help_node = "tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode"
+    assert len(admitted) == 18 and admitted[node] == ["prompt-hook"]
+    assert admitted[help_node] == ["--help"]
+    assert all(entry.startswith("tests/test_memory_changes_hook.py::") for entry in admitted)
+    assert all(argv == (["--help"] if entry == help_node else ["prompt-hook"])
+               for entry, argv in admitted.items())
+    config = SimpleNamespace(_port_cli_prefix=["candidate"], getoption=lambda name: False)
+    pytest_plugin.pytest_collection_finish(SimpleNamespace(config=config, items=[SimpleNamespace(nodeid=node)]))
+    for other in (node.replace("[cli]", "[bash]"), node.replace("[cli]", "[native]"),
+                  "tests/test_memory_changes_hook.py::test_cli_prompt_hook_imports_neither_the_shim_nor_httpx",
+                  "tests/test_memory_changes_hook.py::test_cli_prompt_hook_prints_nothing_through_a_symlinked_cursor"):
+        assert pytest_plugin.boundary(other) is None
+        with pytest.raises(pytest.UsageError, match="no process adapter"):
+            pytest_plugin.pytest_collection_finish(SimpleNamespace(config=config, items=[SimpleNamespace(nodeid=other)]))
+
+
+@pytest.mark.parametrize("node,argv", [
+    ("tests/test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor[cli]", ["prompt-hook"]),
+    ("tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode", ["--help"]),
+])
+def test_prompt_subprocess_route_preserves_process_inputs(monkeypatch, node, argv):
+    import sys
+    dispatched = []
+    finalizers = prompt_subprocess_request(monkeypatch, dispatched, node)
+    environment = {"PSEUDOLIFE_DIGEST_DIR": "owned", "CUDA_VISIBLE_DEVICES": "0"}
+    options = dict(input='{"session_id":"fixture"}', env=environment, cwd="oracle",
+                   capture_output=True, text=True, timeout=5, check=True)
+    subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", *argv], **options)
+    assert dispatched == [((["candidate", *argv],),
+                           {**options, "env": {**environment, "CUDA_VISIBLE_DEVICES": "-1"}})]
+    assert environment["CUDA_VISIBLE_DEVICES"] == "0"
+    finalizers[0]()
+
+
+@pytest.mark.parametrize("node,argv", [
+    (None, ["doctor"]), (None, ["prompt-hook", "--help"]), (None, []),
+    ("tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode", ["prompt-hook"]),
+])
+def test_prompt_subprocess_route_rejects_argv_drift_before_dispatch(monkeypatch, node, argv):
+    import sys
+    dispatched = []
+    finalizers = prompt_subprocess_request(monkeypatch, dispatched, node)
+    with pytest.raises(pytest.UsageError, match="unsupported argv"):
+        subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", *argv])
+    assert dispatched == []
+    with pytest.raises(pytest.fail.Exception, match="observed no public CLI call"):
+        finalizers[0]()
+
+
+def test_prompt_subprocess_route_keeps_unrelated_calls_and_requires_observation(monkeypatch):
+    import sys
+    dispatched = []
+    finalizers = prompt_subprocess_request(monkeypatch, dispatched)
+    command = [sys.executable, "-c", "pass"]
+    subprocess.run(command, timeout=2)
+    assert dispatched == [((command,), {"timeout": 2})]
+    with pytest.raises(pytest.fail.Exception, match="observed no public CLI call"):
+        finalizers[0]()
+
+
+def test_automatic_cli_selection_includes_admissions_once_in_stable_order(monkeypatch):
+    historical = {node for node, mode in pytest_plugin.MANIFEST["mapped"].items()
+                  if mode == "cli-main-process"}
+    assert len(historical) == 8 and len(pytest_plugin.CLI_SUBPROCESS_NODES) == 18
+    assert len(pytest_plugin.CLI_HOOK_NODES) == 4
+    expected = sorted(historical | set(pytest_plugin.CLI_SUBPROCESS_NODES) | pytest_plugin.CLI_HOOK_NODES)
+    assert len(expected) == 30 and cli_dispatch.selected_nodes() == expected
+    # An admission overlapping the historical map must not produce duplicate JUnit nodes.
+    monkeypatch.setitem(pytest_plugin.CLI_SUBPROCESS_NODES, next(iter(historical)), ["--help"])
+    assert cli_dispatch.selected_nodes() == expected
+
+
+def test_cli_runtime_uses_selected_source_version(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.17.0"\n', encoding="utf-8")
+    runtime = {"source_origin_matches_selected_root": True, "package_runtime_version": "0.17.0",
+               "distribution_versions": {"pseudolife-mcp": "0.17.0"}}
+    monkeypatch.setattr(cli_dispatch, "runtime_metadata", lambda root: runtime)
+    assert cli_dispatch.require_cli_runtime(tmp_path) is runtime
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_origin_matches_selected_root", False), ("package_runtime_version", "0.16.1"),
+    ("distribution_versions", {"pseudolife-mcp": "0.16.1"}),
+    ("distribution_versions", {"pseudolife-mcp": None}),
+])
+def test_cli_runtime_rejects_source_and_version_drift(tmp_path, monkeypatch, field, value):
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.17.0"\n', encoding="utf-8")
+    runtime = {"source_origin_matches_selected_root": True, "package_runtime_version": "0.17.0",
+               "distribution_versions": {"pseudolife-mcp": "0.17.0"}, field: value}
+    monkeypatch.setattr(cli_dispatch, "runtime_metadata", lambda root: runtime)
+    with pytest.raises(RuntimeError, match="genuine pinned installed package runtime"):
+        cli_dispatch.require_cli_runtime(tmp_path)
+
+
+def test_cli_dispatch_rejects_unpinned_source_before_runtime_or_candidate(monkeypatch, tmp_path):
+    def unpinned(root):
+        raise RuntimeError("phase-1 pinned production source required")
+    monkeypatch.setattr(cli_dispatch, "require_phase1_source", unpinned)
+    monkeypatch.setattr(cli_dispatch, "require_cli_runtime", lambda root: pytest.fail("must reject source first"))
+    monkeypatch.setattr(cli_dispatch, "candidate_identity", lambda *args: pytest.fail("must reject source first"))
+    with pytest.raises(RuntimeError, match="pinned production source required"):
+        cli_dispatch.run(tmp_path, ["candidate"], tmp_path, tmp_path, {})

@@ -2,7 +2,7 @@
 use std::{ffi::CString, path::PathBuf};
 
 #[allow(unsafe_code)]
-pub(super) fn home_by_name(name: &str) -> Option<PathBuf> {
+pub(crate) fn home_by_name(name: &str) -> Option<PathBuf> {
     // SAFETY: libc's reentrant lookup obeys the buffer/result contract documented
     // below. No returned pointer or borrowed account field escapes the call.
     unsafe {
