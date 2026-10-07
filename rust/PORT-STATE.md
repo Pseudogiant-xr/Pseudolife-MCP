@@ -79,18 +79,9 @@ lacked the pinned CLI entry point; its failed artifacts remain intact. After a
 private PATH correction, attempt2 passed with separate archive names; no tracked
 repair was needed.
 
-| OS | Arm | Samples | Median ms | Repeat-median floor ms |
-| --- | --- | ---: | ---: | ---: |
-| Windows | Python | 30 | 190.441 | 13.277 |
-| Windows | Rust | 30 | 26.751 | 15.457 |
-| Linux | Python | 30 | 227.696 | 10.014 |
-| Linux | Rust | 30 | 55.863 | 0.368 |
-
-These are local observations of the retained debug-path binaries with warm
-filesystem caches. The floor is the max-minus-min of three repeat-block medians,
-not a confidence interval or significance test. Executable hashes and sizes are
-bound, but the producing compiler and build profile are not attested; these
-cells establish no general performance or speedup claim.
+The historical local timing captures remain in private evidence, bound to their
+original debug-path binaries. Their producing compiler and build profile are
+not attested; these cells establish no general performance or speedup claim.
 
 Captured untimed controls retain exit 0, empty stdout/stderr and complete pre/post
 home snapshots matching across arms and OSes: unchanged LF-terminated pending
