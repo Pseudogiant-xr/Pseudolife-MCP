@@ -148,7 +148,8 @@ fn fixture_child_completes() {
         return;
     };
     let home = std::path::PathBuf::from(home);
-    fs::write(home.join("ready"), std::process::id().to_string()).unwrap();
+    fs::write(home.join("ready.tmp"), std::process::id().to_string()).unwrap();
+    fs::rename(home.join("ready.tmp"), home.join("ready")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !home.join("finish").exists() {
         assert!(Instant::now() < deadline, "fixture child was not released");
