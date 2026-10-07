@@ -387,16 +387,16 @@ fn row(r: pg::Row) -> Result<maintainer_sent::Row, ()> {
             r.try_get($name).map_err(|_| ())?
         };
     }
-    let proof: Option<Value> = get!("maintainer_proof");
-    let wake: Option<Value> = get!("wake");
+    let proof: Option<crate::sent_jsonb::Jsonb> = get!("maintainer_proof");
+    let wake: Option<crate::sent_jsonb::Jsonb> = get!("wake");
     Ok(maintainer_sent::Row {
         message_id: get!("message_id"),
         recipient_agent_id: get!("recipient_agent_id"),
         recipient_label: get!("recipient_label"),
         created_at: get!("created_at"),
-        maintainer_proof: value(proof.unwrap_or(Value::Null))?,
+        maintainer_proof: value(proof.map_or(Value::Null, |v| v.0))?,
         text: get!("text"),
-        wake: value(wake.unwrap_or(Value::Null))?,
+        wake: value(wake.map_or(Value::Null, |v| v.0))?,
         first_read_at: get!("first_read_at"),
         acknowledged_at: get!("acknowledged_at"),
         repudiated_at: get!("repudiated_at"),
@@ -589,11 +589,15 @@ async fn handle(
     {
         let _ = session.close().await;
     }
-    let result = result
-        .map_err(|_| ())
-        .and_then(|rows| rows.into_iter().map(row).collect::<Result<Vec<_>, _>>())
-        .and_then(|rows| maintainer_sent::page(rows).map_err(|_| ()))
-        .and_then(|v| sent_json::encode(&v).map_err(|_| ()));
+    // All recursive Values/Jsons are created and dropped on the protected
+    // stack, including error paths; raw JSONB is bounded before construction.
+    let result = stacker::grow(crate::sent_jsonb::STACK_BYTES, || {
+        result
+            .map_err(|_| ())
+            .and_then(|rows| rows.into_iter().map(row).collect::<Result<Vec<_>, _>>())
+            .and_then(|rows| maintainer_sent::page(rows).map_err(|_| ()))
+            .and_then(|v| sent_json::encode(&v).map_err(|_| ()))
+    });
     Ok(match result {
         Ok(body) => response(200, body),
         Err(()) => error(503, "coordination_unavailable"),

@@ -667,3 +667,28 @@ Only check/list/run are implemented in this candidate. `hold`, `break`,
 the candidate loses those actions until Phase 4. Final hosted acceptance and
 independent review remain pending, so neither CLI-LEASE-core nor full mode
 is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
+
+## Maintainer sent JSONB read domain
+
+The native sent leaf uses **bounded-jsonb-depth**: at most 2048 nested JSONB
+containers per proof or wake column. A presentation scan counts only brackets
+outside strings before allocation; exceeding the bound yields the existing
+private 503 class. serde_json's recursion override is paired with pinned
+serde_stacker 0.1.14; a pinned stacker 0.1.25 stack covers decoding, conversion,
+encoding and recursive drop, including error paths. Depth 200 must serve;
+the boundary controls separately report policy outcomes, not exact emulation
+of Python's stack-dependent recursion limit.
+
+**jsonb-no-digit-limit** preserves arbitrary precision integers without a
+4,300-digit read cap. Direct SQL injection above Python's decoder limit is a
+named policy control, not exact response parity. The canonical Python send
+body decoder and board write path are the producer controls; their exceptions,
+admission and rollback must be observed rather than inferred from raw SQL.
+Unchanged ordinary SQL/ordered-ID responses still require exact HTTP bytes.
+
+Typed config uses pinned pure-Rust regex-lite 0.1.9 for the anchored PyYAML
+6.0.3 scalar resolver predicates. yaml-rust2 owns parsing and construction;
+the predicates identify resolver disagreement, not a replacement Python YAML
+loader. Valid digit-prefixed strings remain strings, quoted values retain
+their meaning, and audited allowed-principal names strip, lowercase, deduplicate
+in first-seen order and reject blanks like the Python configuration producer.

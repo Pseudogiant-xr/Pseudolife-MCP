@@ -14,6 +14,7 @@ mod raw_http;
 mod recovery;
 mod sent_config;
 pub mod sent_json;
+mod sent_jsonb;
 pub mod sent_serve;
 mod subscriptions;
 mod upstream;
