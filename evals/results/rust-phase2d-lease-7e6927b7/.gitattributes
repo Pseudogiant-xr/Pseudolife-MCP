@@ -1,0 +1,10 @@
+# Preserve the exact retained producing payload bytes and their recorded hashes.
+MEASUREMENTS.md -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-core-measurements-evidence.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+producing-invocations.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-check-measurement-driver-v2.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-list-measurement-driver-v2.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-fresh-fixture-credential.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-windows-ctrlc-capture-v3.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-windows-ctrlc-console-helper-v3.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-windows-ctrlc-resistant-child-v2.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

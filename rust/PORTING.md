@@ -5,7 +5,12 @@ The current version-branch behavioural oracle target is Python 0.17.0 at
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
-Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
+Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This version scope decision applies only to version manifests. Lease daemon replies
+have a separate producer admission rule in [PARITY.md](PARITY.md): finite UTF-8
+JSON, with malformed/non-finite 200 replies refused before local fallback,
+lock creation or child launch. Healthy coordination and suite metadata producers
+define that lease input shape; historical synthetic interpreter grammar receipts
+remain historical, and successor execution/acceptance is still pending.
 
 The [local version evidence at `62e4f590`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md)
 records both-platform release corpora and bare/installed paired measurements.
@@ -576,3 +581,89 @@ other CLI benchmark reset semantics are unchanged. Cold-copy Windows results
 remain historical, with no security-provider cause established. Current
 numbers, identities and remaining hosted/review gates are in PORT-STATE.md;
 these CPU CLI cells establish no full-suite acceptance.
+
+## Lease diagnostic boundaries
+
+The phase 2c decisions replace the earlier two-case traceback limitation with
+these three named policies. The lease instances are listed individually in
+PARITY.md and `lease-policy-cases.json`; retained captures remain historical.
+CLI-LEASE stays deferred until the version base is ported, the candidate has
+its final-head proof on both platforms, and its remaining acceptance gates pass.
+
+**`python-traceback-not-contract`** governs only the Python traceback header
+and frames when an uncaught exception exits the oracle. Exit status, stdout,
+the terminal `ExceptionType: message` line including its platform newline,
+all other stderr and every post-state byte remain exact. Its first lease case
+is `approved-timeout-overflow-traceback`; the same rule admits the retained
+closed-list, surrogate-name list and C-int-year list instances. An earlier
+candidate refusal with different terminal bytes fails. The preparation checker
+requires one validated header/frame span and retains diagnostics outside it.
+
+**`nondeterministic-bytes-semantic`** governs only explicitly named fields
+whose Python bytes differ between two retained oracle invocations. Its first
+lease case is `lease-run-existing-successful-child`, governing only `ran.json`
+field `/t`: a finite unsigned decimal float in the exact byte layout
+`{"held": "suite,gpu", "t": <decimal>, "credential": false}`. Each captured
+timestamp must satisfy its own inclusive `start_unix <= t <= end_unix` window,
+including the second oracle invocation; every surrounding byte, response field
+and other file remains exact. Raw captures are retained. Missing windows or a
+missing oracle repeat make evidence incomplete and require recapture; aggregate
+receipt timestamps cannot supply those bounds retroactively. This lease ledger
+admits no random suffix or derived-name field.
+
+**`http-forbidden-input-refused`** governs forbidden header bytes only in
+`agent_id`, `credential` or configured `bearer`: C0 U+0000–U+001F, U+007F and
+folded values. Its first lease case is `D3-DEL-agent_id`. The intentional
+candidate substitution returns exit 1, empty stdout and exactly one stderr line,
+`lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid <field> header`, using the platform
+newline and one of those three field names. The diagnostic never includes the
+value. The candidate preserves pre-state and starts no child, lease or release
+request; a registration needed to obtain the offending reply may already have
+occurred. Candidate-arm expected bytes are labelled as substitution evidence;
+the Python arm stays raw. Non-ASCII/surrogate inputs keep their existing exact
+oracle contracts; this policy does not authorize other fields or transports.
+
+`evals/rust_port/lease_policy_preparation.py` is an offline preparation checker,
+with additive static tests. Its exact refusal expectation is also used by the
+separate executable `lease_headers` lane, which retains the raw Python arm and
+labels candidate substitution evidence. The existing judge, corpus and
+measurement instrument remain unchanged; the offline checker alone does not
+establish native executable coverage.
+
+Lease Unix-second display follows the scoped Chrono local-zone substitution in
+PARITY.md: supported daemon timestamps retain ordinary local time and date
+formatting, fractional seconds floor, and unsupported calendar values display
+`?`. JSON numeric values remain unchanged. POSIX supported `TZ` settings belong
+to the platform local-zone contract; Windows CRT-only overrides do not. This
+supersedes the two historical C-int-year list exception expectations without
+discarding their raw failure evidence or changing the other named policies.
+
+## Final lease core comparison boundary
+
+The final7e [bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+retains raw responses before policy, actual image/source/runtime bindings and
+cleanup. Successful-child comparison admits only `ran.json /t`: each finite
+decimal lies within its own recorded invocation window, two Python captures
+have distinct clocks, and every other response/file byte stays exact. Nonzero
+children have no clock exception. Explicit Windows unlock releases exactly
+the acquired first-byte range before closing, best effort; POSIX behavior is
+unchanged. Its new test separately reacquires byte zero while the original
+handle remains open. Windows CTRL_C_EVENT evidence separately checks child
+absence before helper cleanup and actual board/local-lock release.
+
+The named `python-traceback-not-contract` rule additionally admits **only**
+`list-expected-extreme` and `list-waiter-extreme` text outcomes: validated
+Python OverflowError exit 1 may become native exit 0 with complete independently
+specified `?` fixture output, empty stderr and exact unchanged state. Ordinary
+Python exit-0 outcomes stay raw-exact; both timestamp JSON companions and all
+other list exits stay exact. This does not waive exit status for the other
+traceback cells. `extreme_list_response` and the new additive rejecting test
+enforce this narrow boundary; terminal/header/frame validation remains the
+existing `traceback_response` contract. PARITY records both complete receipt
+hashes and the raw Linux 1/0 pair rather than concealing that mismatch.
+
+Only check/list/run are implemented in this candidate. `hold`, `break`,
+`delegate` and `designate` refuse exit 1 with `deferred in this candidate`;
+the candidate loses those actions until Phase 4. Final hosted acceptance and
+independent review remain pending, so neither CLI-LEASE-core nor full mode
+is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
