@@ -27,7 +27,7 @@ def test_public_cli_subprocess_adapter_routes_only_public_entrypoints():
     assert pytest_plugin.public_cli_arguments(["pseudolife-mcp", "lease", "list"]) == ["lease", "list"]
     assert pytest_plugin.public_cli_arguments([sys.executable, "-m", "pseudolife_memory.doctor_cli"]) is None
     assert pytest_plugin.boundary("tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes") is None
-    assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") is None
+    assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") == "cli-main-process"
 
 
 def test_global_cli_selector_refuses_deferred_doctor(monkeypatch):
@@ -201,9 +201,9 @@ def test_prompt_subprocess_route_keeps_unrelated_calls_and_requires_observation(
 def test_automatic_cli_selection_includes_admissions_once_in_stable_order(monkeypatch):
     historical = {node for node, mode in pytest_plugin.MANIFEST["mapped"].items()
                   if mode == "cli-main-process"}
-    assert len(historical) == 5 and len(pytest_plugin.CLI_SUBPROCESS_NODES) == 18
+    assert len(historical) == 8 and len(pytest_plugin.CLI_SUBPROCESS_NODES) == 18
     expected = sorted(historical | set(pytest_plugin.CLI_SUBPROCESS_NODES))
-    assert len(expected) == 23 and cli_dispatch.selected_nodes() == expected
+    assert len(expected) == 26 and cli_dispatch.selected_nodes() == expected
     # An admission overlapping the historical map must not produce duplicate JUnit nodes.
     monkeypatch.setitem(pytest_plugin.CLI_SUBPROCESS_NODES, next(iter(historical)), ["--help"])
     assert cli_dispatch.selected_nodes() == expected

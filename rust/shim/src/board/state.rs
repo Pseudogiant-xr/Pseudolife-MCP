@@ -27,7 +27,10 @@ fn identity(file: &File) -> Result<Vec<u128>> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        if meta.uid() != users::get_current_uid() || meta.mode() & 0o077 != 0 || meta.nlink() != 1 {
+        if meta.uid() != rustix::process::getuid().as_raw()
+            || meta.mode() & 0o077 != 0
+            || meta.nlink() != 1
+        {
             return Err("invalid_state");
         }
         Ok(vec![meta.dev() as u128, meta.ino() as u128])

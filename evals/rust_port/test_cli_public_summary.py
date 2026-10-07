@@ -60,9 +60,9 @@ def test_projection_keeps_complete_installed_inventory_and_no_plain_or_encoded_p
     serialized = json.dumps(summary)
     assert path not in serialized and encoded not in serialized
     assert raw == before
-    assert len(summary["cases"]) == 26
-    assert sum(row["mode"] == "version" for row in summary["cases"]) == 11
-    assert len(summary["candidate_controls"]) == 104
+    assert len(summary["cases"]) == 28
+    assert sum(row["mode"] == "version" for row in summary["cases"]) == 13
+    assert len(summary["candidate_controls"]) == 112
     assert summary["status"] == "passed"
 
 

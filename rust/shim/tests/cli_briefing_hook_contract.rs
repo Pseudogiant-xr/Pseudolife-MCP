@@ -23,10 +23,10 @@ fn parser_command() -> Command {
 }
 
 #[test]
-fn public_columns_integer_grammar_and_narrow_whitespace() {
+fn public_columns_ascii_fallback_and_narrow_whitespace() {
     let baseline = parser_command()
         .args(["briefing", "--help"])
-        .env("COLUMNS", "40")
+        .env("COLUMNS", "80")
         .output()
         .unwrap();
     assert_eq!(baseline.status.code(), Some(0));
@@ -74,7 +74,7 @@ fn public_parser_prescans_late_ambiguity_before_help() {
 }
 
 #[test]
-fn public_help_closed_output_preserves_buffered_shutdown() {
+fn public_help_closed_output_has_native_failure_contract() {
     for unbuffered in [false, true] {
         let mut command = parser_command();
         command
@@ -95,23 +95,12 @@ fn public_help_closed_output_preserves_buffered_shutdown() {
             std::thread::sleep(Duration::from_millis(5));
         }
         let output = child.wait_with_output().unwrap();
-        assert_eq!(output.status.code(), Some(if unbuffered { 0 } else { 120 }));
-        let error = if cfg!(windows) {
-            "OSError: [Errno 22] Invalid argument"
-        } else {
-            "BrokenPipeError: [Errno 32] Broken pipe"
-        };
-        let expected = if unbuffered {
-            String::new()
-        } else {
-            format!(
-                "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n{error}\n"
-            )
-        };
+        assert_eq!(output.status.code(), Some(1));
+        let expected = "pseudolife-mcp briefing: output failed\n";
         let expected = if cfg!(windows) {
             expected.replace('\n', "\r\n")
         } else {
-            expected
+            expected.into()
         };
         assert_eq!(output.stderr, expected.as_bytes());
     }
@@ -119,8 +108,39 @@ fn public_help_closed_output_preserves_buffered_shutdown() {
 
 #[test]
 fn public_prompt_leaf_fetches_and_advances_cursor_without_python() {
+    prompt_leaf(false, false);
+}
+
+#[test]
+fn public_prompt_closed_output_preserves_existing_and_new_mark() {
+    for existing in [false, true] {
+        prompt_leaf(true, existing);
+    }
+}
+
+fn prompt_leaf(closed_output: bool, existing: bool) {
     let home = std::env::temp_dir().join(format!("pseudolife-hook-test-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
+    if existing {
+        fs::create_dir(home.join("digests")).unwrap();
+        fs::write(
+            home.join("digests")
+                .join(format!("{:x}.mark", Sha256::digest(b"public-hook"))),
+            b"77.0\n",
+        )
+        .unwrap();
+    }
+    #[cfg(unix)]
+    if existing {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(home.join("digests"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            home.join("digests")
+                .join(format!("{:x}.mark", Sha256::digest(b"public-hook"))),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+    }
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
@@ -149,9 +169,12 @@ fn public_prompt_leaf_fetches_and_advances_cursor_without_python() {
             bytes.push(byte[0]);
         }
         let request = String::from_utf8(bytes).unwrap();
-        assert!(
-            request.starts_with("GET /api/hook/memory-changes?session_id=public-hook HTTP/1.1\r\n")
-        );
+        let target = if existing {
+            "GET /api/hook/memory-changes?session_id=public-hook&since=77.0 HTTP/1.1\r\n"
+        } else {
+            "GET /api/hook/memory-changes?session_id=public-hook HTTP/1.1\r\n"
+        };
+        assert!(request.starts_with(target));
         assert!(
             request
                 .to_ascii_lowercase()
@@ -194,6 +217,9 @@ fn public_prompt_leaf_fetches_and_advances_cursor_without_python() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    if closed_output {
+        drop(child.stdout.take());
+    }
     child
         .stdin
         .take()
@@ -239,6 +265,71 @@ fn public_prompt_leaf_fetches_and_advances_cursor_without_python() {
     } else {
         text.to_owned()
     };
-    assert_eq!(output.stdout, expected.as_bytes());
-    assert_eq!(mark_bytes, b"123..\n");
+    if closed_output {
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            mark_bytes,
+            if existing {
+                b"77.0\n".as_slice()
+            } else {
+                b"".as_slice()
+            }
+        );
+    } else {
+        assert_eq!(output.stdout, expected.as_bytes());
+        assert_eq!(mark_bytes, b"123..\n");
+    }
+}
+
+#[test]
+fn public_prompt_malformed_ignored_input_sends_no_request() {
+    let home =
+        std::env::temp_dir().join(format!("pseudolife-hook-refusal-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    for input in [
+        r#"{"session_id":"sess-1","other":NaN}"#,
+        r#"{"session_id":"sess-1","other":Infinity}"#,
+        r#"{"session_id":"sess-1","other":"\ud800"}"#,
+    ] {
+        let mut child = parser_command()
+            .arg("prompt-hook")
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("LOCALAPPDATA", &home)
+            .env("PSEUDOLIFE_DIGEST_DIR", home.join("digests"))
+            .env(
+                "PSEUDOLIFE_MCP_DAEMON_URL",
+                format!("http://{}", listener.local_addr().unwrap()),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+        assert!(!home.join("digests").exists());
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+    fs::remove_dir_all(home).unwrap();
 }

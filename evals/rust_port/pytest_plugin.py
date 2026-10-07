@@ -3,9 +3,9 @@ import base64
 import json
 from pathlib import Path
 import sys
+import subprocess
 from contextlib import asynccontextmanager
 import os
-import subprocess
 
 import pytest
 
@@ -33,6 +33,12 @@ CLI_SUBPROCESS_NODES = {
     "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[{\"prompt\": \"\\\\\"session_id\\\\\": \\\\\"sess-1\\\\\"\"}]": ["prompt-hook"],
     "tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode": ["--help"],
     "tests/test_memory_changes_hook.py::test_cli_prompt_hook_reads_its_payload_as_utf8": ["prompt-hook"],
+}
+
+CLI_VERSION_NODES = {
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+    "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
 }
 
 
@@ -157,11 +163,21 @@ def _port_selected_boundary(request):
     def main():
         env = isolated_env(tmp_path)
         env["PSEUDOLIFE_MCP_PYTHON"] = os.environ.get("PSEUDOLIFE_MCP_PYTHON", sys.executable)
-        result = run_cli(prefix, sys.argv[1:], cwd=Path.cwd(),
+        command = prefix
+        if request.node.nodeid in CLI_VERSION_NODES:
+            from pseudolife_memory import runtimes
+            from evals.rust_port.cli_version import checked_dispatch_text, prepare_dispatch_runtime
+            # The immutable test supplies this Runtime or None through its stub.
+            # Only its fixture data crosses into the process, never Python main.
+            runtime = runtimes.running_runtime(None)
+            command = prepare_dispatch_runtime(prefix, runtime, env, Path.cwd())
+        result = run_cli(command, sys.argv[1:], cwd=Path.cwd(),
                          env=env, timeout=10)
         # capsys sees the candidate's streams; original test assertions and
         # expected SystemExit stay intact. No Python CLI implementation is run.
-        sys.stdout.write(base64.b64decode(result["stdout_b64"]).decode("utf-8"))
+        text = checked_dispatch_text(result, runtime, Path.cwd()) if request.node.nodeid in CLI_VERSION_NODES \
+            else base64.b64decode(result["stdout_b64"]).decode("utf-8")
+        sys.stdout.write(text)
         sys.stderr.write(base64.b64decode(result["stderr_b64"]).decode("utf-8"))
         raise SystemExit(result["exit_code"])
 

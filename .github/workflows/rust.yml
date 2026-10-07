@@ -34,6 +34,8 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -45,6 +47,14 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
+      - name: Prepare pinned package metadata for the Rust identity contract
+        shell: pwsh
+        working-directory: .
+        run: |
+          $oracleMetadata = Join-Path $env:RUNNER_TEMP 'phase1-oracle-metadata'
+          python -m evals.rust_port.phase1_oracle --metadata-only --destination $oracleMetadata
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_PORT_ORACLE_ROOT=$oracleMetadata" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
@@ -76,6 +86,12 @@ jobs:
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
+      - name: Check all targets without default features
+        run: cargo check --locked --all-targets --no-default-features -j 4
+      - name: Clippy without default features
+        run: cargo clippy --locked --all-targets --no-default-features -j 4 -- -D warnings
+      - name: Nextest without default features
+        run: cargo nextest run --locked --all-targets --no-default-features -j 4
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - uses: actions/upload-artifact@v4
@@ -111,17 +127,20 @@ jobs:
         with:
           workspaces: rust
       - name: Install checkout and test dependencies
+        timeout-minutes: 10
         run: |
           python -m pip install --upgrade pip
           python -m pip install "setuptools>=68" wheel
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
       - name: Build candidate
+        timeout-minutes: 10
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
-      - name: Run CLI process fixture and help drift guards
-        run: python -m pytest -q evals/rust_port/test_cli_dispatch_lane.py evals/rust_port/test_cli_process.py evals/rust_port/test_cli_version.py evals/rust_port/test_cli_receipt_provenance.py evals/rust_port/test_cli_public_summary.py evals/rust_baseline/test_cli_measurement.py
+      - name: Run every eval harness test
+        run: python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard
       - name: Run unchanged candidates and differential judges
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $checkoutRoot = (Get-Location).Path
@@ -144,6 +163,10 @@ jobs:
           $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
           $oracleSource = Join-Path $oracleRoot 'source'
+          $privateArgvReceipt = Join-Path $env:RUNNER_TEMP 'rust-cli-argv.json'
+          $publicArgvReceipt = Join-Path $checkoutRoot "evals/results/rust-cli-argv-$env:RUNNER_OS.json"
+          & $oraclePython -m evals.rust_port.cli_argv --oracle-root $oracleSource --candidate-json $candidateCommand --out $privateArgvReceipt --public-out $publicArgvReceipt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $judgeBootstrap = @'
           import pathlib, subprocess, sys
           from evals.rust_port.provenance import module_command
@@ -196,5 +219,6 @@ jobs:
           path: |
             evals/results/rust-phase1-ci-*.json
             evals/results/rust-phase2-ci-*.json
+            evals/results/rust-cli-argv-*.json
             ${{ runner.temp }}/phase2b-cli-process-public.json
           if-no-files-found: warn

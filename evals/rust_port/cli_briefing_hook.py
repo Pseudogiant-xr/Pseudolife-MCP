@@ -155,3 +155,75 @@ def expected(case, env):
     if __import__("os").name == "nt":
         output = output.replace(b"\n", b"\r\n")
     return {"wire": wire, "stdout_b64": encode(output), "exit_code": code, "marks": marks}
+
+
+def reduction_cases():
+    """Append native policy controls while retaining every historical oracle case."""
+    import copy
+    result = cases()
+    plain = next(case for case in result if case["id"] == "briefing-plain")
+    for name, body in [
+        ("briefing-json-nan-extra", b'{"markdown":"ok","other":NaN}'),
+        ("briefing-json-infinity-extra", b'{"markdown":"ok","other":Infinity}'),
+        ("briefing-json-surrogate-extra", b'{"markdown":"ok","other":"\\ud800"}'),
+        ("briefing-json-beyond-u64-extra", b'{"markdown":"ok","other":18446744073709551616}'),
+        ("briefing-json-deep-extra", b'{"markdown":"ok","other":' + b'[' * 200 + b'0' + b']' * 200 + b'}'),
+        ("briefing-json-malformed", b'{"markdown":"ok",}'),
+        ("briefing-markdown-list", b'{"markdown":["ok"]}'),
+        ("briefing-markdown-object", b'{"markdown":{"text":"ok"}}'),
+        ("briefing-markdown-zero", b'{"markdown":0}'),
+        ("briefing-markdown-null", b'{"markdown":null}'),
+        ("briefing-markdown-missing", b'{"other":true}'),
+    ]:
+        case = copy.deepcopy(plain)
+        case["id"] = name
+        case["peer"]["content"] = [200, base64.b64encode(body).decode("ascii")]
+        result.append(case)
+    prompt = next(case for case in result if case["id"] == "prompt-baseline")
+    case = copy.deepcopy(prompt)
+    case["id"] = "prompt-json-beyond-u64-extra"
+    case["stdin_b64"] = base64.b64encode(b'{"session_id":"sess-1","other":18446744073709551616}').decode("ascii")
+    result.append(case)
+    return result
+
+
+def native_expected(case, env):
+    """Named candidate substitutions; expected() remains the raw Python contract."""
+    import copy
+    encode = lambda raw: base64.b64encode(raw).decode("ascii")
+    marks = {k: v for k, v in case["pre_files_b64"].items() if k.endswith(".mark")}
+    name = case["id"]
+    policies = []
+    changed = copy.deepcopy(case)
+    diagnostic = None
+    if name == "briefing-custom-negative-unknown":
+        policies.append("hook-ascii-numeric")
+        usage = "usage: pseudolife-mcp briefing [-h] [--max-unsure MAX_UNSURE]\n                               [--max-lessons MAX_LESSONS]\n                               [--max-world MAX_WORLD] [--hook-json]\n                               [--coordination]\n"
+        diagnostic = usage + "pseudolife-mcp briefing: error: argument --max-lessons: invalid int value: '００_４'\n"
+        result = {"wire": [], "stdout_b64": "", "exit_code": 2, "marks": marks}
+    elif case["mode"] == "prompt-hook" and name in {"prompt-json-nan-extra", "prompt-json-surrogate-extra"}:
+        policies.append("hook-strict-json-refusal")
+        result = {"wire": [], "stdout_b64": "", "exit_code": 0, "marks": marks}
+    elif name == "briefing-health-non-json":
+        policies.append("hook-strict-json-refusal")
+        result = expected(case, env)
+        result["exit_code"] = 1
+        diagnostic = "pseudolife-mcp briefing: daemon reply not understood\n"
+    elif name in {"briefing-json-nan-extra", "briefing-json-infinity-extra", "briefing-json-surrogate-extra",
+                  "briefing-json-malformed", "briefing-json-deep-extra", "briefing-markdown-false",
+                  "briefing-markdown-list", "briefing-markdown-object", "briefing-markdown-zero"}:
+        policies.append("hook-typed-markdown" if name.startswith("briefing-markdown") else "hook-strict-json-refusal")
+        changed["peer"]["content"] = [200, encode(b'{"markdown":""}')]
+        result = expected(changed, env)
+        result["exit_code"] = 1
+        diagnostic = "pseudolife-mcp briefing: daemon reply not understood\n"
+    else:
+        result = expected(case, env)
+        if name == "prompt-mark-nonascii-after-lf":
+            policies.append("hook-first-line-cursor")
+            result["wire"][0]["target"] += "&since=100.0"
+    if diagnostic is not None:
+        if __import__("os").name == "nt":
+            diagnostic = diagnostic.replace("\n", "\r\n")
+        result["stderr_b64"] = encode(diagnostic.encode())
+    return {**result, "policies": policies}

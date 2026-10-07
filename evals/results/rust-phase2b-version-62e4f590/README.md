@@ -48,7 +48,8 @@ identity. No interpreter or package identity is substituted.
 
 Installed manifests are restricted to the approved installer-written schema.
 Captured NaN/Infinity and lone-surrogate differences remain explicitly deferred;
-these receipts do not claim arbitrary JSON-manifest equivalence. Streams are
+integers beyond u64 are also deferred. These receipts do not claim arbitrary
+JSON-manifest equivalence. Streams are
 UTF-8 with valid Unicode scalar arguments; Windows CRLF and Linux LF remain
 distinct. Other encodings, non-scalar arguments and other CLI modes remain
 outside this evidence.

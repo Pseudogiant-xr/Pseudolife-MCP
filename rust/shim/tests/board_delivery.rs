@@ -1,3 +1,5 @@
+#![cfg(feature = "codex-delivery")]
+
 use futures::{SinkExt, StreamExt};
 use pseudolife_stdio::board::delivery::{Delivery, endpoint};
 use serde_json::{Value, json};

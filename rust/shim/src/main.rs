@@ -1,24 +1,34 @@
 #![forbid(unsafe_code)]
+mod argv;
 use std::process::ExitCode;
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> ExitCode {
-    let first = std::env::args_os().nth(1);
-    if let Some(mode) = first.as_deref().and_then(|mode| {
-        if mode == "briefing" {
-            Some("briefing")
-        } else if mode == "prompt-hook" {
-            Some("prompt-hook")
-        } else {
-            None
-        }
-    }) {
-        return pseudolife_stdio::cli::dispatch(Some(mode)).unwrap();
+fn main() -> ExitCode {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(mode) = arguments.first().filter(|mode| mode.to_str().is_none()) {
+        pseudolife_stdio::stderrln!(
+            "unknown mode {}; see: pseudolife-mcp --help",
+            argv::python_repr(mode)
+        );
+        return ExitCode::from(2);
     }
-    let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if let Some(code) = pseudolife_stdio::cli::dispatch(arguments.first().map(String::as_str)) {
+    if let Some(code) =
+        pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
+    {
         return code;
     }
-    let channel = arguments.first().is_some_and(|mode| mode == "channel");
+    let channel = match arguments.as_slice() {
+        [] => false,
+        [mode] if mode.to_str() == Some("shim") => false,
+        [mode] if mode.to_str() == Some("channel") => true,
+        _ => {
+            pseudolife_stdio::stderrln!("usage: pseudolife-stdio [shim|channel]");
+            return ExitCode::FAILURE;
+        }
+    };
+    serve_proxy(channel)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn serve_proxy(channel: bool) -> ExitCode {
     let proxy = match pseudolife_stdio::Proxy::attach_mode(channel).await {
         Ok(proxy) => proxy,
         Err(error) => {

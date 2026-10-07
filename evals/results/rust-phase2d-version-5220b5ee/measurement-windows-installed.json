@@ -1,0 +1,838 @@
+{
+  "schema": 1,
+  "platform": "windows",
+  "layout": "installed",
+  "executed_head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "executed_tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "mode": "version",
+  "argv": [
+    "version"
+  ],
+  "stream_contract": {
+    "stdout_stderr_encoding": "utf-8",
+    "argv_domain": "valid Unicode scalar strings",
+    "newlines": "Windows CRLF; LF on other platforms",
+    "deferred": [
+      "locale/default and other output encodings",
+      "non-UTF-8 or surrogate argv"
+    ]
+  },
+  "capture_platform": {
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "hardware": {
+    "os": "Windows",
+    "os_release": "10",
+    "architecture": "AMD64",
+    "logical_cpus": 16,
+    "physical_cpus": 8,
+    "ram_bytes": 66190344192
+  },
+  "candidate_executable": {
+    "sha256": "2ec6ce230d7aa06f016fbc63342ec2f5f70ebd9b7d2c28a5d43493048cb02916",
+    "bytes": 13267968
+  },
+  "captured_at_utc": "2026-10-06T16:53:45Z",
+  "raw_receipt": {
+    "sha256": "5c0431e8de165116f5f732e2226729dc38ecc5181f02fe9a592afddbf77359e6",
+    "bytes": 149908415
+  },
+  "raw_status_preserved": "quiet-cli-pair-final",
+  "raw_limitations_preserved": [
+    "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models.",
+    "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+    "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+    "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+    "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
+    "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+    "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+    "Final samples require the caller's quiet CPU window."
+  ],
+  "interpretation": "Warmed, fresh-process observations under concurrent desktop load; raw quiet labels are not proof of controlled idle or a satisfied quiet-window condition. Floors are descriptive repeat-block ranges, not confidence intervals.",
+  "protocol": {
+    "repeats": 3,
+    "samples_per_arm_per_repeat": 10,
+    "untimed_byte_controls": 2,
+    "untimed_warm_starts": 6,
+    "timed_starts": 60,
+    "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+    "paired_order": "Even pair index Python then Rust; odd index Rust then Python. Images and restored input state unchanged across warm/timed starts."
+  },
+  "byte_controls": {
+    "python": {
+      "exit_code": 0,
+      "stdout_sha256": "2b9c4effddc71e55ef1d16fcb106c6638e4dfab986262bf12266af917b15f59c",
+      "stdout_bytes": 200,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    },
+    "rust": {
+      "exit_code": 0,
+      "stdout_sha256": "2b9c4effddc71e55ef1d16fcb106c6638e4dfab986262bf12266af917b15f59c",
+      "stdout_bytes": 200,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    }
+  },
+  "runs": {
+    "python": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 154.64699995936826,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 150.20609996281564,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 151.8515000352636,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 143.44259997596964,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 150.92529996763915,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 147.9334000032395,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 142.9962000111118,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 144.7145999991335,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 141.06080000055954,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 141.22549997409806,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 151.12750005209818,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 144.45789996534586,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 146.35599998291582,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 150.69370000855997,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 147.79270003782585,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 156.61720000207424,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 152.080699976068,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 151.0736999916844,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 138.77359998878092,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 168.89470000751317,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 146.8250000034459,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 147.49040000606328,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 149.17879999848083,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 144.59049998549744,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 149.3204000289552,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 139.87790001556277,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 159.22329999739304,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 143.87410000199452,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 153.74729997711256,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 150.36730002611876,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      }
+    ],
+    "rust": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 23.020699969492853,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 22.158499981742352,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 20.646799996029586,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 19.4280999712646,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 21.016899961978197,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 20.64780000364408,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 20.91600000858307,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 21.586299990303814,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 18.935700005386025,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 21.16170001681894,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 22.735099948477,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 20.332599990069866,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 20.87270002812147,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 19.87290004035458,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 20.534399955067784,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 21.003700036089867,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 19.96170001802966,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 19.536899984814227,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 19.735899986699224,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 22.192100004758686,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 19.52329999767244,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 20.133900048676878,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 18.978099978994578,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 19.057099998462945,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 18.884999968577176,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 20.44439996825531,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 22.46430004015565,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 19.34679999249056,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 20.76019998639822,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 23.320099979173392,
+        "warmed_file_identity_matches": true,
+        "files_and_environment_match_control": true
+      }
+    ]
+  },
+  "warmups": [
+    {
+      "repeat": 0,
+      "arm": "python",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    },
+    {
+      "repeat": 0,
+      "arm": "rust",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    },
+    {
+      "repeat": 1,
+      "arm": "python",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    },
+    {
+      "repeat": 1,
+      "arm": "rust",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    },
+    {
+      "repeat": 2,
+      "arm": "python",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    },
+    {
+      "repeat": 2,
+      "arm": "rust",
+      "exact_control_response": true,
+      "files_and_environment_match_control": true
+    }
+  ],
+  "metrics": {
+    "python": {
+      "median_ms": 148.55610000086017,
+      "p95_ms": 159.22329999739304,
+      "median_floor_ms": 4.559699998935685,
+      "p95_floor_ms": 14.247700048144907,
+      "samples": 30,
+      "repeat_medians_ms": [
+        146.3240000011865,
+        150.8837000001222,
+        148.33460000227205
+      ],
+      "repeat_p95_ms": [
+        154.64699995936826,
+        168.89470000751317,
+        159.22329999739304
+      ]
+    },
+    "rust": {
+      "median_ms": 20.590599975548685,
+      "p95_ms": 23.020699969492853,
+      "median_floor_ms": 1.1378499621059746,
+      "p95_floor_ms": 0.5850000306963921,
+      "samples": 30,
+      "repeat_medians_ms": [
+        20.966449985280633,
+        20.433499972568825,
+        19.82860002317466
+      ],
+      "repeat_p95_ms": [
+        23.020699969492853,
+        22.735099948477,
+        23.320099979173392
+      ]
+    }
+  },
+  "comparison": {
+    "median": {
+      "rust_minus_python_ms": -127.96550002531148,
+      "larger_both_arms_floor_ms": 4.559699998935685
+    },
+    "p95": {
+      "rust_minus_python_ms": -136.2026000279002,
+      "larger_both_arms_floor_ms": 14.247700048144907
+    }
+  },
+  "resource_context": {
+    "recorded_desktop_cpu_percent": [
+      46
+    ],
+    "utc": "2026-10-06T16:53:18.0731858Z",
+    "local_lease_free": true,
+    "board_lookup_unavailable": true,
+    "no_controlled_idle_claim": true
+  }
+}

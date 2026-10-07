@@ -1,5 +1,5 @@
 //! Best-effort GET hooks and their private, non-transactional cursor file.
-use super::python_json::json::Value;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
@@ -33,36 +33,6 @@ impl Write for DescriptorWriter<'_> {
     }
 }
 
-thread_local! {
-    static SHUTDOWN_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-fn output_error(error: &io::Error) -> String {
-    let (number, message) = if cfg!(windows) {
-        match error.raw_os_error() {
-            Some(109 | 232) => (22, "Invalid argument"),
-            Some(6) => (9, "Bad file descriptor"),
-            Some(5 | 32 | 33) => (13, "Permission denied"),
-            Some(112) => (28, "No space left on device"),
-            Some(87) => (22, "Invalid argument"),
-            _ => return format!("OSError: {error}"),
-        }
-    } else {
-        match error.raw_os_error() {
-            Some(9) => (9, "Bad file descriptor"),
-            Some(28) => (28, "No space left on device"),
-            Some(32) => (32, "Broken pipe"),
-            _ => return format!("OSError: {error}"),
-        }
-    };
-    let kind = if number == 32 {
-        "BrokenPipeError"
-    } else {
-        "OSError"
-    };
-    format!("{kind}: [Errno {number}] {message}")
-}
-
 fn print(text: &str, stderr: bool) -> io::Result<()> {
     let bytes = super::text_bytes(text);
     #[cfg(unix)]
@@ -80,58 +50,21 @@ fn print(text: &str, stderr: bool) -> io::Result<()> {
     stream.write_all(&bytes).and_then(|_| stream.flush())
 }
 
-fn stdout_buffer_size() -> usize {
-    #[cfg(unix)]
-    {
-        if let Ok(info) = rustix::fs::fstat(io::stdout().as_fd())
-            && let Ok(size) = usize::try_from(info.st_blksize)
-            && size > 1
-        {
-            return size;
-        }
-    }
-    8192
+fn stdout(text: &str) -> io::Result<()> {
+    print(text, false)
 }
 
-fn stdout(text: &str, flush: bool, caught: bool) -> io::Result<()> {
-    #[cfg(unix)]
-    if rustix::fs::fstat(io::stdout().as_fd()).is_err_and(|e| e == rustix::io::Errno::BADF) {
-        // CPython starts with sys.stdout=None when descriptor 1 is absent.
-        return Ok(());
-    }
-    let result = print(text, false);
-    if let Err(error) = &result {
-        let unbuffered =
-            std::env::var_os("PYTHONUNBUFFERED").is_some_and(|v| !v.is_empty() && v != "0");
-        let bytes = super::text_bytes(text);
-        let body = super::text_bytes(text.strip_suffix('\n').unwrap_or(text));
-        // print writes the body and newline separately. TextIOWrapper batches
-        // small writes at 8192 bytes; an explicit flush reaches BufferedWriter
-        // sooner, whose capacity is the raw descriptor's block size.
-        let buffered = !unbuffered
-            && if cfg!(windows) {
-                body.len() <= stdout_buffer_size()
-            } else if flush {
-                bytes.len() <= stdout_buffer_size()
-            } else {
-                bytes.len() < 8192 || body.len() <= stdout_buffer_size()
-            };
-        if buffered {
-            SHUTDOWN_FAILURE.set(true);
-            let _ = print(
-                &format!(
-                    "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n{}\n",
-                    output_error(error)
-                ),
-                true,
-            );
-        } else if !caught {
-            // The terminal error is native; Python's source-dependent traceback
-            // is retained as an exact-process coverage gap.
-            let _ = print(&format!("{}\n", output_error(error)), true);
-        }
-    }
-    result
+fn output_failed() -> u8 {
+    let _ = print("pseudolife-mcp briefing: output failed\n", true);
+    1
+}
+
+fn reply_not_understood() -> u8 {
+    let _ = print(
+        "pseudolife-mcp briefing: daemon reply not understood\n",
+        true,
+    );
+    1
 }
 
 #[cfg(unix)]
@@ -150,7 +83,7 @@ fn columns_width(raw: &str) -> Option<usize> {
     if value == "0" || value.starts_with('-') {
         return None;
     }
-    // Larger Python integers still put this finite help text on one line.
+    // Large positive widths still put this finite help text on one line.
     Some(value.parse().unwrap_or(usize::MAX))
 }
 
@@ -304,46 +237,18 @@ fn whitespace(c: char) -> bool {
     c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}')
 }
 
-fn decimal(c: char) -> Option<u32> {
-    // CPython 3.11 uses Unicode 14 decimal digits for int(), including argv.
-    const ZEROS: &[u32] = &[
-        0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
-        0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
-        0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0,
-        0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0,
-        0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0,
-        0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0,
-    ];
-    ZEROS
-        .iter()
-        .find_map(|zero| (c as u32).checked_sub(*zero).filter(|n| *n < 10))
-}
-
 fn integer(raw: &str) -> Option<String> {
-    // int()'s ASCII whitespace excludes the four separators str.strip accepts.
-    let text = raw.trim_matches(char::is_whitespace);
+    let text = raw.trim_matches([' ', '\t', '\n', '\r', '\u{b}', '\u{c}']);
     let (negative, text) = if let Some(text) = text.strip_prefix('-') {
         (true, text)
     } else {
         (false, text.strip_prefix('+').unwrap_or(text))
     };
-    let mut digits = String::new();
-    let mut previous_digit = false;
-    for c in text.chars() {
-        if c == '_' && previous_digit {
-            previous_digit = false;
-            continue;
-        }
-        let digit = decimal(c)?;
-        digits.push(char::from_digit(digit, 10)?);
-        previous_digit = true;
-    }
-    if !previous_digit
-        || super::python_json::digit_limit().is_some_and(|limit| digits.len() > limit)
-    {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let digits = digits.trim_start_matches('0');
+    // Caps are signed, unbounded decimal query values, not machine integers.
+    let digits = text.trim_start_matches('0');
     Some(if digits.is_empty() {
         "0".into()
     } else if negative {
@@ -429,7 +334,32 @@ impl Argument {
         } else {
             &self.points
         };
-        super::python_json::string(points).python(true)
+        let quote = if points.contains(&39) && !points.contains(&34) {
+            '"'
+        } else {
+            '\''
+        };
+        let mut output = quote.to_string();
+        for point in points {
+            match char::from_u32(*point) {
+                None => {
+                    use std::fmt::Write;
+                    let _ = write!(output, "\\u{point:04x}");
+                }
+                Some(c) if c == quote => {
+                    output.push('\\');
+                    output.push(c);
+                }
+                Some('\'') => output.push('\''),
+                Some('"') => output.push('"'),
+                Some(c) => {
+                    let one = super::mode_repr(&c.to_string());
+                    output.push_str(&one[1..one.len() - 1]);
+                }
+            }
+        }
+        output.push(quote);
+        output
     }
 }
 impl From<&str> for Argument {
@@ -453,14 +383,14 @@ fn negative_number(text: &str) -> bool {
     let Some(text) = text.strip_prefix('-') else {
         return false;
     };
-    // argparse's negative-number matcher uses Unicode \d and optional .digits.
+    // The narrowed numeric grammar retains negative decimal option values.
     let mut dots = 0;
     let mut count = 0;
     for c in text.chars() {
         if c == '.' && dots == 0 {
             dots += 1;
             count = 0;
-        } else if decimal(c).is_some() {
+        } else if c.is_ascii_digit() {
             count += 1;
         } else {
             return false;
@@ -652,7 +582,7 @@ fn launcher_query() -> String {
     if !launcher.is_file() {
         return String::new();
     }
-    if which::which("pseudolife-mcp")
+    if crate::lifecycle::find_executable("pseudolife-mcp")
         .ok()
         .is_some_and(|found| same_path(&found, &launcher))
     {
@@ -723,28 +653,21 @@ fn origin(prompt: bool) -> Result<String, u8> {
     })
 }
 
-fn truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(v) => *v,
-        Value::Number(v) => v.as_f64().is_none_or(|v| v != 0.0),
-        Value::String(v) => !v.is_empty(),
-        Value::Array(v) => !v.is_empty(),
-        Value::Object(v) => !v.is_empty(),
-    }
-}
-
-fn payload(event: &str, context: Value) -> String {
+fn payload(event: &str, context: &str) -> String {
     format!(
-        "{{\"hookSpecificOutput\": {{\"hookEventName\": \"{event}\", \"additionalContext\": {context}}}}}\n"
+        "{{\"hookSpecificOutput\": {{\"hookEventName\": \"{event}\", \"additionalContext\": {}}}}}\n",
+        super::hook_json::quoted(context)
     )
 }
 
 async fn briefing(argv: &[Argument]) -> u8 {
     let args = match parse(argv) {
         Parsed::Help => {
-            let _ = stdout(&help(terminal_width()), false, true);
-            return 0;
+            return if stdout(&help(terminal_width())).is_ok() {
+                0
+            } else {
+                output_failed()
+            };
         }
         Parsed::Error(error) => {
             let _ = print(
@@ -772,11 +695,10 @@ async fn briefing(argv: &[Argument]) -> u8 {
     let Some(health) = get(&url, "/health", None, Duration::from_millis(250), true).await else {
         return 0;
     };
-    if super::python_json::hook_input(&health)
-        .ok()
-        .is_none_or(|v| v.is_null())
-    {
-        return 0;
+    match super::hook_json::input(&health) {
+        Ok(Value::Null) => return 0,
+        Ok(_) => {}
+        Err(()) => return reply_not_understood(),
     }
     let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
     let target = if args.coordination {
@@ -801,58 +723,30 @@ async fn briefing(argv: &[Argument]) -> u8 {
         return 0;
     };
     let markdown = if args.hook || args.coordination {
-        Value::from(body.as_str())
+        body
     } else {
-        let Ok(data) = super::python_json::hook_input(&body) else {
-            return 0;
+        let Ok(data) = super::hook_json::input(&body) else {
+            return reply_not_understood();
         };
-        if !truthy(&data) {
-            Value::from("")
-        } else if !data.is_object() {
-            return 0;
-        } else {
-            data.get("markdown")
-                .filter(|v| truthy(v))
-                .cloned()
-                .unwrap_or_else(|| Value::from(""))
+        match data.get("markdown") {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(text)) => text.clone(),
+            Some(_) => return reply_not_understood(),
         }
     };
-    let Value::String(text) = &markdown else {
-        // This error occurs outside Python's fetch catch. Keep the failure
-        // observable; the source-dependent Python traceback remains a corpus gap.
-        let _ = print(
-            "AttributeError: briefing markdown has no attribute 'strip'\n",
-            true,
-        );
-        return 1;
-    };
-    let _ = text;
-    let points = super::python_json::points(&markdown).unwrap();
-    let start = points
-        .iter()
-        .position(|p| !char::from_u32(*p).is_some_and(whitespace))
-        .unwrap_or(points.len());
-    let end = points
-        .iter()
-        .rposition(|p| !char::from_u32(*p).is_some_and(whitespace))
-        .map_or(start, |p| p + 1);
-    if start == end {
+    let context = markdown.trim_matches(whitespace);
+    if context.is_empty() {
         return 0;
     }
-    let context = super::python_json::string(&points[start..end]);
     let output = if args.hook {
         payload("SessionStart", context)
     } else {
-        let Some(text) = context.as_str() else {
-            let _ = print("UnicodeEncodeError: briefing contains a surrogate\n", true);
-            return 1;
-        };
-        format!("{text}\n")
+        format!("{context}\n")
     };
-    if stdout(&output, false, false).is_ok() {
+    if stdout(&output).is_ok() {
         0
     } else {
-        1
+        output_failed()
     }
 }
 
@@ -880,7 +774,7 @@ fn first_line(path: &Path) -> String {
         .split(|b| matches!(b, b'\r' | b'\n'))
         .next()
         .unwrap_or_default();
-    if !first.is_ascii() || !bytes[..bytes.len().min(8192)].is_ascii() {
+    if !first.is_ascii() {
         return String::new();
     }
     let text = std::str::from_utf8(first).unwrap().trim_matches(whitespace);
@@ -931,7 +825,7 @@ fn clean_old(directory: &Path) -> io::Result<()> {
 async fn prompt_hook() -> Option<()> {
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input).ok()?;
-    let data = super::python_json::hook_input(&String::from_utf8_lossy(&input)).ok()?;
+    let data = super::hook_json::input(&String::from_utf8_lossy(&input)).ok()?;
     let session = data.get("session_id")?.as_str()?;
     if session.is_empty()
         || session.len() > 128
@@ -983,7 +877,7 @@ async fn prompt_hook() -> Option<()> {
     }
     let mut file = options.open(&mark).ok()?;
     if !note.is_empty() {
-        stdout(&payload("UserPromptSubmit", Value::from(note)), true, true).ok()?;
+        stdout(&payload("UserPromptSubmit", note)).ok()?;
     }
     file.set_len(0).ok()?;
     file.write_all(format!("{next}\n").as_bytes()).ok()?;
@@ -1000,43 +894,31 @@ pub(super) fn run(mode: &str) -> ExitCode {
             .map(|value| Argument::from_os(&value))
             .collect()
     };
-    // The reviewed JSON parser and its owned values recurse. This thread owns
-    // parse/format/drop together; the caller's measured depth is in the corpus.
-    let result = std::thread::Builder::new()
-        .name("cli-hook".into())
-        .stack_size(16 * 1024 * 1024)
-        .spawn(move || {
-            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            else {
-                return 0;
-            };
-            let result = runtime.block_on(async {
-                if prompt {
-                    let _ = prompt_hook().await;
-                    0
-                } else {
-                    briefing(&argv).await
-                }
-            });
-            if SHUTDOWN_FAILURE.get() { 120 } else { result }
-        })
-        .ok()
-        .and_then(|thread| thread.join().ok())
-        .unwrap_or(if prompt { 0 } else { 1 });
-    ExitCode::from(result)
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return ExitCode::from(if prompt { 0 } else { 1 });
+    };
+    ExitCode::from(runtime.block_on(async {
+        if prompt {
+            let _ = prompt_hook().await;
+            0
+        } else {
+            briefing(&argv).await
+        }
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn columns_use_python_integer_grammar() {
-        for value in ["٤٠", "4_0", "\u{a0}+٤_٠\t", "00040"] {
+    fn columns_use_positive_ascii_decimal() {
+        for value in ["40", "+40", " 40\t", "00040"] {
             assert_eq!(columns_width(value), Some(40));
         }
-        for value in ["0", "-40", "4__0", "4_", "4.0", "\u{1c}40"] {
+        for value in ["0", "-40", "٤٠", "4_0", "\u{a0}40", "4.0", "\u{1c}40"] {
             assert_eq!(columns_width(value), None);
         }
         assert_eq!(columns_width(&"9".repeat(100)), Some(usize::MAX));
@@ -1057,7 +939,9 @@ mod tests {
         for value in ["", "-1", "1e3", "1\n", "12345678901234567890123"] {
             assert!(!cursor(value));
         }
-        assert_eq!(integer("\u{a0}-００_３\u{a0}"), Some("-3".into()));
+        assert!(integer("\u{a0}-００_３\u{a0}").is_none());
+        assert_eq!(integer(" -003\t\u{b}\u{c}"), Some("-3".into()));
+        assert_eq!(integer(&"9".repeat(5000)), Some("9".repeat(5000)));
         assert!(integer("\u{1c}3").is_none());
         assert_eq!(integer("-0"), Some("0".into()));
         for value in ["_1", "1__2", "1_", "1.0"] {

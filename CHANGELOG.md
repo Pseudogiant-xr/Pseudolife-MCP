@@ -10,6 +10,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Changed (2026-10-07 — native hook input and output contracts)
+
+- The experimental native briefing and prompt hooks validate strict JSON while
+  ignoring ordinary metadata, including large integers. Briefing reports a
+  named malformed-reply error; prompt input refusal remains quiet and leaves
+  cursors untouched. Numeric options use signed ASCII decimal, and output
+  failures follow native write/flush semantics. These are named substitutions
+  in the porting contract; no installation path installs the candidate.
+
+### Changed (2026-10-07 — native version admission and warmed CLI timing)
+
+- The experimental native `version` command reports an installed runtime only
+  when its own runtime has a dictionary marker and the canonical Python console
+  file; an incomplete layout falls back to the package version.
+- Version measurements preserve each arm's executable file identity, restore
+  input state and warm both images before timed fresh-process pairs. The CLI
+  harness records UTF-8 output and covers missing-console and non-ASCII-home
+  cases. No installation path installs the candidate; its
+  [CLI-VERSION evidence and status](rust/PORT-STATE.md#frozen-combined-version-evidence-at-5220b5ee)
+  remain separate from readiness.
+
+### Fixed (2026-10-07 — bound descendant exit observation in the baseline harness)
+
+- The baseline test helper waits up to two seconds before checking an owned
+  descendant's liveness. A surviving child still fails the assertion and is
+  cleaned up; the daemon's process cleanup is unchanged.
+
+### Fixed (2026-10-07 — retain successful readiness wait notices in parity evidence)
+
+- The real-bank stdio judge normalizes only the sole exact no-spawn readiness
+  wait notice after matching stdout and exit 0, retaining both raw stderr
+  captures and process provenance in the receipt. Other stdio policies and
+  production behavior remain unchanged.
+
 ## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
 
 ### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)

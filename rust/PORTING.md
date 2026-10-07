@@ -1,18 +1,18 @@
 # Porting contract
 
 The current version-branch behavioural oracle target is Python 0.17.0 at
-`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
-Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values and lone Unicode surrogates are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
+Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values, lone Unicode surrogates and integers beyond u64 are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
 
-The [local version evidence at `62e4f590`](../evals/results/rust-phase2b-version-62e4f590/README.md)
+The [local version evidence at `62e4f590`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md)
 records both-platform release corpora and bare/installed paired measurements.
 It preserves the Windows installed median/p95 regression and distinct runtime
-versions, with no aggregate speedup or causal claim. CLI-VERSION remains deferred
-until required hosted CI and the evidence/documentation successor review/checks
-pass; local evidence does not certify a later head.
+versions, with no aggregate speedup or causal claim. Those receipts remain
+historical and do not certify a later head; current scoped CLI-VERSION
+acceptance is bound to the final `df2dbf8a` proof above.
 
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
@@ -54,6 +54,10 @@ both are set). Without either, the candidate takes the existing no-spawn wait
 and prints the named explanation `NO_CONFIGURED_SPAWN_NOTE`; it never invents
 `python` from PATH. This is `ported-with-substitution` for the Python oracle's
 `sys.executable` spawn. A configured command is passed as argv, without a shell.
+Malformed explicit serve commands print `INVALID_SERVE_COMMAND_NOTE` before
+the health probe and use the no-spawn waiting path, even when an interpreter
+is also configured. The waiting notes name disabled fallback spawning rather
+than claiming the caller set `PSEUDOLIFE_MCP_NO_SPAWN`.
 
 Unattended client updates retain their loopback/no-spawn/newer-version gates
 and require the explicit interpreter setting. The writer schedules them once,
@@ -63,7 +67,54 @@ initialize instructions, plus all authentication checks. An update launch
 diagnostic appears only after that launch succeeds. An explicit serve command
 alone does not identify a Python interpreter for client updates. This changes
 the scheduling and initialize version note by the same maintainer decision;
-the candidate remains uninstalled by the port.
+the candidate remains uninstalled by the port. Installer-backed client update
+parity is deferred to Phase 5: this candidate proves the explicit-interpreter
+launch and scheduling seam against a disposable sentinel module, not a client
+installation or an implicit interpreter lookup.
+
+## Briefing and prompt-hook producer substitutions
+
+The experimental hook candidate validates host JSON and daemon JSON replies with
+strict JSON parsing. It consumes string session IDs and markdown while ignoring
+ordinary metadata, including integers beyond u64; original Python observations
+and historical failures remain evidence rather than candidate expectations.
+
+- **`hook-strict-json-refusal`** governs complete prompt stdin and daemon JSON
+  replies, including ignored fields. NaN, Infinity, lone surrogate escapes,
+  malformed JSON and nesting beyond serde_json's default bound are refused.
+  Prompt stdin refusal is silent exit 0 before any request or cursor access;
+  malformed prompt responses are silent exit 0 without cursor changes or a
+  subsequent request. Briefing JSON refusal is exit 1, no stdout and exactly
+  `pseudolife-mcp briefing: daemon reply not understood` plus a newline on
+  stderr. First case: `prompt-json-nan-extra`. Plain session-start, coordination
+  and memory-change response bodies retain their text/cursor grammar.
+- **`hook-typed-markdown`** governs `/api/briefing`'s consumed `markdown` field.
+  Its producer is `MemoryService.session_briefing`, which emits a string.
+  False, numbers, arrays and objects use the briefing refusal above; missing,
+  null and empty strings remain quiet. First case: `briefing-markdown-false`.
+- **`hook-ascii-numeric`** governs briefing caps and COLUMNS. Caps accept signed
+  ASCII decimal with ASCII surrounding whitespace and arbitrary magnitude;
+  leading zeros/signs are canonicalized, negatives are transmitted unchanged.
+  Unicode digits and underscores receive argparse-shaped exit 2. No Python
+  digit-limit environment setting applies. COLUMNS accepts positive ASCII
+  decimal or falls back to 80; large widths retain finite-text saturation.
+  First case: `briefing-custom-negative-unknown`.
+- **`hook-first-line-cursor`** governs owned mark reads. Only the first CR/LF
+  terminated line is interpreted as ASCII `[0-9.]{1,22}` after whitespace
+  trimming; bytes after that line cannot invalidate its cursor. The own writer
+  emits the cursor plus LF. First case: `prompt-mark-nonascii-after-lf`.
+- **`hook-native-output-failure`** governs hook stdout writes and flushes.
+  Briefing/help failure is exit 1 with exactly
+  `pseudolife-mcp briefing: output failed` plus a newline on stderr. Prompt
+  failure remains silent exit 0 without truncating or advancing its mark.
+  Opening a new mark before printing can leave an empty mark. First control:
+  `public_help_closed_output_has_native_failure_contract`.
+
+All surrounding authentication, path, cursor and hook-envelope wire semantics
+remain required. The hook serializer retains ensure_ascii escaping, including
+astral surrogate pairs; this strict parser is local to hooks and changes no
+separate lease parser. Native policy controls retain the raw oracle function
+and label candidate substitutions explicitly.
 
 ## Types and serialization
 
@@ -80,6 +131,16 @@ the candidate remains uninstalled by the port.
 Do not rely on a serializer's defaults to reproduce Python coercion or missing
 field behaviour. Test unknown fields, wrong types, nulls, empty inputs and
 boundary values against the oracle. Error text may be user-visible contract.
+
+### `nondeterministic-bytes-semantic`: generated registration name
+
+Fields governed: `/body/name` in `register-sender` and `register-recipient` only; `/body/name_source`, `/body/label` and the raw `/body/agent_id` gate the rule. First case: `register-sender`.
+
+Before normalization, require `name_source == ""`, a nonempty string `label`, canonical lowercase hexadecimal `agent_id` matching `[0-9a-f]{32}`, and `name == label + " " + raw_agent_id[:8]`. Replace only those eight generated characters with the actor's named prefix token; label, separator, name source and every surrounding field stay exact. Explicit names and other operations receive no name normalization. Earlier response shapes without both naming fields remain exact; partial naming shapes fail.
+
+Wire-length adjustment touches only the original escaped span of those eight decoded characters, preserving the prefix's Unicode escapes, quoting, whitespace and all surrounding JSON bytes. Per-arm `policy_instances` retain case, arm, policy, raw name, raw label, raw name source, raw ID prefix and normalized name; no credential body is retained. The Phase 1 public CI receipt exports these instances under `generic_controls`.
+
+Instances: `register-sender /body/name`; `register-recipient /body/name`, across each fresh generic arm. Historical hosted runs 37428908416 (#602) and 37429259333 (#603) each show these two cases in arms 1 and 2; their downloaded public receipts contain no raw names, so they prove failure locations, not the raw semantic relation. Source `_board_name` / `_public` and synthetic rejection controls establish the rule; next execution must supply retained raw instances.
 
 ## Errors and recovery
 
@@ -104,6 +165,10 @@ mutex or a PID-file existence check. Use bounded build parallelism and respect
 the shared full-suite queue. Dependency choices remain provisional until their
 supported protocol versions and platform behaviour are demonstrated.
 
+`tokio-tungstenite` and its transitive `webpki-roots` are optional behind the
+default-on `codex-delivery` feature; disabling it retains pull coordination and
+native doorbell paths. The existing TLS feature selection is unchanged.
+
 The Phase 1 shim uses `#![deny(unsafe_code)]` with narrow module-local exceptions:
 `credentials::windows_security` validates opened credential and coordination
 state handles and sets protected owner-only access for new private state;
@@ -118,6 +183,54 @@ must use only async-signal-safe operations between fork and exec. These
 exceptions preserve the operating-system behavior of the Python oracle; their
 presence does not establish parity. Each requires targeted platform evidence
 and independent review before acceptance.
+
+`credentials::unix_accounts::{home_by_name, home_with_lookup}` are local
+exceptions for reentrant `libc::getpwnam_r` account-database lookup after removing
+`users` 0.11. The caller owns the initialized passwd structure and lookup buffer.
+Only zero status with a result identifying that structure is admitted; outside
+Android, a null home field is rejected before reading its NUL-terminated bytes.
+The home bytes are copied before the buffer is dropped, preserving non-UTF8
+paths. Lookup starts with 2048 bytes and doubles on ERANGE with checked size
+overflow and no added cap. Missing names, interior-NUL names and lookup errors
+return `None`. Android retains the prior `/var/empty` home default after an
+admitted lookup. Board ownership uses `rustix::process::getuid` for real-UID
+checks. These are OS primitives, not a pure-standard-library replacement.
+
+The [isolated comparison](../evals/rust_port/users_comparison/README.md) uses the
+actual locked `users` 0.11.0 crate and imports the production resolver. Four
+original seam tests remain unchanged; two additive tests reject a populated
+error result and a null home field. These defensive rejections are explicit
+and are not evidence of former-crate behavior on malformed results. Historical
+validation at `43e05ac1` predates this repair. Targeted platform validation and
+independent review remain required; Android, other Unix targets, unusual NSS
+backends and real/effective-UID divergence are not established by Linux proofs.
+
+`lifecycle::executable::is_executable` is a local Windows exception after removing
+`which` 8.0.6. Its owned NUL-terminated UTF-16 pathname and initialized output
+buffer remain live through `GetBinaryTypeW`; no native handle is created.
+Windows retains symlink metadata and extension-bearing file acceptance, while
+extensionless paths require that binary-type check. Unix uses `rustix::fs::access`
+with real IDs and ACLs after following metadata to a regular file. Ordered PATH
+search, captured cwd and Windows filename casing are compared against the actual
+registry crate by `evals/rust_port/which_comparison.py`.
+
+Windows deliberately reads PATHEXT on each lookup. This matches the removed
+public `which::which` calls in 8.0.6: their borrowed `RealSys` uses the trait's
+default extension parser. It differs from an owned `WhichConfig<RealSys>`,
+whose `RealSys` implementation caches the first extension list in `OnceLock`.
+The comparison exercises both actual crate APIs after changing `.CMD` to
+`.EXE` in a disposable child; the owned configuration still accepts a `.CMD`
+file while the public API and replacement reject it. The replacement does not
+adopt that owned-configuration cache. This is an explicit lookup policy, not
+an assertion that every `which` API has identical behavior.
+The maintainer authorized exactly the two fixture resolver-call substitutions;
+their assertions and error handling remain unchanged. The
+[actual-crate receipts](../evals/results/rust-which-8.0.6-comparison/README.md)
+record 23 equal public-API cases on Windows and 17 on Linux, plus the expected
+Windows owned-configuration difference. Windows file-symlink coverage remains
+unavailable (creation error 1314). These bounded comparisons do not establish
+equivalence for every platform, ACL or error message. Current hosted checks
+and independent review remain required before acceptance.
 
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
 subprocess handling. Unsafe allowances are confined to `spawn_phases`,
@@ -165,13 +278,20 @@ behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
 casefold differences. `shim/src/board/unicode14.rs` records those corrections
 and the 701 category-C ranges, with dedicated normalization assertions.
-This compatibility table pins CPython 3.11's Unicode 14 for repository claims;
-it does not pin every Rust text operation to Python. Wake-reason sanitization
-uses Rust `char::is_alphanumeric` and `char::is_whitespace` by the maintainer's
-2026-10-05 phase 2 decision (`ported-with-substitution`); it still compacts,
-limits to 60 characters, filters punctuation and falls back to `unknown`.
-Unicode 14's U+001C separator is therefore filtered rather than split in a wake
-reason. Claim casefold/category-C/NFC behavior keeps `unicode14.rs` unchanged.
+Wake-reason sanitization also uses the pinned Unicode 14 predicates: categories
+L* or N* for `str.isalnum`, and the Python whitespace set including U+001C–001F
+for `str.isspace`. The same file retains 733 alphanumeric ranges; the existing
+casefold and category-C tables stay intact. The full-range SHA256 contract hashes
+one alphanumeric byte followed by one whitespace byte for every code point,
+including surrogates. `evals/rust_port/unicode14_reason.py` computes it with the
+pinned CPython 3.11 runtime. Sanitization still compacts, limits to 60 characters,
+filters punctuation and falls back to `unknown`; the separate `reason14.rs`
+asset remains deleted.
+
+The original shim/channel CLI keeps its valid-argument dispatch. OS arguments
+are read without Unicode conversion panics; an invalid-Unicode mode follows
+Python's unknown-mode repr and exit 2, using surrogateescape on Unix and unpaired
+UTF-16 surrogate escapes on Windows.
 
 ## HTTP and authentication
 
@@ -195,7 +315,8 @@ credential defaults from the caller's installed client configuration.
 
 ## SQL and durable state
 
-Read and write the recorded phase-start schema (53 for phases 0b and 1) without
+Read and write the recorded phase-start schema (55 at the current Phase 1
+pin; historical close-out evidence keeps schema 54) without
 DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
 each phase start; any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
@@ -214,7 +335,7 @@ small. Reject unlisted normalization and non-finite values.
 
 The same-ONNX-graph embedding tolerance is **not yet established**. The current
 configuration guide documents torch fallback for the default Qwen model because
-it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](../evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
+it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/13dbe0b032527bf110acbaf4f1ea1ae00ca20cef/evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
 identifies a disposable fp32 graph and compares Torch fp32 with direct ORT CPU
 over 1,000 seeded documents and 25 **PROPOSED** topic queries: maximum absolute
 embedding difference `5.401670932769775e-7`, minimum cosine
@@ -391,9 +512,20 @@ argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing 
 existing pinned table. Locale/default and other output encodings and
 non-UTF-8/surrogate argv remain deferred. Recognized modes
 without an implementation emit a candidate-only deferred diagnostic, never the
-Python unknown-mode contract. No runtime identity is invented for version:
-`runtimes.running_runtime` depends on Python `sys.prefix`, so its three named
-oracle nodes remain deferred pending an explicit candidate identity decision.
+Python unknown-mode contract. The scoped ported version implementation derives the
+runtime root from its own executable under a six-digit `runtimes` entry's
+`Scripts` or `bin` directory, matching Python's `sys.prefix` identity. It checks
+its own executable, also requires the canonical Python console path to be a file
+(`Scripts/pseudolife-mcp.exe` or `bin/pseudolife-mcp`), and matches the runtime
+path as written or canonicalized. The marker follows Python's dictionary shape.
+Manifest NaN, Infinity, lone surrogates and integers beyond u64 remain deferred.
+The three original version nodes are routed among eight unchanged CLI nodes per
+arm. Final `df2dbf8a` Windows/Linux CLI cells cover named-console admission,
+missing-console fallback and actual non-ASCII homes with UTF-8 streams; all four
+3x10 warm pairs retain exact output/state and warmed file identity. Counts,
+per-arm floors and limits are in PORT-STATE.md and the final packet. The
+candidate is not installed; this evidence carrier requires independent review
+and hosted checks, with no recapture of the unchanged executed tree.
 The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
 normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
 and initialize-return timing, using the same paired ordering and repeat floors.
@@ -426,7 +558,7 @@ establishes no production parity.
   locking nor atomic updates; the trial also excludes object subclasses, byte
   text, deep recursion and tier warning logs. None is retired by implication.
 
-## Current close-out evidence
+## Historical Phase 1 close-out evidence
 
 Frozen candidate `690bb8ac` has current Windows/Linux schema-2 Python self-replay
 and Rust receipts, each with eight actual stdio outcomes and 32 executable-bound
@@ -437,3 +569,16 @@ identity, not a build attestation. The paired measurements use three repeats
 of ten samples per arm, with separately sampled RSS and per-arm quantile floors.
 Current numeric tables and remaining acceptance gates are in PORT-STATE.md;
 full suites, final integrated-head CI and whole-change review remain pending.
+
+## Version warm measurement condition
+
+Frozen `5220b5ee` captures retain 28 exact cases and 112 mutation controls on
+each OS. UTF-8 output is selected; locale/default encoding remains deferred.
+Version measurement makes one untimed start per arm before each of three
+ten-pair blocks, then reuses exact executable file identities and restored
+state. Each layout retains two byte controls, six warm starts and sixty timed
+starts with per-arm floors. Help can explicitly opt in with `--warm-images`;
+other CLI benchmark reset semantics are unchanged. Cold-copy Windows results
+remain historical, with no security-provider cause established. Current
+numbers, identities and remaining hosted/review gates are in PORT-STATE.md;
+these CPU CLI cells establish no full-suite acceptance.
