@@ -131,7 +131,7 @@ these two fields for one fresh delivery without rewriting raw observations.
 | `wait-mail-cr-spaces-ring` | Both hosts' earlier clock-only failures retained. |
 | `unicode-session` | Earlier Windows clock instance; no same-id second-Python claim. |
 | `wait-mail-unicode-delivery` | Both hosts' positive delivery; additive bounded-clock node prepared, final-head execution pending. |
-| `seen-directory` | Both hosts' one quoted source basename `.tmp-[a-z0-9_]{8}.seen`; exact directory, destination and error bytes; any clocks governed separately. Comparator wiring pending. |
+| `seen-directory` | Both hosts' one quoted source basename `.tmp-[a-z0-9_]{8}.seen`; exact directory, destination and error bytes; any clocks governed separately. |
 | `invalid-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
 | `inline-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
 | `environment-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
@@ -140,7 +140,11 @@ these two fields for one fresh delivery without rewriting raw observations.
 
 For the five session cases, exit 1, stdout, the terminal
 `UnicodeEncodeError: message` line including its LF and complete post-state
-remain exact; their final-head comparator wiring is still pending.
+remain exact. The process comparator applies these policies only to the named
+case IDs and records each arm's admitted fields; unlisted cases stay exact.
+New admission/rejection tests check that path, state, exit and terminal-line
+mutations fail. Historical-input replay under this checker remains separate
+from final native execution.
 The native CI lane runs the unchanged deterministic additive wait-mail tests,
 a new actual positive-delivery node and the Python/native help drift guard
 at `COLUMNS=80`. It cannot substitute for the complete both-OS corpus,

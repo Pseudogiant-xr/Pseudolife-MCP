@@ -15,10 +15,12 @@ suite on the committed final candidate; it has not run.
 The new additive CI nodes check actual native Unicode delivery/stdout/`.seen`
 and bounded per-arm clocks, plus `COLUMNS=80` help against Python. The existing
 deterministic wait-mail assertions run with an explicit binary in that lane.
-Only the synthetic policy control has run during preparation; native execution,
-both-OS recapture, suffix/terminal-traceback comparator wiring, positive paired
-measurements and current-head hosted checks remain pending. Historical private
-receipts cited below cannot certify this candidate.
+The process comparator now wires only the named delivery-clock, source-suffix
+and Linux terminal-traceback fields. New admission/rejection and process-lane
+self-checks run during preparation; historical-input replay uses the current
+checker without launching native processes. Native execution, both-OS recapture,
+positive paired measurements and current-head hosted checks remain pending.
+Historical private receipts cited below cannot certify this candidate.
 
 ## Historical wait-mail leaf candidate and captures
 

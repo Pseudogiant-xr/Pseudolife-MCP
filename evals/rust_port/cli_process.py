@@ -360,7 +360,12 @@ def candidate_controls(records):
                     base64.b64decode(observed[field].get(path, "")) + b"\x00").decode("ascii")
             else:
                 mutated[field] = base64.b64encode(base64.b64decode(observed[field]) + b"\x00").decode("ascii")
-            differences = compare(expected, mutated, BYTE_POLICY)
+            if record["mode"] == "wait-mail" and sys.platform in ("linux", "win32"):
+                from .wait_mail_policy import compare_record
+                changed = {**record, "candidate": {**record["candidate"], "response": mutated}}
+                differences = compare_record(changed, "windows" if os.name == "nt" else "linux")["differences"]
+            else:
+                differences = compare(expected, mutated, BYTE_POLICY)
             field_path = "/" + field
             rejected = any(cell["path"] == field_path or cell["path"].startswith(field_path + "/")
                            for cell in differences)
@@ -377,9 +382,20 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None):
     for case in spec:
         arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare)
                 for arm, command in commands.items()}
-        differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
+        policy_instances = []
+        if case["mode"] == "wait-mail" and sys.platform in ("linux", "win32"):
+            from .wait_mail_policy import compare_record
+            checked = compare_record({"id": case["id"], **arms}, "windows" if os.name == "nt" else "linux")
+            # Inputs stay exact. Only the named response spans can differ;
+            # arm execution windows are provenance, not comparison inputs.
+            inputs = {arm: byte_payload({**value, "response": {}}) for arm, value in arms.items()}
+            differences = compare(inputs["oracle"], inputs["candidate"], BYTE_POLICY)
+            differences += [{**cell, "path": "/response" + cell["path"]} for cell in checked["differences"]]
+            policy_instances = checked["policy_instances"]
+        else:
+            differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
         records.append({"id": case["id"], "mode": case["mode"], **arms,
-                        "differences": differences, "passed": not differences})
+                        "differences": differences, "policy_instances": policy_instances, "passed": not differences})
     controls = candidate_controls(records)
     return {"records": records, "candidate_output_controls": controls,
             "passed": all(record["passed"] for record in records) and all(c["rejected"] for c in controls)}
