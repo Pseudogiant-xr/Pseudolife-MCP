@@ -26,6 +26,40 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
+## Maintainer sent source preparation
+
+The SQL-first endpoint oracle is `0b46bb8e2010cf0e428dd650b98cedb165ad3d75`.
+This checkpoint prepares its projection and exact JSON encoder. The HTTP
+listener, gates, PostgreSQL connection and external pytest process routing are
+incomplete. No builds, tests, disposable endpoint cells or parity acceptance
+are claimed; the native `serve` leaf retains its deferred CLI refusal.
+
+The approved next entry point is a bounded native `serve` subset. Pinned Python
+`serve` parses no trailing flags: it calls `run_daemon()` and reads bind, port,
+bank/config and bearer/principal settings from the existing environment. The
+complete `/api/maintainer/sent` boundary must own gates, queries, SQL, errors
+and bytes. Every other path will return HTTP 501 with this fixed body, also
+declared as `maintainer_sent::DEFERRED_BODY`:
+
+```json
+{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}
+```
+
+That body is a candidate refusal, not Python parity. `/health` is deferred too;
+the future owned-process adapter needs affirmative readiness independently of
+that HTTP response, and bounded shutdown with no descendants. Original
+maintainer web/role/fixture tests remain unchanged. Direct internals, successful
+Recorder calls and the mixed signed-write workflow remain Python oracle cases
+until a real process mapping preserves their assertions and bank ownership.
+No installation path selects the candidate.
+
+Supplemental controls in `evals/rust_port/maintainer_sent.py` retain raw bytes,
+application headers, Python default separators/ASCII escapes, float spelling,
+named UUID/timestamp producers and proof truthiness. The ordered-object fixture
+is not a database JSONB-order proof. Real SQL/JSONB/gate corpus replay, shared
+PostgreSQL integration, cold/TLS/recovery and both-platform acceptance remain
+pending. The generic earlier HTTP comparator is not the exact-byte sent gate.
+
 ## Parity rows
 
 BASE and RULES record the completed phase 0 instruments and measurements; historical evidence from PR #540 retains its original pin. Phase 0b evidence review and all ten CI checks passed at 9a62ed02, as recorded in PORT-STATE.md; subsequent PR updates require fresh review and current-merge-ref CI. Broader production behavior rows remain deferred; named retirements and scoped substitutions are explicit. The SDK preflight retirement is authorized by the 2026-10-05 phase 2 decision; other unfinished behavior remains deferred. `P` means real process/wire eligible nodes; `I` means Python internals requiring additive wire cases or Rust unit equivalents; `A` means artifact/static contract. Paths below are repository-relative.

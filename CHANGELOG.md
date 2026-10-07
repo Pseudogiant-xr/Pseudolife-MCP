@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Added (2026-10-07 — maintainer sent source preparation)
+
+- Prepare the experimental native maintainer sent projection and response
+  serializer, with additive exact-byte instrument controls. The HTTP listener,
+  PostgreSQL integration and external pytest routing remain incomplete; no
+  endpoint parity or runtime validation is claimed.
+
 ### Changed (2026-10-07 — native version admission and warmed CLI timing)
 
 - The experimental native `version` command reports an installed runtime only
