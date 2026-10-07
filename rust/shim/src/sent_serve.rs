@@ -122,7 +122,7 @@ fn header<'a>(request: &'a Request<Incoming>, name: &str) -> Option<&'a [u8]> {
             .headers()
             .get_all(name)
             .iter()
-            .last()
+            .next_back()
             .map(|v| v.as_bytes())
     } else {
         request.headers().get(name).map(|v| v.as_bytes())
@@ -169,21 +169,19 @@ fn valid_name(name: &str) -> bool {
 async fn refresh(state: &State) {
     let started = Instant::now();
     let mut slot = state.snapshot_session.lock().await;
-    if slot.is_none() {
-        if let Some(dsn) = &state.config.dsn {
-            *slot = pg::Session::open(dsn).await.ok();
-            if let Some(session) = slot.as_ref() {
-                if session
-                    .client()
-                    .batch_execute("SET statement_timeout = '5s'")
-                    .await
-                    .is_err()
-                {
-                    if let Some(session) = slot.take() {
-                        let _ = session.close().await;
-                    }
-                }
-            }
+    if slot.is_none()
+        && let Some(dsn) = &state.config.dsn
+    {
+        *slot = pg::Session::open(dsn).await.ok();
+        if let Some(session) = slot.as_ref()
+            && session
+                .client()
+                .batch_execute("SET statement_timeout = '5s'")
+                .await
+                .is_err()
+            && let Some(session) = slot.take()
+        {
+            let _ = session.close().await;
         }
     }
     let Some(session) = slot.as_ref() else {
@@ -571,10 +569,10 @@ async fn handle(
         ));
     }
     let mut connection = state.session.lock().await;
-    if connection.is_none() {
-        if let Some(dsn) = &c.dsn {
-            *connection = pg::Session::open(dsn).await.ok();
-        }
+    if connection.is_none()
+        && let Some(dsn) = &c.dsn
+    {
+        *connection = pg::Session::open(dsn).await.ok();
     }
     let Some(session) = connection.as_ref() else {
         return Ok(error(503, "coordination_unavailable"));
@@ -586,10 +584,10 @@ async fn handle(
             &[&"maintainer", &"maintainer", &count],
         )
         .await;
-    if result.is_err() {
-        if let Some(session) = connection.take() {
-            let _ = session.close().await;
-        }
+    if result.is_err()
+        && let Some(session) = connection.take()
+    {
+        let _ = session.close().await;
     }
     let result = result
         .map_err(|_| ())

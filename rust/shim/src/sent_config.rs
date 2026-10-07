@@ -115,11 +115,11 @@ fn ambiguous(value: &str) -> bool {
             return true;
         }
     }
-    if value.parse::<f64>().is_ok() {
-        if let Some((mantissa, exponent)) = value.split_once(['e', 'E']) {
-            // PyYAML's 1.1 float resolver needs both a dot and an exponent sign.
-            return !mantissa.contains('.') || !exponent.starts_with(['+', '-']);
-        }
+    if value.parse::<f64>().is_ok()
+        && let Some((mantissa, exponent)) = value.split_once(['e', 'E'])
+    {
+        // PyYAML's 1.1 float resolver needs both a dot and an exponent sign.
+        return !mantissa.contains('.') || !exponent.starts_with(['+', '-']);
     }
     false
 }
