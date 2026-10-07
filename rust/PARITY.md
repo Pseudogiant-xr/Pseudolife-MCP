@@ -932,6 +932,9 @@ the registration reply's `agent_id` and `credential`, their subsequent
 rows' `agent_id` plus the chain links derived from that identity. Each arm
 must receive a canonical UUID4 hex ID and a 43-character URL-safe token;
 the stored credential hash must equal SHA-256 of its actual issued token.
+Each arm also validates the exact display name produced by its label, one
+space and its own `agent_id[:8]` suffix; only that eight-character UUID echo
+is semantic.
 Every captured audit chain must independently verify its original payload
 text, hashes and links before semantic comparison, with exact event kinds,
 order, sequence and all other columns. Request-body bytes, CLI streams,
