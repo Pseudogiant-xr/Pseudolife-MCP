@@ -1,0 +1,14 @@
+# Preserve exact producing payload bytes and recorded hashes.
+affected-checks.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+functional-policy-evidence.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+measurement-evidence.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+MEASUREMENTS.md -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-check-measurement-driver-v2.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-fresh-fixture-credential.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+phase2d-lease-final-list-measurement-driver-v2.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+policy-inputs.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+PRODUCER-INVENTORY.md -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+producing-invocations.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+README.md -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+retained-closed-stdout-capture.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+source-image-binding.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

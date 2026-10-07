@@ -447,3 +447,59 @@ impl Drop for Shim {
 pub fn meta() -> Value {
     json!({"io.modelcontextprotocol/protocolVersion":"2026-07-28", "io.modelcontextprotocol/clientCapabilities":{}, "io.modelcontextprotocol/clientInfo":{"name":"eof-contract","version":"1"}})
 }
+
+/// Disposable lease homes retain the local and board tests' original profiles.
+pub struct LeaseHome(pub std::path::PathBuf);
+impl LeaseHome {
+    fn create(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+    pub fn new() -> Self {
+        Self::create("native-lease-test")
+    }
+    pub fn board() -> Self {
+        let home = Self::create("lease-board-test");
+        std::fs::write(home.0.join("instance.id"), b"0123456789ab\n").unwrap();
+        home
+    }
+    fn base_command(&self, url: &str) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
+        command.env_clear();
+        for key in ["SYSTEMROOT", "WINDIR"] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        command
+            .env("HOME", &self.0)
+            .env("USERPROFILE", &self.0)
+            .env("CUDA_VISIBLE_DEVICES", "-1")
+            .env("OMP_NUM_THREADS", "1")
+            .env("MKL_NUM_THREADS", "1")
+            .env("PSEUDOLIFE_LEASE_LOCK_DIR", &self.0)
+            .env("PSEUDOLIFE_SUITE_LOCK_DIR", &self.0)
+            .env("PSEUDOLIFE_MCP_DAEMON_URL", url)
+            .env("PSEUDOLIFE_MCP_NO_SPAWN", "1");
+        command
+    }
+    pub fn command(&self) -> Command {
+        let mut command = self.base_command("http://127.0.0.1:1");
+        command.env("LOCALAPPDATA", self.0.join("local"));
+        command
+    }
+    pub fn board_command(&self, url: &str) -> Command {
+        let mut command = self.base_command(url);
+        command.env("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer");
+        command
+    }
+    pub fn call(&self, args: &[&str]) -> std::process::Output {
+        self.command().args(args).output().unwrap()
+    }
+}
+impl Drop for LeaseHome {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).unwrap();
+    }
+}

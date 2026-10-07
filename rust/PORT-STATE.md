@@ -1020,3 +1020,420 @@ as do locale/default or other output encodings and non-UTF-8/surrogate argv.
 The candidate is not installed; other CLI modes retain their existing gates.
 Owned fixtures and process subtrees were cleaned up. These CPU cells claim no
 new optional stdio proof or full Python suite, and no GPU/model work.
+
+## Phase 2b native lease candidate
+
+Native `lease check`, `lease list` and `lease run` have a local implementation
+candidate. Operator actions remain deferred. Targeted Windows proofs against
+the historical Python 0.16.1 pin cover raw-surrogate identity, held/free names,
+exact 8191/8192/8193-byte output boundaries and nested-run precedence. The latest
+focused repair has 22 matching byte pairs, three matching closed-check stream
+pairs and 72 rejected candidate-output controls; two traceback cases use the
+explicitly deferred presentation boundary in PORTING. Earlier receipts retain
+their original candidate identities, including the corrected distinction
+between authenticated peer observations and local no-board observations.
+
+The seven native lease files contain 2,884 physical production lines, including
+693 JSON compatibility-helper lines, against 1,889 in the pinned Python lease
+module (1.52673). Test modules, assets and dispatch are excluded; the earlier
+2,996-line count included 112 test lines. The Python denominator includes
+deferred operator modes. Current-master and shared-helper source integration uses Python
+0.17.0/schema55, and committed helper admission passes. The latest review repairs
+cover run-option ambiguity and ISO holder timestamps with 25 exact byte pairs
+and 100 rejected output controls. A subsequent CPython grammar comparison fixes
+signed-year refusal and numeric week-date separator selection: 2059 sampled
+holder strings, six lease units and the affected process test pass. Its 30
+focused public pairs match exactly, with 120 output controls rejected; the
+previous binary differs in 14 of those pairs. Independent review then found
+seven UTC-marker/NUL counterexamples. The focused repair passes 2113 sampled
+strings, six lease units and the affected process test; all 22 focused public
+pairs match, including those seven failures, with 88 output controls rejected.
+These are focused Windows results, not complete grammar or cross-platform
+acceptance. Original integration preparation retained 230 passed, one failed and
+two deselected checks before the separate committed helper-admission repair.
+Ten surrogate-name list observations match
+the failure exit, terminal exception and unchanged state, but their full Python
+tracebacks remain unmatched; this third case is outside the two approved
+presentation exclusions. Fresh repair review, both-platform real daemon/storage
+and signal acceptance, CI and paired measurements remain pending. Historical
+receipts retain their original source and runtime identities. The CLI-LEASE
+parity row remains deferred.
+
+The first disposable Python 0.17.0/schema55 Windows check/list/run/release proof
+matches four process pairs using the fixture's environment bearer. Its earlier
+file-source attempt remains a failed board proof: Windows `chmod` did not make
+the token file owner-only. Fixture preparation now calls the pinned production
+secure token writer and binds the executed credentials module. File-source
+writer/read admission and targeted fixture checks pass; the same four-cell
+real-daemon proof on a committed helper head and fresh review remain pending.
+
+At `07761381`, the Windows token-file proof passes four real-daemon pairs and
+16 output controls without an environment bearer; owned cleanup is verified.
+Independent review approves the token-writer change at that head. The first
+Linux build exits 101 because the Unix lock path names a nonexistent Rustix
+`ACCES` constant. Successor `8a1ead9b` uses `ACCESS`; its Linux build and six
+lease units pass, but the Unix signal test fails compilation under its existing
+`forbid(unsafe_code)` lint. This candidate uses safe Rustix signal and liveness
+APIs while preserving that lint and the test assertions. Linux fmt and all-target
+compilation pass, followed by six lease units, 13 lease-board tests and 15
+lease-CLI tests. The real-daemon proof on a committed successor remains pending.
+Both original compiler failures are retained.
+
+At `961d60e5`, the Linux TOKEN_FILE proof records four mismatching pairs:
+the fixture resolves the virtualenv executable symlink and invokes base Python,
+which lacks httpx and falls back locally while native board access succeeds.
+Raw counterexamples and complete owned cleanup are retained. This fixture repair
+preserves the invocation path and checks resolved bytes and ownership separately.
+A disposable process roundtrip observes the intended 0.17 runtime and exact raw
+streams and file effects. Targeted checks pass on Linux (147) and Windows (143,
+with four POSIX-only skips). Committed real-daemon recapture and the fifteen
+affected Linux help/unknown-command rows remain pending. Comparison policy and
+traceback scope are unchanged; CLI-LEASE remains deferred.
+
+At `f4bf8a83`, the committed Linux token-file path matches four real-daemon
+pairs and rejects 16 output controls, with the installed 0.17 virtualenv,
+httpx, board access and owned cleanup observed. This point-in-time proof does
+not close independent review R1: preparation could select an owned copy while
+retargeting the original executable symlink to equal bytes. This candidate
+retains the original resolved target independently through preparation, context
+entry and capture. All four new refusal cases fail on the preceding helper and
+pass after repair. A changed helper return shape initially broke four existing
+measurement tests; restoring its three-value API closes those failures. The
+combined targeted checks pass on Linux (129) and Windows (121, with eight
+Unix-only skips). R1 remains pending fresh successor review; no additional
+daemon proof or affected help-row recapture has run on this repair. CLI-LEASE
+and the third traceback scope decision remain deferred.
+
+The lease candidate now integrates the reviewed version dependency `804e829e`,
+including its startup contract, historical evidence packet and runtime erratum.
+The three-value preparation API, secure token writer, complete helper inventory,
+process context and original/selected target checks are retained. Both sets of
+invocation regressions remain: four lease context/owned-copy refusals and the
+version snapshot, preparation, prelaunch and postcapture refusals. The aligned
+targeted selection passes 133 checks on Linux and 121 on Windows, with twelve
+Unix-only skips; it includes the existing measurement API tests. The version
+invocation repair has scoped independent approval at `804e829e`; fresh review of
+this aligned lease tree remains pending. These checks do not establish whole-mode
+acceptance, recapture the affected Linux help rows, extend the two approved
+traceback exclusions or provide new daemon/timing evidence.
+
+At `b1359c8f`, a bounded Linux proof against the disposable Python 0.17.0/schema55
+daemon passes one basic check pair with four controls and three FIFO process
+pairs. Both arms observe waiter one and then waiter two queued behind a holder,
+and execute holder, waiter one, waiter two in that order. Process streams, exits
+and home-file bytes match; raw queue identities and enqueue times are retained
+without cross-arm equality claims. Post-release checks show no holder or queued
+waiter, and owned processes, database and homes are cleaned up. This is a
+point-in-time Linux FIFO proof, not Windows, timeout, capacity, renewal, signal
+or timing acceptance. Independent review of the complete candidate at that head
+then found three blocking defects: mutable environment receipts, host timestamp
+formatting and non-ASCII registration headers. Their successor repair is below;
+the historical proof does not establish acceptance of that successor.
+
+The successor repairs the original counterexamples. The fixture retains an independent
+launch environment and refuses changes after capture and context exit/poststate
+collection; eleven watched regressions fail before repair on each platform.
+Focused fixture and compatibility checks pass 144 tests on Linux and 132 on
+Windows, with twelve Unix-only skips. Native timestamp formatting now uses each
+host's CRT conversion and formatting, including its actual range and year
+padding. Registration retains JSON string codepoints and refuses non-ASCII
+instance headers before sending, including unpaired surrogates. Thirty-five
+owned-peer public pairs match exactly per platform, including the original five
+review counterexamples, two surrogate-header cases and 28 timestamp boundaries.
+Native lease checks pass 36 tests on Linux and 37 on Windows; fmt and locked
+builds pass on both. These are bounded repair checks with actual matching request
+traffic, not a new real-daemon proof or complete mode acceptance. Fresh combined
+review, committed successor proofs, current CI and measurements remain pending;
+the third traceback exclusion remains unapproved and CLI-LEASE stays deferred.
+
+Independent successor review closes the environment-receipt finding but retains
+two code blockers. On Linux, a successful host time conversion can yield a year
+that Python rejects when converting its tuple for formatting; check must return
+the exact exit-70 error without a partial report. Python also transmits ASCII
+DEL in a malformed registration reply's instance fields, while the native HTTP
+header type refuses it before transport, changing requests, exit and lock state.
+Raw counterexamples from both platforms remain retained. A proposed DEL-case
+deferral is unapproved; no unchecked header construction or comparison exception
+is adopted. This candidate remains local pending repair and fresh review.
+
+The version dependency is subsequently integrated through `db0d59cb`, retaining
+its reviewed fifteen-row Linux receipt and independent environment-snapshot
+repair. The fixture merge preserves lease process contexts and all original and
+selected executable checks, and checks the admitted environment immediately
+after context exit as well as after capture and poststate collection. Combined
+compatibility checks pass 186 tests on Linux and 174 on Windows, with twelve
+Unix-only skips; one actual disposable-child cell also passes on each platform.
+These fixture checks do not close the remaining native clock/header findings or
+the mode's acceptance gates.
+
+The remaining C-int-year repair now propagates the host formatting error through
+check and queued-run callers: check returns its exact exit-70 error before any
+report, JSON bypasses formatting, and queued run takes the Python-compatible
+local fallback. A new public corpus matches all seventeen Windows pairs and
+fifteen of seventeen Linux pairs. The two Linux list rows match exit 1, empty
+stdout, the terminal OverflowError, file state and captured request projections;
+their full Python tracebacks remain unmatched and their proposed presentation
+exclusion is unapproved. The DEL-header and earlier surrogate-name traceback
+boundaries also remain unresolved. Seventeen focused native tests and locked
+all-target shim clippy pass on each host; earlier compiler/lint failures remain
+recorded. These uncommitted-source repair checks do not substitute for committed
+successor acceptance. Fresh review and the broader mode gates remain pending.
+
+At `c4fc33593d55983b127ccf537307ff9c838e75ee`, tree
+`88446f4bb2e3638ef2c4b693cbf7fc5795caeecd`, the bounded committed TOKEN_FILE
+path passes four real-daemon Python/native pairs and rejects all 16 output/file
+controls on each OS. Genuine Python 0.17.0/schema 55 at the oracle above is used;
+the check/list observations show available board, no holder and zero queued
+waiters, and the run preserves its exact child streams and exit 3. Post-release
+check is free again, with owned PostgreSQL, daemon, children, database and homes
+cleaned up. Local untracked evidence is `lease-c4fc-committed-proof-result.json`
+and `lease-c4fc-{windows,linux}-proof.json`. This bounded path does not establish
+the remaining host/storage/concurrency/recovery/signal gates.
+
+The existing CLI instrument at
+`127e04ed1c7e5902c77e8b0f83873825a2822b81`, tree
+`381a8c5a230ab5a75cea715dcf7b040d1942584d`, measures only the retained positive
+empty/free `lease check sample --json` TOKEN_FILE case. Each OS completes three
+repeats of ten cold-start-to-exit samples per arm, alternating arms and retaining
+the existing repeat floors; 1x1 plumbing smokes remain separate. Independent
+expected controls retain 286 Windows bytes and 269 Linux bytes, exit 0, empty
+stderr and exact unchanged token/instance home bytes. Four field mutations are
+rejected, independent endpoint state is unchanged and owned cleanup is verified.
+Timed rows omit raw stdout/stderr/exit and post-file payloads: exact recorded
+arm-level controls are distinct from the instrument's programmatic per-invocation
+output/environment/home comparisons before a timing row is appended.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `lease-measurement-windows-3x10.json` | `5652af321e77cbca9b31a9b3e837eb124f763c14fc9943e97d04e161a5596317` |
+| Linux | `lease-measurement-linux-3x10.json` | `4aecc3583c684e69dadb742452cf8219ab6fa9b6673cb0c55c410bc823a6dac1` |
+
+Native executable SHA256 is
+`072490df14742c80f9aa597c4511649e40dd686d236cd189747841eba97e0020` on Windows
+and `368e7b120ac92a5a52e8f4fa24a411ca14af72c245428895c08d701bb94e08bd` on Linux.
+Retained raw Rust/Cargo hashes match the prior per-OS source maps, and native
+executable hashes are unchanged; the Linux successor preserves the original
+cache and ELF.
+These are debug measurements with incomplete producing-invocation/profile
+attestation, not release-profile evidence or a general speed claim. Local
+`lease-measurement-results.md` and `lease-measurement-audit.json` record the
+descriptive distributions, helper/runtime bindings and retained-row limitations.
+
+Full CLI-LEASE acceptance remains deferred. Pending groups 1 (ten surrogate-name
+list traceback cells), 3 (D3 ASCII DEL registration-reply headers) and 4 (two
+Linux C-int-year list traceback cells) remain unapproved, preserving all twelve
+traceback cells. No unchecked header construction, normalization or new traceback
+exclusion is adopted. Next action is the DEL compatibility/scope decision and
+the remaining traceback and broader acceptance gates, including hosted CI;
+this check-only timing does not close `lease list` or `lease run` acceptance.
+
+The independently reviewed list instrument at
+`073c975e18c1ce4922ca84d0e6293ab5c0a9bb5f`, tree
+`f1a7d2d93a69dac0a78a18a8542480266408f71e`, extends measurement to exactly
+`lease list --json` on an available empty owned board, using the retained
+TOKEN_FILE and instance bytes. Windows and Linux each complete a separate 1x1
+plumbing smoke and three repeats of ten alternating cold-start-to-exit samples
+per arm. Final arm-level controls retain 318 Windows bytes and 323 Linux bytes,
+exit 0, empty stderr, the actual owned URL/lock-directory path and unchanged
+home bytes. Four field mutations are rejected per receipt; independent endpoint
+bytes before/after agree and owned PostgreSQL, database, daemon, children and
+private-home cleanup is verified. Retained native binaries and per-OS raw
+Rust/Cargo source maps above remain unchanged; current instrument/helper/runtime
+bindings were checked against both native checkouts and the pinned oracle.
+
+| OS | Local untracked final receipt | Receipt SHA256 |
+| --- | --- | --- |
+| Windows | `lease-list-measurement-windows-3x10.json` | `52fefa6a010ba004abedacabcf93ee98fe3f1f6181b72fe9573602d448fe4619` |
+| Linux | `lease-list-measurement-linux-3x10.json` | `e37502bcb9eb12fbdb82bede34cb78834ca66dd4f4acb6a6f2bf2b59b88b3ed6` |
+
+Local untracked `lease-list-measurement-results.md` and
+`lease-list-measurement-selfcheck.json` retain receipt hashes and recomputed
+metrics. Timed rows omit raw stdout/stderr/exit and post-home payloads: exact
+recorded arm-level controls remain distinct from the instrument's programmatic
+per-invocation response/environment/home comparisons. These are debug-only
+measurements with incomplete producing-invocation/profile attestation; no
+release-profile evidence or general speed claim follows.
+
+Successful-run timing remains deferred under pending group 13. The unchanged
+existing exit-0 child writes `time.time()` into `ran.json`; the local untracked
+`lease-list-run-windows-first.json` preserves both exit-0 captures, exact empty
+streams, released leases and the sole raw post-home mismatch at that timestamp.
+The narrow comparison-policy question remains unanswered; no timestamp exception
+or normalization is adopted. Earlier exit-3 proof bytes remain unchanged.
+Full CLI-LEASE acceptance, groups 1/3/4 (all twelve retained traceback cells and
+DEL headers), broader acceptance gates and hosted CI remain outstanding; this
+bounded empty-board list timing does not close them.
+
+### Lease phase 2c preparation at a6cdf024
+
+Draft #602 remains deferred. PORTING.md names the three approved policies and
+PARITY.md lists all 23 retained instances: 14 historical traceback-contract
+matches, eight forbidden-header cases requiring fatal refusal implementation,
+one successful-child clock case incomplete without own invocation windows and
+a second oracle run. `rust/lease-policy-cases.json` binds the retained receipt
+basenames/hashes and exact terminal/diagnostic contracts. These decisions
+supersede the preceding historical notes that called groups 1/3/4/13 unapproved.
+New static preparation tests establish only the offline checker. No captures,
+measurements, rebases, builds or current-head CI proof were performed. Next:
+wait for the version branch to become ported, implement fatal refusal, wire
+named comparison scopes, and rebind final-head Windows/Linux receipts before
+any row promotion. Existing tests and eval instruments remain unchanged.
+
+### Lease phase 2d integration scope
+
+The lease candidate is integrated onto corrected version base `5220b5ee`.
+Its Parity job now selects the lease corpus as well as help and version. The
+Chrono timestamp substitution in PARITY.md preserves ordinary local producer
+output and JSON values, displays `?` for unsupported dates, and excludes
+Windows CRT-only timezone overrides. Original clock failures and the phase 2c
+policy ledger remain historical evidence; no CLI-LEASE row is promoted.
+
+Still deferred are fatal forbidden-header refusal and its executable corpus,
+successful-child invocation-window comparison, shared lease fixture/help drift
+guards, explicit Windows unlock and Ctrl-C coverage, and the disposition of
+`hold`, `break` and `delegate`. Those three actions currently return a deferred
+error rather than dispatching to Python. Full mode, final-head hosted,
+measurement and independent-review gates require separate closure.
+
+### Lease shared fixture and help guard follow-up
+
+The shared lease Home fixture and help drift guards were added at `cb0d89fd`.
+All eight committed help/usage assets are compared with the genuine pinned
+Python argparse output at `3c01bb31`, using `COLUMNS=80`. Existing Rust test
+assertions are retained; the fixture move changes only their setup names.
+Windows checks at that helper head passed nine Python guards, 15 lease CLI
+tests and 17 lease board tests. Linux checks at the same head passed nine
+Python guards, 15 lease CLI tests and 16 lease board tests.
+
+This closes the shared Rust fixture and help drift guard item in the preceding
+integration scope. The full source review at `d8a936eb` remains bound to that
+candidate. The new carrier merges version `181a50d1` and inherits its users
+dependency removal: `rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`,
+`rust/shim/src/board/state.rs` and `rust/shim/src/credentials.rs` change, and
+the Unix account resolver, its tests and the comparison/evidence files are
+added. The merged Cargo workspace retains the lease Chrono version requirement
+and its Tokio signal and Windows I/O features.
+The version section's 341-path counts describe the version carrier alone.
+
+Lease-owned CLI source, assets, shared Home/help guards and CLI/measurement
+instruments remain unchanged from `cb0d89fd`; original Python, tests and
+conftest remain unchanged. Earlier clock, version/dispatch, disposable-cell,
+instrument, R1 and help executions retain their `6016a3ce`, `5ba6f84a`,
+`06a2bbae`, `7a4a6976` and `cb0d89fd` source bindings. They do not validate
+the inherited users changes or this new combined tree. No combined-head
+execution, capture or timing is claimed; current hosted CI and fresh review
+remain pending. CLI-LEASE stays deferred: fatal forbidden-header refusal and
+executable corpus, successful-child own invocation windows and second oracle
+capture, explicit Windows unlock and Ctrl-C, `hold`/`break`/`delegate` policies,
+the final both-OS/hosted matrix and measurements still require closure.
+
+
+### Lease master-forward and forbidden-header candidate
+
+Master `df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff` is integrated by ordinary
+merge, retaining both historical evidence sections, lease Chrono/platform
+features and the LF help-asset rule. The Windows lease child lookup now uses
+master's `lifecycle::find_executable` after the `which` dependency removal;
+lookup failure still falls back to the original command. The lockfile delta
+only removes that dependency and its unused package entry. Original Python
+source and original `tests/`/conftest bytes are unchanged.
+
+The fatal forbidden-header candidate and its additive public-process corpus
+close only the implementation gap for the approved header policy. Prior
+`49342a21` hosted results remain historical on the old `181a50d1` base. New
+local evidence retains its own exact source and executable identities; fresh
+review and successor hosted checks are separate. CLI-LEASE stays deferred.
+Successful-child own invocation windows and second oracle capture, explicit
+Windows unlock/Ctrl-C, measurements and final acceptance remain pending.
+
+The header corpus also covers combined malformed daemon URLs with selected
+environment/private-file bearers and incomplete registration replies. Forbidden
+admitted headers preempt ordinary fallback; otherwise URL-first credential
+diagnostics, private-file security and missing/empty address behavior remain.
+Raw ordinary controls retain non-ASCII and surrogate reply behavior.
+
+`hold`, `break`, `delegate` and `designate` remain Phase 4. This native
+candidate loses those four actions until Phase 4; each must explicitly refuse
+with exit 1 and a diagnostic containing `deferred in this candidate`, without
+Python or silent fallback. A future CLI-LEASE-core check/list/run row may be
+accepted only through its own gates, and full CLI-LEASE requires every action
+to be native. This candidate makes neither promotion.
+
+### Lease final7e functional and policy evidence; hosted acceptance pending
+
+Accepted master `0b46bb8e2010cf0e428dd650b98cedb165ad3d75` is integrated by
+ordinary merge, preserving CLI-VERSION acceptance. Actual Windows/Linux
+execution remains bound to `7e6927b7b72db62569281d3477dc8e8924c82292`, tree
+`34b24d60d854e28448079bfc0c8e8eea83551d47`; evidence/docs/comparison
+additions through `04f0532b` leave that Rust production/Cargo/assets component unchanged.
+
+[Committed bounded evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md)
+records both-OS successful-child own-window/repeat proof and six controls,
+exact exit-3 child, four deferred refusals, independent board release and
+lock reacquisition, final Windows Ctrl-C with zero helper kills, and the
+actual four warmed bare check/list3x10 measurements. Every producing whole
+driver exited 0 and checked fixture cleanup. All 16 remaining policy cells
+per OS are accepted in their named scope, with 80 captured controls per OS;
+the two Linux extreme-text raw 1/0 outcomes pass only the explicit PARITY
+rule. Earlier unresolved interpretation and raw failures remain historical,
+without rewriting observations. The additional offline checker accepts 32
+retained cells and rejects 32 wrong-exit controls. Successful-run timing is
+unmeasured. Numerical claims are limited to the committed samples/recipes;
+the removed historical untracked timing table is not restored.
+
+Historical physical lease production lines at 7e total **2,932** across the same
+seven files, before their test-only modules: args352, board369, json693,
+lock240, mod76, run395 and view807. Comments/blanks count; assets, dispatch,
+fixtures and test modules do not. The historical Python lease_cli denominator
+is still 1,889, including deferred operator actions: 2,932/1,889=1.55214. Shared
+Python os_lock adds 147 lines; including it gives 2,932/2,036=1.44008. The earlier
+2,884/1,889 figure retains its own historical source binding.
+
+The final hosted lane still supplies both feature configurations, general/header
+corpora and current-head routed help/version checks. Original direct lease tests
+remain unchanged Python baselines, not Rust-routed lease acceptance.
+Normal hosted Linux full/lite lanes through `ops/ci_tests.sh` supply those Python
+baselines on PRs; their outgoing-head result remains pending. Fresh final
+review and exact-master-ref CI remain pending. CLI-LEASE-core(check/list/run)
+and full CLI-LEASE stay deferred; hold/break/delegate/designate explicitly
+refuse exit 1 with `deferred in this candidate`, without Python/silent fallback,
+until Phase 4. Locale/default-encoding, Windows CRT-only TZ, installation and
+full mode acceptance remain outside this bounded evidence.
+
+Historical forbidden-header RED/effect failures, malformed-URL/partial reply
+counterexamples, old-base hosted help/parser failures, mounted POSIX private-home
+failure and cached CRLF assets remain retained. Frozen68's clock cell matched,
+but its whole Windows driver failed an assertion; its continuation separately
+failed, so neither whole run passed. Final7e proof has separate actual identities.
+
+### Lease producer reduction successor; acceptance pending
+
+The successor replaces the custom UTF-16/32/surrogate/nonfinite JSON decoder
+with finite UTF-8 serde_json admission and narrows suite holder dates to the
+suite writer's seconds-resolution ISO shape. The synthetic CPython ISO fixture
+is removed. Named HTTP reply refusal preserves fail-closed malformed reply
+handling; successful JSON parsing retains forbidden-header admission and private
+credential-file security. Opaque arguments use args_os with a clean refusal,
+board wait timeouts use a typed variant, and POSIX child signals use rustix.
+Native diagnostics replace fabricated interpreter/client exception strings;
+legacy assertion substitutions require their explicit scoped disposition.
+
+Prior final7e execution and measurements remain bound to their old runtime.
+The [source-bound b3 bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md)
+records actual both-OS targeted checks, 192-cell header corpora, admitted policy
+cells, successful/nonzero child and release evidence, Windows Ctrl-C and four
+recaptured check/list measurements. Its executed head is
+`b3e36f707d4e8b038c258b5378c064d62b4d977a`, tree
+`6730038c3e4b40399c6493060293670ffca9be61`. The publishing successor changes
+evidence/documentation and unused test tuple scaffolding; production inputs
+remain identical, and hosted acceptance and fresh review remain pending.
+CLI-LEASE-core(check/list/run) and full CLI-LEASE remain deferred, and
+hold/break/delegate/designate retain their explicit exit-1 Phase 4 refusal.
+
+The reduced successor's physical production count is **2037** across the same
+seven lease files, before test-only blocks: args346, board363, json22, lock240, mod64, run398, view604.
+Comments/blanks count; assets, dispatch and tests do not. Against the historical
+1,889-line Python lease module this is 2037/1,889=1.07835; including its
+147-line OS-lock helper gives 2037/2,036=1.00049. The Python denominator
+includes deferred actions. These are source size counts, not runtime or parity
+measurements.

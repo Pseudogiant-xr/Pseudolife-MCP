@@ -62,3 +62,11 @@ integer results and subscription acknowledgement order. They supplement the
 public stdio differential lane; they do not establish complete parity. Board
 and channel acceptance remains subject to their separate implementation and
 validation streams.
+
+Native lease check/list/run have a [bounded functional candidate and evidence](../evals/results/rust-phase2d-lease-7e6927b7/README.md),
+including both-OS child/status/release and scoped policy checks, Windows Ctrl-C
+and committed debug check/list samples. Final hosted acceptance and review
+remain pending; CLI-LEASE-core is not yet ported. Full mode stays deferred:
+hold/break/delegate/designate return exit 1 with `deferred in this candidate`,
+without Python or silent fallback. This candidate loses them until Phase 4
+and remains uninstalled.

@@ -1,0 +1,367 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "I3-0-text",
+      "argv": [
+        "lease",
+        "list"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJcdWQ4MDAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-0-json",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJcdWQ4MDAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-1-text",
+      "argv": [
+        "lease",
+        "list"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJhYlx1ZGZmZiIsImhvbGRlciI6eyJsYWJlbCI6ImgifX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-1-json",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJhYlx1ZGZmZiIsImhvbGRlciI6eyJsYWJlbCI6ImgifX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-2-text",
+      "argv": [
+        "lease",
+        "list"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJcdWQ4MDBcdWQ4MDAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-2-json",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJcdWQ4MDBcdWQ4MDAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-3-text",
+      "argv": [
+        "lease",
+        "list"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiLtoIDtsIAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-3-json",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiLtoIDtsIAiLCJob2xkZXIiOnsibGFiZWwiOiJoIn19XX0=",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-4-text",
+      "argv": [
+        "lease",
+        "list"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJlbW9qaS3wn5iALVx1ZDgwMCIsImhvbGRlciI6eyJsYWJlbCI6ImgifX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "I3-4-json",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOlt7Im5hbWUiOiJlbW9qaS3wn5iALVx1ZDgwMCIsImhvbGRlciI6eyJsYWJlbCI6ImgifX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "list-expected-extreme",
+      "argv": [
+        "lease",
+        "list",
+        "resource"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg=="
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOiBbeyJuYW1lIjogInJlc291cmNlIiwgImhvbGRlciI6IHsibGFiZWwiOiAiaG9sZGVyIn0sICJleHBlY3RlZF9lbmQiOiA2Ljc3Njc5NzYyMzM1MzI4ZSsxNiwgInF1ZXVlZCI6IDAsICJxdWV1ZSI6IFtdfV19",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential.",
+      "expected_text_lines": [
+        "board: $URL",
+        "lease resource: held by holder, expected end ?",
+        "  local lock: absent",
+        "no local lease locks in $HOME/.pseudolife-mcp/locks"
+      ],
+      "expected_text_rule": "Substitute only actual owned URL/home and host newline; compare complete bytes."
+    },
+    {
+      "id": "list-waiter-extreme",
+      "argv": [
+        "lease",
+        "list",
+        "resource"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg=="
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOiBbeyJuYW1lIjogInJlc291cmNlIiwgImhvbGRlciI6IHsibGFiZWwiOiAiaG9sZGVyIn0sICJleHBlY3RlZF9lbmQiOiBudWxsLCAicXVldWVkIjogMSwgInF1ZXVlIjogW3sibGFiZWwiOiAid2FpdGVyIiwgImVucXVldWVkX2F0IjogNi43NzY3OTc2MjMzNTMyOGUrMTZ9XX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential.",
+      "expected_text_lines": [
+        "board: $URL",
+        "lease resource: held by holder",
+        "  queue (1): waiter since ?",
+        "  local lock: absent",
+        "no local lease locks in $HOME/.pseudolife-mcp/locks"
+      ],
+      "expected_text_rule": "Substitute only actual owned URL/home and host newline; compare complete bytes."
+    },
+    {
+      "id": "approved-timeout-overflow-traceback",
+      "argv": [
+        "lease",
+        "run",
+        "resource",
+        "--no-board",
+        "--timeout",
+        "999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "--",
+        "$PINNED_PYTHON",
+        "-c",
+        "import os,pathlib;pathlib.Path(os.environ['HOME'],'child-sentinel').write_bytes(b'child-ran')"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg=="
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": false
+    },
+    {
+      "id": "C3-large-list-closed-stdout",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg==",
+        ".pseudolife-mcp/locks/lease-000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-001-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-002-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-003-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-004-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-005-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-006-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-007-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-008-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-009-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-010-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-011-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-012-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-013-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-014-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-015-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-016-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-017-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-018-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-019-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-020-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-021-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-022-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-023-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-024-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-025-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-026-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-027-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-028-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-029-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-030-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-031-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-032-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-033-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-034-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-035-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-036-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-037-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-038-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-039-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-040-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-041-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-042-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-043-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-044-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-045-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-046-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-047-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-048-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-049-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-050-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-051-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-052-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-053-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-054-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-055-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-056-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-057-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-058-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-059-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-060-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-061-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-062-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-063-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": "",
+        ".pseudolife-mcp/locks/lease-064-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lock": ""
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": false
+    },
+    {
+      "id": "list-expected-json",
+      "argv": [
+        "lease",
+        "list",
+        "resource",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg=="
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOiBbeyJuYW1lIjogInJlc291cmNlIiwgImhvbGRlciI6IHsibGFiZWwiOiAiaG9sZGVyIn0sICJleHBlY3RlZF9lbmQiOiA2Ljc3Njc5NzYyMzM1MzI4ZSsxNiwgInF1ZXVlZCI6IDAsICJxdWV1ZSI6IFtdfV19",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    },
+    {
+      "id": "list-waiter-json",
+      "argv": [
+        "lease",
+        "list",
+        "resource",
+        "--json"
+      ],
+      "stdin_b64": "",
+      "pre_files_b64": {
+        ".pseudolife-mcp/locks/instance.id": "MDEyMzQ1Njc4OWFiCg=="
+      },
+      "normalizations": [],
+      "token_file_unset": true,
+      "loopback_peer_required": true,
+      "raw_peer_reply_b64": "eyJsZWFzZXMiOiBbeyJuYW1lIjogInJlc291cmNlIiwgImhvbGRlciI6IHsibGFiZWwiOiAiaG9sZGVyIn0sICJleHBlY3RlZF9lbmQiOiBudWxsLCAicXVldWVkIjogMSwgInF1ZXVlIjogW3sibGFiZWwiOiAid2FpdGVyIiwgImVucXVldWVkX2F0IjogNi43NzY3OTc2MjMzNTMyOGUrMTZ9XX1dfQ==",
+      "auth_requirement": "Synthetic environment bearer; same admitted header in both arms, not a retained credential."
+    }
+  ]
+}
