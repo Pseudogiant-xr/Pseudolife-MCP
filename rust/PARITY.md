@@ -38,7 +38,13 @@ Its first Windows disposable cell matched a nonempty SQL result against the
 Python store plus JSON contract, and verified process-tree/database cleanup.
 That cell used JSON-as-YAML and does not establish whole HTTP oracle parity,
 YAML parity, the later candidate source, Linux execution or performance.
-The complete corpus and external test routing still require execution.
+Subsequent Windows candidate controls executed the whole Python ASGI/SQL
+response against real native HTTP on separate sequential disposable banks:
+33 additive controls passed, including exact bytes, ordered IDs, SQL proof
+failures, admission, installer YAML and named startup refusals. The nine-case
+native serializer corpus and one eligible immutable tokenless sent GET node
+also passed. These are bounded local checks; independent review, hosted checks,
+snapshot refresh convergence and graceful shutdown remain pending.
 
 Pinned Python `serve` parses no trailing flags: it calls `run_daemon()` and
 reads `PSEUDOLIFE_MCP_HOST`, `PORT`, `DATABASE_URL`, `CONFIG`, `TOKEN`, `TOKENS`
@@ -46,6 +52,11 @@ and `TRUST_BIND` using the `PSEUDOLIFE_MCP_` prefix. The candidate follows this
 entry point; no new Python mode or command-line flags are introduced.
 All other paths, including `/health`, return HTTP 501 with the same body:
 `{"error": "route_deferred", "candidate": "rust-maintainer-sent", "deferred_route": "all paths other than /api/maintainer/sent"}`.
+Only the sent GET implements application work. The owned sent path retains
+pre-dispatch method/body refusals: an authenticated valid or bodyless POST
+returns the pinned known-route `400 invalid_request`; this implements no POST
+operation and does not imply another route. Nonfinite/invalid-UTF8 POST bodies
+remain outside the tested GET contract.
 Affirmative readiness is a flushed stdout JSON notice, verified against the
 fixture's nonce, listener port and owned process. Fixture shutdown uses the
 existing process-tree owner; graceful signal shutdown remains separately
@@ -53,10 +64,10 @@ unverified. No installation, production shadow or cutover is enabled.
 
 | Boundary | Candidate coverage | Status |
 |---|---|---|
-| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL corpus prepared | deferred pending executed corpus |
-| Supplemental serialization | ASCII escaping, Python float spelling, separators, producer order, large integers, named UUID/timestamp `default=str` fixtures | deferred pending native corpus execution |
-| Configuration | `config-yaml-typed`: pinned pure Rust YAML reader, audited typed fields/defaults, named ambiguity/tag/duplicate/type refusals | substitution decision; execution pending |
-| Original tests | External plugin routes only the eligible tokenless sent GET node to a real owned HTTP process; Recorder success/internal assertions remain Python | routing execution pending |
+| Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | candidate; review/hosted checks pending |
+| Supplemental serialization | Nine exact native cases: escaping, float spelling, separators, producer order, large integers, named UUID/timestamp `default=str` | bounded Windows controls passed |
+| Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | approved substitution; bounded Windows controls passed |
+| Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | one mapped node passed locally; no native claim for internal nodes |
 | Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred |
 | Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred |
 
