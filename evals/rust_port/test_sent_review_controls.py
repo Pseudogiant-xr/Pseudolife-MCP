@@ -2,6 +2,13 @@
 import base64
 import hashlib
 import json
+import os
+import queue
+import secrets
+import threading
+from pathlib import Path
+import socket
+import subprocess
 from contextlib import closing
 from types import SimpleNamespace
 
@@ -10,10 +17,138 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 import pytest
 
-from evals.rust_baseline.daemon import disposable_database
+from evals.rust_baseline.daemon import disposable_database, free_port
 from evals.rust_port.test_sent_http_process import CONFIG, TOKEN, oracle, paired, prefix, seed  # noqa: F401
 from evals.rust_port.sent_http import native_sent
 from evals.rust_port.maintainer_sent import compare_response, observe_http
+from evals.rust_port.harness import isolated_env, HttpClient
+from evals.rust_port.processes import owned_process
+
+
+MERGE_FIELDS = ["enabled: false", "allowed_principals: []", "enabled: false, allowed_principals: []"]
+
+
+def merge_configuration(fields):
+    return (f"defaults: &deny {{{fields}}}\ncoordination:\n  <<: *deny\n"
+            "  maintainer:\n    rp_id: localhost\n    origin: http://localhost\n")
+
+
+def startup_refusal(prefix, private, configuration):
+    """Capture an expected pre-readiness refusal and verify owned cleanup."""
+    private = Path(private)
+    private.mkdir(parents=True, exist_ok=True)
+    config = private / "config.yaml"
+    config.write_text(configuration, encoding="utf-8")
+    env = isolated_env(private / "home")
+    env.update(PSEUDOLIFE_MCP_CONFIG=str(config), PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT="0")
+    with owned_process([*prefix, "serve"], cwd=private, env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        out, error = process.communicate(timeout=15)
+        assert process.returncode == 1
+        assert out == b""
+    assert process.owned_cleanup == {"process_stopped": True, "subtree_stopped": True}
+    return error
+
+
+@pytest.mark.parametrize("fields", MERGE_FIELDS)
+def test_implicit_yaml_merge_startup_refused(prefix, tmp_path, fields):
+    error = startup_refusal(prefix, tmp_path, merge_configuration(fields))
+    assert error == b"pseudolife-stdio serve: config-yaml-typed: implicit YAML merge key '<<' unsupported; quote the string (file: config.yaml)\n"
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+def test_quoted_yaml_merge_key_and_value_http_bytes(prefix, tmp_path, monkeypatch, quote):
+    text = (f"ignored: {quote}<<{quote}\ncoordination:\n  {quote}<<{quote}: {{enabled: false}}\n"
+            "  maintainer:\n    rp_id: localhost\n    origin: http://localhost\n")
+    paired(prefix, tmp_path, monkeypatch, configuration=text)
+
+
+@pytest.mark.parametrize("fields", MERGE_FIELDS)
+def test_ordinary_yaml_alias_admission_http_bytes(prefix, tmp_path, monkeypatch, fields):
+    text = (f"defaults: &deny {{{fields}, maintainer: {{rp_id: localhost, origin: 'http://localhost'}}}}\n"
+            "coordination: *deny\n")
+    paired(prefix, tmp_path, monkeypatch, configuration=text)
+
+
+def pg_open_observation(prefix, private, dsn, *, ambient=None, default_file=None):
+    """Observe both snapshot and request opens through an owned TCP process."""
+    private = Path(private)
+    private.mkdir(parents=True, exist_ok=True)
+    config = private / "config.yaml"
+    config.write_text(json.dumps(CONFIG), encoding="utf-8")
+    env = isolated_env(private / "home")
+    port, nonce = free_port(), secrets.token_hex(32)
+    env.update(PSEUDOLIFE_MCP_CONFIG=str(config), PSEUDOLIFE_MCP_DATABASE_URL=dsn,
+               PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT=str(port),
+               PSEUDOLIFE_MCP_TOKEN=TOKEN, PSEUDOLIFE_BASELINE_NONCE=nonce)
+    env.update(ambient or {})
+    if default_file is not None:
+        directory = Path(env["APPDATA"]) / "postgresql" if os.name == "nt" else Path(env["HOME"]) / ".postgresql"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / default_file).write_text("synthetic unsupported control", encoding="utf-8")
+    diagnostics = []
+    with owned_process([*prefix, "serve"], cwd=private, env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        def collect():
+            try:
+                for line in process.stderr:
+                    diagnostics.append(line)
+            except ValueError:
+                pass  # The ownership fixture closes streams after terminating.
+        reader = threading.Thread(target=collect, daemon=True)
+        reader.start()
+        lines = queue.Queue()
+        threading.Thread(target=lambda: lines.put(process.stdout.readline()), daemon=True).start()
+        notice = json.loads(lines.get(timeout=20))
+        assert notice["candidate"] == "rust-maintainer-sent" and notice["ready"] is True
+        assert notice["nonce"] == nonce and notice["port"] == port
+        assert process.owns_runtime_pid(notice["pid"])
+        actual = observe_http(HttpClient(f"http://127.0.0.1:{port}"), headers={"Authorization": "Bearer " + TOKEN})
+    reader.join(timeout=5)
+    assert not reader.is_alive()
+    assert process.owned_cleanup == {"process_stopped": True, "subtree_stopped": True}
+    return actual, b"".join(diagnostics), process.owned_cleanup
+
+
+@pytest.mark.parametrize("control", ["PGSSLMODE", "PGTLSCONTROL", "PGPASSWORD"])
+def test_ambient_pg_policy_keeps_private_503(prefix, tmp_path, control):
+    actual, error, _ = pg_open_observation(prefix, tmp_path,
+        "host=127.0.0.1 port=1 dbname=synthetic_refusal sslmode=disable",
+        ambient={control: "synthetic-value-not-for-stderr"})
+    assert_private_503(actual)
+    assert error.splitlines() == [b"pseudolife-stdio serve: pg-dsn-explicit-tls"] * 2
+
+
+@pytest.mark.parametrize("name", ["postgresql.crt", "postgresql.key", "root.crl"])
+def test_ambient_pg_file_keeps_private_503(prefix, tmp_path, name):
+    actual, error, _ = pg_open_observation(prefix, tmp_path,
+        "host=127.0.0.1 port=1 dbname=synthetic_refusal sslmode=disable", default_file=name)
+    assert_private_503(actual)
+    assert error.splitlines() == [b"pseudolife-stdio serve: pg-dsn-explicit-tls"] * 2
+
+
+def test_snapshot_and_request_root_certificate_policy_refusal(prefix, tmp_path):
+    missing = tmp_path / "synthetic-missing-root.pem"
+    dsn = make_conninfo(host="127.0.0.1", port=1, dbname="synthetic_refusal", sslmode="verify-full", sslrootcert=str(missing),
+                        user="synthetic-user-not-for-stderr", password="synthetic-password-not-for-stderr")
+    actual, error, _ = pg_open_observation(prefix, tmp_path, dsn)
+    assert_private_503(actual)
+    assert error.splitlines() == [b"pseudolife-stdio serve: pg-dsn-explicit-tls"] * 2
+
+
+def assert_private_503(actual):
+    assert actual["status"] == 503
+    assert base64.b64decode(actual["body_b64"]) == b'{"error": "coordination_unavailable"}'
+
+
+def test_network_unavailability_keeps_private_http_503(prefix, tmp_path):
+    # An owned, bound but non-listening socket keeps this endpoint unavailable.
+    with socket.socket() as endpoint:
+        endpoint.bind(("127.0.0.1", 0))
+        dsn = make_conninfo(host="127.0.0.1", port=endpoint.getsockname()[1], dbname="synthetic_unavailable", sslmode="disable")
+        actual, error, _ = pg_open_observation(prefix, tmp_path, dsn)
+    assert_private_503(actual)
+    assert error == b""
 
 
 def raw_bank_snapshot(dsn):

@@ -43,6 +43,11 @@ impl EventReceiver for Presentation {
             Event::Scalar(value, style, _, tag) => {
                 if tag.is_some() {
                     self.problem = Some("explicit tags unsupported");
+                } else if style == TScalarStyle::Plain && value == "<<" {
+                    // PyYAML resolves this presentation as a merge tag; the
+                    // YAML 1.2 loader would leave inherited admission unset.
+                    self.problem =
+                        Some("implicit YAML merge key '<<' unsupported; quote the string");
                 } else if style == TScalarStyle::Plain && ambiguous(&value) {
                     self.problem = Some("YAML 1.1/1.2 scalar disagreement; quote the string");
                 } else if style == TScalarStyle::Plain && integer_outside_loader(&value) {
@@ -201,6 +206,32 @@ pub fn parse(text: &str) -> Result<SentConfig, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn implicit_merge_refused_quoted_strings_and_aliases_preserved() {
+        for fields in [
+            "enabled: false",
+            "allowed_principals: []",
+            "enabled: false, allowed_principals: []",
+        ] {
+            let text = format!("defaults: &deny {{{fields}}}\ncoordination:\n  <<: *deny\n");
+            assert_eq!(
+                parse(&text).unwrap_err(),
+                "config-yaml-typed: implicit YAML merge key '<<' unsupported; quote the string"
+            );
+        }
+        for quote in ['\'', '"'] {
+            let text = format!(
+                "coordination:\n  {quote}<<{quote}: {{enabled: false}}\nignored: {quote}<<{quote}\n"
+            );
+            assert_eq!(parse(&text).unwrap(), SentConfig::default());
+        }
+        let alias = parse(
+            "defaults: &deny {enabled: false, allowed_principals: []}\ncoordination: *deny\n",
+        )
+        .unwrap();
+        assert!(!alias.enabled);
+        assert!(alias.allowed.is_empty());
+    }
     #[test]
     fn installer_shape_and_quoted_strings() {
         let config = parse("embedding:\n  device: cpu\n  backend: torch\n  cpu_dtype: fp32\nmemory:\n  dream:\n    enabled: false\nupdates:\n  check_releases: false\ncoordination:\n  enabled: true\n  allowed_principals: ['yes', \"on\"]\n  maintainer:\n    rp_id: localhost\n    origin: http://localhost\n").unwrap();

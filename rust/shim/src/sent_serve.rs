@@ -57,8 +57,22 @@ impl Config {
             return Err("PSEUDOLIFE_MCP_TOKENS has no valid entries".into());
         }
         let path = env::var("PSEUDOLIFE_MCP_CONFIG").unwrap_or_else(|_| "config.yaml".into());
-        let fields = match std::fs::read_to_string(path) {
-            Ok(text) => crate::sent_config::parse(&text)?,
+        let fields = match std::fs::read_to_string(&path) {
+            Ok(text) => crate::sent_config::parse(&text).map_err(|problem| {
+                if problem.starts_with("config-yaml-typed: implicit YAML merge key '<<'") {
+                    let file = std::path::Path::new(&path)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .filter(|name| {
+                            name.bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                        })
+                        .unwrap_or("configuration file");
+                    format!("{problem} (file: {file})")
+                } else {
+                    problem
+                }
+            })?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 crate::sent_config::SentConfig::default()
             }
@@ -166,13 +180,37 @@ fn valid_name(name: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._-".contains(&c))
 }
+// Open failures retain private HTTP 503; only the named policy is emitted,
+// never driver text, control values, credentials or certificate paths.
+fn policy_refusal(error: &pg::Error) -> Option<&'static str> {
+    match error {
+        pg::Error::AmbientControl(_)
+        | pg::Error::RootCertificate
+        | pg::Error::InvalidDsn
+        | pg::Error::InvalidOption(_)
+        | pg::Error::UnsupportedOption(_) => Some("pg-dsn-explicit-tls"),
+        pg::Error::HostnameRules => Some("pg-tls-webpki-hostnames"),
+        pg::Error::Connection | pg::Error::SessionSetup | pg::Error::Shutdown => None,
+    }
+}
+async fn open_session(dsn: &pg::Dsn) -> Option<pg::Session> {
+    match pg::Session::open(dsn).await {
+        Ok(session) => Some(session),
+        Err(error) => {
+            if let Some(policy) = policy_refusal(&error) {
+                crate::stderrln!("pseudolife-stdio serve: {policy}");
+            }
+            None
+        }
+    }
+}
 async fn refresh(state: &State) {
     let started = Instant::now();
     let mut slot = state.snapshot_session.lock().await;
     if slot.is_none()
         && let Some(dsn) = &state.config.dsn
     {
-        *slot = pg::Session::open(dsn).await.ok();
+        *slot = open_session(dsn).await;
         if let Some(session) = slot.as_ref()
             && session
                 .client()
@@ -226,6 +264,7 @@ async fn refresh(state: &State) {
         loaded: Some(started),
     };
 }
+
 async fn principal(state: &State, request: &Request<Incoming>) -> Result<Option<String>, ()> {
     let c = &state.config;
     if !c.auth() {
@@ -572,7 +611,7 @@ async fn handle(
     if connection.is_none()
         && let Some(dsn) = &c.dsn
     {
-        *connection = pg::Session::open(dsn).await.ok();
+        *connection = open_session(dsn).await;
     }
     let Some(session) = connection.as_ref() else {
         return Ok(error(503, "coordination_unavailable"));
@@ -687,4 +726,33 @@ async fn serve() -> Result<(), String> {
             .map_err(|_| "PostgreSQL shutdown failed")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_policy_diagnostics_do_not_include_values_or_paths() {
+        for error in [
+            pg::Error::AmbientControl("PGSSL\nsynthetic-value".into()),
+            pg::Error::InvalidDsn,
+            pg::Error::InvalidOption("synthetic-value"),
+            pg::Error::UnsupportedOption("synthetic-value".into()),
+            pg::Error::RootCertificate,
+        ] {
+            assert_eq!(policy_refusal(&error), Some("pg-dsn-explicit-tls"));
+        }
+        assert_eq!(
+            policy_refusal(&pg::Error::HostnameRules),
+            Some("pg-tls-webpki-hostnames")
+        );
+        for error in [
+            pg::Error::Connection,
+            pg::Error::SessionSetup,
+            pg::Error::Shutdown,
+        ] {
+            assert_eq!(policy_refusal(&error), None);
+        }
+    }
 }
