@@ -544,6 +544,34 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
 | test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
 
+## Wait-mail producer substitutions
+
+These are deliberate native input/output contracts, separate from the three
+named parity policies and from the immutable Python oracle. Earlier raw failures
+and receipts keep their original inputs and bindings. The reduced candidate is
+unvalidated and `wait-mail` remains deferred.
+
+| Input/output | Producer | Declared native substitution |
+|---|---|---|
+| `wait-mail-writer-records`: Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal followed by LF. Additional `.seen` writers are `plugin/hooks/coordination-prompt.sh:86`, `plugin/hooks/stop-wake.sh:661`, and `rust/shim/src/board/adapter.rs:953-960,1116-1121`. The prompt hook truncates before its `printf` write. | Arbitrary-width decimal ordering by numeric value, including leading zeros, with no CPython 4,300-digit ceiling; native output is canonical decimal. The seen reader strips precisely ASCII byte whitespace, treats empty/whitespace-only as zero, and accepts an unsigned counter without a final LF. Signs, underscores and non-ASCII digits remain corrupt. Digest headers retain their LF and bodies their final LF; rings retain exactly two LF-terminated lines. Malformed admitted records retain exit 2 and the existing canonical/LF-framing diagnostic, with no stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
+| `wait-mail-ascii-numeric-options`: Timeout and interval | Shell/CLI callers and existing launchers supply finite decimal seconds. | ASCII `[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`, finite after conversion; existing timeout `(0,86400]` and interval `[0.01,60]` bounds remain. Unicode digits, underscores, outer whitespace, NaN/Infinity and overflow refuse with argparse-shaped usage/error and exit 2. |
+| `wait-mail-ascii-columns-help`: Terminal dimensions and help | Terminals/callers supply COLUMNS; the help drift guard runs at COLUMNS80. | Positive ASCII integers; invalid grammar, zero or machine-integer overflow falls back to 80. COLUMNS80 retains the exact help asset and usage. Other widths use simple word wrapping, retain whole words and omit argparse's extreme-width thresholds/action-group emulation. |
+| `wait-mail-direct-stdout`: Failed stdout writes/flushes | Caller-owned pipes and redirected descriptors. | Direct failure exits 2 and leaves mail unshown, without seen/ledger advance. `PYTHONUNBUFFERED`, block size and CPython shutdown retries do not change this behavior. Delivery retains `wait-mail: could not write the mail to stdout (<error>); left it unshown.` Help failure uses `wait-mail: could not write help to stdout (<error>).` No synthetic `TextIOWrapper` shutdown exception is emitted. |
+| `wait-mail-failed-stderr`: Diagnostic writes | Caller-owned stderr descriptors. | A failed checked diagnostic write exits 120. Failure of the initial delivery announcement occurs before stdout, seen advance or ledger append. If the seen-advance failure diagnostic itself cannot be written after successful stdout, exit 120 occurs with the mail already delivered and before ledger append; the native marker advance failed, while concurrent producers may still change the marker. An unchecked stdout-failure diagnostic retains direct exit 2. These are declared native substitutions. |
+| `wait-mail-python-error-text`: OS error diagnostics | Native I/O errors at the CLI boundary. | The mappings in `wait_mail.rs::error_text` retain Python-shaped error text (including platform errno/WinError and quoted paths); they are deliberate text substitutions, not Python exceptions or tracebacks. |
+| `wait-mail-native-temporary-collisions`: Temporary-file collisions | Native atomic marker/listener writes. | Keep `.tmp-[a-z0-9_]{8}.seen`, exclusive creation, private permissions and cleanup of owned files. Sixteen collisions exhaust the native budget with `temporary file creation exhausted after 16 collisions`, without overwriting a colliding file/directory. The copied CPython platform retry count and exhaustion exception are removed. |
+
+The native ring reason gate and symlink refusal stay exact. A canonical `plain`
+decision does not wake the wait. A ring watermark is no longer limited to twelve
+digits; actual writers use the same decimal counter representation as digests.
+An explicit user-authored `--digest` file is subject to the same declared record
+grammar. The approved legacy-test exceptions are applied. The shared candidate
+contract fixture binds 19 changed cases to exact declared requests and retained
+seed bytes; other cases keep the named parity policies and exact comparison.
+Actual Python responses and raw differences remain in each capture. Candidate
+controls check the declared native contract. Final both-host candidate execution
+remains required; a historical replay cannot certify these substitutions.
+
 ## Test-file buckets
 
 The real-bank stdio judge declares `completed-readiness-wait-notice` as a
@@ -887,6 +915,131 @@ The subsequent integration of master `7b0abf921fe4bd4ef1c84864eef118309b400705` 
 
 Integration of master `57c007ff292cffdbb6755911bd54de837a00f9a5` retains #611 readiness evidence, #607 users and #608 executable resolution. Of the 341 paths bound to executed `5220b5ee`, 11 now differ (`evals/rust_port/phase1.py`, `evals/rust_port/phase1_receipts.py`, `evals/rust_port/stdio_judge.py`, `rust/Cargo.lock`, `rust/Cargo.toml`, `rust/shim/Cargo.toml`, `rust/shim/src/board/state.rs`, `rust/shim/src/credentials.rs`, `rust/shim/src/lifecycle.rs`, `rust/shim/tests/auth_windows_private_state/mod.rs`, `rust/shim/tests/nonboard_final_assertions.rs`); 330 remain exact, including all 146 original production/test guard paths. Incoming changes from reviewed `181a50d1` affect 9 bound paths. The old timing images and captures remain historical executions of `5220b5ee`, without acceptance claims for this combined tree.
 
+### Hook producer reduction preparation
+
+The briefing/prompt-hook candidate remains deferred pending actual runtime
+checks on the reduced source. `hook-strict-json-refusal`, `hook-typed-markdown`,
+`hook-ascii-numeric`, `hook-first-line-cursor`, `hook-bounded-json-nesting` and
+`hook-native-output-failure`
+are deliberate substitutions described in PORTING.md, not byte-parity claims.
+
+Numeric source evidence: `briefing_cli.py::run_briefing` declares argparse
+`type=int`; `_fetch_markdown` URL-encodes the signed values unchanged.
+`web/routes.py::_i` converts with `int`, and `service.py::session_briefing`
+uses comparisons/slices without an upper bound or clamp. ASCII caps therefore
+retain arbitrary magnitude and negative values; the 4300-digit interpreter
+threshold and PYTHONINTMAXSTRDIGITS are removed. No installer-only bound or
+max(0, ...) normalization is introduced.
+
+The 18 existing subprocess hook admissions and original tests remain unchanged.
+The port-owned COLUMNS and closed-output tests use the named candidate rules;
+additive malformed-input, typed-markdown, beyond-u64, first-line cursor and
+closed-output cursor controls are prepared. Historical Python diagnostics are
+preserved by `cli_briefing_hook.expected`; `native_expected` is separate.
+The help asset has a pinned Python drift guard at COLUMNS=80. The Windows
+prepublication gate passed the debug build, format check, default/no-default
+all-targets Clippy, 12 CLI unit tests and six hook integration tests. The first
+disposable native prompt cell fetched a fixture note and advanced its cursor
+before the remaining native checks ran. The first-line cursor unit controls
+accepted `100.0\n\xff` as `100.0` and refused malformed first lines.
+
+The executed `hook-bounded-json-nesting` unit control observed 127 nested
+arrays accepted and 128 refused; a root object plus 126 nested arrays was
+accepted and plus 127 refused. This is serde_json's default parser budget,
+not a new application limit. The controls also preserved signed ASCII caps
+of arbitrary magnitude, beyond-u64 ignored metadata and native output-failure
+cursor state. These targeted Windows checks establish no corpus, timing,
+full-suite, hosted or both-platform acceptance; the candidate remains deferred.
+
+Master-forward integration of `59a8624e` retains these hook production modules
+and original admissions unchanged, while adding the accepted lease source,
+shared credential checks and dependency features. The synchronous entrypoint
+starts a separate current-thread runtime only for the lease leaf; hook/version
+dispatch remains before the proxy runtime. The combined source has 118 passing
+offline checks, with its initial diagnostic mismatch retained separately.
+Combined source `273e6533` passed Windows formatting, all-target check and
+Clippy under default/no-default features, 19 CLI unit tests and 55 targeted
+hook, dispatch, version and lease contracts. The initial contract failure from
+an omitted existing oracle metadata setting is retained alongside the passing
+rerun; source, tests and oracle were unchanged. Historical `64f5a6a2` execution
+retains its original attribution. Fresh independent review, hosted checks,
+the committed-head remote Python suite and remaining both-platform
+proof are still required.
+
+## Doorbell producer domains (2026-10-07)
+
+The prompt receipt candidate now parses the hook payload and shim-owned pending
+record as standard JSON, with bounded relevant numbers and ordinary native
+parser depth. These are approved substitutions; bounded Windows native checks
+pass, while broader proof is pending and `doorbell-prompt-seen` remains deferred.
+Historical CPython captures retain
+their raw inputs, outputs, failures and source identities.
+
+The Fable125 successor repairs empty POSIX HOME expansion in the receipt and
+credential paths: expansion is root-based, never relative to the cwd. Receipt
+symlink admission uses lexical absolute paths retaining `..`, including Windows
+drive-relative and root-relative inputs. POSIX private-file ownership matches
+Python's `geteuid`. The repaired Windows leaf `710970c9` passes formatting,
+both-feature all-target check/Clippy, targeted native CLI/credential/lease tests,
+positive receipt cells and the four no-home process controls. Actual Windows
+symlink rejection remains unproved: creating the disposable fixture failed
+with WinError 1314. POSIX empty-HOME/effective-uid runtime proof remains pending.
+File order, lock timing, private
+modes/ACLs, hard-link rejection and serialization domains are unchanged.
+
+The named `python-traceback-not-contract` control preserves Python's raw
+RuntimeError exit 1 for a valid session with a non-string prompt and an
+unresolvable home. Rust checks the prompt first and returns exit 0 with empty
+streams; both leave existing state untouched and write no receipt or lock.
+The control is separate from the four producer domains below. Companion cells
+keep valid-string/no-home, invalid-session/no-home and non-string/resolvable-home
+outcomes distinct, and reject wrong exits, streams and file mutations. Their
+Windows no-home process controls completed against `710970c9` through
+`cli_doorbell_fable125.py`; actual POSIX empty-HOME/effective-uid and Windows
+symlink-parent controls remain pending.
+
+A refused input writes no receipt. The doorbell therefore clears by expiry
+instead of by prompt arrival for that input; quiet refusal does not confirm
+arrival, reading or mailbox acknowledgment.
+
+| Named substitution | Producer and supported domain | Refusal and controls |
+| --- | --- | --- |
+| `doorbell-standard-json` | UTF-8 host-hook forwarding and the shim's fixed-scalar pending writer. Reject NaN, Infinity, overflowing float tokens and lone surrogate escapes anywhere, including keys, ignored extras and overwritten duplicate values; valid escaped surrogate pairs remain supported. | Exit 0, empty streams, zero daemon requests. Invalid stdin creates no new files; invalid pending preserves pending/receipt bytes after the ordinary lock may be created. Token and whole-input controls are prepared. |
+| `doorbell-ignore-python-digit-limit` | External metadata may contain ignored integers; fixed pending fields have separate numeric admission. Ignored integer tokens have no Python environment digit limit within the existing 65536-byte stdin / 8192-character pending caps. | An otherwise valid input writes the normal nonce-plus-LF marker and lock regardless of `PYTHONINTMAXSTRDIGITS`; 640/641/4300/4301/5001/65000-digit stdin and large pending-extra controls retain the raw Python outcome separately. |
+| `doorbell-bounded-relevant-numbers` | Daemon SQL counts and current finite timestamps. Count is positive u64, v3 maintainer is an integer in 1..count; timestamps are nonnegative finite f64 numbers or u64 integers. Legacy integer +86400 uses checked addition and exact equality, including mixed float comparisons. | Beyond-u64 relevant integers and checked-add overflow invalidate pending with exit 0 and empty streams, preserving pending/receipt bytes; an ordinary lock may exist. Exact 2**54 expiry distinctions, u64 edges and huge-timestamp controls are prepared. |
+| `doorbell-native-nesting-bound` | Fixed pending records are shallow; arbitrary hook metadata is admitted under serde's default recursion budget of 128. Windows native parser unit checks accept 127 nested arrays and refuse 128 and 2000. The source-derived budget also counts object containers. | The same quiet stdin/pending refusal rules apply. Whole-input boundary controls counting the root object remain unexecuted. No CPython recursion frame accounting or extra parser thread remains. |
+
+Duplicate keys still take the last value without moving the first key position.
+Legacy rewrites retain the original fixed-field order, appended upgrade fields,
+compact serialization, finite generated number formatting and final LF; the
+fixed-field native serialization unit check passes, while full legacy rewrite
+byte controls remain unexecuted and required before acceptance. This
+change grants no serialization substitution. Path expansion, private-file gates,
+codepoint file limits, interprocess locks, atomic staging and the production
+rollback allowlist remain in place. The interpreter-wide Windows errno sweep is
+replaced by bounded tests around the same unchanged raw-code allowlist.
+The deleted exhaustive `rust/shim/tests/fixtures/doorbell_windows_errno.json`
+fixture remains listed in historical manifests;
+those manifests describe their original source and are not current inventories.
+
+On Windows, native source `d0c4c5d8f7cded926a4363828db480784e3ccb95`, tree
+`519e33819eedc998d214cc1ae6692d83c5e8d1bf`, passes formatting, cargo check and
+all-target Clippy under default and no-default features. Each feature selection
+passes nine doorbell parser/number/serialization unit checks, twelve CLI and
+version-admission checks, and one bounded Windows rollback-allowlist check.
+The default debug image also matches the pinned Python oracle for the existing
+`version2-positive` cell: exact empty streams, pending/receipt bytes, private
+file checks and cleanup. This is one end-to-end cell, not the full corpus.
+The initial range-pattern lint and missing oracle-metadata environment failure
+remain retained; the syntax-only range repair and configured metadata rerun
+pass. The 44 native checks and this first real cell retain the `d0c4c5d8`
+attribution; they do not validate the Fable125 successor. Its separate Windows
+proof above retains the `710970c9` source identity. Both-OS corpus,
+interruption controls, the native and touched-harness merge gates quoted in
+PORT-STATE.md, fresh review,
+current-head CI and fresh measurements remain pending. No full-suite pass is
+claimed.
+
 ## Lease phase 2c policy preparation
 
 CLI-LEASE and the lease mode row remain deferred. The named decisions in
@@ -1122,3 +1275,73 @@ exit 0) is accepted for the unchanged episode leaf. Fresh independent review
 and hosted merge-ref CI remain pending. No parity row is
 promoted; both episode modes remain deferred. This documentation successor changes
 no runtime/instrument input and does not relabel execution as a successor run.
+### Recorded hook HTTP dispositions
+
+`hook-absent-accept-wildcard` applies only when the oracle has no Accept field
+and the native request has one field with exactly `*/*`. The explicit 53-case
+ledger is:
+
+- `briefing-content-invalid-utf8`
+- `briefing-content-redirect`
+- `briefing-coordination-hook`
+- `briefing-coordination-off`
+- `briefing-custom-negative-unknown`
+- `briefing-env-only`
+- `briefing-error-ambiguous`
+- `briefing-error-flag`
+- `briefing-error-int`
+- `briefing-error-missing`
+- `briefing-health-error-json`
+- `briefing-health-non-json`
+- `briefing-health-null`
+- `briefing-help`
+- `briefing-hook-json`
+- `briefing-hook-plain-context`
+- `briefing-launcher-default`
+- `briefing-launcher-override`
+- `briefing-markdown-false`
+- `briefing-plain`
+- `briefing-token-control`
+- `briefing-token-del`
+- `briefing-token-fold`
+- `briefing-token-latin1`
+- `briefing-token-nonlatin`
+- `prompt-baseline`
+- `prompt-body-without-lf`
+- `prompt-changed-note`
+- `prompt-env-token`
+- `prompt-invalid-input-0`
+- `prompt-invalid-input-1`
+- `prompt-invalid-input-2`
+- `prompt-invalid-input-3`
+- `prompt-invalid-input-4`
+- `prompt-invalid-input-5`
+- `prompt-invalid-input-6`
+- `prompt-invalid-input-7`
+- `prompt-invalid-input-8`
+- `prompt-invalid-input-9`
+- `prompt-invalid-utf8-preserves`
+- `prompt-json-nan-extra`
+- `prompt-json-surrogate-extra`
+- `prompt-malformed-preserves`
+- `prompt-mark-invalid-ascii`
+- `prompt-mark-nonascii-after-lf`
+- `prompt-quiet-advance`
+- `prompt-redirect-preserves`
+- `prompt-session-max`
+- `prompt-session-too-long`
+- `prompt-stdin-replacement`
+- `prompt-token-file-missing`
+- `prompt-token-file-no-token`
+- `prompt-token-file-wins`
+
+Outside this ledger Accept is exact. `http-field-name-case-insensitive` and distinct-name order
+use HTTP association; same-name value order, multiplicity and bytes stay exact.
+No Referer is generated on `/health` redirects or discarded by comparison.
+The `Python-urllib/3.11` User-Agent is oracle-pinned. Native transport drops
+urllib's `Accept-Encoding: identity` and `Connection: close`; historical full
+wire differences remain retained, rather than receiving a comparison waiver.
+`http-forbidden-input-refused` names bearer C0/DEL/folded refusals; it replaces
+the pending-policy description without rewriting Python observations.
+Non-JSON `/health` means quiet no-daemon, separately from the consumed payload
+scope of `hook-strict-json-refusal`; valid degraded JSON 503 remains available.

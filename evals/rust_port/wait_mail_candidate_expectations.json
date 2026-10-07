@@ -1,0 +1,425 @@
+{
+  "schema": 1,
+  "cases": {
+    "wait-mail-help-columns-1": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-1",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "1"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait\nuntil\nthe\ndaemon\nrings\nthis\nsession\nfor\naddressed\nmail\n(plain\nmail\nnever\nwakes\nit),\nprint\nthe\nmail,\nexit.\nExit\n0:\na\nring\n(the\nmail\non\nstdout);\n3:\ntimeout;\n2:\nnothing\nto\nwait\non.\n\noptions:\n-h,\n--help\nshow\nthis\nhelp\nmessage\nand\nexit\n--session-id\nSESSION_ID\nhost\nsession\nid\nkeying\nthe\ndigest,\ne.g.\na\nCodex\nthread\nid\n(default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest\nfile\n(<64\nhex\ndigits>.txt)\nto\nwatch\ninstead\n--timeout\nTIMEOUT\nseconds\nto\nwait,\nat\nmost\n86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks,\n0.01\nto\n60\n(default\n2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-2": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-2",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "2"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait\nuntil\nthe\ndaemon\nrings\nthis\nsession\nfor\naddressed\nmail\n(plain\nmail\nnever\nwakes\nit),\nprint\nthe\nmail,\nexit.\nExit\n0:\na\nring\n(the\nmail\non\nstdout);\n3:\ntimeout;\n2:\nnothing\nto\nwait\non.\n\noptions:\n-h,\n--help\nshow\nthis\nhelp\nmessage\nand\nexit\n--session-id\nSESSION_ID\nhost\nsession\nid\nkeying\nthe\ndigest,\ne.g.\na\nCodex\nthread\nid\n(default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest\nfile\n(<64\nhex\ndigits>.txt)\nto\nwatch\ninstead\n--timeout\nTIMEOUT\nseconds\nto\nwait,\nat\nmost\n86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks,\n0.01\nto\n60\n(default\n2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-3": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-3",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "3"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait\nuntil\nthe\ndaemon\nrings\nthis\nsession\nfor\naddressed\nmail\n(plain\nmail\nnever\nwakes\nit),\nprint\nthe\nmail,\nexit.\nExit\n0:\na\nring\n(the\nmail\non\nstdout);\n3:\ntimeout;\n2:\nnothing\nto\nwait\non.\n\noptions:\n-h,\n--help\nshow\nthis\nhelp\nmessage\nand\nexit\n--session-id\nSESSION_ID\nhost\nsession\nid\nkeying\nthe\ndigest,\ne.g.\na\nCodex\nthread\nid\n(default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest\nfile\n(<64\nhex\ndigits>.txt)\nto\nwatch\ninstead\n--timeout\nTIMEOUT\nseconds\nto\nwait,\nat\nmost\n86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks,\n0.01\nto\n60\n(default\n2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-7": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-7",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "7"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait\nuntil\nthe\ndaemon\nrings\nthis\nsession\nfor\naddressed\nmail\n(plain\nmail\nnever\nwakes\nit),\nprint\nthe\nmail,\nexit.\nExit 0:\na ring\n(the\nmail on\nstdout);\n3:\ntimeout;\n2:\nnothing\nto wait\non.\n\noptions:\n-h,\n--help\nshow\nthis\nhelp\nmessage\nand\nexit\n--session-id\nSESSION_ID\nhost\nsession\nid\nkeying\nthe\ndigest,\ne.g. a\nCodex\nthread\nid\n(default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest\nfile\n(<64\nhex\ndigits>.txt)\nto\nwatch\ninstead\n--timeout\nTIMEOUT\nseconds\nto\nwait,\nat most\n86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks,\n0.01 to\n60\n(default\n2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-12": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-12",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "12"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID |\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait until\nthe daemon\nrings this\nsession for\naddressed\nmail (plain\nmail never\nwakes it),\nprint the\nmail, exit.\nExit 0: a\nring (the\nmail on\nstdout); 3:\ntimeout; 2:\nnothing to\nwait on.\n\noptions:\n-h, --help\nshow this\nhelp message\nand exit\n--session-id\nSESSION_ID\nhost session\nid keying\nthe digest,\ne.g. a Codex\nthread\nid (default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest file\n(<64 hex\ndigits>.txt)\nto\nwatch\ninstead\n--timeout\nTIMEOUT\nseconds to\nwait, at\nmost 86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks, 0.01\nto 60\n(default 2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-13": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-13",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "13"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID |\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n\nWait until\nthe daemon\nrings this\nsession for\naddressed\nmail (plain\nmail never\nwakes it),\nprint the\nmail, exit.\nExit 0: a\nring (the\nmail on\nstdout); 3:\ntimeout; 2:\nnothing to\nwait on.\n\noptions:\n-h, --help\nshow this\nhelp message\nand exit\n--session-id\nSESSION_ID\nhost session\nid keying the\ndigest, e.g.\na Codex\nthread\nid (default:\nCLAUDE_CODE_SESSION_ID)\n--digest\nDIGEST\ncoordination\ndigest file\n(<64 hex\ndigits>.txt)\nto\nwatch instead\n--timeout\nTIMEOUT\nseconds to\nwait, at most\n86400\n(default\n14400)\n--interval\nINTERVAL\nseconds\nbetween\nchecks, 0.01\nto 60\n(default 2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-40": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-40",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "40"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest\nDIGEST]\n[--timeout TIMEOUT] [--interval\nINTERVAL]\n\nWait until the daemon rings this session\nfor addressed mail (plain mail never\nwakes it), print the mail, exit. Exit 0:\na ring (the mail on stdout); 3:\ntimeout; 2: nothing to wait on.\n\noptions:\n-h, --help show this help message and\nexit\n--session-id SESSION_ID\nhost session id keying the digest, e.g.\na Codex thread\nid (default: CLAUDE_CODE_SESSION_ID)\n--digest DIGEST coordination digest file\n(<64 hex digits>.txt) to\nwatch instead\n--timeout TIMEOUT seconds to wait, at\nmost 86400 (default 14400)\n--interval INTERVAL seconds between\nchecks, 0.01 to 60 (default 2)\n",
+      "stderr": ""
+    },
+    "wait-mail-help-columns-120": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-help-columns-120",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--help"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "120"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 0,
+      "stdout": "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest DIGEST]\n[--timeout TIMEOUT] [--interval INTERVAL]\n\nWait until the daemon rings this session for addressed mail (plain mail never\nwakes it), print the mail, exit. Exit 0: a ring (the mail on stdout); 3:\ntimeout; 2: nothing to wait on.\n\noptions:\n-h, --help show this help message and exit\n--session-id SESSION_ID\nhost session id keying the digest, e.g. a Codex thread\nid (default: CLAUDE_CODE_SESSION_ID)\n--digest DIGEST coordination digest file (<64 hex digits>.txt) to\nwatch instead\n--timeout TIMEOUT seconds to wait, at most 86400 (default 14400)\n--interval INTERVAL seconds between checks, 0.01 to 60 (default 2)\n",
+      "stderr": ""
+    },
+    "wait-mail-error-columns-40": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-error-columns-40",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--bogus"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "40"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest\nDIGEST] [--timeout TIMEOUT] [--interval\nINTERVAL]\npseudolife-mcp wait-mail: error: unrecognized arguments: --bogus\n"
+    },
+    "wait-mail-error-columns-120": {
+      "substitution": "wait-mail-ascii-columns-help",
+      "request": {
+        "id": "wait-mail-error-columns-120",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--bogus"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {
+          "COLUMNS": "120"
+        },
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h] [--session-id SESSION_ID | --digest DIGEST] [--timeout TIMEOUT] [--interval\nINTERVAL]\npseudolife-mcp wait-mail: error: unrecognized arguments: --bogus\n"
+    },
+    "wait-mail-unicode-negative": {
+      "substitution": "wait-mail-ascii-numeric-options",
+      "request": {
+        "id": "wait-mail-unicode-negative",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--timeout",
+          "-٠.١"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h]\n                                [--session-id SESSION_ID | --digest DIGEST]\n                                [--timeout TIMEOUT] [--interval INTERVAL]\npseudolife-mcp wait-mail: error: argument --timeout: expected one argument\n"
+    },
+    "wait-mail-nan-timeout": {
+      "substitution": "wait-mail-ascii-numeric-options",
+      "request": {
+        "id": "wait-mail-nan-timeout",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--timeout",
+          "NaN"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h]\n                                [--session-id SESSION_ID | --digest DIGEST]\n                                [--timeout TIMEOUT] [--interval INTERVAL]\npseudolife-mcp wait-mail: error: argument --timeout: invalid float value: 'NaN'\n"
+    },
+    "wait-mail-infinite-timeout": {
+      "substitution": "wait-mail-ascii-numeric-options",
+      "request": {
+        "id": "wait-mail-infinite-timeout",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--timeout",
+          "inf"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h]\n                                [--session-id SESSION_ID | --digest DIGEST]\n                                [--timeout TIMEOUT] [--interval INTERVAL]\npseudolife-mcp wait-mail: error: argument --timeout: invalid float value: 'inf'\n"
+    },
+    "wait-mail-prefix-repeat-float": {
+      "substitution": "wait-mail-ascii-numeric-options",
+      "request": {
+        "id": "wait-mail-prefix-repeat-float",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--tim",
+          "1",
+          "--timeout",
+          "٠.٠٢٥",
+          "--int",
+          "1_0e-3"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {}
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: pseudolife-mcp wait-mail [-h]\n                                [--session-id SESSION_ID | --digest DIGEST]\n                                [--timeout TIMEOUT] [--interval INTERVAL]\npseudolife-mcp wait-mail: error: argument --timeout: invalid float value: '٠.٠٢٥'\n"
+    },
+    "wait-mail-invalid-utf8-delivery": {
+      "substitution": "wait-mail-writer-records",
+      "request": {
+        "id": "wait-mail-invalid-utf8-delivery",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--digest",
+          "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+          "--timeout",
+          "0.025",
+          "--interval",
+          "0.01"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": "MV8yCnBlZXL//go=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": "MAo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "MTIKcnVuZyBhbnlvbmUK"
+        }
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "wait-mail: corrupt coordination digest record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.\n"
+    },
+    "wait-mail-cr-spaces-ring": {
+      "substitution": "wait-mail-writer-records",
+      "request": {
+        "id": "wait-mail-cr-spaces-ring",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--digest",
+          "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+          "--timeout",
+          "0.025",
+          "--interval",
+          "0.01"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": "KzEyCnBlZXIK",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": "MAo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "IDEgMiANCnJ1bmcgdGVzdCByZWFzb24NCmV4dHJh"
+        }
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "wait-mail: corrupt coordination digest record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.\n"
+    },
+    "wait-mail-non-ascii-space-body": {
+      "substitution": "wait-mail-writer-records",
+      "request": {
+        "id": "wait-mail-non-ascii-space-body",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--digest",
+          "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+          "--timeout",
+          "0.025",
+          "--interval",
+          "0.01"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": "MTIKwqA=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": "MAo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "MTIKcnVuZyBhbnlvbmUK"
+        }
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "wait-mail: corrupt coordination digest record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.\n"
+    },
+    "wait-mail-bad-digest": {
+      "substitution": "wait-mail-writer-records",
+      "request": {
+        "id": "wait-mail-bad-digest",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--digest",
+          "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+          "--timeout",
+          "0.025",
+          "--interval",
+          "0.01"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": "YmFkCnBlZXIK",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": "MAo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "MTIKcnVuZyBhbnlvbmUK"
+        }
+      },
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "wait-mail: corrupt coordination digest record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.\n"
+    },
+    "wait-mail-long-ring-watermark": {
+      "substitution": "wait-mail-writer-records",
+      "request": {
+        "id": "wait-mail-long-ring-watermark",
+        "mode": "wait-mail",
+        "argv": [
+          "wait-mail",
+          "--digest",
+          "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+          "--timeout",
+          "0.025",
+          "--interval",
+          "0.01"
+        ],
+        "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+        "normalizations": [],
+        "environment_deltas": {},
+        "pre_files_b64": {
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": "MTIKcGVlcgo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": "MAo=",
+          ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+        }
+      },
+      "exit_code": 0,
+      "stdout": "peer\n",
+      "stderr": "wait-mail: the daemon rang for addressed mail at <local-clock> (rung anyone, watermark 12, 0 s after arming):\n",
+      "delivery": {
+        "seen_path": ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen",
+        "seen": "12\n",
+        "ledger": "<epoch>\twait\taaaaaaaa\t12\t5\trung anyone\n"
+      }
+    }
+  }
+}

@@ -27,6 +27,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   matching Python's header absence. The comparison instrument records named
   field-name association and the delegated 57-case absent-Accept versus exact
   `*/*` substitution, rejecting other header changes and duplicate/case collisions.
+### Changed (2026-10-07 — native wait-mail producer scope)
+
+- The experimental native `wait-mail` reads unsigned decimal, LF-framed
+  coordination records without an interpreter digit limit. Corrupt records
+  refuse delivery with exit 2; numeric options use finite ASCII decimal values,
+  invalid terminal dimensions fall back to 80 columns, and stdout failures
+  leave mail unshown with exit 2. Temporary-file collision retries are bounded.
+  The mode remains deferred while its reduced candidate is validated.
+### Changed (2026-10-07 — native hook input and output contracts)
+
+- The experimental native briefing and prompt hooks validate strict JSON while
+  ignoring ordinary metadata, including large integers. Briefing reports a
+  named malformed-reply error; prompt input refusal remains quiet and leaves
+  cursors untouched. Numeric options use signed ASCII decimal, and output
+  failures follow native write/flush semantics. These are named substitutions
+  in the porting contract; no installation path installs the candidate.
+### Changed (2026-10-07 — bounded native prompt receipts)
+
+- The experimental native `doorbell-prompt-seen` candidate accepts standard
+  finite JSON, bounded relevant integers and the native parser depth budget;
+  unsupported input quietly leaves receipts unchanged. Ignored integer extras
+  no longer depend on Python's digit-limit environment setting. Bounded Windows
+  native checks, positive receipt cells and no-home process controls pass on
+  the repaired Windows leaf. Actual symlink rejection remains unproved because
+  the disposable link fixture lacked Windows privileges.
+  Empty POSIX HOME stays root-based, symlink checks retain parent components,
+  and private-file ownership uses the effective uid. Broader native proof and
+  current-head CI remain pending, and the mode remains deferred.
 
 ### Added (2026-10-07 — native lease candidate and help drift guards)
 

@@ -2,7 +2,9 @@
 import argparse
 import base64
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -18,10 +20,59 @@ from evals.rust_port.cli_process import (
 )
 from evals.rust_port.harness import _base_url, capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
-from evals.rust_port.provenance import require_import_root, runtime_metadata
+from evals.rust_port.provenance import require_import_root, require_instrument_binding, runtime_metadata
 from evals.rust_port.stdio_capture import require_phase1_source
 
 
+def doorbell_fixture():
+    """Reuse the ordinary positive corpus cell, including its recorded seed."""
+    from evals.rust_port.cli_doorbell_seen import THREAD, cases
+    from pseudolife_memory.codex_doorbell_state import PendingNotice, notice_text
+    original = next(row for row in cases(notice_text) if row["id"] == "version2-positive")
+    key = hashlib.sha256(THREAD.encode()).hexdigest()
+    text = json.dumps(original["pending"], ensure_ascii=False, separators=(",", ":"))
+    seed = (text + "\n").encode()
+    case = {"id": original["id"], "mode": "doorbell-prompt-seen",
+            "argv": ["doorbell-prompt-seen", *original["argv"]], "stdin_b64": original["stdin_b64"],
+            "environment_deltas": {"PSEUDOLIFE_DIGEST_DIR": "{home}/digests"},
+            "pre_files_b64": {"digests/" + key + ".bell-pending": base64.b64encode(seed).decode()},
+            "normalizations": [], "timeout_seconds": 20}
+
+    def prepare(cell, home, env, command, commands):
+        if cell != case or env.get("PSEUDOLIFE_DIGEST_DIR") != str(home / "digests"):
+            raise ValueError("doorbell preparation requires the recorded positive case")
+        pending = PendingNotice(home / "digests", THREAD)
+        path = pending.path
+        if path != home / next(iter(case["pre_files_b64"])) or path.read_bytes() != seed:
+            raise ValueError("doorbell preparation requires the recorded pending bytes")
+        path.unlink()
+        pending._write_atomic(path, text)
+        return command
+
+    return case, prepare
+
+
+def doorbell_private_metadata(home):
+    """Opening each state file proves owner-only access and a single link."""
+    from pseudolife_memory.private_state import open_private
+    metadata = {}
+    for relative in snapshot(home):
+        descriptor = open_private(file_path(home, relative), os.O_RDONLY)
+        try:
+            info = os.fstat(descriptor)
+            metadata[relative] = {"private": True, "nlink": info.st_nlink,
+                                  "mode": oct(info.st_mode & 0o777)}
+        finally:
+            os.close(descriptor)
+    return metadata
+
+
+def doorbell_source_binding(root):
+    from pseudolife_memory.codex_doorbell_state import PendingNotice, notice_text
+    from pseudolife_memory.private_state import open_private
+    return require_instrument_binding(root, {
+        "pseudolife_memory/codex_doorbell_state.py": [PendingNotice, PendingNotice._write_atomic, notice_text],
+        "pseudolife_memory/private_state.py": [open_private]})
 def file_identity(command):
     path = Path(command[0]).resolve(strict=True)
     metadata = path.stat()
@@ -68,7 +119,7 @@ def lease_list_case():
     return case
 
 
-def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify=None):
+def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify=None, record_invocation=None):
     mode = getattr(args, "mode", "help")
     warm_images = mode == "version" or getattr(args, "warm_images", False)
     argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
@@ -78,6 +129,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                          and argv[:2] == ["lease", mode.removeprefix("lease-")])):
         raise ValueError("measurement argv must name the selected CLI mode")
     episode_fixture = fixture_url is not None and mode == "episode-end"
+    wait_delivery = fixture_url is not None and mode == "wait-mail"
     if episode_fixture:
         from .transport import TOKEN
         from evals.rust_port.episode_corpus import cases
@@ -91,13 +143,26 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                 or getattr(args, "layout", "bare") != "bare" \
                 or not callable(prepare) or not callable(verify):
             raise ValueError("daemon measurement requires the recorded authenticated episode-end case and state callbacks")
+    elif wait_delivery:
+        from evals.rust_port.wait_mail_measurement import measurement_case, project_invocation
+        _base_url(fixture_url)
+        if mode != "wait-mail" or case != measurement_case() or argv != case["argv"] \
+                or prepare is not None or not warm_images or getattr(args, "layout", "bare") != "bare":
+            raise ValueError("daemon delivery measurement requires the retained wait-mail case and equal warmups")
     elif fixture_url is not None:
         _base_url(fixture_url)
-        admitted_case = {"lease-check": lease_check_case, "lease-list": lease_list_case}.get(mode)
-        if admitted_case is None or case != admitted_case() or argv != case["argv"] \
-                or prepare is not None or verify is not None or getattr(args, "layout", "bare") != "bare":
-            raise ValueError("daemon measurement requires a retained TOKEN_FILE lease check/list fixture")
-    elif verify is not None:
+        if mode == "briefing":
+            from .transport import TOKEN
+            if argv != ["briefing"] or case is None \
+                    or case.get("environment_deltas") != {"PSEUDOLIFE_MCP_TOKEN": TOKEN} \
+                    or case.get("stdin_b64", "") != "" or getattr(args, "layout", "bare") != "bare":
+                raise ValueError("daemon measurement requires the authenticated plain briefing fixture")
+        else:
+            admitted_case = {"lease-check": lease_check_case, "lease-list": lease_list_case}.get(mode)
+            if admitted_case is None or case != admitted_case() or argv != case["argv"] \
+                    or prepare is not None or verify is not None or getattr(args, "layout", "bare") != "bare":
+                raise ValueError("daemon measurement requires a retained TOKEN_FILE lease check/list fixture")
+    if verify is not None and not episode_fixture:
         raise ValueError("state verification requires the owned episode-end fixture")
     root = args.oracle_root.resolve()
     pin = require_phase1_source(root)
@@ -120,8 +185,13 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                                                    reset_home, snapshot, remove_root_link],
                "evals/rust_port/harness.py": [capture_platform, isolated_env, run_cli, write_new],
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
-               "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
+               "evals/rust_port/provenance.py": [require_import_root, require_instrument_binding, runtime_metadata],
                "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+    if wait_delivery:
+        from evals.rust_port import wait_mail_policy, cli_wait_mail
+        helpers.update({"evals/rust_port/wait_mail_measurement.py": [measurement_case, project_invocation],
+                        "evals/rust_port/wait_mail_policy.py": [wait_mail_policy.delivery_projection],
+                        "evals/rust_port/cli_wait_mail.py": [cli_wait_mail.cases]})
     if fixture_url is not None:
         from . import transport
         helpers["evals/rust_port/cli_process.py"].extend([fixture_env, file_path])
@@ -129,8 +199,24 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
         if episode_fixture:
             helpers["evals/rust_port/episode_corpus.py"] = [cases]
         helpers["evals/rust_baseline/transport.py"] = [Path(transport.__file__)]
-    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     layout = getattr(args, "layout", "bare")
+    doorbell = mode == "doorbell-prompt-seen"
+    doorbell_binding = None
+    if doorbell:
+        if layout != "bare":
+            raise ValueError("positive doorbell measurement requires the bare layout")
+        from evals.rust_port.cli_doorbell_seen import THREAD, assert_effect, cases
+        from pseudolife_memory.codex_doorbell_state import notice_text
+        expected_case, default_prepare = doorbell_fixture()
+        if case is None and prepare is None:
+            case, prepare = copy.deepcopy(expected_case), default_prepare
+        if case != expected_case or argv != expected_case["argv"]:
+            raise ValueError("doorbell measurement requires the exact recorded positive case")
+        original_case = next(row for row in cases(notice_text) if row["id"] == "version2-positive")
+        key = hashlib.sha256(THREAD.encode()).hexdigest()
+        helpers["evals/rust_port/cli_doorbell_seen.py"] = [cases, assert_effect]
+        doorbell_binding = doorbell_source_binding(root)
+    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     if layout == "installed" and prepare is None:
         if mode != "version":
             raise ValueError("installed CLI measurement currently covers version only")
@@ -141,15 +227,18 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
     if fixture_url is None and (prepare is None) != (case is None):
         raise ValueError("prepared measurement requires both a callback and a recorded case")
     if case is not None and (case["mode"] != mode or case["argv"] != argv or case.get("normalizations")
-                             or (fixture_url is None and case.get("environment_deltas"))
-                             or (fixture_url is None and case.get("pre_files_b64"))):
+                             or (not doorbell and fixture_url is None and case.get("environment_deltas"))
+                             or (not doorbell and (fixture_url is None or mode == "briefing")
+                                 and case.get("pre_files_b64"))):
         raise ValueError("prepared measurement needs exact mode/argv and no input normalization or deltas")
     case = copy.deepcopy(case)
+    prepared = prepare is not None or fixture_url is not None
     prepared_controls = {}
     runs = {"python": [], "rust": []}
     resource_checks = []
     warmups = []
     state_checks = []
+    raw_invocations = []
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
         home = directory / "cli-home"
@@ -164,7 +253,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
             control = label == "control-" + arm
             reuse = warm_images and not control
             # Keep the historical per-invocation reset for modes without opt-in.
-            active_home = home if prepare is not None or fixture_url is not None or warm_images else directory / label
+            active_home = home if prepared or warm_images else directory / label
             if reuse:
                 for installed_arm, entry in installed.items():
                     if file_identity(entry["selected"]) != identities[installed_arm]:
@@ -179,13 +268,25 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                     # Warm images still need a fresh owned episode before every CLI.
                     prepared_case = copy.deepcopy(case)
                     prefixes = {"oracle": commands["python"], "candidate": commands["rust"]}
-                    prepared, prepared_identity, prepared_original = prepared_command(
+                    prepared_image, prepared_identity, prepared_original = prepared_command(
                         prepared_case, commands[arm], prefixes, root=root,
                         home=active_home, env=env, prepare=prepare)
-                    if prepared_case != case or prepared != selected \
+                    if prepared_case != case or prepared_image != selected \
                             or prepared_identity != selected_identity or prepared_original != original_identity:
                         raise ValueError("CLI warmup preparation must retain recorded inputs and images")
-            elif prepare is None and fixture_url is None:
+            elif wait_delivery:
+                reset_home(active_home)
+                env = fixture_env(active_home, {"oracle": commands["python"], "candidate": commands["rust"]}, fixture_url)
+                for relative, value in case["pre_files_b64"].items():
+                    path = file_path(active_home, relative)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(base64.b64decode(value, validate=True))
+                selected = commands[arm]
+                selected_identity = original_identity = command_identity(selected, root)
+                binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
+                           "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
+                                         "cwd": str(root), "command_identity": selected_identity}}
+            elif not prepared:
                 reset_home(active_home)
                 env = isolated_env(active_home)
                 selected = commands[arm]
@@ -205,19 +306,36 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                     env = isolated_env(active_home)
                     env.update({"XDG_DATA_HOME": str(active_home / "data"), "PSEUDOLIFE_MCP_NO_SPAWN": "1",
                                 "PYTHONDONTWRITEBYTECODE": "1"})
+                    if doorbell:
+                        if case != expected_case:
+                            raise ValueError("doorbell recorded case changed during measurement")
+                        env["PSEUDOLIFE_DIGEST_DIR"] = str(home / "digests")
+                        for relative, encoded in case["pre_files_b64"].items():
+                            path = file_path(home, relative)
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_bytes(base64.b64decode(encoded, validate=True))
                 try:
                     prepared_case = copy.deepcopy(case) if fixture_url is not None else case
                     selected, selected_identity, original_identity = prepared_command(
                         prepared_case, commands[arm], prefixes, root=root, home=active_home, env=env, prepare=prepare)
                     if fixture_url is not None and prepared_case != case:
-                        raise ValueError("CLI preparation must retain the recorded inputs")
+                        raise ValueError("CLI preparation must retain the recorded briefing inputs"
+                                         if mode == "briefing" else "CLI preparation must retain the recorded lease inputs")
                     binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
                                "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                              "effective_argv": [*selected, *argv], "cwd": str(root),
                                              "command_identity": selected_identity}}
+                    if doorbell:
+                        if case != expected_case or selected != commands[arm] \
+                                or binding["pre_files_b64"] != expected_case["pre_files_b64"]:
+                            raise ValueError("doorbell preparation changed recorded case, prefix or pending bytes")
+                        binding["private_metadata"] = {"before": doorbell_private_metadata(home)}
+                        home_identity = (home.stat().st_dev, home.stat().st_ino)
                 except BaseException:
                     remove_root_link(active_home)
                     raise
+            if doorbell and reuse:
+                home_identity = (home.stat().st_dev, home.stat().st_ino)
             before = snapshot(active_home)
             if control:
                 baseline_files = before
@@ -230,18 +348,34 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
             input_options = {"stdin": base64.b64decode(case.get("stdin_b64", ""), validate=True)} \
                 if case is not None else {}
             try:
+                arguments = [argument.format_map({"home": str(active_home)}) for argument in argv] if wait_delivery else argv
+                wall_started = time.time() if wait_delivery else None
                 started = time.perf_counter() if timed else None
-                response = run_cli(selected, argv, cwd=root, env=env,
+                response = run_cli(selected, arguments, cwd=root, env=env,
                                    timeout=case.get("timeout_seconds", 10) if fixture_url is not None else 10,
                                    **input_options)
                 elapsed = (time.perf_counter() - started) * 1000 if timed else None
+                wall_finished = time.time() if wait_delivery else None
                 after = snapshot(active_home)
+                compared_after = after
+                if wait_delivery:
+                    raw_invocations.append({"arm": arm, "label": label, "timed": timed,
+                                            "argv": arguments, "environment": copy.deepcopy(env),
+                                            "pre_files_b64": before, "response": copy.deepcopy(response),
+                                            "post_files_b64": after, "wall_window": [wall_started, wall_finished]})
+                    if record_invocation is not None:
+                        record_invocation(copy.deepcopy(raw_invocations[-1]))
+                    response, policy = project_invocation(case, response, before, after,
+                                                         [wall_started, wall_finished],
+                                                         "windows" if sys.platform == "win32" else "linux")
+                    raw_invocations[-1]["policy_instance"] = policy
+                    compared_after = response["post_files_b64"]
                 if reuse and file_identity(selected) != identities[arm]:
                     raise RuntimeError("CLI warmed executable file identity changed")
                 if command_identity(selected, root) != selected_identity \
                         or command_identity(commands[arm], root) != original_identity:
                     raise RuntimeError("CLI executable changed during measurement capture")
-                state = {"environment": copy.deepcopy(env), "pre_files_b64": before, "post_files_b64": after}
+                state = {"environment": copy.deepcopy(env), "pre_files_b64": before, "post_files_b64": compared_after}
                 if reuse and state != state_controls[arm]:
                     raise RuntimeError("CLI files or environment changed during measurement")
                 if control:
@@ -249,7 +383,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                 if binding is not None:
                     if env != binding["environment"]:
                         raise RuntimeError("CLI effective environment changed during measurement")
-                    binding["post_files_b64"] = after
+                    binding["post_files_b64"] = compared_after
                     if episode_fixture:
                         state = verify(copy.deepcopy(case), active_home, env, list(selected), copy.deepcopy(prefixes),
                                        copy.deepcopy(response))
@@ -260,6 +394,16 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                         if response != {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""} \
                                 or binding["post_files_b64"] != binding["pre_files_b64"]:
                             raise RuntimeError("CLI episode-end requires the accepted empty streams and unchanged home")
+                    if doorbell:
+                        if case != expected_case or env != binding["environment"] \
+                                or (home.stat().st_dev, home.stat().st_ino) != home_identity:
+                            raise RuntimeError("doorbell case, home or environment changed during measurement")
+                        binding["private_metadata"]["after"] = doorbell_private_metadata(home)
+                        try:
+                            assert_effect(original_case, {**response, "post_files_b64": binding["post_files_b64"]},
+                                          key, expected_case["pre_files_b64"])
+                        except AssertionError as error:
+                            raise RuntimeError("doorbell positive receipt byte control failed") from error
                     if command_identity(selected, root) != selected_identity \
                             or command_identity(commands[arm], root) != original_identity:
                         raise RuntimeError("CLI executable changed during measurement capture")
@@ -275,8 +419,11 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                 prepared_controls[arm] = binding
         if controls["python"] != controls["rust"] or controls["python"]["exit_code"] != 0:
             raise RuntimeError("CLI byte control failed; measurement not comparable")
+        if fixture_url is not None and mode == "briefing" and (not base64.b64decode(controls["python"]["stdout_b64"], validate=True)
+                                        or controls["python"]["stderr_b64"]):
+            raise RuntimeError("CLI briefing control must have nonempty stdout and empty stderr")
 
-        if fixture_url is not None and not episode_fixture:
+        if fixture_url is not None and mode in {"lease-check", "lease-list"}:
             if mode == "lease-check":
                 expected = {"name": "sample", "held": False,
                             "local": {"file": "lease-sample.lock", "state": None},
@@ -339,6 +486,8 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
     measured_provenance = provenance(source_root=root)
     if cli_binding(args.candidate_root, root, extra_helpers=helpers) != instrument_binding:
         raise RuntimeError("CLI instrument changed during measurement capture")
+    if doorbell and doorbell_source_binding(root) != doorbell_binding:
+        raise RuntimeError("doorbell preparation source changed during measurement capture")
     return {"schema": 1, "status": "contaminated-plumbing-smoke" if args.smoke else "quiet-cli-pair-final",
             "capture_platform": capture_platform(), "provenance": measured_provenance,
             "cli_instrument_binding": instrument_binding,
@@ -346,6 +495,7 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
             "candidate_executable": binary, "python_executable": python_identity,
             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,
             "prepared_case": copy.deepcopy(case), "prepared_controls": prepared_controls,
+            **({"doorbell_preparation_binding": doorbell_binding} if doorbell else {}),
             **({"fixture_url": fixture_url} if fixture_url is not None else {}),
             **({"independent_state_checks": state_checks,
                 "database_byte_equality_claimed": False} if episode_fixture else {}),
@@ -353,13 +503,18 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
             "warmups": warmups, "state_controls": state_controls,
+            **({"fixture_url": fixture_url, "raw_invocations": raw_invocations,
+                "named_policy": "nondeterministic-bytes-semantic",
+                "delivery_scope": "Exact retained seeded coordination records in an owned daemon fixture"}
+               if wait_delivery else {}),
             "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state."
                               if warm_images else "Historical per-invocation fixture reset; no explicit image warmup.",
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
-            "limitations": ["Fresh public CLI process against an already running owned daemon; image warmup follows start_protocol."
-                            if fixture_url is not None else "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
+            "limitations": ["Fresh public CLI process delivering recorded mail in an owned daemon fixture; no model execution."
+                             if wait_delivery else "Fresh public CLI process against an already running owned daemon; image warmup follows start_protocol."
+                             if fixture_url is not None else "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models."
                              if warm_images else "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
                             "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
                             "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
@@ -378,7 +533,7 @@ def main():
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256")
-    parser.add_argument("--mode", choices=("help", "version"), default="help")
+    parser.add_argument("--mode", choices=("help", "version", "doorbell-prompt-seen"), default="help")
     parser.add_argument("--warm-images", action="store_true",
                         help="Reuse and warm images before each repeat; default for version, opt-in for other modes")
     parser.add_argument("--argv-json", help="Optional argv for the selected mode")
