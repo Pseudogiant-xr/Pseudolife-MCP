@@ -53,7 +53,7 @@ def startup_refusal(prefix, private, configuration):
 @pytest.mark.parametrize("fields", MERGE_FIELDS)
 def test_implicit_yaml_merge_startup_refused(prefix, tmp_path, fields):
     error = startup_refusal(prefix, tmp_path, merge_configuration(fields))
-    assert error == b"pseudolife-stdio serve: config-yaml-typed: implicit YAML merge key '<<' unsupported; quote the string (file: config.yaml)\n"
+    assert error == ("pseudolife-stdio serve: config-yaml-typed: implicit YAML merge key '<<' unsupported; quote the string (file: config.yaml)" + os.linesep).encode()
 
 
 @pytest.mark.parametrize("quote", ["'", '"'])
