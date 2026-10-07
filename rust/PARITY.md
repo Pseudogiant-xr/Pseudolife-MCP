@@ -46,6 +46,14 @@ native serializer corpus and one eligible immutable tokenless sent GET node
 also passed. These are bounded local checks; independent review, hosted checks,
 snapshot refresh convergence and graceful shutdown remain pending.
 
+Source integration of accepted master `59a8624e` retains its lease/version
+admission and the sent candidate through an ordinary merge. The earlier local
+Windows controls belong to `6a582f7f` and do not validate this combined source.
+The sent/PG implementation and lock remain unchanged; the combined entrypoint
+and inherited dependency features require a fresh bounded Windows gate before
+acceptance. Snapshot recovery/concurrency, graceful shutdown and real TLS
+integration remain pending.
+
 Pinned Python `serve` parses no trailing flags: it calls `run_daemon()` and
 reads `PSEUDOLIFE_MCP_HOST`, `PORT`, `DATABASE_URL`, `CONFIG`, `TOKEN`, `TOKENS`
 and `TRUST_BIND` using the `PSEUDOLIFE_MCP_` prefix. The candidate follows this
