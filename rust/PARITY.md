@@ -139,21 +139,34 @@ when explicitly configured in the both-OS hosted lane; that wiring has not yet
 run on the prepared head. The original ten in-process episode/title nodes and
 all existing eval assertions remain unchanged.
 
-The input producers are `episode_cli.py::_read_stdin` (legacy host hook JSON),
-its environment-only bearer and `shim.py::probe_health` (stdlib HTTP health
-reply), plus `session_title.py::title_from_cwd` (host cwd and local clock).
-`ops/install-hook.sh` and `.ps1` remove the obsolete episode hooks; ordinary
-shim session lifecycle is a separate producer/path. Legacy hook comments name
-a string session ID and filesystem cwd, but this checkout contains no strict
-host schema constraining arbitrary caller stdin. The health producer sends
-UTF-8 JSON; the HTTP boundary still permits malformed remote replies. No
-installer or daemon producer was found for NaN/Infinity, giant integers,
-989-container recursion boundaries or synthetic non-string cwd/session IDs.
-Those inputs remain in the retained corpus and compatibility implementation:
-this inventory does not authorize deleting coverage or narrowing an open
-public CLI contract. Surrogate filesystem path spelling and normal title path
-rules remain observable on host paths; further simplification needs an
-explicit producer-domain decision, not an interpreter-version assumption.
+The episode hook input producer is `episode_cli.py::_read_stdin` (legacy
+external host JSON); its module contract names a string `session_id` and a
+filesystem `cwd`. The admitted grammar is an ordinary JSON object with a
+STRING `session_id` and missing/null/string `cwd`. Empty or missing session
+IDs and malformed/outside-grammar fields refuse silently before origin/network
+work. Other ordinary host fields are validated by serde_json and ignored;
+its library resource bounds replace CPython recursion accounting. The installers
+remove obsolete episode hooks; they do not produce arbitrary numeric or
+container session IDs. Manual stdin can reach the historical Python coercion,
+but that interpreter domain is deliberately outside this hook contract.
+
+| Episode site | Producer/input class | Substitution or retained reason |
+|---|---|---|
+| `episode_input.rs::Hook` | External hook ordinary JSON object and string fields | Typed serde_json map; no general Python truthiness/repr, NaN/Infinity conversion, arbitrary numeric session coercion or PYTHONINTMAXSTRDIGITS setting. Duplicate string fields retain last-value semantics. |
+| `episode_input.rs::Text` and `quoted` | Hook strings and actual OS cwd spelling | serde_json byte-string decoding plus a minimal WTF-8 codepoint adapter retains escaped host surrogate units; ordinary JSON forbids raw string controls. ASCII JSON escaping and request-body spacing remain exact. This is a filesystem/string codec, not a general interpreter value model. |
+| `episode.rs::run` | Hook JSON text | The standard parser replaces the pinned989-container scan and its8MiB thread/extra runtime. Synthetic deep/numeric/non-finite cases remain historical diagnostics; no passing admission claim is made for them. |
+| `episode.rs::health` | Daemon `_build_health_payload`, `web/api.py` JSON response | UTF-8 ordinary serde_json parsing/non-null health gate, with no Python non-finite, integer-env or UTF16/32 byte-sniffing emulation. Configured remote malformed responses still refuse. |
+| `episode.rs` path/title helpers | Host cwd, real OS paths, HOME/USERPROFILE, .git directories, local clock | Retain surrogate filesystem conversion, root/UNC/separator/basename rules, nearest git directory, home/system fallback and local-minute title because they change public body bytes for actual host paths. No broad title/time normalization is added. |
+
+The shared `python_json*` implementation remains owned by other consumers;
+episode no longer imports it, Python repr or version numeric formatting. The
+specific native recursion/integer-limit assertions are retired; the origin
+assertion uses a real string key. Original Python tests and all existing eval
+assertions remain unchanged, including historical corpus-presence checks. The
+numeric42 native167/2a measurements are historical; reduced-successor closure
+and measurement fixtures use the string42 producer and must be freshly bound.
+Both modes remain deferred through runtime, review and hosted acceptance.
+
 
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.
 

@@ -1,8 +1,6 @@
 //! Legacy hook leaves: silent best-effort calls to an already-running daemon.
-use super::python_json::{
-    self,
-    json::{self, Value},
-};
+#[path = "episode_input.rs"]
+mod input;
 use std::{
     ffi::{OsStr, OsString},
     io::Read,
@@ -18,26 +16,6 @@ fn forbidden_header_input(token: &str) -> bool {
     token
         .chars()
         .any(|c| matches!(u32::from(c), 0..=8 | 10..=31 | 127))
-}
-
-fn truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_f64().is_none_or(|value| value != 0.0),
-        Value::String(value) => !value.is_empty(),
-        Value::Array(value) => !value.is_empty(),
-        Value::Object(value) => !value.is_empty(),
-    }
-}
-
-fn key(input: &Value) -> Option<Value> {
-    let value = input.get("session_id").filter(|value| truthy(value))?;
-    Some(if value.is_string() {
-        value.clone()
-    } else {
-        Value::from(value.python(false))
-    })
 }
 
 fn normalized(path: &Path) -> PathBuf {
@@ -267,11 +245,7 @@ fn project(cwd: &[u32]) -> Option<Vec<u32>> {
     }
 }
 
-fn title(cwd: Option<&Value>) -> Option<Value> {
-    let cwd = match cwd {
-        Some(value) if truthy(value) => python_json::points(value)?,
-        _ => &[],
-    };
+fn title(cwd: &[u32]) -> String {
     let mut name = project(cwd);
     if name.is_none() && !cwd.is_empty() {
         let is_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
@@ -301,61 +275,10 @@ fn title(cwd: Option<&Value>) -> Option<Value> {
             .chars()
             .map(u32::from),
     );
-    Some(python_json::string(&name))
+    input::quoted(&name)
 }
 
-// The pinned CPython public CLI has 989 remaining container-recursion slots.
-// Count containers, not scalar leaves; json.loads rejects before any request.
-fn stdin_json(input: &str) -> Option<Value> {
-    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
-    for byte in input.bytes() {
-        if quoted {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                quoted = false;
-            }
-        } else {
-            match byte {
-                b'"' => quoted = true,
-                b'[' | b'{' => {
-                    depth += 1;
-                    if depth > 989 {
-                        return None;
-                    }
-                }
-                b']' | b'}' => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-    }
-    json::from_str(input).ok()
-}
-
-// Parsing, formatting and dropping accepted Python JSON all recurse. Windows'
-// default main-thread stack is too small at the public CLI's accepted depth.
-pub(super) async fn run(mode: &str) -> ExitCode {
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
-            .spawn_scoped(scope, || {
-                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                else {
-                    return ExitCode::SUCCESS;
-                };
-                runtime.block_on(run_inner(mode))
-            })
-            .ok()
-            .and_then(|thread| thread.join().ok())
-            .unwrap_or(ExitCode::SUCCESS)
-    })
-}
-
-async fn health(url: &str) -> Option<Value> {
+async fn health(url: &str) -> Option<()> {
     let client = reqwest::Client::builder()
         // urllib follows health redirects without generating a Referer.
         .referer(false)
@@ -375,23 +298,24 @@ async fn health(url: &str) -> Option<Value> {
         .await
         .ok()?;
     // The production health path decodes UTF-8 text, unlike json.loads(bytes).
-    let value = stdin_json(std::str::from_utf8(&bytes).ok()?)?;
-    (!value.is_null()).then_some(value)
+    let value: serde_json::Value = serde_json::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
+    (!value.is_null()).then_some(())
 }
 
-async fn run_inner(mode: &str) -> ExitCode {
+pub(super) async fn run(mode: &str) -> ExitCode {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return ExitCode::SUCCESS;
     }
     // TextIOWrapper performs universal-newline conversion before json.loads.
     let input = input.replace("\r\n", "\n").replace('\r', "\n");
-    let Some(input) = stdin_json(&input) else {
+    let Some(input) = input::parse(&input) else {
         return ExitCode::SUCCESS;
     };
-    let Some(key) = key(&input) else {
+    let Some(key) = input.key.filter(|key| !key.0.is_empty()) else {
         return ExitCode::SUCCESS;
     };
+    let key = input::quoted(&key.0);
     let url = match crate::daemon_url::from_environment() {
         Ok(url) => url,
         Err(message) => {
@@ -403,9 +327,7 @@ async fn run_inner(mode: &str) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let (path, body) = if mode == "episode-start" {
-        let Some(title) = title(input.get("cwd")) else {
-            return ExitCode::SUCCESS;
-        };
+        let title = title(input.cwd.as_ref().map_or(&[], |cwd| &cwd.0));
         (
             "start",
             format!("{{\"session_key\": {key}, \"title\": {title}}}"),

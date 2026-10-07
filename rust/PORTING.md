@@ -23,6 +23,17 @@ boundaries. A compiling translation does not establish parity.
 
 ## Evidence and ownership
 
+### Episode hook producer grammar
+
+The legacy hook producer supplies an ordinary JSON object with STRING
+`session_id` and missing/null/string `cwd`. Typed serde_json validation replaces
+Python value coercion, non-finite numbers, integer interpreter options and
+pinned recursion-depth behavior. Keep the OS-path/string codec and exact
+request-body escaping; synthetic interpreter inputs remain retained historical
+diagnostics. The producer and each deliberate substitution are recorded in
+PARITY.md. Original oracle/eval tests remain unchanged; only the explicitly
+retired native interpreter-limit tests and string-key origin fixture change.
+
 ### Prepared episode policy instances
 
 The header-disposition statement from the original preparation at `758aa642`

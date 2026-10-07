@@ -1,5 +1,18 @@
 # Rust port state
 
+## Episode producer grammar reduction
+
+Episode now admits the audited hook ordinary-JSON object with string
+`session_id` and missing/null/string `cwd`. It uses typed serde_json fields,
+retains the minimal real-filesystem surrogate/string codec and observable
+path/title/body behavior, and no longer imports shared Python value emulation.
+The interpreter-depth/integer-env native assertions are retired under the
+explicit test exception; original Python/eval assertions are unchanged.
+Synthetic numeric/non-finite/deep inputs and native167/numeric42 measurements
+remain historical diagnostics. Reduced-successor builds, string42 actual
+closure/corpus/measurements, fresh review and hosted gates remain pending; both
+episode modes stay deferred. Producer/substitution details are in PARITY.md.
+
 ## Episode distinct-field ordering disposition
 
 The additive associated-wire comparator permits order differences among
