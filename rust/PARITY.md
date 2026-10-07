@@ -924,6 +924,21 @@ before lock/fallback/child effects remains scoped to check/list/run. The
 additive `lease_hold.rs` controls distinguish these two admission boundaries.
 Ordinary non-ASCII registration failures also remain mirror-only.
 
+The `nondeterministic-bytes-semantic` rule applies to identities issued by
+the real daemon during mirrored hold registration. Its exact field scope is
+the registration reply's `agent_id` and `credential`, their subsequent
+`X-PL-Agent`/`X-PL-Agent-Key` echoes, `coordination_agents.agent_id` and
+`credential_hash`, lease holder IDs (including HTTP holder views), and audit
+rows' `agent_id` plus the chain links derived from that identity. Each arm
+must receive a canonical UUID4 hex ID and a 43-character URL-safe token;
+the stored credential hash must equal SHA-256 of its actual issued token.
+Every captured audit chain must independently verify its original payload
+text, hashes and links before semantic comparison, with exact event kinds,
+order, sequence and all other columns. Request-body bytes, CLI streams,
+lock/child behavior and all unrelated rows remain exact. This rule does not
+permit replacing entropy sources or discarding unrelated state differences.
+Mirrored hold whole-command acceptance remains pending.
+
 This is source preparation, with no Phase 4 native execution or acceptance
 claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
 public-process/state corpora, Windows interruption and PostgreSQL transaction/
