@@ -6,7 +6,10 @@ The hook candidate remains deferred. Its producer reduction replaces the
 private Python JSON domain and stack thread with bounded strict parsing,
 retains valid ignored large integers, and implements the named typed-markdown,
 ASCII-numeric, first-line-cursor and native-output-failure substitutions in
-PORTING.md. No native execution or build verifies this reduced source yet.
+PORTING.md. Windows validation of `64f5a6a2` passed the native build, formatting,
+both Clippy configurations, 12 CLI unit tests, six hook integration tests and
+the first public prompt cell. The 13 offline policy checks also passed; these
+checks do not establish both-platform or mode acceptance.
 The dedicated hook production is now 944 lines before test modules (911 for
 briefing_hook plus 33 for hook_json), down from 1,811 under the same counting
 rule. All 12 remove/narrow inventory sites are addressed; the 12 keep sites
@@ -15,7 +18,8 @@ separator lines; neither count is a readiness or performance claim.
 
 The branch merges accepted master forward. Four code conflicts were resolved
 in the measurement helper, CLI dispatcher, pytest adapter and binary entrypoint;
-a committed-head local full suite is required after review fixes. The merged
+a committed-head Python full suite on the homelab box is still required,
+separately from hosted Rust correctness and both-platform parity checks. The merged
 adapter preserves version routing and all 18 hook admissions (26 selected
 nodes total); the
 measurement helper preserves image warmups and owned briefing fixtures.
