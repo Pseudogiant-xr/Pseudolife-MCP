@@ -33,7 +33,31 @@ The bounded native `serve` entry point owns the listener, request admission,
 query limits, initialized-bank SQL projection and exact response bytes for
 `GET /api/maintainer/sent`. It uses the committed shared PostgreSQL module
 from `0341ad38e04df356360b1d3cbd4b51b5faefa5b4`, with explicit DSN/TLS
-and the named SAN-only hostname policy; no Python implementation is called.
+and the named `pg-dsn-explicit-tls` and SAN-only
+`pg-tls-webpki-hostnames` policies; no Python implementation is called.
+
+The transport oracle is libpq 18.6 (observed version 180006), upstream
+[`REL_18_6`, commit `724edf9bde9d356724ad384a2e196edc3c9f80f7`](https://github.com/postgres/postgres/tree/724edf9bde9d356724ad384a2e196edc3c9f80f7).
+Available roots trigger peer verification in
+[`fe-secure-openssl.c:930,976,1352–1353`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-secure-openssl.c#L1352).
+For `prefer`, failed TLS retries a fresh plaintext connection
+([`fe-connect.c:3856–3862`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-connect.c#L3856));
+a server startup/authentication ErrorResponse also selects the next encryption
+method except `cannot_connect_now`
+([`4134–4162`](https://github.com/postgres/postgres/blob/724edf9bde9d356724ad384a2e196edc3c9f80f7/src/interfaces/libpq/fe-connect.c#L4134)).
+Native keeps available-root validation and one `prefer` retry within the
+existing connect deadline; `require`, `verify-ca` and `verify-full` never
+retry plaintext. Invalid SSLRequest replies and pre-connect configuration
+refusals do not retry. `allow` remains explicitly deferred. Real owned PG
+controls assert both whole HTTP bytes and `pg_stat_ssl`; protocol unit controls
+are not TLS acceptance evidence.
+
+Historical frozen `55f28613` Linux controls served exact HTTP/SQL bytes over
+DNS/IP SAN TLS and retained named legacy-name refusals. Its wrong-CA `prefer`
+control exposed Python HTTP200 over plaintext versus native HTTP503. That
+receipt does not validate the later retry repair, which still needs its own
+exact source/image proof and independent review. Broader recovery/concurrency,
+graceful shutdown, snapshot/export and cutover acceptance remain deferred.
 Its first Windows disposable cell matched a nonempty SQL result against the
 Python store plus JSON contract, and verified process-tree/database cleanup.
 That cell used JSON-as-YAML and does not establish whole HTTP oracle parity,

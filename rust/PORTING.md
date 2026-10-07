@@ -812,3 +812,15 @@ the predicates identify resolver disagreement, not a replacement Python YAML
 loader. Valid digit-prefixed strings remain strings, quoted values retain
 their meaning, and audited allowed-principal names strip, lowercase, deduplicate
 in first-seen order and reject blanks like the Python configuration producer.
+
+### PostgreSQL prefer negotiation
+
+The shared native client retains available-root verification during a TLS
+attempt. In the approved libpq18 domain, `prefer` may then try one fresh
+plaintext connection after failed TLS negotiation or a server startup/auth
+ErrorResponse other than `cannot_connect_now`. This matches libpq's transport
+state, rather than removing CA checks from the TLS attempt. The existing
+connect deadline covers both attempts; strict modes never retry plaintext.
+The named policies `pg-dsn-explicit-tls` and `pg-tls-webpki-hostnames` remain
+explicit, including the SAN-only divergence for verify-full. See PARITY.md
+for pinned upstream source and historical versus candidate proof scope.
