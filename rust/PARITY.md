@@ -1265,9 +1265,10 @@ metadata omits the optional since text. The CPython ISO grammar grid is retired.
 
 Opaque OS lease arguments are refused with exit 2 and
 `lease: arguments must be valid Unicode`, before state or child effects. This
-candidate does not pass opaque child arguments through. Deferred actions
-hold/break/delegate/designate still return exit 1 with
-`deferred in this candidate`. Windows unlock and Ctrl-C receipts at final7e are
+candidate does not pass opaque child arguments through. At the reduced source
+checkpoint `96356249`, hold/break/delegate/designate returned exit 1 with
+`deferred in this candidate`; the later Phase 4 implementation supersedes those
+implementation deferrals. Windows unlock and Ctrl-C receipts at final7e are
 historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
 checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
 hosted acceptance and fresh review remain pending.

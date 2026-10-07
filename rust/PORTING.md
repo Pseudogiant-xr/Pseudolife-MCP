@@ -995,13 +995,16 @@ tokenize/tokenise checks, preserving match iteration. This dependency does not
 introduce a Python parser or runtime bridge. Audit payloads retain sorted UTF-8
 JSON and timestamp decimal spelling because both are hashed durable state.
 
-Only locked offline dependency metadata and source formatting were checked;
-compilation and every new runtime cell remain unrun. The additive fixture plan
-starts with `lease break fixture-missing` on an owned disposable bank, whose
-missing-row result creates no audit/time fields. Subsequent mutations require
-the identical clock seam in both arms, all-row/byte comparison and rejecting
-controls. Delegate/designate, container cancellation, ambiguous COMMIT and full
-mode acceptance remain pending; prior transport measurements are historical.
+At the original source checkpoint `ef0f9a4b`, only locked offline dependency
+metadata and source formatting had been checked; compilation and runtime cells
+were unrun. Its additive fixture plan started with `lease break fixture-missing`
+on an owned disposable bank, whose missing-row result creates no audit/time
+fields. Subsequent mutations require the identical clock seam in both arms,
+all-row/byte comparison and rejecting controls. Delegate/designate were then
+unimplemented; subsequent implementation
+and scoped execution are recorded in [PARITY](PARITY.md#phase-4-delegate-source-preparation).
+Container cancellation, ambiguous COMMIT and full mode acceptance remain
+pending; prior transport measurements retain their original runtime identities.
 
 ## Maintainer sent JSONB read domain
 
