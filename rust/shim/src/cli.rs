@@ -4,7 +4,6 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 mod episode;
-mod python_json;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");

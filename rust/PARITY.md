@@ -159,9 +159,12 @@ but that interpreter domain is deliberately outside this hook contract.
 | `episode.rs:54/72/85/95` OS string conversion | OS paths / user string cwd | Keep host UTF-16/surrogateescape conversion because actual filenames can contain those units and change filesystem lookup and body bytes. |
 | `episode.rs:21/42/121/129/153/196/204/248` path/title helpers | OS cwd, user string cwd, HOME/USERPROFILE, .git directories and local clock | Keep root/UNC/separator/basename rules, nearest git directory, home/system fallback and local-minute title because they change public body bytes for actual host paths. No broad title/time normalization is added. |
 
-The shared `python_json*` implementation remains owned by other consumers;
-episode no longer imports it, Python repr or version numeric formatting. The
-specific native recursion/integer-limit assertions are retired; the origin
+The obsolete `python_json.rs` wrapper and `python_json_data.rs` parser are
+removed from this candidate, along with their CLI module declaration. Neither
+had a production caller in this tree; lease remains deferred. VERSION's numeric
+formatting helper returns to its accepted private visibility. Episode uses
+only its typed input/string codec. The specific native recursion/integer-limit
+assertions are retired; the origin
 assertion uses a real string key. Original Python tests and all existing eval
 assertions remain unchanged, including historical corpus-presence checks. The
 numeric42 native167/2a measurements are historical; reduced-successor closure
@@ -176,9 +179,12 @@ in a warm three-by-ten measurement. Strict header-order differences, historical
 outside-grammar captures and the original Linux minute-boundary failure remain
 raw diagnostics; its exact isolated repeat passed without a new normalization.
 Production episode code is 512 physical lines versus 192 Python episode/title
-lines (2.667 times), with no episode dependency on the 733-line shared value
-implementation. These local executions establish no hosted-node execution or
-ported status; fresh review and the required post-review full suite remain open.
+lines (2.667 times). The unused general value implementation is removed from
+the outgoing diff, rather than retained as shared support. These local executions
+remain bound to native component `17459703`, before that removal; they establish
+no successor-image or hosted-node execution or ported status. Fresh compilation,
+affected checks, image comparisons, follow-up review and the required post-review
+full suite remain open.
 
 
 Phase 0b: unchanged Python control over `test_shim.py`, `test_daemon_http.py`, selected recovery boundary nodes and docs/evidence guards; new generated corpus/schema snapshot/harness negative controls. Baselines identify backend and use a quiet CPU host with lease free. The historical disposable trial is complete and its corrections remain in PORTING.md; phase 0b closes the five new gaps rather than repeating that trial.

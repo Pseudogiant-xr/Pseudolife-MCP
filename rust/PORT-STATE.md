@@ -5,7 +5,9 @@
 Episode now admits the audited hook ordinary-JSON object with string
 `session_id` and missing/null/string `cwd`. It uses typed serde_json fields,
 retains the minimal real-filesystem surrogate/string codec and observable
-path/title/body behavior, and no longer imports shared Python value emulation.
+path/title/body behavior. The unused general Python value wrapper/parser and
+their module declaration are removed; this tree has no lease parser consumer.
+The VERSION formatting helper returns to its accepted private visibility.
 The interpreter-depth/integer-env native assertions are retired under the
 explicit test exception; original Python/eval assertions are unchanged.
 Synthetic numeric/non-finite/deep inputs and native167/numeric42 measurements
@@ -13,7 +15,10 @@ remain historical diagnostics. Native component `17459703` and capture component
 `63922667` now have both-OS local string42 closure and warm three-by-ten receipts,
 32 admitted corpus pairs with 128 rejected controls per OS, and 201 targeted
 tests per OS. The exact Linux path-minute repeat passed; original raw failure
-and outside-grammar diagnostics remain retained. Fresh independent review,
+and outside-grammar diagnostics remain retained. Those receipts precede removal
+of the unused parser and retain their original image identities. Episode runtime
+source is unchanged, but successor compilation, affected checks and image
+comparisons have not run. Fresh independent follow-up review,
 the required post-review full Python suite and current hosted/exact-master gates
 remain pending; both episode modes stay deferred. Producer/substitution details
 and the 2.667-times production line ratio are in PARITY.md.
@@ -82,7 +87,7 @@ fresh line-ratio accounting, independent review and publication checks.
 Historical measurements, failures and their source identities remain below;
 none certify this preparation.
 
-## Episode leaf candidate
+## Historical episode leaf candidate
 
 Native `episode-start` and `episode-end` are implemented before shim attachment
 on the reviewed version dependency `db0d59cb`. Earlier uncommitted-source diagnostics
@@ -99,8 +104,9 @@ clippy pass on both hosts. Existing Python episode/title tests remain unchanged
 and in-process; no native-routing credit is assigned to them. The dedicated leaf
 has 440 production lines and the shared JSON wrapper/parser has 733, versus 192
 in the two Python reference modules (1173/192 = 6.10938, excluding tests and
-existing dispatch glue). The parser derives from the reviewed lease parser;
-the current repair adds configured integer limits.
+existing dispatch glue). That historical parser derived from a separate lease
+candidate; it had no production lease consumer in this tree. The configured
+integer-limit repair and parser itself have since been removed.
 The Python denominator contains title behavior outside these leaves; this is a
 size observation, not a coverage claim.
 
@@ -243,7 +249,8 @@ Local untracked receipt `episode-measurement-windows-3x10.json` has SHA256
 Raw captures and failed attempts remain retained. This evidence covers an
 authenticated nonblank request closing an empty root, not closure of stored
 entries, complete episode-mode acceptance or full HTTP header/framing equality.
-The 440 dedicated Rust lines plus 733 JSON wrapper/parser lines remain 1,173,
+That historical source had 440 dedicated Rust lines plus 733 JSON wrapper/parser
+lines, totaling 1,173,
 against 83 Python episode lines plus 109 title lines (192; ratio 6.10938),
 excluding tests/assets and dispatch. The broader title denominator caveat above
 still applies. Policy groups 5, 7 and 12, remaining integration, current CI and

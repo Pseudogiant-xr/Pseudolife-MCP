@@ -33,6 +33,10 @@ request-body escaping; synthetic interpreter inputs remain retained historical
 diagnostics. The producer and each deliberate substitution are recorded in
 PARITY.md. Original oracle/eval tests remain unchanged; only the explicitly
 retired native interpreter-limit tests and string-key origin fixture change.
+The unused general `python_json*` additions and their module declaration are
+removed from the episode candidate; no lease production consumer exists in this
+tree. VERSION's helper visibility is restored to the accepted base. Earlier
+runtime receipts keep their original images and do not certify this removal.
 
 ### Prepared episode policy instances
 
