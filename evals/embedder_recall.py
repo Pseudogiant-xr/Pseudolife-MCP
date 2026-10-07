@@ -35,6 +35,10 @@ RESULTS = Path(__file__).resolve().parent / "results"
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 QWEN3_QUERY_PREFIX = ("Instruct: Given a web search query, retrieve relevant "
                       "passages that answer the query\nQuery:")
+# EmbeddingGemma 2 prefixes both sides; strings are the card's retrieval
+# prompts (config_sentence_transformers.json: "query" / "document").
+EG2_QUERY_PREFIX = "task: search result | query: "
+EG2_PASSAGE_PREFIX = "title: none | text: "
 
 # key -> (label, repo, query_prefix, passage_prefix). Prefixes are pinned
 # VERBATIM from each model card because instruction-tuned embedders swing
@@ -60,11 +64,18 @@ CANDIDATES = {
                         "nvidia/Nemotron-3-Embed-1B-BF16", "query: ", "passage: "),
     "nemotron-1b-d1024": ("Nemotron-3-Embed-1B (bf16, truncated 1024d)",
                           "nvidia/Nemotron-3-Embed-1B-BF16", "query: ", "passage: "),
+    # Needs sentence-transformers>=6.1.0 (card requirement).
+    "embeddinggemma-2": ("EmbeddingGemma 2 (native 768d)",
+                         "google/embeddinggemma-2",
+                         EG2_QUERY_PREFIX, EG2_PASSAGE_PREFIX),
+    "embeddinggemma-2-d256": ("EmbeddingGemma 2 (truncated 256d)",
+                              "google/embeddinggemma-2",
+                              EG2_QUERY_PREFIX, EG2_PASSAGE_PREFIX),
 }
 # ST arms that use card-sanctioned Matryoshka truncation (slice + L2 renorm,
 # handled by sentence-transformers' truncate_dim). pgvector's HNSW index caps
 # at 2000 dims, so a 2048-d native model is only DEPLOYABLE truncated.
-TRUNCATE_DIM = {"nemotron-1b-d1024": 1024}
+TRUNCATE_DIM = {"nemotron-1b-d1024": 1024, "embeddinggemma-2-d256": 256}
 
 # ── GGUF arms: quantized models served by llama-server ────────────────────
 # Weights quantization is what these arms measure (Q4_K_M vs fp32 vectors).
