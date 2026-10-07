@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import subprocess
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 import os
 import subprocess
 
@@ -143,16 +143,18 @@ def _port_selected_boundary(request):
         from psycopg.conninfo import make_conninfo
         # The original test's Recorder is never called; only its assertions run.
         # Tokenless admission requires no schema or application-service startup.
-        with disposable_database() as generated:
-            with native_sent(sent_prefix, request.getfixturevalue("tmp_path"),
-                             make_conninfo(generated, sslmode="disable")) as (client, _):
-                adapter = asgi_http_adapter(client)
-                def app(service, token=None):
-                    if token is not None:
-                        raise ValueError("tokenless routing adapter received a bearer fixture")
-                    return adapter
-                request.getfixturevalue("monkeypatch").setattr(request.node.module, "_app", app)
-                yield
+        stack = ExitStack()
+        request.addfinalizer(stack.close)
+        generated = stack.enter_context(disposable_database())
+        client, _ = stack.enter_context(native_sent(
+            sent_prefix, request.getfixturevalue("tmp_path"),
+            make_conninfo(generated, sslmode="disable")))
+        adapter = asgi_http_adapter(client)
+        def app(service, token=None):
+            if token is not None:
+                raise ValueError("tokenless routing adapter received a bearer fixture")
+            return adapter
+        request.getfixturevalue("monkeypatch").setattr(request.node.module, "_app", app)
         return
     stdio_prefix = getattr(request.config, "_port_stdio_prefix", None)
     if stdio_prefix is not None and MANIFEST["mapped"].get(request.node.nodeid) == "stdio-shim-process":
@@ -174,11 +176,9 @@ def _port_selected_boundary(request):
                 yield streams
 
         request.getfixturevalue("monkeypatch").setattr(mcp.client.stdio, "stdio_client", candidate_client)
-        yield
         return
     prefix = getattr(request.config, "_port_cli_prefix", None)
     if prefix is None:
-        yield
         return
     if boundary(request.node.nodeid) != "cli-main-process":
         raise pytest.UsageError("selected boundary is not implemented")
@@ -228,7 +228,6 @@ def _port_selected_boundary(request):
         raise SystemExit(result["exit_code"])
 
     monkeypatch.setattr(request.node.module, "main", main)
-    yield
 
 
 def doorbell_hook_environment(command, env, root, tmp_path):

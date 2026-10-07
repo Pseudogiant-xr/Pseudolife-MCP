@@ -33,7 +33,7 @@ fn main() -> ExitCode {
         std::process::exit(run_lease(&lease_arguments));
     }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("serve") {
-        return pseudolife_stdio::sent_serve::run().await;
+        return run_sent();
     }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))
@@ -60,6 +60,11 @@ async fn run_episode(mode: Option<&str>) -> Option<ExitCode> {
 #[tokio::main(flavor = "current_thread")]
 async fn run_lease(arguments: &[String]) -> i32 {
     pseudolife_stdio::cli::lease::main(arguments).await
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_sent() -> ExitCode {
+    pseudolife_stdio::sent_serve::run().await
 }
 
 #[tokio::main(flavor = "current_thread")]
