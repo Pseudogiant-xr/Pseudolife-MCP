@@ -46,8 +46,10 @@ def test_digit_name_http_bytes(prefix, tmp_path, monkeypatch, name):
     ('{"integer":' + "9" * 4301 + "}", 200, 503, False),
     ('{"integer":-' + "9" * 4301 + "}", 200, 503, False),
 ], ids=["depth200-exact", "depth2048-policy", "depth2049-refusal", "digits4300-positive", "digits4300-negative", "digits4301-positive-policy", "digits4301-negative-policy"])
-def test_jsonb_read_domains(prefix, tmp_path, raw, native_status, oracle_status, exact):
+def test_jsonb_read_domains(prefix, tmp_path, monkeypatch, raw, native_status, oracle_status, exact):
     from pseudolife_memory.utils.config import load_config
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", TOKEN)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
     path = tmp_path / "oracle.yaml"
     path.write_text(json.dumps(CONFIG), encoding="utf-8")
     request = {"headers": {"Authorization": "Bearer " + TOKEN}}
@@ -107,12 +109,21 @@ def test_canonical_send_ingress_rejects_4301_before_store(tmp_path):
 
 @pytest.mark.parametrize("depth,accepted", [(200, True), (2048, False), (2049, False)])
 def test_canonical_board_send_depth(tmp_path, depth, accepted):
-    from pseudolife_memory.storage.coordination import CoordinationConnection, CoordinationStore
-
     proof = 0
     for _ in range(depth - 1):
         proof = [proof]
     proof = {"label": "synthetic", "depth_control": proof}
+    board_send_proof(proof, accepted, RecursionError)
+
+
+@pytest.mark.parametrize("sign", [1, -1])
+def test_canonical_board_send_integer4301(sign):
+    board_send_proof({"label": "synthetic", "integer_control": sign * (10 ** 4300)}, False, ValueError)
+
+
+def board_send_proof(proof, accepted, exception):
+    from pseudolife_memory.storage.coordination import CoordinationConnection, CoordinationStore
+
     with disposable_database() as generated:
         dsn = make_conninfo(generated, sslmode="disable")
         seed(dsn)
@@ -130,6 +141,6 @@ def test_canonical_board_send_depth(tmp_path, depth, accepted):
                 assert send()["message_id"]
                 assert raw_bank_snapshot(dsn) != before
             else:
-                with pytest.raises(RecursionError):
+                with pytest.raises(exception):
                     send()
                 assert raw_bank_snapshot(dsn) == before

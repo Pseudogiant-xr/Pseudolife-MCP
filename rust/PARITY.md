@@ -75,6 +75,8 @@ unverified. No installation, production shadow or cutover is enabled.
 | Initialized explicit-DSN sent GET | Native HTTP gates through exact SQL/JSON bytes; equivalent-bank whole Python ASGI/SQL controls passed locally on Windows | candidate; review/hosted checks pending |
 | Supplemental serialization | Nine exact native cases: escaping, float spelling, separators, producer order, large integers, named UUID/timestamp `default=str` | bounded Windows controls passed |
 | Configuration | `config-yaml-typed`: audited typed fields/defaults, quoted strings, installer shape, ambiguity/tag/duplicate/type refusals | approved substitution; bounded Windows controls passed |
+| JSONB container depth | `bounded-jsonb-depth`: 2048 containers per column with protected decode/traversal/encoding/drop; deeper values return private 503 | named read domain; depth 200 exact, boundary policy controls separate |
+| JSONB integer digits | `jsonb-no-digit-limit`: arbitrary precision pass-through; no 4,300-digit read cap | named policy; raw SQL injection differs from Python, canonical producer rejection controls separate |
 | Original tests | One eligible immutable tokenless sent GET node routed to owned native HTTP; Recorder/internal assertions remain Python | one mapped node passed locally; no native claim for internal nodes |
 | Other HTTP routes and MCP | Fixed 501 body above, with no route-specific application work | deferred |
 | Cold storage, embedded/container DB resolution, live cutover, embeddings | No implementation or measurement in this slice | deferred |
