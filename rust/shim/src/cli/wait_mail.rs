@@ -209,18 +209,24 @@ fn read_ring(path: &Path) -> io::Result<Option<(Integer, String)>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let record = raw
-        .strip_suffix(b"\n")
-        .ok_or_else(|| corrupt_record("ring"))?;
-    let split = record
+    // Match wait_mail_cli._read_ring and the Stop hook's ring_past_seen:
+    // only the first two lines matter; malformed markers mean no ring.
+    let mut lines = raw.split(|byte| *byte == b'\n');
+    let head: Vec<u8> = lines
+        .next()
+        .unwrap_or_default()
         .iter()
-        .position(|b| *b == b'\n')
-        .ok_or_else(|| corrupt_record("ring"))?;
-    let watermark = Integer::parse(&record[..split]).ok_or_else(|| corrupt_record("ring"))?;
-    let reason = &record[split + 1..];
-    if reason.contains(&b'\n') || reason.contains(&b'\r') {
-        return Err(corrupt_record("ring"));
+        .copied()
+        .filter(|byte| !matches!(byte, b'\r' | b' '))
+        .collect();
+    if head.len() > 12 {
+        return Ok(None);
     }
+    let Some(watermark) = Integer::parse(&head) else {
+        return Ok(None);
+    };
+    let reason = lines.next().unwrap_or_default();
+    let reason = reason.strip_suffix(b"\r").unwrap_or(reason);
     if !reason.starts_with(b"rung ")
         || !reason[5..]
             .iter()
@@ -1267,11 +1273,11 @@ mod tests {
             assert!(read_ring(&path).unwrap().is_none());
         }
         fs::write(&path, b"1234567890123\nrung anyone\n").unwrap();
-        assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "1234567890123");
+        assert!(read_ring(&path).unwrap().is_none());
         fs::write(&path, b" 1 2 \r\nrung \r\nextra").unwrap();
         assert_eq!(
-            read_ring(&path).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
+            read_ring(&path).unwrap(),
+            Some((Integer::parse(b"12").unwrap(), "rung ".into()))
         );
         fs::write(&path, b"12\nrung anyone\n").unwrap();
         #[cfg(unix)]
