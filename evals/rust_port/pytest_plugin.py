@@ -94,7 +94,8 @@ def pytest_collection_finish(session):
         return
     unmapped = [item.nodeid for item in session.items if boundary(item.nodeid) not in boundaries
                and not ("sent-http-process" in boundaries and (sent_eligible(item)
-                        or item.nodeid.startswith("evals/rust_port/test_sent_http_process.py::")))]
+                        or item.nodeid.startswith(("evals/rust_port/test_sent_http_process.py::",
+                                                  "evals/rust_port/test_sent_review_controls.py::"))))]
     if unmapped:
         # No silent skip/deselection: an explicit supported selection is required.
         raise pytest.UsageError("selected tests have no process adapter: " + ", ".join(unmapped))
