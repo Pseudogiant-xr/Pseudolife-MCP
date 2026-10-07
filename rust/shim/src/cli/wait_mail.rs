@@ -1071,7 +1071,10 @@ mod tests {
         fs::write(&path, b"1234567890123\nrung anyone\n").unwrap();
         assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "1234567890123");
         fs::write(&path, b" 1 2 \r\nrung \r\nextra").unwrap();
-        assert_eq!(read_ring(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            read_ring(&path).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
         fs::write(&path, b"12\nrung anyone\n").unwrap();
         #[cfg(unix)]
         {

@@ -111,6 +111,9 @@ def compare_record(record, platform):
     from .harness import Policy, compare
     if platform not in ("linux", "windows"):
         raise ValueError("wait-mail policies require a recorded Linux or Windows platform")
+    from .wait_mail_candidate_contract import EXPECTATIONS, compare_candidate_contract
+    if record["id"] in EXPECTATIONS:
+        return compare_candidate_contract(record, platform)
     projected = {}
     instances = []
     for arm in ("oracle", "candidate"):

@@ -317,21 +317,35 @@ mod tests {
     #[test]
     fn formatter_default_help_and_simple_usage_keep_the_declared_text() {
         assert_eq!(help(80), super::super::HELP);
-        assert_eq!(usage(40), "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest\nDIGEST] [--timeout TIMEOUT] [--interval\nINTERVAL]\n");
+        assert_eq!(
+            usage(40),
+            "usage: pseudolife-mcp wait-mail [-h]\n[--session-id SESSION_ID | --digest\nDIGEST] [--timeout TIMEOUT] [--interval\nINTERVAL]\n"
+        );
         for columns in [40, 120] {
-            assert_eq!(help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
-                super::super::HELP.split_ascii_whitespace().collect::<Vec<_>>());
+            assert_eq!(
+                help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
+                super::super::HELP
+                    .split_ascii_whitespace()
+                    .collect::<Vec<_>>()
+            );
         }
     }
     #[test]
     fn small_terminal_widths_keep_whole_words_without_argparse_thresholds() {
         for columns in [1, 2, 3, 7, 12, 13] {
-            assert_eq!(help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
-                super::super::HELP.split_ascii_whitespace().collect::<Vec<_>>());
+            assert_eq!(
+                help(columns).split_ascii_whitespace().collect::<Vec<_>>(),
+                super::super::HELP
+                    .split_ascii_whitespace()
+                    .collect::<Vec<_>>()
+            );
             assert!(help(columns).contains("pseudolife-mcp"));
             assert!(help(columns).contains("addressed"));
         }
-        assert_eq!(usage(1), "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n");
+        assert_eq!(
+            usage(1),
+            "usage:\npseudolife-mcp\nwait-mail\n[-h]\n[--session-id\nSESSION_ID\n|\n--digest\nDIGEST]\n[--timeout\nTIMEOUT]\n[--interval\nINTERVAL]\n"
+        );
     }
     #[test]
     fn float_spellings_and_argparse_option_boundaries() {

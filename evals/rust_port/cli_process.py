@@ -383,6 +383,7 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None):
         arms = {arm: observe(case, command, commands, root=root, home=home, url=url, prepare=prepare)
                 for arm, command in commands.items()}
         policy_instances = []
+        candidate_contract = {}
         if case["mode"] == "wait-mail" and sys.platform in ("linux", "win32"):
             from .wait_mail_policy import compare_record
             checked = compare_record({"id": case["id"], **arms}, "windows" if os.name == "nt" else "linux")
@@ -392,10 +393,14 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None):
             differences = compare(inputs["oracle"], inputs["candidate"], BYTE_POLICY)
             differences += [{**cell, "path": "/response" + cell["path"]} for cell in checked["differences"]]
             policy_instances = checked["policy_instances"]
+            candidate_contract = {key: checked[key] for key in
+                                  ("candidate_expected_response", "candidate_contract_substitution",
+                                   "raw_oracle_differences") if key in checked}
         else:
             differences = compare(byte_payload(arms["oracle"]), byte_payload(arms["candidate"]), BYTE_POLICY)
         records.append({"id": case["id"], "mode": case["mode"], **arms,
-                        "differences": differences, "policy_instances": policy_instances, "passed": not differences})
+                        "differences": differences, "policy_instances": policy_instances,
+                        **candidate_contract, "passed": not differences})
     controls = candidate_controls(records)
     return {"records": records, "candidate_output_controls": controls,
             "passed": all(record["passed"] for record in records) and all(c["rejected"] for c in controls)}

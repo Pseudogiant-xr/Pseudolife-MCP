@@ -7,8 +7,10 @@ without a digit limit, exact writer LF framing, finite ASCII numeric options,
 positive ASCII terminal dimensions with invalid input falling back to 80,
 simple help wrapping, direct stdout failure exit 2 and a native temporary-file
 collision budget. [PARITY](PARITY.md#wait-mail-producer-substitutions) records
-each deliberate substitution. Only the 4,301-digit legacy assertion exception
-has been applied; other legacy assertions require their exact exception patches
+each deliberate substitution. The approved 4,301-digit assertion and exact Rust
+and Python legacy-test exception patches have been applied. The shared checker
+binds 19 changed corpus cases to explicit candidate contracts while retaining
+actual Python observations and raw differences. Final native validation is required
 before candidate test acceptance. New Rust and candidate-only process nodes are
 prepared but have not run. The mode remains deferred.
 

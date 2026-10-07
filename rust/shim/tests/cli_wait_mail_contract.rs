@@ -51,7 +51,11 @@ fn explicit_unbuffered_stdout_fails_directly_without_shutdown_retry() {
             false
         );
         if help {
-            assert!(String::from_utf8(output.stderr).unwrap().contains("could not write help to stdout"));
+            assert!(
+                String::from_utf8(output.stderr)
+                    .unwrap()
+                    .contains("could not write help to stdout")
+            );
         }
     }
 }
