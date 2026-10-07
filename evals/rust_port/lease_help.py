@@ -11,7 +11,7 @@ import sys
 ORACLE_HEAD = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
 ASSET_DIRECTORY = "rust/shim/src/cli/lease/assets"
 ASSETS = tuple(f"{action}_{kind}.txt"
-               for action in ("top", "run", "check", "list")
+               for action in ("top", "run", "hold", "check", "list", "break", "delegate")
                for kind in ("help", "usage"))
 ORACLE_SOURCES = ("__init__.py", "lease_cli.py", "os_lock.py", "daemon_exec.py")
 
@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from pseudolife_memory.lease_cli import _parsers
 top, run, others = _parsers()
-parsers = {"top": top, "run": run, "check": others["check"], "list": others["list"]}
+parsers = {"top": top, "run": run, **others}
 print(json.dumps({f"{action}_{kind}.txt": getattr(parser, f"format_{kind}")()
                   for action, parser in parsers.items() for kind in ("help", "usage")}))
 """

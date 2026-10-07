@@ -11,10 +11,19 @@ pub struct Args {
     pub timeout: Option<f64>,
     pub purpose: Option<String>,
     pub command: Vec<String>,
+    pub while_pid: Option<u32>,
+    pub worktree: String,
+    pub agent: Option<String>,
 }
 
 fn asset(action: &str, help: bool) -> &'static str {
     match (action, help) {
+        ("hold", true) => include_str!("assets/hold_help.txt"),
+        ("hold", false) => include_str!("assets/hold_usage.txt"),
+        ("break", true) => include_str!("assets/break_help.txt"),
+        ("break", false) => include_str!("assets/break_usage.txt"),
+        ("delegate", true) => include_str!("assets/delegate_help.txt"),
+        ("delegate", false) => include_str!("assets/delegate_usage.txt"),
         ("run", true) => include_str!("assets/run_help.txt"),
         ("run", false) => include_str!("assets/run_usage.txt"),
         ("check", true) => include_str!("assets/check_help.txt"),
@@ -152,6 +161,18 @@ fn negative_number(text: &str) -> bool {
 
 /// The public separator is consumed before parsing, just as lease_cli.main does.
 pub fn parse(argv: &[String]) -> Result<Args, i32> {
+    let mut renamed;
+    let argv = if argv.first().is_some_and(|action| action == "designate") {
+        out(
+            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\n",
+            true,
+        );
+        renamed = argv.to_vec();
+        renamed[0] = "delegate".into();
+        &renamed
+    } else {
+        argv
+    };
     let split = argv.iter().position(|v| v == "--");
     let before = &argv[..split.unwrap_or(argv.len())];
     let mut unrecognized = vec![];
@@ -180,17 +201,10 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         );
         return Err(2);
     };
-    if matches!(action.as_str(), "hold" | "break" | "delegate" | "designate") {
-        out(
-            &format!(
-                "pseudolife-stdio: lease action {} is deferred in this candidate\n",
-                repr(action)
-            ),
-            true,
-        );
-        return Err(1);
-    }
-    if !matches!(action.as_str(), "run" | "check" | "list") {
+    if !matches!(
+        action.as_str(),
+        "run" | "hold" | "check" | "list" | "break" | "delegate"
+    ) {
         return Err(error(
             "top",
             &format!(
@@ -208,9 +222,27 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         expect: None,
         timeout: None,
         purpose: None,
+        while_pid: None,
+        worktree: String::new(),
+        agent: None,
         command: split.map_or_else(Vec::new, |p| argv[p + 1..].to_vec()),
     };
-    let options: &[&str] = if action == "run" {
+    let options: &[&str] = if action == "hold" {
+        &[
+            "--help",
+            "--while-pid",
+            "--expect",
+            "--ttl",
+            "--purpose",
+            "--worktree",
+            "--no-board",
+            "--timeout",
+        ]
+    } else if action == "break" {
+        &["--help"]
+    } else if action == "delegate" {
+        &["--help", "--for"]
+    } else if action == "run" {
         &[
             "--help",
             "--expect",
@@ -285,7 +317,33 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                 index += 1;
                 v
             };
-            if option == "--purpose" {
+            if option == "--while-pid" {
+                let trimmed = value.trim_matches(super::whitespace);
+                let number = trimmed.strip_prefix('+').unwrap_or(trimmed);
+                if number.strip_prefix('-').is_some_and(|digits| {
+                    !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())
+                }) {
+                    return Err(error(
+                        action,
+                        "argument --while-pid: a process id is a positive whole number",
+                    ));
+                }
+                let pid = number.parse::<u32>().map_err(|_| {
+                    error(
+                        action,
+                        &format!("argument --while-pid: not a process id: {}", repr(value)),
+                    )
+                })?;
+                if pid == 0 {
+                    return Err(error(
+                        action,
+                        "argument --while-pid: a process id is a positive whole number",
+                    ));
+                }
+                args.while_pid = Some(pid);
+            } else if option == "--worktree" {
+                args.worktree = value.into();
+            } else if option == "--purpose" {
                 if value.chars().count() > 240 || value.chars().any(char::is_control) {
                     return Err(error(
                         action,
@@ -302,6 +360,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                 let limits = match option {
                     "--ttl" => (30, Some(86400)),
                     "--expect" => (1, Some(604800)),
+                    "--for" => (60, Some(604800)),
                     _ => (0, None),
                 };
                 let value = duration(value, limits.0, limits.1)
@@ -309,23 +368,57 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
                 match option {
                     "--ttl" => args.ttl = value,
                     "--expect" => args.expect = Some(value),
+                    "--for" => (),
                     _ => unreachable!("bounded duration option"),
                 }
             }
+        } else if action == "delegate"
+            && args.name.is_some()
+            && args.agent.is_none()
+            && (!item.starts_with('-') || negative_number(item))
+        {
+            args.agent = Some(item.clone());
         } else if item.starts_with('-') && !negative_number(item) || args.name.is_some() {
             unrecognized.push(item.as_str());
         } else {
             if !valid_name(item) {
                 return Err(error(
                     action,
-                    "argument NAME: a lease name is 1 to 120 characters, not blank, without control characters",
+                    &format!(
+                        "argument {}: a lease name is 1 to 120 characters, not blank, without control characters",
+                        if action == "delegate" {
+                            "PROJECT"
+                        } else {
+                            "NAME"
+                        }
+                    ),
                 ));
             }
             args.name = Some(item.clone());
         }
     }
+    let mut missing = Vec::new();
     if args.name.is_none() && action != "list" {
-        return Err(error(action, "the following arguments are required: NAME"));
+        missing.push(if action == "delegate" {
+            "PROJECT"
+        } else {
+            "NAME"
+        });
+    }
+    if action == "hold" && args.while_pid.is_none() {
+        missing.push("--while-pid");
+    }
+    if action == "delegate" && args.agent.is_none() {
+        missing.push("AGENT");
+    }
+    if !missing.is_empty() {
+        return Err(error(
+            action,
+            &format!(
+                "the following arguments are required: {}",
+                missing.join(", ")
+            ),
+        ));
     }
     if !unrecognized.is_empty() {
         return Err(error(

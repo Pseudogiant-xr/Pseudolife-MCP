@@ -1,0 +1,30 @@
+usage: pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
+
+Take the lease NAME for a process this command did not start (a detached bench server, say): hold its OS lock, mirror it on the board, and release both when PID exits.
+
+positional arguments:
+  NAME                the lease name, 1 to 120 characters
+
+options:
+  -h, --help          show this help message and exit
+  --while-pid PID     the process the lease lasts for
+  --expect DURATION   how long PID should run; the board shows the expected
+                      end
+  --ttl SECONDS       how long the board keeps the lease without a renewal, 30
+                      to 86400 (default 120); renewed every ttl/3
+  --purpose TEXT      what it is for, shown on the board (at most 240
+                      characters)
+  --worktree PATH     the checkout whose name (never its path) the notices
+                      give (default: the current directory)
+  --no-board          skip the agent board and hold the local lock alone
+  --timeout DURATION  give up waiting for a held lock after DURATION: exit 75
+
+The hold takes the OS lock first (the process already owns the resource), then
+mirrors it on the board, tells the peers the lease concerns (status suite=running,
+suite=queued or gpu=, or parked until this lease clears), and releases both when
+PID exits. It never stops PID. A lock another process holds is waited for, polled
+every 2 s; --timeout 0 gives up at once.
+
+exit codes: 0 PID ended (or was already gone); 2 usage error; 71 lock file
+unusable; 75 --timeout expired before the lock was taken; 128+N stopped by
+signal N (130 Ctrl-C), releasing the lease and leaving PID running.

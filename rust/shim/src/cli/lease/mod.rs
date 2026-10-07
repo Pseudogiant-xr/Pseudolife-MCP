@@ -1,6 +1,7 @@
 //! Native process leaves at Python lease_cli.py pin 165f4125.
 mod args;
 mod board;
+mod hold;
 mod json;
 mod lock;
 mod run;
@@ -54,6 +55,14 @@ pub async fn main(arguments: &[String]) -> i32 {
     let code = match args.action.as_str() {
         "check" => view::check(&args).await,
         "list" => view::list(&args).await,
+        "hold" => hold::hold(args).await,
+        "break" | "delegate" => {
+            say(&format!(
+                "pseudolife-stdio: lease action {} is deferred in this candidate",
+                repr(&args.action)
+            ));
+            1
+        }
         _ => run::run(args).await,
     };
     if OUTPUT_FAILED.load(std::sync::atomic::Ordering::Relaxed) {

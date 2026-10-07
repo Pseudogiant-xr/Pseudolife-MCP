@@ -629,3 +629,16 @@ Only check/list/run are implemented in this candidate. `hold`, `break`,
 the candidate loses those actions until Phase 4. Final hosted acceptance and
 independent review remain pending, so neither CLI-LEASE-core nor full mode
 is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
+
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+Break/delegate/designate remain explicit exit-1 deferrals while native operator
+resolution is prepared. No Phase 4 execution, hosted acceptance or new timing
+claim is made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.

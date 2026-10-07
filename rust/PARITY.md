@@ -895,3 +895,39 @@ It preserves Linux raw exits 1/0 for only list-expected-extreme and
 list-waiter-extreme under the existing two-ID rule, with exact JSON companions
 and rejecting controls. The complete raw receipt SHA256 bindings are in
 functional-policy-evidence.json; no broader exit substitution is admitted.
+
+
+## Phase 4 lease hold preparation
+
+The Phase 4 branch builds on the pending Phase 2d lease-core candidate. Native
+`hold` takes the existing named local OS lock, follows an external PID using a
+read-only process probe, and releases without signalling that PID. Its board
+mirror registers `lease-hold@<instance-id>`, renews and notifies the concerned
+peers asynchronously; local exclusion ends before bounded board cleanup.
+The parser and pinned Python help guards include hold/break/delegate and the
+`designate` deprecation alias. Break/delegate/designate still have explicit
+exit-1 deferrals while native PostgreSQL operator resolution is prepared.
+
+The named `hold-mirror-best-effort` rule preserves local ownership: a configured
+forbidden bearer refuses before acquiring or creating a lock/stamp; a failure
+observed after acquisition, including forbidden registration headers or
+`HTTP_REPLY_NOT_UNDERSTOOD`, stops only the mirror. The hold keeps its lock,
+leaves the followed PID running and retains its normal exits. Core refusal
+before lock/fallback/child effects remains scoped to check/list/run. The
+additive `lease_hold.rs` controls distinguish these two admission boundaries.
+Ordinary non-ASCII registration failures also remain mirror-only.
+
+This is source preparation, with no Phase 4 native execution or acceptance
+claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
+public-process/state corpora, Windows interruption and PostgreSQL transaction/
+audit/ownership controls remain pending. Linux runtime gates run on the
+existing homelab machine; nextest remains in hosted CI. The Phase 2d runtime
+receipts keep their old identities and do not validate this changed runtime.
+Full CLI-LEASE and scoped lease-core acceptance remain separate and deferred.
+
+Pending operator comparisons use the named `fixed-clock-replay` rule: both
+arms receive the identical fixed clock through the same existing test or
+OS-level injection seam. Receipts identify that clock and its source; expiry,
+audit rows and chain hashes remain exact. Cases without a shared clock seam
+remain explicitly uncompared. No production Python clock hook, timestamp
+removal or hash relaxation is introduced.

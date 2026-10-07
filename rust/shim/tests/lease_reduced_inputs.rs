@@ -135,21 +135,30 @@ fn malformed_list_reply_refuses_without_reporting_local_free() {
     }
 }
 #[test]
-fn deferred_actions_have_exact_refusal_before_state() {
-    for action in ["hold", "break", "delegate", "designate"] {
+fn operator_actions_have_exact_refusal_before_state() {
+    for (arguments, diagnostic) in [
+        (
+            vec!["lease", "break", "resource"],
+            "pseudolife-stdio: lease action 'break' is deferred in this candidate\n",
+        ),
+        (
+            vec!["lease", "delegate", "resource", "fixture-agent"],
+            "pseudolife-stdio: lease action 'delegate' is deferred in this candidate\n",
+        ),
+        (
+            vec!["lease", "designate", "resource", "fixture-agent"],
+            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate\npseudolife-stdio: lease action 'delegate' is deferred in this candidate\n",
+        ),
+    ] {
         let home = Home::new();
-        let output = home.call(&["lease", action, "resource"]);
+        let output = home.call(&arguments);
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            output.stderr,
-            text(&format!(
-                "pseudolife-stdio: lease action '{action}' is deferred in this candidate\n"
-            ))
-        );
+        assert_eq!(output.stderr, text(diagnostic));
         assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
     }
 }
+
 #[test]
 fn opaque_lease_arguments_refuse_before_state() {
     #[cfg(unix)]

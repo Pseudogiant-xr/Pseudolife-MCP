@@ -1238,3 +1238,16 @@ Comments/blanks count; assets, dispatch and tests do not. Against the historical
 147-line OS-lock helper gives 2037/2,036=1.00049. The Python denominator
 includes deferred actions. These are source size counts, not runtime or parity
 measurements.
+
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+Break/delegate/designate remain explicit exit-1 deferrals while native operator
+resolution is prepared. No Phase 4 execution, hosted acceptance or new timing
+claim is made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.

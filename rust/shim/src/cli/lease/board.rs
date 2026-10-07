@@ -13,6 +13,7 @@ pub struct Failure {
     pub text: String,
     pub transient: bool,
     pub fatal_input: bool,
+    pub code: Option<String>,
 }
 impl Failure {
     fn refused(text: impl Into<String>) -> Self {
@@ -20,6 +21,7 @@ impl Failure {
             text: text.into(),
             transient: false,
             fatal_input: false,
+            code: None,
         }
     }
     fn forbidden(field: &str) -> Self {
@@ -95,6 +97,7 @@ impl Board {
             ),
             transient: session.answered,
             fatal_input: false,
+            code: None,
         };
         let response = request.send().await.map_err(&failure)?;
         let status = response.status().as_u16();
@@ -111,10 +114,19 @@ impl Board {
         decode(status, payload.ok())
     }
     pub async fn register(&self, task: &str, project: &str) -> Result<(), Failure> {
+        self.register_as(task, project, "lease-run", "").await
+    }
+    pub async fn register_as(
+        &self,
+        task: &str,
+        project: &str,
+        label: &str,
+        status: &str,
+    ) -> Result<(), Failure> {
         if self.session.lock().await.agent.is_some() {
             return Ok(());
         }
-        let reply=self.post("register",json!({"label":"lease-run","project":project,"task":task,"status":"","capabilities":json!({"resumable":false}),"wake_enabled":false}),false,10).await?;
+        let reply=self.post("register",json!({"label":label,"project":project,"task":task,"status":status,"capabilities":json!({"resumable":false}),"wake_enabled":false}),false,10).await?;
         for field in ["agent_id", "credential"] {
             if let Value::String(value) = &reply[field]
                 && forbidden(value)
@@ -157,6 +169,37 @@ impl Board {
         if self.session.lock().await.agent.is_some() {
             let _ = self.post("release", json!({"name":name}), true, 5).await;
         }
+    }
+    pub async fn forget(&self) {
+        let mut session = self.session.lock().await;
+        session.agent = None;
+        session.credential = None;
+    }
+    pub async fn agent_id(&self) -> Option<String> {
+        self.session.lock().await.agent.clone()
+    }
+    pub async fn agents(&self) -> Result<Vec<Value>, Failure> {
+        let reply = self.post("agents", json!({"limit":50}), true, 5).await?;
+        let Some(agents) = reply["agents"].as_array() else {
+            return Err(Failure::refused(
+                "the daemon's agents reply was not understood",
+            ));
+        };
+        Ok(agents
+            .iter()
+            .filter(|agent| agent.is_object() && agent["agent_id"].is_string())
+            .cloned()
+            .collect())
+    }
+    pub async fn send(&self, to: &str, text: &str, request_id: &str) -> Result<(), Failure> {
+        self.post(
+            "send",
+            json!({"to":to,"text":text,"request_id":request_id}),
+            true,
+            5,
+        )
+        .await?;
+        Ok(())
     }
     pub async fn leases(&self, name: Option<&str>) -> Result<(Vec<Value>, bool), Failure> {
         let reply = self
@@ -233,6 +276,7 @@ fn decode(status: u16, payload: Option<Value>) -> Result<Value, Failure> {
         },
         transient,
         fatal_input: false,
+        code: code.map(str::to_owned),
     })
 }
 pub fn connect(no_board: bool) -> Result<Arc<Board>, Failure> {

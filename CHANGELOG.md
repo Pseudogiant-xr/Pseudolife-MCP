@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-07 — Phase 4 lease hold preparation)
+
+- Add a native Rust `lease hold` candidate with a read-only external-process
+  probe and asynchronous board mirror, plus hold/operator parser help guards.
+  Operator PostgreSQL actions and Phase 4 execution/acceptance remain pending;
+  no installation path installs the candidate.
+
 ### Added
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
