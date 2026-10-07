@@ -319,7 +319,9 @@ def measure(args, resource, *, prepare=None, case=None, fixture_url=None, verify
                     selected, selected_identity, original_identity = prepared_command(
                         prepared_case, commands[arm], prefixes, root=root, home=active_home, env=env, prepare=prepare)
                     if fixture_url is not None and prepared_case != case:
-                        raise ValueError("CLI preparation must retain the recorded inputs")
+                        raise ValueError("CLI preparation must retain the recorded briefing inputs"
+                                         if mode == "briefing" else "CLI preparation must retain the recorded lease inputs"
+                                         if mode in {"lease-check", "lease-list"} else "CLI preparation must retain the recorded inputs")
                     binding = {"environment": copy.deepcopy(env), "pre_files_b64": snapshot(active_home),
                                "execution": {"original_prefix": commands[arm], "selected_prefix": selected,
                                              "effective_argv": [*selected, *argv], "cwd": str(root),
