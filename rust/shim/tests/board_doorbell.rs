@@ -94,8 +94,10 @@ async fn board_doorbell_native_acceptance_preserves_one_pending_notice_until_exa
     );
     bell.watch(BANK, adapter.clone(), false).await;
     bell.observe(BANK, &offered_view()).await;
+    let pending = PendingNotice::new(&directory, BANK).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
-        while !output.exists() {
+        // File creation precedes echo's write; acceptance follows queue exit.
+        while !pending.path.with_extension("bell-accepted").exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -106,7 +108,6 @@ async fn board_doorbell_native_acceptance_preserves_one_pending_notice_until_exa
         format!("queue --thread {BANK}")
     );
     bell.close().await;
-    let pending = PendingNotice::new(&directory, BANK).unwrap();
     let bytes = state::read(&pending.path, 8192).unwrap();
     let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(record["text"].as_str().unwrap().starts_with(
