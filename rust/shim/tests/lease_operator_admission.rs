@@ -11,7 +11,7 @@ fn docker_fixture(home: &Home) -> PathBuf {
     #[cfg(windows)]
     let (name, script) = (
         "owned-docker.cmd",
-        "@echo off\r\necho called>>\"%LEASE_DOCKER_CALLS%\"\r\nif \"%~1\"==\"inspect\" (echo true& exit /b 0)\r\n:args\r\nif \"%~1\"==\"\" exit /b 3\r\necho %~1>>\"%LEASE_DOCKER_ARGUMENTS%\"\r\nshift\r\ngoto args\r\n",
+        "@echo off\r\necho called>>\"%LEASE_DOCKER_CALLS%\"\r\nif \"%~1\"==\"inspect\" (echo true& exit /b 0)\r\n:args\r\nif \"%~1\"==\"\" exit /b 3\r\n>>\"%LEASE_DOCKER_ARGUMENTS%\" echo %~1\r\nshift\r\ngoto args\r\n",
     );
     #[cfg(unix)]
     let (name, script) = (
