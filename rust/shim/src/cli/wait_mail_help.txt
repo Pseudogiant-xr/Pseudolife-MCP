@@ -1,0 +1,17 @@
+usage: pseudolife-mcp wait-mail [-h]
+                                [--session-id SESSION_ID | --digest DIGEST]
+                                [--timeout TIMEOUT] [--interval INTERVAL]
+
+Wait until the daemon rings this session for addressed mail (plain mail never
+wakes it), print the mail, exit. Exit 0: a ring (the mail on stdout); 3:
+timeout; 2: nothing to wait on.
+
+options:
+  -h, --help            show this help message and exit
+  --session-id SESSION_ID
+                        host session id keying the digest, e.g. a Codex thread
+                        id (default: CLAUDE_CODE_SESSION_ID)
+  --digest DIGEST       coordination digest file (<64 hex digits>.txt) to
+                        watch instead
+  --timeout TIMEOUT     seconds to wait, at most 86400 (default 14400)
+  --interval INTERVAL   seconds between checks, 0.01 to 60 (default 2)

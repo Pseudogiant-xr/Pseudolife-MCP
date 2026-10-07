@@ -3,14 +3,44 @@ import base64
 import json
 from pathlib import Path
 import sys
+import subprocess
 from contextlib import asynccontextmanager
 import os
+import subprocess
 
 import pytest
 
 from evals.rust_port.harness import isolated_env, run_cli
 
 MANIFEST = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
+# Admit subprocess nodes only when their candidate modes are supported.
+# Doctor remains deferred; the global CLI selector must fail closed for it.
+CLI_SUBPROCESS_NODES = {
+    "tests/test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer[-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer[not-a-cursor\\nnote\\n-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_is_silent_and_keeps_its_cursor_when_the_daemon_is_down[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[bad id-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[a/b-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_a_sessions_first_note_clears_marks_idle_for_a_month[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_refuses_a_redirect_and_keeps_its_cursor": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_sends_the_bearer_and_prefers_the_token_file": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[not json]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[[]]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[{\"session_id\": 7}]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[{\"prompt\": \"\\\\\"session_id\\\\\": \\\\\"sess-1\\\\\"\"}]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode": ["--help"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_reads_its_payload_as_utf8": ["prompt-hook"],
+}
+
+CLI_HOOK_NODES = {
+    "tests/test_codex_hooks.py::test_coordination_prompt_records_only_exact_doorbell_arrival"
+    f"[{notice}-{hook}]"
+    for notice in ("legacy", "unknown") for hook in ("windows", "posix")
+}
 CLI_VERSION_NODES = {
     "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
     "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
@@ -19,6 +49,8 @@ CLI_VERSION_NODES = {
 
 
 def boundary(node):
+    if node in CLI_SUBPROCESS_NODES or node in CLI_HOOK_NODES:
+        return "cli-main-process"
     return MANIFEST["mapped"].get(node)
 
 
@@ -114,6 +146,27 @@ def _port_selected_boundary(request):
     if boundary(request.node.nodeid) != "cli-main-process":
         raise pytest.UsageError("selected boundary is not implemented")
     monkeypatch = request.getfixturevalue("monkeypatch")
+    if request.node.nodeid in CLI_HOOK_NODES:
+        _route_doorbell_hook(request, monkeypatch, prefix)
+        return
+    if request.node.nodeid in CLI_SUBPROCESS_NODES:
+        original = subprocess.run
+        routed = []
+
+        def candidate_run(command, *args, **kwargs):
+            modes = public_cli_arguments(command)
+            if modes is None:
+                return original(command, *args, **kwargs)
+            if modes != CLI_SUBPROCESS_NODES[request.node.nodeid]:
+                raise pytest.UsageError("CLI subprocess adapter observed unsupported argv: " + repr(modes))
+            env = dict(kwargs.get("env") or os.environ)
+            env["CUDA_VISIBLE_DEVICES"] = "-1"
+            routed.append(modes)
+            return original([*prefix, *modes], *args, **{**kwargs, "env": env})
+
+        monkeypatch.setattr(subprocess, "run", candidate_run)
+        request.addfinalizer(lambda: routed or pytest.fail("CLI subprocess adapter observed no public CLI call"))
+        return
     tmp_path = request.getfixturevalue("tmp_path")
 
     def main():
@@ -138,6 +191,92 @@ def _port_selected_boundary(request):
         raise SystemExit(result["exit_code"])
 
     monkeypatch.setattr(request.node.module, "main", main)
+
+
+def doorbell_hook_environment(command, env, root, tmp_path):
+    """Recognize the unchanged hook, launcher and marker-writing runner."""
+    if not isinstance(command, (list, tuple)) or not env:
+        raise pytest.UsageError("doorbell adapter requires the fixture hook process")
+    windows = list(map(str, command[1:])) == [
+        "-NoProfile", "-File", str(root / "plugin/hooks/lifecycle.ps1"),
+        "-Event", "CoordinationPrompt"]
+    posix = list(map(str, command[1:])) == [str(root / "plugin/hooks/coordination-prompt.sh")]
+    executable = Path(command[0]).name.lower() if command else ""
+    if not ((windows and executable in {"pwsh", "pwsh.exe"}) or
+            (posix and executable in {"bash", "bash.exe"})):
+        raise pytest.UsageError("doorbell adapter observed a changed hook command")
+    runner, marker = tmp_path / "consume.py", tmp_path / "helper-launched"
+    expected_runner = (f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
+                       "from pseudolife_memory.cli import main\nmain()\n")
+    cmd = windows and os.name == "nt"
+    launcher = tmp_path / ("consume.cmd" if cmd else "consume.sh")
+    expected_launcher = (f'@"{sys.executable}" "{runner}" %*\r\n' if cmd else
+                         f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" '
+                         f'"{runner.as_posix()}" "$@"\n')
+    if (env.get("PSEUDOLIFE_SHIM_LAUNCHER") != launcher.as_posix() or
+            env.get("PYTHONPATH") != str(root) or
+            runner.read_bytes() != expected_runner.replace("\n", os.linesep).encode("utf-8") or
+            launcher.read_bytes() != expected_launcher.replace("\n", os.linesep).encode("utf-8")):
+        raise pytest.UsageError("doorbell adapter observed changed fixture launcher or runner")
+    return runner
+
+
+def doorbell_child_source():
+    # The original consume.py still runs and writes its own marker. Only its
+    # imported public main is redirected to the selected executable process.
+    return '''import json,os,pathlib,subprocess,sys
+config=json.loads(pathlib.Path(os.environ["PSEUDOLIFE_PORT_HOOK_CONFIG"]).read_text(encoding="utf-8"))
+if pathlib.Path(sys.argv[0]) == pathlib.Path(config["runner"]):
+ import pseudolife_memory.cli as cli
+ def main():
+  if sys.argv[1:] != ["doorbell-prompt-seen"]:
+   raise RuntimeError("doorbell adapter observed changed public mode")
+  if pathlib.Path(cli.__file__) != pathlib.Path(config["cli_source"]):
+   raise RuntimeError("doorbell adapter imported an unexpected public CLI")
+  result=subprocess.run(config["prefix"]+sys.argv[1:],input=sys.stdin.buffer.read(),capture_output=True,timeout=config["timeout"])
+  row={"argv":config["prefix"]+sys.argv[1:],"runner":sys.argv[0],"executable":sys.executable,"cli_source":cli.__file__,"exit":result.returncode,"marker":pathlib.Path(config["runner"]).with_name("helper-launched").read_text(encoding="utf-8")}
+  with open(config["witness"],"a",encoding="utf-8") as handle:handle.write(json.dumps(row)+"\\n")
+  sys.stdout.buffer.write(result.stdout);sys.stderr.buffer.write(result.stderr)
+  raise SystemExit(result.returncode)
+ cli.main=main
+'''
+
+
+def _route_doorbell_hook(request, monkeypatch, prefix):
+    # Keep the original shell capability skip; it is not candidate coverage.
+    if request.node.callspec.params["platform_hook"] == "windows":
+        if not request.node.module.shutil.which("pwsh"):
+            return
+    else:
+        request.node.module.bash_exe()
+    tmp_path = request.getfixturevalue("tmp_path")
+    root = request.node.module.ROOT
+    adapter = tmp_path / "port-hook-adapter"
+    adapter.mkdir()
+    (adapter / "sitecustomize.py").write_text(doorbell_child_source(), encoding="utf-8")
+    witness = adapter / "calls.jsonl"
+    config = adapter / "config.json"
+    original, routed = subprocess.run, []
+
+    def candidate_hook(command, *args, **kwargs):
+        runner = doorbell_hook_environment(command, kwargs.get("env"), root, tmp_path)
+        config.write_text(json.dumps(dict(runner=str(runner), prefix=prefix,
+                                         cli_source=str(root / "pseudolife_memory/cli.py"),
+                                         timeout=kwargs.get("timeout"), witness=str(witness))), encoding="utf-8")
+        env = dict(kwargs["env"])
+        env.update(PYTHONPATH=str(adapter) + os.pathsep + env["PYTHONPATH"],
+                   PSEUDOLIFE_PORT_HOOK_CONFIG=str(config), CUDA_VISIBLE_DEVICES="-1")
+        routed.append(list(command))
+        return original(command, *args, **{**kwargs, "env": env})
+
+    def verified_calls():
+        rows = [json.loads(line) for line in witness.read_text(encoding="utf-8").splitlines()] if witness.exists() else []
+        assert len(routed) == 4 and len(rows) == 3, "doorbell adapter did not observe the original four hooks and three public child calls"
+        assert all(row["argv"] == [*prefix, "doorbell-prompt-seen"] and
+                   row["marker"] == "yes" and row["exit"] == 0 for row in rows)
+
+    monkeypatch.setattr(subprocess, "run", candidate_hook)
+    request.addfinalizer(verified_calls)
 
 
 def public_shim_arguments(command, arguments):

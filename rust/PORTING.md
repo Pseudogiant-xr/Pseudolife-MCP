@@ -197,6 +197,81 @@ parity is deferred to Phase 5: this candidate proves the explicit-interpreter
 launch and scheduling seam against a disposable sentinel module, not a client
 installation or an implicit interpreter lookup.
 
+## Briefing and prompt-hook producer substitutions
+
+The experimental hook candidate validates prompt stdin and consumed daemon JSON
+payload replies with strict JSON parsing. It consumes string session IDs and markdown while ignoring
+ordinary metadata, including integers beyond u64; original Python observations
+and historical failures remain evidence rather than candidate expectations.
+
+- **`hook-strict-json-refusal`** governs complete prompt stdin and consumed daemon
+  JSON payload replies, including ignored fields. The `/health` availability
+  probe is separate: non-JSON health, including HTML 502/503, means no daemon
+  and quiet exit 0 before a payload request. Valid non-null JSON health remains
+  available, including Python's degraded JSON 503. Prompt-hook performs no
+  health probe; malformed memory-change text stays quiet without cursor changes. NaN, Infinity, lone surrogate escapes,
+  and malformed JSON are refused.
+  Prompt stdin refusal is silent exit 0 before any request or cursor access;
+  malformed prompt responses are silent exit 0 without cursor changes or a
+  subsequent request. Briefing JSON refusal is exit 1, no stdout and exactly
+  `pseudolife-mcp briefing: daemon reply not understood` plus a newline on
+  stderr. First case: `prompt-json-nan-extra`. Plain session-start, coordination
+  and memory-change response bodies retain their text/cursor grammar.
+- **`hook-bounded-json-nesting`** governs JSON resource refusal beyond the
+  parser's default depth budget of 128, separately from malformed JSON.
+  Prompt refusal is silent exit 0 without a request or cursor change;
+  briefing refusal uses the exact named diagnostic and exit 1 above.
+  No known hook producer emits deep metadata. Native controls at `64f5a6a2`
+  observed 127 nested arrays accepted and 128 refused; a root object plus 126
+  arrays was accepted and plus 127 refused. This is the observed serde_json
+  default parser budget, not an additional application limit.
+  First case: `briefing-json-deep-extra`.
+- **`hook-typed-markdown`** governs `/api/briefing`'s consumed `markdown` field.
+  Its producer is `MemoryService.session_briefing`, which emits a string.
+  False, numbers, arrays and objects use the briefing refusal above; missing,
+  null and empty strings remain quiet. First case: `briefing-markdown-false`.
+- **`hook-ascii-numeric`** governs briefing caps and COLUMNS. Caps accept signed
+  ASCII decimal with ASCII surrounding whitespace and arbitrary magnitude;
+  leading zeros/signs are canonicalized, negatives are transmitted unchanged.
+  Unicode digits and underscores receive argparse-shaped exit 2. No Python
+  digit-limit environment setting applies. COLUMNS accepts positive ASCII
+  decimal or falls back to 80; large widths retain finite-text saturation.
+  First case: `briefing-custom-negative-unknown`.
+- **`hook-first-line-cursor`** governs owned mark reads. Only the first CR/LF
+  terminated line is interpreted as ASCII `[0-9.]{1,22}` after whitespace
+  trimming; bytes after that line cannot invalidate its cursor. The own writer
+  emits the cursor plus LF. First case: `prompt-mark-nonascii-after-lf`.
+- **`hook-native-output-failure`** governs hook stdout writes and flushes.
+  Briefing/help failure is exit 1 with exactly
+  `pseudolife-mcp briefing: output failed` plus a newline on stderr. Prompt
+  failure remains silent exit 0 without truncating or advancing its mark.
+  Opening a new mark before printing can leave an empty mark. First control:
+  `public_help_closed_output_has_native_failure_contract`.
+
+The hook HTTP client uses the oracle-pinned **`Python-urllib/3.11` User-Agent**.
+Python's urllib default `Accept-Encoding: identity` and `Connection: close`
+are explicitly dropped by the native transport; no full raw-header equality is
+claimed. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
+DEL and folded values before sending an authenticated payload request. Ordinary
+Latin-1 bearer values retain their encoded bytes; other non-Latin-1 values keep
+the existing refusal. Raw historical Python bearer diagnostics remain retained.
+
+**`hook-absent-accept-wildcard`** permits only absent-oracle Accept versus native
+exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md. No other
+Accept difference or unrecorded ID receives this disposition. **`http-field-name-case-insensitive`** associates HTTP field names
+by lowercase ASCII spelling; distinct-name ordering is free, while same-name value
+order, multiplicity and bytes stay exact. The port-owned comparison helper
+retains raw observations and provides no other header, body or framing waiver.
+The native client disables Referer generation on redirects, including `/health`;
+Referer is never removed by comparison. The targeted native controls exercise
+health redirects, degraded health and malformed payload separately.
+
+All surrounding authentication, path, cursor and hook-envelope wire semantics
+remain required. The hook serializer retains ensure_ascii escaping, including
+astral surrogate pairs; this strict parser is local to hooks and changes no
+separate lease parser. Native policy controls retain the raw oracle function
+and label candidate substitutions explicitly.
+
 ## Types and serialization
 
 | Python behaviour | Rust contract |
@@ -224,6 +299,58 @@ Wire-length adjustment touches only the original escaped span of those eight dec
 Instances: `register-sender /body/name`; `register-recipient /body/name`, across each fresh generic arm. Historical hosted runs 37428908416 (#602) and 37429259333 (#603) each show these two cases in arms 1 and 2; their downloaded public receipts contain no raw names, so they prove failure locations, not the raw semantic relation. Source `_board_name` / `_public` and synthetic rejection controls establish the rule; next execution must supply retained raw instances.
 
 ## Errors and recovery
+
+### Wait-mail inputs and named policy instances
+
+The wait-mail candidate is integrated with accepted master
+`0b46bb8e2010cf0e428dd650b98cedb165ad3d75`; its next full corpus must use
+that oracle pin. This preparation does not promote historical receipts.
+The adapter writes UTF-8 digest text with an ASCII decimal watermark, an
+ASCII ring decision/reason and decimal `.seen` content. The command's public
+argv, environment and explicitly selected digest path are user inputs.
+The declared producer substitutions in [PARITY](PARITY.md#wait-mail-producer-substitutions)
+narrow marker and numeric grammar, help wrapping and stdout failure behavior;
+opaque identity/path bytes and every field outside those declarations stay exact.
+This local-file mode makes no HTTP requests, so it has no
+`http-forbidden-input-refused` or header/chunk inactivity instances.
+
+`nondeterministic-bytes-semantic` governs only delivery stderr's `HH:MM:SS`
+and `ledger.log` column 1. First case: `wait-mail-large-watermark`.
+The local clock must have the exact format and represent a second in that
+arm's own invocation wall-time window; the ledger epoch must be canonical
+ASCII decimal in the same window. Every surrounding stderr byte, elapsed
+wording, ledger column, stdout byte, `.seen` byte and other state stays exact.
+`cli_process.observe` now records the window immediately around the child
+invocation; `wait_mail_policy.delivery_projection` validates and records
+these two fields for one fresh delivery without rewriting raw observations.
+
+| Case id | Named fields / disposition |
+|---|---|
+| `wait-mail-large-watermark` | Windows delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-non-ascii-space-body` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-delayed-ring` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-delayed-digest` | Linux delivery clock and ledger epoch; historical raw failure retained. |
+| `wait-mail-cr-spaces-ring` | Both hosts' earlier clock-only failures retained. |
+| `unicode-session` | Earlier Windows clock instance; no same-id second-Python claim. |
+| `wait-mail-unicode-delivery` | Both hosts' positive delivery; additive bounded-clock node prepared, final-head execution pending. |
+| `seen-directory` | Both hosts' one quoted source basename `.tmp-[a-z0-9_]{8}.seen`; exact directory, destination and error bytes; any clocks governed separately. |
+| `invalid-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `inline-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `environment-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `invalid-multiple-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+| `inline-unicode-session-bytes` | Linux `python-traceback-not-contract`: only traceback header/frames deferred. |
+
+For the five session cases, exit 1, stdout, the terminal
+`UnicodeEncodeError: message` line including its LF and complete post-state
+remain exact. The process comparator applies these policies only to the named
+case IDs and records each arm's admitted fields; unlisted cases stay exact.
+New admission/rejection tests check that path, state, exit and terminal-line
+mutations fail. Historical-input replay under this checker remains separate
+from final native execution.
+The native CI lane runs the unchanged deterministic additive wait-mail tests,
+a new actual positive-delivery node and the Python/native help drift guard
+at `COLUMNS=80`. It cannot substitute for the complete both-OS corpus,
+positive paired measurements, current-head CI or independent review.
 
 Map each failure at its public boundary: MCP error code/data/message, HTTP status
 and body, or CLI exit/stdout/stderr. An internal Rust error enum is not a wire
