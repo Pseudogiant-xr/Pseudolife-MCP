@@ -1498,10 +1498,25 @@ DB-free operator units pin all secret/ordinary vectors from unchanged
 `tests/test_coordination_secrets.py` and append's canonical material against
 the unchanged Python `coordination.audit_hash` producer, including non-ASCII
 payload and a null recipient. Audit predecessor and unrelated-payload controls
-must change the hash. These source repairs and their new controls are unrun;
-prior receipts and hosted failures retain their original identities. The
-separate Windows doorbell repair must merge before forwarding and final gates.
-All lease acceptance rows remain deferred.
+must change the hash. At source checkpoint `3583bb6c` these controls were unrun;
+prior receipts and hosted failures retain their original identities.
+
+Accepted doorbell test repair `7a2d59b2` was merged once into this branch.
+Windows successor `58b8f9ff` passed format, check, Clippy with warnings denied
+and 196 affected Rust tests under each feature configuration. Its initial
+owned-container argv test failed because CMD consumed a trailing digit as a
+redirection descriptor; moving the fixture redirection retained the exact
+assertion, and all three admission controls then passed. Production bytes are
+unchanged from built source `5e6e62f1`.
+Whole Python/native Windows no-bank and malformed-DSN controls matched exact
+bytes except the named parenthesized native diagnostic; PID grammar refusals
+matched, and the native range refusal preceded effects. The unusable-bearer
+hold pair matched exact streams and files, retained local ownership and the
+followed child, then released normally. Its state, stream and lifecycle
+rejecting controls passed. No real container, daemon or PostgreSQL bank was
+started for these cells. Remote range/state/TLS/mirror recapture, final hosted
+gates and fresh independent review remain pending. All lease acceptance rows
+remain deferred.
 
 ## Episode merge-forward validation boundary
 
