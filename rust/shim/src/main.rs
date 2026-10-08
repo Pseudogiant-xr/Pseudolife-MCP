@@ -20,6 +20,11 @@ fn main() -> ExitCode {
             arguments.into_iter().skip(1).collect(),
         ));
     }
+    if arguments.first().is_some_and(|mode| mode == "board-audit") {
+        return ExitCode::from(pseudolife_stdio::cli::board_audit::run(
+            arguments.into_iter().skip(1).collect(),
+        ));
+    }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
         let Some(lease_arguments) = arguments
             .iter()

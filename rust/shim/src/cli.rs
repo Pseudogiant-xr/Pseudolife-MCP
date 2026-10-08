@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+pub mod board_audit;
 mod briefing_hook;
 mod doctor;
 mod doorbell_seen;
