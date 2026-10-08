@@ -117,7 +117,8 @@ fn native(text: &str) -> Vec<u8> {
 #[test]
 fn dead_pid_does_not_create_lock_stamp_or_contact_board() {
     let home = Home::new();
-    let pid = home.completed_pid();
+    let completed = home.completed_pid();
+    let pid = completed.id();
     let output = home.call(&["lease", "hold", "resource", "--while-pid", &pid.to_string()]);
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
@@ -128,6 +129,8 @@ fn dead_pid_does_not_create_lock_stamp_or_contact_board() {
         ))
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+    #[cfg(windows)]
+    drop(completed);
 }
 #[cfg(windows)]
 #[test]
