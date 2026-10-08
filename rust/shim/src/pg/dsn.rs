@@ -25,6 +25,8 @@ pub struct Dsn {
     config: tokio_postgres::Config,
     pub(super) mode: SslMode,
     pub(super) rootcert: Option<PathBuf>,
+    pub(super) password_present: bool,
+    pub(super) password_port: String,
 }
 impl fmt::Debug for Dsn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -150,7 +152,13 @@ impl Dsn {
         if let Some(value) = origin.get_user() {
             config.user(value);
         }
-        if let Some(value) = origin.get_password() {
+        let password = fields.remove("password");
+        let password_present = password.is_some() || origin.get_password().is_some();
+        let password = password
+            .as_ref()
+            .map(String::as_bytes)
+            .or_else(|| origin.get_password());
+        if let Some(value) = password.filter(|value| !value.is_empty()) {
             config.password(value);
         }
         if let Some(value) = origin.get_dbname() {
@@ -169,16 +177,24 @@ impl Dsn {
             return Err(Error::InvalidOption("host"));
         }
         config.host(host);
-        let port = fields
+        // Password-file matching uses libpq's port text, not its socket number.
+        let password_port = fields
             .remove("port")
-            .map(|value| {
-                value
-                    .parse::<u16>()
-                    .map_err(|_| Error::InvalidOption("port"))
+            .or_else(|| {
+                let base = base?;
+                let authority = base.split_once("://")?.1.split('/').next()?;
+                let host = authority.rsplit('@').next()?;
+                let port = if host.starts_with('[') {
+                    host.split_once(']')?.1.strip_prefix(':')?
+                } else {
+                    host.split_once(':')?.1
+                };
+                decode(port).ok()
             })
-            .transpose()?
-            .or_else(|| origin.get_ports().first().copied())
-            .unwrap_or(5432);
+            .unwrap_or_else(|| "5432".into());
+        let port = password_port
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidOption("port"))?;
         if port == 0 {
             return Err(Error::InvalidOption("port"));
         }
@@ -187,9 +203,6 @@ impl Dsn {
             match key.as_str() {
                 "user" => {
                     config.user(value);
-                }
-                "password" => {
-                    config.password(value);
                 }
                 "dbname" => {
                     config.dbname(value);
@@ -216,6 +229,8 @@ impl Dsn {
             config,
             mode,
             rootcert,
+            password_present,
+            password_port,
         })
     }
     pub fn config(&self) -> &tokio_postgres::Config {

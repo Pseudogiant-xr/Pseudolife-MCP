@@ -17,6 +17,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scheduled run covers master on days with only Rust merges. Only pull
   request runs cancel superseded runs.
 
+### Fixed (2026-10-08 — native PostgreSQL password lookup)
+
+- The experimental Rust PostgreSQL client resolves an explicit password,
+  `PGPASSWORD`, or the platform default password file in libpq order. An empty
+  explicit password suppresses `PGPASSWORD` and still permits default-file
+  lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
+  controls retain their named refusals. Runtime parity remains unverified.
+
 ### Fixed (2026-10-08 — native lease zombie detection)
 
 - The experimental native `lease hold` recognizes exited Linux processes whose
