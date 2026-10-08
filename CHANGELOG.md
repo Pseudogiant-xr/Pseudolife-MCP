@@ -13,6 +13,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unreadable-procfs behavior remain unchanged; native lease acceptance remains
   deferred.
 
+### Fixed (2026-10-08 — transient Codex coordination checks)
+
+- Ordinary Codex coordination calls recover one transient bank-authority
+  check automatically, using the same adapter and saved mailbox. Existing
+  adapters use a context-validation deadline compatible with the HTTP
+  timeout instead of the shorter startup deadline. Authentication,
+  binding and credential changes still fail closed without retry, and
+  failure hints distinguish validation, access and attachment failures.
+  Existing-adapter checks request strict read-only context and cannot
+  initialize a missing bank identity or cold storage. Initial startup and
+  legacy migration retain their authority-establishment behavior.
+  Cancellation during validation or cleanup propagates before retry or
+  dispatch. Message operations are never replayed by this recovery.
+
+### Added (2026-10-08 — current Claude models in the dreamer menus)
+
+- The Claude dreamer model lists now offer `claude-sonnet-5-5`,
+  `claude-haiku-5-5` and `claude-fable-5-1` beside the models they follow,
+  everywhere the list is written: both installers' lists and menus (now
+  numbered 1-8), the Claude shim autostart help text, the dreaming guide,
+  the Console's Dreamer card, the Extractor panel's override suggestions and
+  the Claude shim's `/models`. They join as options only: `claude-opus-5-5`
+  stays the default and the only recommended model until a ladder run
+  measures the new ones.
+
+### Fixed (2026-10-08 — daemon log no longer carries the database password)
+
+- The daemon's `storage: postgres (...)` startup line is now the endpoint
+  (`host:port/dbname`) parsed with libpq's rules. It used to split the DSN on
+  `@`, which left a keyword-form DSN (`host=... password=... dbname=...`)
+  logged whole, password included. Rotate any credential that reached a
+  daemon log through that line.
+
 ### Fixed (2026-10-08 — native lease argument classification)
 
 - The experimental native lease parser accepts a lone `-` and unmatched

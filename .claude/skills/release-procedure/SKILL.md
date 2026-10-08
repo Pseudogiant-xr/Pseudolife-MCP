@@ -1,6 +1,6 @@
 ---
 name: release-procedure
-description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, the GHCR container images, or the Claude Code plugin marketplace. Covers the docs currency pass, the six-file version cut, build/inspect, the Trusted Publishing + registry + image automation, and verification.
+description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, the GHCR container images, or the Claude Code plugin marketplace. Covers the docs currency pass, the seven-file version cut, build/inspect, the Trusted Publishing + registry + image automation, and verification.
 ---
 
 # Release / publish procedure (five public surfaces)
@@ -59,10 +59,12 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    update experience"). The 2026-10-04 passkey and test-login changes held
    the release after 0.16.1 this way.
 
-1. **Version cut touches six files together**: the CHANGELOG (`## [N.N.N]`
+1. **Version cut touches seven files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
-   the compose daemon image tag, **both** version fields in `server.json`,
+   the daemon image tag in **both** compose files (`ops/docker-compose.yml`
+   and the packaged copy `pseudolife_memory/compose/docker-compose.yml`),
+   **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the
    version handshake. `plugin/.claude-plugin/plugin.json` carries no
@@ -71,14 +73,18 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
    re-verify the map's claims, don't just renumber it — update
    `meta.verified` to the date you actually checked). `server.json` (both
-   fields) and the compose daemon image tag are also pinned locally by
+   fields) and the `ops/docker-compose.yml` daemon image tag are also pinned
+   locally by
    `tests/test_plugin_packaging.py::test_server_json_versions_match_pyproject`
    (issue #185) — run it as part of the cut, before tagging, so a missed
-   field fails in the suite rather than mid-CI.
+   field fails in the suite rather than mid-CI. Nothing pins the packaged
+   compose copy's tag to the version: check it by hand.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
-   then open the wheel — Console build present (index.html, assets/ and vendor/ under
-   `web/static/`), no stray top-level dirs, the `mcp-name` marker in METADATA,
+   then open the wheel — Console build present: every file
+   `git ls-files pseudolife_memory/web/static` lists is in the wheel (11 at
+   0.17.0; a fixed count rots with every Console rebuild), no stray
+   top-level dirs, the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers
    `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token):
@@ -119,3 +125,10 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    packages to public in their GHCR package settings, or pulls fail with
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
+6. **Deploy, then run the client step twice.** `pseudolife-mcp update
+   --clients-only` runs the updater of the runtime it was launched from —
+   the *previous* release's. That run installs the new runtime, but any
+   client-step behaviour new in this release only runs on a second
+   `--clients-only` from the new runtime (2026-10-05: 0.17.0's
+   plugin-marketplace HTTPS move did nothing on the first run). Verify the
+   release's own client-side changes after the second run, not the first.

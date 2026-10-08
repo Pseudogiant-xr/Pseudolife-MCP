@@ -493,8 +493,9 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.dream.extractor_model_override", "group": "Extractor",
      "label": "Dreamer model override", "type": "string", "default": None,
      "restart": False,
-     "suggestions": ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
-                     "claude-haiku-4-5", "claude-fable-5", "gpt-5.6-sol",
+     "suggestions": ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
+                     "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
+                     "claude-fable-5-1", "claude-fable-5", "gpt-5.6-sol",
                      "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol",
                      "gpt-6-luna"],
      "help": "Model-only override for the primary extractor — wins over BOTH "

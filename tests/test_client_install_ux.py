@@ -157,8 +157,9 @@ def test_installers_offer_dreamer_model_choice() -> None:
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        for model in ("claude-opus-5", "claude-opus-5-5", "claude-sonnet-5",
-                      "claude-haiku-4-5", "claude-fable-5"):
+        for model in ("claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5",
+                      "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
+                      "claude-fable-5-1", "claude-fable-5"):
             assert model in text, f"missing model option: {model}"
     assert "-Model $Model" in ps          # choice forwarded to autostart
     assert '--model "$MODEL"' in sh

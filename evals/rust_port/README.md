@@ -263,8 +263,18 @@ retain the executable identity of all thirty-two cells, while their raw streams
 remain private. Startup stderr still has no allowlist. Concurrent call order is
 authorized only by the separately captured per-platform final-pair contract.
 
-After merging newer Python source, keep the oracle at its recorded pin. Prepare
-an isolated oracle from the current checkout-installed dependency runtime:
+The oracle follows master, never the reverse. Production changes are never
+held for the port. After each batch of production merges, the root selects a
+master commit, checks its exact schema/test inventory, regenerates the Phase 1
+manifests and obtains fresh both-OS parity and independent review. Historical
+receipts and frozen contracts keep their original source identities; old
+process receipts cannot be relabeled as new-pin evidence. Rust merges wait for
+the final re-pin to be green, subject to explicit maintainer exceptions.
+
+The selected pin is master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`
+(the #637 squash commit, Python 0.17.0, schema 55). Fresh runtime validation,
+exact-head CI and independent review remain pending. Prepare an isolated oracle
+from the checkout-installed dependency runtime:
 
 ```sh
 python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
@@ -275,7 +285,7 @@ export PATH="$PWD/../runtime/bin:$PATH"
 
 On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
 directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
-creates a detached clone at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, overlays
+creates a detached clone at the selected `stdio_capture.ORACLE_HEAD`, overlays
 only the current harness instruments, and installs that oracle editable without
 dependencies in a private runtime. It checks both source bytes and imported
 package/version identity. The candidate is the current absolute binary path;
@@ -434,3 +444,17 @@ diagnostics have rejecting controls; the retained container transport compares
 its actual argv and inherited streams. Use the existing `cli_process` fixture
 and `harness.run_cli` capture, preserving raw observations before policy. This
 plan supplies no execution receipt or acceptance claim.
+
+Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
+Windows wait-mail pairs using the Parity job's pinned Python oracle and a fresh
+native release image; ordinary CI remains the default dispatch mode. Set
+`case_list` to comma-separated `wait-mail-long-ring-watermark`,
+`wait-mail-bad-ring-reason` or `wait-mail-unicode-delivery` IDs and `frozen_head`
+to the full commit ID of the dispatched branch/tag. Start with the long-ring
+case after this workflow and selector land. The selector uses whole CLI arms,
+disposable homes, existing comparison policies and rejecting output controls,
+without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,
+source/image build bindings, logs and cleanup; download and hash it before
+using it as evidence. Capture does not promote acceptance or establish
+installed-image timing. An OS selector is a later increment; this lane runs
+only on Windows.
