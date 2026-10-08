@@ -14,6 +14,10 @@ from .provenance import ROOT
 def regenerate(exploration, root=ROOT):
     # A new oracle needs reviewed counts; incomplete exploration cannot set them.
     expected = {
+        "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1": {
+            "schema": 55, "functions": 191, "test_files": 425,
+            "buckets": {"candidate": 10, "oracle": 1, "internal": 180},
+        },
         "3c01bb31abd60178e15dea99adda369b4bbf92fc": {
             "schema": 55, "functions": 191, "test_files": 423,
             "buckets": {"candidate": 10, "oracle": 1, "internal": 180},
