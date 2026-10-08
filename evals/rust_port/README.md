@@ -472,8 +472,9 @@ Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
 Windows wait-mail pairs using the frozen master head's Python oracle and a fresh
 native release image; ordinary CI remains the default dispatch mode. Set
 `case_list` to comma-separated `wait-mail-long-ring-watermark`,
-`wait-mail-bad-ring-reason` or `wait-mail-unicode-delivery` IDs and `frozen_head`
-to the full commit ID of the dispatched branch/tag. Start with the long-ring
+`wait-mail-bad-ring-reason`, `wait-mail-unicode-delivery` or
+`wait-mail-positive-long-ring-watermark` IDs and `frozen_head`
+to the full commit ID of the dispatched master head. Start with the long-ring
 case after this workflow and selector land. The selector uses whole CLI arms,
 disposable homes, existing comparison policies and rejecting output controls,
 without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,
@@ -481,3 +482,13 @@ source/image build bindings, logs and cleanup; download and hash it before
 using it as evidence. Capture does not promote acceptance or establish
 installed-image timing. An OS selector is a later increment; this lane runs
 only on Windows.
+
+`wait-mail-positive-long-ring-watermark` seeds a valid twelve-digit ring
+watermark (`123456789012`), digest watermark 12, unseen marker 0 and `peer\n`
+body. It targets exit 0 with those exact five stdout bytes, `.seen` advanced
+to `12\n` and one delivery ledger line. Only the existing named delivery
+HH:MM:SS and ledger epoch fields use the per-arm invocation-window policy;
+all other bytes remain exact. The ring watermark is a sequence value, not
+a scheduled timestamp. The separate thirteen-digit `wait-mail-long-ring-watermark`
+case remains a malformed-marker timeout probe. Source preparation supplies
+no hosted execution or acceptance result for the new case.

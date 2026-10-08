@@ -296,7 +296,7 @@ jobs:
           if ($env:CAPTURE_MODE -cne 'wait-mail') { throw 'Unsupported mode' }
           if ($env:CAPTURE_FROZEN_HEAD -cnotmatch '^[0-9a-f]{40}$') { throw 'Full commit ID required' }
           if ($env:CAPTURE_FROZEN_HEAD -cne $env:GITHUB_SHA) { throw 'Dispatch ref and frozen head must match' }
-          $allowed = @('wait-mail-long-ring-watermark', 'wait-mail-bad-ring-reason', 'wait-mail-unicode-delivery')
+          $allowed = @('wait-mail-long-ring-watermark', 'wait-mail-bad-ring-reason', 'wait-mail-unicode-delivery', 'wait-mail-positive-long-ring-watermark')
           $selected = $env:CAPTURE_CASE_LIST.Split(',')
           if ($selected.Count -lt 1 -or $selected.Count -gt 3 -or (@($selected | Select-Object -Unique).Count -ne $selected.Count)) { throw 'Invalid case list' }
           foreach ($caseId in $selected) { if ($allowed -cnotcontains $caseId) { throw 'Unsupported case' } }

@@ -583,7 +583,7 @@ never the reverse: a production change is never held for the port. Re-pin to
 a selected master commit at each phase start and after each batch of production
 merges. Re-pinning is a routine root task: enumerate the selected source and
 counts, regenerate manifests, preserve historical identities, then obtain fresh
-both-OS parity and independent review before Rust merges resume. Production
+platform-scoped parity and independent review before Rust merges resume. Production
 merges with source-pin-only Parity failures require the maintainer's explicit
 gate exception. Any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
@@ -676,9 +676,28 @@ its seven startup and six concurrent candidate cells require executable bindings
 
 ## Measurement and acceptance
 
+### OS-sensitive surfaces
+
+Both-OS executable proof is required for paths, process spawn and kill, file
+locks, stdio, signals, line endings and the Windows console. Other behavior
+requires Linux proof; hosted Windows CI still compiles and tests the candidate.
+Apply this scope to every open and future cell, including mixed cells containing
+an OS-sensitive surface. This replaces general both-OS proof requirements;
+historical receipts retain their recorded platform, source and scope.
+
+### Review tiers within a PR
+
+Every PR still receives one full independent review. Concurrency,
+authentication, schema, lifecycle, delete paths and dream writes receive full
+review at every freeze. Pure, formatting and read-only cells covered by goldens
+may use sampled cell review, about one in five, within that full PR review.
+This does not replace the independent review of the complete PR or turn source
+preparation into golden coverage. A nightly mutation test is to check that the
+harness rejects injected faults; its job remains design-only until implemented.
+
 Daemon oracle captures and baselines run on Linux; the current phase 0b receipts
 were captured on WSL2, while the production daemon runs in a Linux container.
-Shim and CLI captures run on Windows and Linux. Every capture receipt
+Shim and CLI captures follow the OS-sensitive scope above. Every capture receipt
 records its platform; a missing platform is a validation failure. Historical
 PR #540 captures retain their original commit and platform and cannot stand in
 for the phase 0b pin.
