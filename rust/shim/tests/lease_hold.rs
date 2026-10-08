@@ -270,6 +270,7 @@ fn registration_peer(raw: &'static [u8]) -> (String, thread::JoinHandle<Vec<u8>>
                 Err(e) => panic!("fixture accept: {e}"),
             }
         };
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
