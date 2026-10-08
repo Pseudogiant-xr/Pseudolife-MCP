@@ -144,22 +144,8 @@ fn noncanonical_arguments_defer_without_parser_diagnostics() {
     }
     let overflow = "9".repeat(400);
     for timeout in [
-        "",
-        ".",
-        "0",
-        "-1",
-        "-1\n",
-        "-.5\n",
-        "+20",
-        "2_0",
-        "nan",
-        "inf",
-        "1e2",
-        " 20",
-        "20\n",
-        "1.2.3",
-        "２０",
-        &overflow,
+        "", ".", "0", "-1", "-1\n", "-.5\n", "+20", "2_0", "nan", "inf", "1e2", " 20", "20\n",
+        "1.2.3", "２０", &overflow,
     ] {
         deferred(
             command(&home)

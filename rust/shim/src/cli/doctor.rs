@@ -10,7 +10,9 @@ const REFUSAL: &str = "{\"ok\": false, \"error\": \"ExplicitDisposableDatabaseRe
 
 fn positive_decimal(raw: &str) -> bool {
     raw.bytes().any(|byte| byte.is_ascii_digit())
-        && raw.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.')
+        && raw
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
         && raw.bytes().filter(|byte| *byte == b'.').count() <= 1
         && raw
             .parse::<f64>()
