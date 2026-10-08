@@ -34,10 +34,18 @@ fn missing_directory_refusal_uses_the_real_filesystem() {
     let home = std::env::temp_dir().join(format!("backup-missing-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let absent = home.join("missing-bank");
-    let output = command(&home).arg("--data-dir").arg(&absent).output().unwrap();
+    let output = command(&home)
+        .arg("--data-dir")
+        .arg(&absent)
+        .output()
+        .unwrap();
     let remaining = fs::read_dir(&home).unwrap().count();
     let still_absent = !absent.exists();
-    let existing = command(&home).arg("--data-dir").arg(&home).output().unwrap();
+    let existing = command(&home)
+        .arg("--data-dir")
+        .arg(&home)
+        .output()
+        .unwrap();
     fs::remove_dir_all(&home).unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
