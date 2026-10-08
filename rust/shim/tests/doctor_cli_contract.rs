@@ -131,6 +131,20 @@ fn parser_and_timeout_errors_precede_state_and_dsn_checks() {
             "--disposable-proof cannot use a saved --agent-state",
         ),
         (
+            vec!["--agent-state", "-1\n"],
+            "--disposable-proof cannot use a saved --agent-state",
+        ),
+        (vec!["--timeout", "-1\n"], "--timeout must be positive"),
+        (vec!["--timeout", "-.5\n"], "--timeout must be positive"),
+        (
+            vec!["--timeout", "-1\n\n"],
+            "argument --timeout: expected one argument",
+        ),
+        (
+            vec!["--host", "-1\n"],
+            "argument --host: invalid choice: '-1\\n' (choose from 'codex', 'claude-code', 'claude-desktop', 'generic')",
+        ),
+        (
             vec!["--host", "--agent-state="],
             "argument --host: expected one argument",
         ),

@@ -48,6 +48,7 @@ fn option(raw: &str) -> Result<Option<usize>, String> {
 
 fn optional(raw: &str) -> bool {
     let negative = raw.strip_prefix('-').is_some_and(|number| {
+        let number = number.strip_suffix('\n').unwrap_or(number);
         !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
             || number.split_once('.').is_some_and(|(left, right)| {
                 left.bytes().all(|b| b.is_ascii_digit())
