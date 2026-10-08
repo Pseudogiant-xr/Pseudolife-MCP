@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from . import phase1, stdio_eof
+from . import phase1, stdio_eof, stdio_scenarios
 from .stdio_scenarios import expected_stderr, startup_difference
 
 
@@ -113,3 +113,55 @@ def test_selected_startup_refusal_cannot_send_traffic():
     records = [{"method": "GET", "path": "/health"}, {"method": "POST", "path": "/mcp"}]
     assert any(row["reason"] == "startup_refusal_sent_traffic" for row in startup_difference(
         result, contract, case, "fixture-origin", None, records, compare_stderr=False))
+
+
+@pytest.mark.parametrize("candidate_stderr", [b"current diagnostic\n", b"current diagnostic!\n"])
+def test_selected_startup_direct_pair_rejects_one_byte_stderr_difference(
+        monkeypatch, tmp_path, candidate_stderr):
+    from evals.rust_baseline import daemon
+
+    @contextmanager
+    def private_directory():
+        yield str(tmp_path)
+
+    class Fixture:
+        url = "http://127.0.0.1:1"
+
+        def __init__(self, health):
+            self.records = []
+
+        def close(self):
+            return {"server_stopped": True}
+
+    calls = []
+    oracle_stderr = b"current diagnostic\n"
+
+    def observe(command, **kwargs):
+        calls.append(command)
+        candidate = kwargs["boundary_errors"]
+        return {"stdout_frames_b64": [base64.b64encode(b'{"id":1}\n').decode()],
+                "stderr_b64": base64.b64encode(candidate_stderr if candidate else oracle_stderr).decode(),
+                "exit_code": 0, "capture_kind": "process", "pid": 222 if candidate else 111,
+                "captured_at_utc": "2026-10-09T00:00:00.123456Z"}
+
+    monkeypatch.setattr(daemon, "private_directory", private_directory)
+    monkeypatch.setattr(stdio_scenarios, "ScenarioFixture", Fixture)
+    monkeypatch.setattr(stdio_scenarios, "capture", observe)
+    contract = {"cases": [{"case": "synthetic", "stderr_lf_template": "historical diagnostic\n",
+                           "exit_code": 0, "stdout_frame_count": 1}]}
+    result = stdio_scenarios.startup(tmp_path, ["native-candidate"], contract,
+                                     selected_source={"oracle_head": "a" * 40})
+    assert len(calls) == 2 and calls[1] == ["native-candidate"]
+    assert calls[0][1:] == ["-m", "pseudolife_memory.cli"]
+    assert result["oracle_head"] == "a" * 40
+    assert all(row["informational_only"] and row["differences"] for row in result["historical_comparisons"])
+    if candidate_stderr == oracle_stderr:
+        assert result["differences"] == []
+    else:
+        assert len(candidate_stderr) == len(oracle_stderr) + 1
+        assert len(result["differences"]) == 1
+        difference = result["differences"][0]
+        assert difference["path"] == "/stderr"
+        retained = difference["stderr_evidence"]
+        assert base64.b64decode(retained["oracle"]["stderr_b64"]) == oracle_stderr
+        assert base64.b64decode(retained["candidate"]["stderr_b64"]) == candidate_stderr

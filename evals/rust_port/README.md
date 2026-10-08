@@ -266,7 +266,9 @@ authorized only by the separately captured per-platform final-pair contract.
 New parity selects its Python source from immutable workflow event commits:
 `pull_request` uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
 merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
-which must equal the dispatched checkout. No extra dispatch input is needed.
+which must equal the dispatched checkout, with `GITHUB_REF` required to be
+`refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
+The selection JSON records the ref. No extra dispatch input is needed.
 Each new receipt records `oracle_head`; source receipts also retain the event
 selection and actual source/schema. A stale historical pin is information only
 and cannot freeze the port. Source/import binding and behavior comparisons
@@ -277,6 +279,13 @@ and the existing final-pair ordering policy. Startup keeps required exit/frame
 outcomes, health requests, diagnostic presence and refusal traffic controls;
 current Python and Rust stderr bytes remain fully compared. Historical EOF
 streams and startup identity templates are retained as informational comparisons.
+
+PR parity intentionally uses the merge-base Python behavior as its baseline.
+A Python-only behavior change therefore passes PR parity against the unchanged
+Rust port and is first caught by the master push run, which selects the new
+Python commit. A PR changing Python behavior and its Rust port together fails
+PR parity until its base includes the Python change. This is the intended
+ordering for changes to `pseudolife_memory/`.
 
 The workflow binds `PSEUDOLIFE_PORT_ORACLE_SELECTION` before preparing metadata,
 running harness tests or creating the isolated oracle. For an explicit local

@@ -18,7 +18,7 @@ on:
         default: wait-mail-long-ring-watermark
         required: false
       frozen_head:
-        description: 'Full reviewed commit ID, equal to the dispatched ref head'
+        description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched master head'
         type: string
         required: false
 
@@ -67,6 +67,8 @@ jobs:
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
+        env:
+          GITHUB_REF: ${{ github.ref }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
@@ -163,6 +165,8 @@ jobs:
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - name: Bind the event-selected Python oracle
         shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
@@ -321,6 +325,8 @@ jobs:
           exit $LASTEXITCODE
       - name: Bind the frozen-head Python oracle
         shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE

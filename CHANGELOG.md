@@ -11,6 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Rust parity builds its Python oracle from the PR merge base, the push commit
   or the frozen master capture head, recording that SHA in new receipts.
   Historical pins remain unchanged and stale-pin reports are informational.
+  Manual dispatch requires the master branch ref and its matching frozen head
+  in both CI and capture modes; selection receipts also record the ref.
 
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 

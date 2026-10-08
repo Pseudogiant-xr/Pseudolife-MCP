@@ -29,7 +29,7 @@ def merge_base(root, base, head):
     return commit(bases[0])
 
 
-def select(root, event_name, event, checkout_head):
+def select(root, event_name, event, checkout_head, *, github_ref=None):
     checkout_head = commit(checkout_head)
     if event_name == "pull_request":
         request = event["pull_request"]
@@ -41,6 +41,8 @@ def select(root, event_name, event, checkout_head):
         if head != checkout_head:
             raise ValueError("push after and checkout head differ")
     elif event_name == "workflow_dispatch":
+        if github_ref != "refs/heads/master":
+            raise ValueError("dispatch requires refs/heads/master")
         head = oracle = commit(event["inputs"]["frozen_head"])
         base = None
         if head != checkout_head:
@@ -50,7 +52,7 @@ def select(root, event_name, event, checkout_head):
     # An object that is absent or is not a commit is a setup error, not parity.
     if git(root, "rev-parse", oracle + "^{commit}") != oracle:
         raise ValueError("selected oracle commit unavailable")
-    return {"event": event_name, "checkout_head": checkout_head,
+    return {"event": event_name, "github_ref": github_ref, "checkout_head": checkout_head,
             "base_head": base, "candidate_head": head, "oracle_head": oracle}
 
 
@@ -64,7 +66,7 @@ def selected_oracle(root=ROOT):
                                "head": {"sha": observed["candidate_head"]}}}
              if name == "pull_request" else {"after": observed["candidate_head"]}
              if name == "push" else {"inputs": {"frozen_head": observed["candidate_head"]}})
-    checked = select(root, name, event, observed["checkout_head"])
+    checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"))
     if observed != checked:
         raise ValueError("oracle selection differs from its immutable event binding")
     return checked
@@ -88,6 +90,7 @@ def main():
     parser.add_argument("--event-name", default=os.environ.get("GITHUB_EVENT_NAME"))
     parser.add_argument("--event-path", type=Path, default=os.environ.get("GITHUB_EVENT_PATH"))
     parser.add_argument("--checkout-head", default=os.environ.get("GITHUB_SHA"))
+    parser.add_argument("--github-ref", default=os.environ.get("GITHUB_REF"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--github-env", type=Path)
     args = parser.parse_args()
@@ -95,7 +98,8 @@ def main():
     if actual != args.checkout_head:
         raise ValueError("event checkout head and actual checkout differ")
     selection = select(args.root, args.event_name,
-                       json.loads(args.event_path.read_text(encoding="utf-8")), actual)
+                       json.loads(args.event_path.read_text(encoding="utf-8")), actual,
+                       github_ref=args.github_ref)
     encoded = json.dumps(selection, sort_keys=True, separators=(",", ":"))
     with args.out.open("x", encoding="utf-8") as output:
         output.write(encoded + "\n")
