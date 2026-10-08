@@ -263,18 +263,41 @@ retain the executable identity of all thirty-two cells, while their raw streams
 remain private. Startup stderr still has no allowlist. Concurrent call order is
 authorized only by the separately captured per-platform final-pair contract.
 
-The oracle follows master, never the reverse. Production changes are never
-held for the port. After each batch of production merges, the root selects a
-master commit, checks its exact schema/test inventory, regenerates the Phase 1
-manifests and obtains fresh both-OS parity and independent review. Historical
-receipts and frozen contracts keep their original source identities; old
-process receipts cannot be relabeled as new-pin evidence. Rust merges wait for
-the final re-pin to be green, subject to explicit maintainer exceptions.
+New parity selects its Python source from immutable workflow event commits:
+`pull_request` uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
+merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
+which must equal the dispatched checkout, with `GITHUB_REF` required to be
+`refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
+The selection JSON records the ref. No extra dispatch input is needed.
+Each new receipt records `oracle_head`; source receipts also retain the event
+selection and actual source/schema. A stale historical pin is information only
+and cannot freeze the port. Source/import binding and behavior comparisons
+remain required. Historical receipts, inventories and frozen contracts retain
+their recorded SHAs and are never rewritten as current evidence. Active EOF
+parity keeps successful silent completion, terminal responses, frame coverage
+and the existing final-pair ordering policy. Startup keeps required exit/frame
+outcomes, health requests, diagnostic presence and refusal traffic controls;
+current Python and Rust stderr bytes remain fully compared. Historical EOF
+streams and startup identity templates are retained as informational comparisons.
 
-The selected pin is master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`
-(the #637 squash commit, Python 0.17.0, schema 55). Fresh runtime validation,
-exact-head CI and independent review remain pending. Prepare an isolated oracle
-from the checkout-installed dependency runtime:
+PR parity intentionally uses the merge-base Python behavior as its baseline.
+A Python-only behavior change therefore passes PR parity against the unchanged
+Rust port and is first caught by the master push run, which selects the new
+Python commit. A PR changing Python behavior and its Rust port together fails
+PR parity until its base includes the Python change. This is the intended
+ordering for changes to `pseudolife_memory/`.
+
+The workflow binds `PSEUDOLIFE_PORT_ORACLE_SELECTION` before preparing metadata,
+running harness tests or creating the isolated oracle. For an explicit local
+proof, save the actual event payload and select it first (no moving-master
+fallback):
+
+```sh
+python -m evals.rust_port.oracle_selection --event-name pull_request --event-path /private/event.json --checkout-head FULL_CHECKOUT_SHA --out /private/selection.json
+export PSEUDOLIFE_PORT_ORACLE_SELECTION="$(cat /private/selection.json)"
+```
+
+Then prepare an isolated oracle from the checkout-installed dependency runtime:
 
 ```sh
 python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
@@ -285,11 +308,11 @@ export PATH="$PWD/../runtime/bin:$PATH"
 
 On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
 directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
-creates a detached clone at the selected `stdio_capture.ORACLE_HEAD`, overlays
+creates a detached clone at the selected event oracle SHA, overlays
 only the current harness instruments, and installs that oracle editable without
 dependencies in a private runtime. It checks both source bytes and imported
 package/version identity. The candidate is the current absolute binary path;
-the immutable test functions execute from the pinned source. Dependency paths
+the immutable test functions execute from the selected source. Dependency paths
 come from the caller's installed `[dev,lite]` runtime. The destination must be new.
 
 
@@ -446,12 +469,12 @@ and `harness.run_cli` capture, preserving raw observations before policy. This
 plan supplies no execution receipt or acceptance claim.
 
 Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
-Windows wait-mail pairs using the Parity job's pinned Python oracle and a fresh
+Windows wait-mail pairs using the frozen master head's Python oracle and a fresh
 native release image; ordinary CI remains the default dispatch mode. Set
 `case_list` to comma-separated `wait-mail-long-ring-watermark`,
 `wait-mail-bad-ring-reason`, `wait-mail-unicode-delivery` or
 `wait-mail-positive-long-ring-watermark` IDs and `frozen_head`
-to the full commit ID of the dispatched branch/tag. Start with the long-ring
+to the full commit ID of the dispatched master head. Start with the long-ring
 case after this workflow and selector land. The selector uses whole CLI arms,
 disposable homes, existing comparison policies and rejecting output controls,
 without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,

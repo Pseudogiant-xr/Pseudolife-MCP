@@ -5,7 +5,7 @@ import re
 CLI_HELPERS = (
     "evals/rust_port/cli_process.py", "evals/rust_port/cli_corpus.py", "evals/rust_port/lease_corpus.py", "evals/rust_port/cli_public.py", "evals/rust_port/cli_version.py",
     "evals/rust_port/harness.py", "evals/rust_port/phase1_receipts.py", "evals/rust_port/processes.py",
-    "evals/rust_port/provenance.py", "evals/rust_port/stdio_capture.py", "evals/rust_port/full_bank.py",
+    "evals/rust_port/provenance.py", "evals/rust_port/stdio_capture.py", "evals/rust_port/oracle_selection.py", "evals/rust_port/full_bank.py",
     "evals/rust_baseline/common.py", "evals/rust_baseline/daemon.py",
     "evals/rust_baseline/daemon_child.py", "evals/rust_baseline/transport.py",
     "evals/rust_port/stdio_daemon.py", "evals/memory_policy_bench.py", "evals/memory_policy_daemon.py")
