@@ -17,6 +17,9 @@ ordering for changes to `pseudolife_memory/`.
 
 The previous master target was Python 0.17.0 at
 `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
+
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
