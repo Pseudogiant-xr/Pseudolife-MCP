@@ -273,7 +273,6 @@ jobs:
       CAPTURE_MODE: ${{ inputs.mode }}
       CAPTURE_CASE_LIST: ${{ inputs.case_list }}
       CAPTURE_FROZEN_HEAD: ${{ inputs.frozen_head }}
-      CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
     steps:
       - name: Validate the dispatch selector
         shell: pwsh
@@ -324,6 +323,8 @@ jobs:
       - name: Build and bind the candidate
         timeout-minutes: 20
         shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
         run: |
           $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
           New-Item -ItemType Directory -Path $receiptRoot -ErrorAction Stop | Out-Null
@@ -348,6 +349,8 @@ jobs:
       - name: Capture the named disposable cases
         timeout-minutes: 5
         shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
         run: |
           $checkoutRoot = (Get-Location).Path
           $oracleSource = Join-Path $env:RUNNER_TEMP 'phase1-oracle/source'
