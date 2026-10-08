@@ -177,7 +177,7 @@ done
 # not a gate: a CLI shim mode passes an id it does not list to the shim
 # unchanged, so a model release is usable the day it ships.
 EXTRACTOR_MODES="sidecar claude-only claude-fallback openai-only openai-fallback endpoint endpoint-fallback"
-CLAUDE_MODELS="claude-opus-5-5 claude-opus-5 claude-sonnet-5 claude-haiku-4-5 claude-fable-5"
+CLAUDE_MODELS="claude-opus-5-5 claude-opus-5 claude-sonnet-5-5 claude-sonnet-5 claude-haiku-5-5 claude-haiku-4-5 claude-fable-5-1 claude-fable-5"
 OPENAI_MODELS="gpt-5.6-terra gpt-5.6-sol gpt-5.6-luna gpt-6-sol gpt-6-luna"
 # The model-era names (2026-07-14 to 2026-09-28) stay accepted.
 extractor_alias=""
@@ -1082,21 +1082,27 @@ if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
     if [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
-        echo "  1) claude-opus-5-5  — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
-        echo "  2) claude-opus-5    — the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
-        echo "  3) claude-sonnet-5  — balanced"
-        echo "  4) claude-haiku-4-5 — fastest / lightest on plan usage"
-        echo "  5) claude-fable-5   — most capable tier"
+        echo "  1) claude-opus-5-5   — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        echo "  2) claude-opus-5     — the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
+        echo "  3) claude-sonnet-5-5 — balanced"
+        echo "  4) claude-sonnet-5   — the earlier Sonnet"
+        echo "  5) claude-haiku-5-5  — fastest / lightest on plan usage"
+        echo "  6) claude-haiku-4-5  — the earlier Haiku"
+        echo "  7) claude-fable-5-1  — most capable tier"
+        echo "  8) claude-fable-5    — the earlier Fable"
         while [ -z "$MODEL" ]; do
-            printf "Choose 1/2/3/4/5 (Enter = 1): "
+            printf "Choose 1-8 (Enter = 1): "
             read -r choice
             case "$choice" in
                 ""|1) MODEL=claude-opus-5-5 ;;
                 2) MODEL=claude-opus-5 ;;
-                3) MODEL=claude-sonnet-5 ;;
-                4) MODEL=claude-haiku-4-5 ;;
-                5) MODEL=claude-fable-5 ;;
-                *) echo "  please answer 1, 2, 3, 4 or 5" ;;
+                3) MODEL=claude-sonnet-5-5 ;;
+                4) MODEL=claude-sonnet-5 ;;
+                5) MODEL=claude-haiku-5-5 ;;
+                6) MODEL=claude-haiku-4-5 ;;
+                7) MODEL=claude-fable-5-1 ;;
+                8) MODEL=claude-fable-5 ;;
+                *) echo "  please answer 1-8" ;;
             esac
         done
     else
