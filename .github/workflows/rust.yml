@@ -352,6 +352,7 @@ jobs:
           if ($selected.Count -lt 1 -or $selected.Count -gt 3 -or (@($selected | Select-Object -Unique).Count -ne $selected.Count)) { throw 'Invalid case list' }
           foreach ($caseId in $selected) { if ($allowed -cnotcontains $caseId) { throw 'Unsupported case' } }
       - name: Allocate a fresh capture output root
+        id: allocate_capture_root
         shell: pwsh
         run: |
           $launchUtc = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss.fffffffZ')
@@ -440,7 +441,7 @@ jobs:
           & $oraclePython -c $env:CAPTURE_BOOTSTRAP $checkoutRoot $oracleSource evals.rust_port.hosted_wait_mail_capture --mode $env:CAPTURE_MODE --case-list $env:CAPTURE_CASE_LIST --frozen-head $env:CAPTURE_FROZEN_HEAD --oracle-root $oracleSource --candidate-root $checkoutRoot --candidate $candidate --out (Join-Path $receiptRoot 'raw-receipt.json') *> (Join-Path $receiptRoot 'capture.log')
           exit $LASTEXITCODE
       - name: Retain raw capture evidence
-        if: always()
+        if: always() && steps.allocate_capture_root.outcome == 'success' && env.CAPTURE_OUTPUT_ROOT != ''
         uses: actions/upload-artifact@v4
         with:
           name: hosted-windows-capture-${{ github.run_id }}-${{ github.run_attempt }}
