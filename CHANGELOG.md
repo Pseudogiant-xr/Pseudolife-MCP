@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
   controls retain their named refusals. Runtime parity remains unverified.
 
+### Fixed (2026-10-08 — native lease zombie detection)
+
+- The experimental native `lease hold` recognizes exited Linux processes whose
+  names contain non-UTF-8 bytes or embedded right parentheses. Live-process and
+  unreadable-procfs behavior remain unchanged; native lease acceptance remains
+  deferred.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority
