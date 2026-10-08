@@ -74,7 +74,10 @@ fn original_incompatible_owned_agent_state_cell() {
         .arg(&path)
         .output()
         .unwrap();
-    usage_error(output, "--disposable-proof cannot use a saved --agent-state");
+    usage_error(
+        output,
+        "--disposable-proof cannot use a saved --agent-state",
+    );
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 1);
 }

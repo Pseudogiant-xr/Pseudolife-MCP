@@ -76,7 +76,10 @@ fn timeout(raw: &str) -> Option<f64> {
         "nan" | "+nan" | "-nan" => Some(f64::NAN),
         "inf" | "+inf" | "infinity" | "+infinity" => Some(f64::INFINITY),
         "-inf" | "-infinity" => Some(f64::NEG_INFINITY),
-        _ if raw.bytes().all(|b| b.is_ascii_digit() || b".e+-".contains(&b)) => {
+        _ if raw
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b".e+-".contains(&b)) =>
+        {
             raw.parse().ok()
         }
         _ => None,
@@ -114,10 +117,8 @@ fn parse(values: &[String]) -> Result<Option<Args>, String> {
         };
         if selected == 0 || selected == 4 {
             // A short help cluster executes help before its remaining letters.
-            let short_help_cluster = selected == 0
-                && raw.starts_with("-h")
-                && !raw.starts_with("-h=")
-                && raw.len() > 2;
+            let short_help_cluster =
+                selected == 0 && raw.starts_with("-h") && !raw.starts_with("-h=") && raw.len() > 2;
             if let Some(value) = explicit.filter(|_| !short_help_cluster) {
                 return Err(format!(
                     "argument {label}: ignored explicit argument {}",
@@ -171,7 +172,11 @@ fn parse(values: &[String]) -> Result<Option<Args>, String> {
 
 fn error(message: &str) -> ExitCode {
     let text = format!("{USAGE}pseudolife-stdio doctor: error: {message}\n");
-    if io::stderr().lock().write_all(&super::text_bytes(&text)).is_ok() {
+    if io::stderr()
+        .lock()
+        .write_all(&super::text_bytes(&text))
+        .is_ok()
+    {
         ExitCode::from(2)
     } else {
         ExitCode::FAILURE
@@ -183,7 +188,12 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     // Defer before classification rather than reinterpret an OS string lossily.
     let values: Option<Vec<_>> = values
         .iter()
-        .map(|value| value.to_str().filter(|raw| raw.is_ascii()).map(str::to_owned))
+        .map(|value| {
+            value
+                .to_str()
+                .filter(|raw| raw.is_ascii())
+                .map(str::to_owned)
+        })
         .collect();
     let args = match parse(&values?) {
         Ok(args) => args?,
