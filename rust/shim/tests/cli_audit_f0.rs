@@ -155,10 +155,10 @@ fn option_looking_input_tokens_defer_even_when_literal_empty_files_exist() {
 }
 
 #[test]
-fn argparse_value_exceptions_still_verify_literal_empty_files() {
+fn negative_and_space_prefixed_input_tokens_defer() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    let names = ["-", "-1", "-1.5", "-.5", "-١.٥", "--bogus name"];
+    let names = ["-1", "-1.5", "-.5", "-١.٥", "--bogus name"];
     #[cfg(unix)]
     let names = [names.as_slice(), &["-1\n"]].concat();
     let outputs: Vec<_> = names
@@ -178,16 +178,38 @@ fn argparse_value_exceptions_still_verify_literal_empty_files() {
     assert_eq!(fs::read_dir(&home).unwrap().count(), names.len());
     fs::remove_dir_all(&home).unwrap();
     for output in outputs {
-        assert_eq!(output.status.code(), Some(0));
-        assert_eq!(
-            output.stdout,
-            cli::native_text(concat!(
-                "{\"ok\": true, \"events\": 0, \"first_seq\": null, \"head_seq\": null, ",
-                "\"head_hash\": null, \"head_created_at\": null, \"start_cut\": null}\n"
-            ))
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("deferred")
         );
-        assert!(output.stderr.is_empty());
     }
+}
+
+#[test]
+fn single_dash_input_verifies_literal_empty_file() {
+    let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("-"), b"").unwrap();
+    let output = command(&home)
+        .current_dir(&home)
+        .args(["verify", "--input", "-"])
+        .output()
+        .unwrap();
+    assert_eq!(fs::read(home.join("-")).unwrap(), b"");
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+    fs::remove_dir_all(&home).unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.stdout,
+        cli::native_text(concat!(
+            "{\"ok\": true, \"events\": 0, \"first_seq\": null, \"head_seq\": null, ",
+            "\"head_hash\": null, \"head_created_at\": null, \"start_cut\": null}\n"
+        ))
+    );
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
