@@ -1,5 +1,35 @@
 # Rust port state
 
+## Stream D historical doorbell evidence (2026-10-08)
+
+The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+records 17 completed Python/native pairs, 34 genuine arms and 72 original
+rejecting controls. Two version2-positive pairs belong to source
+`e1226d2ec30a55a6e44b09b2b12fcbd500173c41`; the Linux empty-HOME pair and
+both-OS ordinary, missing and five invalid-prompt pairs per OS belong to
+`ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1`. Each retains its actual image,
+producing-receipt and raw SHA256 against immutable oracle
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`. Linux ec697 image reuse preserves
+the actual Stream E producing receipt, rather than relabelling its origin.
+
+The Windows symlink fixture retains WinError1314: capability SKIP with native
+RED, zero completed arms and zero controls. Its assertions are not waived.
+Candidate-only controls remain distinct from the empty-HOME pair's four
+controls per arm. PID sampling, denied Windows event observation, Linux
+inaccessible processes, the empty-HOME lead's missed first-output deadline,
+and the zero-cell Windows wrapper quoting failure remain recorded separately.
+The invalid-prompt main's timely direct read and coordinator's later
+minute-precision observation are distinct evidence.
+
+These cells establish bounded historical doorbell behavior, not dedicated
+briefing payload, HTTP wire, persistent-turn, original hook routing or durable
+state coverage. Capable-host symlink, distinct-UID, remaining corpus/features
+and measurement gaps remain open. The final oracle307 integration target is
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; the historical receipt predates
+that pin and retains oracle3c attribution. Current acceptance/publication
+remains `HELD_PENDING_COORDINATOR_ORACLE307`. No parity row is promoted and
+no current-head execution is inferred.
+
 ## Selected master oracle re-pin
 
 The maintainer's 2026-10-08 policy makes the oracle follow master after each
