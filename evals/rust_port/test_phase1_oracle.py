@@ -41,6 +41,8 @@ def preparation(tmp_path, monkeypatch):
     monkeypatch.setattr(phase1_oracle.subprocess, "run", run)
     monkeypatch.setattr(phase1_oracle.subprocess, "check_output", check_output)
     monkeypatch.setattr(phase1_oracle, "require_phase1_source", checked_source)
+    monkeypatch.setattr(phase1_oracle, "selected_oracle", lambda: {
+        "event": "pull_request", "oracle_head": phase1_oracle.ORACLE_HEAD})
     monkeypatch.setattr(phase1_oracle.shutil, "copytree", lambda *args, **kwargs: None)
     state.destination = tmp_path / "prepared"
     return state
@@ -65,11 +67,11 @@ def test_preparation_accepts_the_selected_source_version(preparation, version):
 def test_preparation_rejects_metadata_from_a_different_release(preparation, runtime, distribution):
     preparation.runtime_version = runtime
     preparation.distribution_version = distribution
-    with pytest.raises(RuntimeError, match="pinned checkout/version"):
+    with pytest.raises(RuntimeError, match="selected checkout/version"):
         phase1_oracle.prepare(preparation.destination)
 
 
 def test_preparation_rejects_an_import_from_another_checkout(preparation):
     preparation.source_matches = False
-    with pytest.raises(RuntimeError, match="pinned checkout/version"):
+    with pytest.raises(RuntimeError, match="selected checkout/version"):
         phase1_oracle.prepare(preparation.destination)

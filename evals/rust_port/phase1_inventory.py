@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from .stdio_capture import BEHAVIOR_TESTS, ORACLE_HEAD, ORACLE_SCHEMA, require_phase1_source
+from .stdio_capture import BEHAVIOR_TESTS, ORACLE_HEAD, ORACLE_SCHEMA, require_pinned_phase1_source as require_phase1_source
 from .provenance import ROOT
 
 

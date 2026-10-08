@@ -1,4 +1,4 @@
-"""Generate lease help from the pinned Python parser, without a bank or daemon."""
+"""Generate lease help from the selected Python parser, without a bank or daemon."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+
+from .oracle_selection import selected_oracle
 
 
 ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
@@ -22,12 +24,13 @@ def committed_bytes(root: Path, revision: str, relative: str) -> bytes:
 
 
 def pinned_help(root: Path, scratch: Path) -> dict[str, str]:
-    """Execute the genuine parser from Git's pin using only disposable source."""
+    """Execute the genuine parser from the selected commit using only disposable source."""
     package = scratch / "pseudolife_memory"
+    oracle_head = selected_oracle(root)["oracle_head"]
     package.mkdir(parents=True)
     for name in ORACLE_SOURCES:
         (package / name).write_bytes(committed_bytes(
-            root, ORACLE_HEAD, f"pseudolife_memory/{name}"))
+            root, oracle_head, f"pseudolife_memory/{name}"))
     script = """
 import json
 import sys
