@@ -1,5 +1,33 @@
 # Behaviour parity register
 
+## Stream D retained cell scope (2026-10-08)
+
+The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+binds completed doorbell cells to their exact e122/ec697 sources, per-OS
+images, actual producing receipts and immutable oracle3c. The 17 pairs,
+34 genuine arms and 72 original rejected controls are historical evidence;
+Windows symlink-parent remains capability SKIP/native RED with zero arms and
+controls. Raw artifacts remain retained by hash, with per-case file effects
+and the original control scopes projected without machine identifiers.
+
+Selected exits, empty streams and shared-file bytes remain exact. The positive
+cell checks the nonce-plus-LF receipt and ASCII-zero lock; ordinary prompt
+retains pending bytes, absent prompt-seen receipt and ASCII-zero lock; missing
+and invalid prompts retain pending bytes and create neither receipt nor lock.
+Empty-HOME preserves file/link/directory state with four controls per arm.
+No new outcome rule, substitution or diagnostic normalization is introduced.
+Hook JSON parsed-object equality, unpinned stderr diagnostic semantics and
+existing declared timing/identity bounds retain their existing scopes; these
+cells make no additional hook, wire, timing or durable-state coverage claim.
+
+Dedicated briefing payload, original hook routing, persistent-turn cursor and
+output ordering, capable-host Windows symlinks, distinct real/effective UID,
+remaining corpus/features, real-daemon evidence and measurements remain gaps.
+Observer failures/corrections, sampling limits and first-output observations
+remain distinct from runtime verdicts in the receipt. Current acceptance and
+publication remain `HELD_PENDING_COORDINATOR_ORACLE307`, with no final SHA;
+all existing deferred/retired/ported labels are unchanged.
+
 Current version-branch oracle target: Python 0.17.0 at `3c01bb31abd60178e15dea99adda369b4bbf92fc`, schema 55. Published `95d5402d` passed all 14 checks. Frozen `5220b5ee` now has both-OS named-console and warm-protocol CLI proofs; successor hosted checks and independent review remain pending, so version stays deferred.
 Historical phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
 Historical phase 1 receipts retain Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
