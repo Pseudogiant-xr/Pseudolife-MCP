@@ -359,6 +359,37 @@ checker without launching native processes. Native execution, both-OS recapture,
 positive paired measurements and current-head hosted checks remain pending.
 Historical private receipts cited below cannot certify this candidate.
 
+## Retained wait-mail evidence (2026-10-09)
+
+The completed ring-admission cells are now indexed in
+[`evidence/wait-mail-ring219.json`](evidence/wait-mail-ring219.json), with raw
+receipt hashes, source/oracle pins, image identities and separate failed attempts.
+They remain historical at `33f55402`; this evidence-only carrier adds no runtime
+or acceptance claim.
+
+Windows and Linux each retain three whole-CLI pairs: long-ring watermark and
+bad ring reason exit 3 in both arms; Unicode delivery exits 0. Each pair rejected
+four candidate-output controls. Both OSes retain 119 seven-file workflow passes;
+the focused 38 reduction and 41 contract passes overlap that group. Images remain
+labelled built `57c720ef`, with 79 Windows and 82 Linux canonical compile inputs
+matching the carrier. Source-only inventory retains 41 original test functions
+and 19 candidate-contract rows; it is not original-test execution.
+
+The prior hosted CI still records five failures and 112 passes per OS. Linux's
+first workflow attempt remains 26 failures and 93 passes; its separate recovery
+passed 119 after the parent source guard received existing oracle Git metadata.
+The repeated 93 passes are not extra coverage. Preparation failures and delayed
+root observations also remain in the receipt.
+
+Full flushed-body interruption before marker advance, the Windows exact stat
+refusal site, an ordinary full response with producer/ledger clocks, and runtime
+platform producer capability remain open. The ec697 long-ring provenance refresh
+and hosted transport proof remain unrun; the final307 oracle target is unconfirmed.
+`wait-mail`, `CLI-MAIL` and the complete acceptance matrix remain deferred.
+The original long-ring exit 3/3 observation remains an acceptance RED/blocker,
+separate from its historical comparator pass; accepted-master provenance and
+the hosted long-ring proof are still outstanding.
+
 ## Historical wait-mail leaf candidate and captures
 
 Native `wait-mail` is implemented before shim attachment on dependency
