@@ -93,10 +93,10 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
-    if mode == "backup" {
-        if let Some(code) = backup::run(std::env::args_os().skip(2).collect()) {
-            return Some(ExitCode::from(code));
-        }
+    if mode == "backup"
+        && let Some(code) = backup::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
     }
     if mode == "wait-mail" {
         return Some(ExitCode::from(wait_mail::run(
