@@ -13,7 +13,8 @@ TRACEBACK_CASES = frozenset({"invalid-session-bytes", "inline-session-bytes", "e
                              "invalid-multiple-session-bytes", "inline-unicode-session-bytes"})
 CLOCK_CASES = frozenset({"wait-mail-large-watermark", "wait-mail-non-ascii-space-body",
                          "wait-mail-delayed-ring", "wait-mail-delayed-digest", "wait-mail-cr-spaces-ring",
-                         "unicode-session", "wait-mail-unicode-delivery", "seen-directory"})
+                         "unicode-session", "wait-mail-unicode-delivery", "seen-directory",
+                         "wait-mail-positive-long-ring-watermark"})
 
 
 def delivery_projection(response, window, ledger_path):
