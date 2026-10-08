@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native doctor disposable database refusal)
+
+- The experimental Rust `doctor --disposable-proof` command returns the
+  existing refusal JSON for an absent or empty disposable database DSN,
+  after parser, timeout and saved-state checks. Negative numeric values
+  ending in one LF preserve validation precedence. Normal diagnostics
+  and nonempty database operations remain deferred.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority
