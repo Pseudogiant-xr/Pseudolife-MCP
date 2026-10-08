@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native doctor disposable database refusal)
+
+- The experimental Rust `doctor --disposable-proof` command returns the
+  existing refusal JSON for an absent or empty disposable database DSN,
+  using canonical arguments. Normal diagnostics, saved-state requests
+  and nonempty database operations remain deferred.
+
+### Changed (2026-10-09 — canonical native doctor arguments)
+
+- The experimental Rust doctor refusal accepts full option names with
+  separate values: positive finite ASCII decimal timeouts and the four
+  host names. Other argument shapes defer without argparse diagnostics;
+  saved-state requests also remain deferred.
+
 ### Added (2026-10-09 — native empty board-audit archive verification)
 
 - The experimental native `board-audit verify --input PATH` verifies a
