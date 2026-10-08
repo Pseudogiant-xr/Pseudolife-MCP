@@ -131,6 +131,7 @@ class CodexCoordinationRegistry:
     def __init__(self, url: str, token: str, *, state_dir=None,
                  adapter_factory=None, startup_seconds: float = 3.0,
                  retry_seconds: float = 5.0,
+                 validation_seconds: float = 6.0,
                  max_threads: int = 128, clock=None, delivery_url=None,
                  delivery_token=None, delivery_factory=None, provider=None,
                  digest_dir=None, doorbell=None):
@@ -142,6 +143,11 @@ class CodexCoordinationRegistry:
         self._adapter_factory = adapter_factory
         self._startup_seconds = startup_seconds
         self._retry_seconds = retry_seconds
+        # Context HTTP allows 5s; leave room to classify that timeout instead
+        # of cancelling it under the 3s attachment budget. Two read-only
+        # checks bound recovery to 12s by default; the shim's total tool
+        # deadline can cancel earlier.
+        self._validation_seconds = validation_seconds
         self._max_threads = max_threads
         self._clock = clock or time.monotonic
         self._delivery_url = delivery_url
@@ -320,24 +326,82 @@ class CodexCoordinationRegistry:
             async with self._entry_lock:
                 self._startups.discard(startup)
 
+    async def _validate_existing(self, adapter, snapshot):
+        validation = asyncio.create_task(adapter.validate_snapshot(snapshot))
+        # A caller cancelled during cleanup may stop waiting for this child.
+        # Retrieve its eventual exception without consuming caller cancellation.
+        validation.add_done_callback(
+            lambda task: task.exception() if not task.cancelled() else None)
+        try:
+            # wait_for can swallow caller cancellation when its child finishes
+            # in the same loop turn. wait propagates it, also on Python 3.10.
+            done, _ = await asyncio.wait((validation,), timeout=self._validation_seconds)
+            if not done:
+                raise asyncio.TimeoutError
+            return validation.result()
+        finally:
+            if not validation.done():
+                validation.cancel()
+                # Child cancellation is a result of wait, while cancellation
+                # of this caller still raises and must prevent retry/dispatch.
+                await asyncio.wait((validation,))
+
     async def _verified_existing(self, thread_id, adapter, snapshot):
         if self.provider is None:
             return adapter
-        try:
-            await asyncio.wait_for(adapter.validate_snapshot(snapshot), self._startup_seconds)
+        from .coordination_adapter import AdapterError
+
+        for attempt in range(2):
+            if self._closing:
+                return None
+            try:
+                await self._validate_existing(adapter, snapshot)
+            except Exception as error:
+                code = getattr(error, "code", None)
+                transient = (isinstance(error, asyncio.TimeoutError)
+                             or code == "transport_unavailable"
+                             or (code == "context_unavailable"
+                                 and getattr(error, "status", None) in {429, 500, 502, 503, 504}))
+                if transient and not self._closing:
+                    # A failed read may span credential rotation. Never retry
+                    # that authority, even when its failure looked transient.
+                    try:
+                        current = self.provider.snapshot()
+                    except Exception:
+                        error = AdapterError("credential source is unavailable",
+                                             code="credential_unavailable")
+                    else:
+                        if current.generation == snapshot.generation and attempt == 0:
+                            continue
+                        if current.generation != snapshot.generation:
+                            error = AdapterError("credential changed during validation",
+                                                 code="credential_changed")
+                self._note_failure(thread_id, error, phase="authority_validation")
+                return None
+            # validate_snapshot checks the credential generation again after
+            # its HTTP await; closing must also fence a completed check.
+            if self._closing:
+                return None
             self._failure_hints.pop(thread_id, None)
             return adapter
-        except Exception as error:
-            self._note_failure(thread_id, error)
-            return None
 
-    def _note_failure(self, thread_id, error):
-        if getattr(error, "code", None) == "bank_identity_mismatch":
+    def _note_failure(self, thread_id, error, *, phase="adapter_startup"):
+        code = getattr(error, "code", None)
+        origin = "authority validation" if phase == "authority_validation" else "identity attachment"
+        if code == "bank_identity_mismatch":
             hint = "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential."
-        elif getattr(error, "code", None) in {"credential_unavailable", "credential_changed"}:
+        elif code in {"credential_unavailable", "credential_changed"}:
             hint = "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes."
+        elif code in {"unauthorized", "authentication_required", "principal_not_allowed"} or getattr(error, "status", None) in {401, 403}:
+            hint = f"Coordination: {origin} was refused by authentication or access policy; saved state was preserved. Check the configured credential and access."
+        elif isinstance(error, asyncio.TimeoutError):
+            hint = f"Coordination: {origin} timed out (timeout); saved state was preserved. Retry when the bank responds."
+        elif code in {"transport_unavailable", "context_unavailable"}:
+            hint = f"Coordination: {origin} failed ({code}); saved state was preserved. Retry when the bank responds."
+        elif code == "attachment_busy" and phase == "adapter_startup":
+            hint = "Coordination: identity attachment is busy (attachment_busy); saved state was preserved. Wait for the prior attachment lease to expire."
         else:
-            hint = "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire."
+            hint = f"Coordination: {origin} unavailable; saved state was preserved. Check bank access and private adapter state."
         self._failure_hints[thread_id] = hint
 
     async def _get_started(self, thread_id: str, snapshot=None, parent_thread=None):
