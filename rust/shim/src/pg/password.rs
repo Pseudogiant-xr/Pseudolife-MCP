@@ -52,6 +52,7 @@ fn environment_password() -> Option<Vec<u8>> {
     std::env::var_os("PGPASSWORD").map(|value| value.into_vec())
 }
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn environment_password() -> Option<Vec<u8>> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
@@ -91,6 +92,7 @@ fn environment_password() -> Option<Vec<u8>> {
     }
 }
 #[cfg(unix)]
+#[allow(unsafe_code)]
 fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
     use std::{
         ffi::{CStr, OsString},
@@ -131,6 +133,7 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
     (user, home)
 }
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt};
     use windows_sys::Win32::{
