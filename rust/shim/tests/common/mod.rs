@@ -449,6 +449,19 @@ pub fn meta() -> Value {
     json!({"io.modelcontextprotocol/protocolVersion":"2026-07-28", "io.modelcontextprotocol/clientCapabilities":{}, "io.modelcontextprotocol/clientInfo":{"name":"eof-contract","version":"1"}})
 }
 
+/// Windows reserves the exited child's PID with its retained process handle.
+/// Other platforms retain the existing reaped-PID fixture and its reuse risk.
+pub struct CompletedPid {
+    pid: u32,
+    #[cfg(windows)]
+    _child: Child,
+}
+impl CompletedPid {
+    pub fn id(&self) -> u32 {
+        self.pid
+    }
+}
+
 /// Disposable lease homes retain the local and board tests' original profiles.
 pub struct LeaseHome(pub std::path::PathBuf);
 impl LeaseHome {
@@ -494,7 +507,7 @@ impl LeaseHome {
     pub fn call(&self, args: &[&str]) -> std::process::Output {
         self.command().args(args).output().unwrap()
     }
-    pub fn completed_pid(&self) -> u32 {
+    pub fn completed_pid(&self) -> CompletedPid {
         let mut child = self
             .command()
             .args(["lease", "--help"])
@@ -504,7 +517,11 @@ impl LeaseHome {
             .unwrap();
         let pid = child.id();
         assert!(child.wait().unwrap().success());
-        pid
+        CompletedPid {
+            pid,
+            #[cfg(windows)]
+            _child: child,
+        }
     }
 }
 impl Drop for LeaseHome {
