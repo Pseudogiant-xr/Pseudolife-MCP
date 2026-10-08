@@ -391,6 +391,7 @@
     },
     "wait-mail-long-ring-watermark": {
       "substitution": "wait-mail-writer-records",
+      "note": "Oracle-conformant no-ring timeout; this case can be routed differentially later.",
       "request": {
         "id": "wait-mail-long-ring-watermark",
         "mode": "wait-mail",
@@ -412,14 +413,9 @@
           ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
         }
       },
-      "exit_code": 0,
-      "stdout": "peer\n",
-      "stderr": "wait-mail: the daemon rang for addressed mail at <local-clock> (rung anyone, watermark 12, 0 s after arming):\n",
-      "delivery": {
-        "seen_path": ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen",
-        "seen": "12\n",
-        "ledger": "<epoch>\twait\taaaaaaaa\t12\t5\trung anyone\n"
-      }
+      "exit_code": 3,
+      "stdout": "",
+      "stderr": "wait-mail: no ring in 0.025 s (plain mail does not end the wait); re-arm to keep waiting.\n"
     }
   }
 }
