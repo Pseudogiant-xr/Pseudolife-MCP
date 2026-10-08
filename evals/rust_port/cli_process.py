@@ -23,6 +23,7 @@ from .harness import Policy, capture_platform, compare, isolated_env, run_cli, w
 from .phase1_receipts import candidate_identity, command_identity
 from .provenance import require_import_root, require_instrument_binding, runtime_metadata
 from .stdio_capture import require_phase1_source
+from .oracle_selection import selected_oracle
 
 STATE_POLICY = "cli-state-compared"
 BYTE_POLICY = Policy(source_text_paths=(), ignored_values=())
@@ -46,6 +47,7 @@ def cli_binding(root, oracle_root, *, extra_helpers=None, callbacks=()):
                "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
                "evals/rust_port/provenance.py": [require_import_root, runtime_metadata, require_instrument_binding],
                "evals/rust_port/stdio_capture.py": [require_phase1_source],
+               "evals/rust_port/oracle_selection.py": [selected_oracle],
                "evals/rust_port/processes.py": [harness.owned_process, processes.execution_sources],
                "evals/rust_baseline/common.py": [lease_gate, child_environment, daemon.child_environment],
                "evals/memory_policy_bench.py": [memory_policy_bench.scrubbed_env, memory_policy_bench.production_database],

@@ -1,4 +1,4 @@
-"""Capture bounded wait-mail pairs against the existing pinned Python oracle."""
+"""Capture bounded wait-mail pairs against the frozen master Python oracle."""
 import argparse
 import copy
 import json
@@ -11,6 +11,7 @@ import tempfile
 
 ALLOWED = frozenset({"wait-mail-long-ring-watermark", "wait-mail-bad-ring-reason", "wait-mail-unicode-delivery",
                      "wait-mail-positive-long-ring-watermark"})
+# Historical receipts retain this identity; new captures select frozen_head.
 WAIT_PIN = "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
 
 
@@ -65,10 +66,6 @@ def main():
 
     require_import_root(root)
     source = require_phase1_source(root)
-    for relative in ("pseudolife_memory/cli.py", "pseudolife_memory/wait_mail_cli.py"):
-        pinned = subprocess.check_output(["git", "show", WAIT_PIN + ":" + relative], cwd=root, timeout=10)
-        if (root / relative).read_bytes().replace(b"\r\n", b"\n") != pinned:
-            raise RuntimeError("wait-mail oracle module differs from the immutable pin")
     binary = args.candidate.resolve(strict=True)
     commands = {"oracle": [sys.executable, "-m", "pseudolife_memory.cli"], "candidate": [str(binary)]}
     identity = candidate_identity(commands["candidate"], candidate_root)
@@ -97,7 +94,8 @@ def main():
                     captures = []
                     for case in selected:
                         observed = paired_cases([case], commands, root=root, home=home, url="http://127.0.0.1:29871")
-                        write_new(args.out.with_name(case["id"] + ".json"), observed)
+                        write_new(args.out.with_name(case["id"] + ".json"),
+                                  {"oracle_head": source["oracle_head"], **observed})
                         captures.append(observed)
                     result = {"records": [record for value in captures for record in value["records"]],
                               "candidate_output_controls": [control for value in captures for control in value["candidate_output_controls"]],
@@ -107,7 +105,7 @@ def main():
                 reset_home(home)
                 cleanup["fixture_home_absent"] = not home.exists()
     finally:
-        write_new(args.out.with_name("cleanup.json"), cleanup)
+        write_new(args.out.with_name("cleanup.json"), {"oracle_head": source["oracle_head"], **cleanup})
     if selected != original or candidate_identity(commands["candidate"], candidate_root) != identity:
         raise RuntimeError("capture source input or candidate changed")
     require_frozen_checkout(candidate_root, args.frozen_head)
@@ -119,7 +117,8 @@ def main():
         raise RuntimeError("capture is incomplete")
     write_new(args.out, {"schema": 1, "frozen_head": args.frozen_head, "mode": args.mode,
         "case_ids": names, "capture_platform": capture_platform(), "capture_runtime": runtime_metadata(root),
-        "oracle_source": source, "wait_mail_module_pin": WAIT_PIN, "cli_instrument_binding": binding,
+        "oracle_head": source["oracle_head"], "oracle_source": source,
+        "wait_mail_module_pin": source["oracle_head"], "cli_instrument_binding": binding,
         "candidate_identity": identity, "oracle_identity": oracle_identity, "cleanup": cleanup, **result})
     print(json.dumps({"passed": result["passed"], "cases": len(names), "receipt": args.out.name}))
     return 0 if result["passed"] else 1

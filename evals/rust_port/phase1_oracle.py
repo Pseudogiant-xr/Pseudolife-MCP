@@ -1,4 +1,4 @@
-"""Prepare a private pinned Python oracle with the current judge instruments."""
+"""Prepare the event-selected Python oracle with the current judge instruments."""
 import argparse
 import json
 from pathlib import Path
@@ -9,29 +9,32 @@ import tomllib
 
 from .provenance import ROOT
 from .stdio_capture import ORACLE_HEAD, require_phase1_source
+from .oracle_selection import selected_oracle
 
 
 def prepare_metadata(destination):
-    """Export exact pinned package metadata without installing a runtime."""
+    """Export exact selected package metadata without installing a runtime."""
     destination = Path(destination).resolve()
-    metadata = subprocess.check_output(["git", "show", ORACLE_HEAD + ":pyproject.toml"], cwd=ROOT)
+    selection = selected_oracle()
+    metadata = subprocess.check_output(["git", "show", selection["oracle_head"] + ":pyproject.toml"], cwd=ROOT)
     version = tomllib.loads(metadata.decode("utf-8"))["project"]["version"]
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "pyproject.toml").write_bytes(metadata)
-    return {"source": str(destination), "oracle_head": ORACLE_HEAD, "version": version}
+    return {"source": str(destination), **selection, "oracle_selection": selection, "version": version}
 
 
 def prepare(destination):
     destination = Path(destination).resolve()
+    selection = selected_oracle()
     destination.mkdir(parents=True, exist_ok=False)
     source = destination / "source"
     runtime = destination / "runtime"
     subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(source)], check=True)
-    subprocess.run(["git", "checkout", "--quiet", "--detach", ORACLE_HEAD], cwd=source, check=True)
+    subprocess.run(["git", "checkout", "--quiet", "--detach", selection["oracle_head"]], cwd=source, check=True)
     checked = require_phase1_source(source)
     version = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     # Only instruments are overlaid. Production and immutable oracle tests stay
-    # at the pin, while the candidate remains an absolute caller-supplied path.
+    # at the selected commit, while the candidate stays an absolute supplied path.
     for name in ("rust_port", "rust_baseline"):
         shutil.copytree(ROOT / "evals" / name, source / "evals" / name, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -53,14 +56,14 @@ def prepare(destination):
     metadata = json.loads(probe)
     if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != version \
             or metadata["distribution_versions"]["pseudolife-mcp"] != version:
-        raise RuntimeError("prepared oracle runtime does not import the pinned checkout/version")
+        raise RuntimeError("prepared oracle runtime does not import the selected checkout/version")
     return {"source": str(source), "python": str(python), **checked, "runtime": metadata}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", type=Path, required=True, help="new private directory")
-    parser.add_argument("--metadata-only", action="store_true", help="export pinned pyproject.toml only")
+    parser.add_argument("--metadata-only", action="store_true", help="export selected pyproject.toml only")
     args = parser.parse_args()
     print(json.dumps((prepare_metadata if args.metadata_only else prepare)(args.destination)))
 

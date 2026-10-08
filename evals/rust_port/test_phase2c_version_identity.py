@@ -92,12 +92,13 @@ def test_bare_dispatch_version_does_not_construct_an_installed_identity(tmp_path
 
 
 def test_metadata_fixture_exports_exact_pin_without_installation(tmp_path):
+    selected = phase1_oracle.selected_oracle()["oracle_head"]
     expected = phase1_oracle.subprocess.check_output(
-        ["git", "show", phase1_oracle.ORACLE_HEAD + ":pyproject.toml"], cwd=phase1_oracle.ROOT)
+        ["git", "show", selected + ":pyproject.toml"], cwd=phase1_oracle.ROOT)
     destination = tmp_path / "metadata"
     result = phase1_oracle.prepare_metadata(destination)
     assert (destination / "pyproject.toml").read_bytes() == expected
     assert list(destination.iterdir()) == [destination / "pyproject.toml"]
-    assert result["oracle_head"] == phase1_oracle.ORACLE_HEAD
+    assert result["oracle_head"] == selected
     with pytest.raises(FileExistsError):
         phase1_oracle.prepare_metadata(destination)
