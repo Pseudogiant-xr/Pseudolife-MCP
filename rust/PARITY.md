@@ -26,6 +26,8 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
+Semantic by default: non-UTF-8 implicit OS usernames are outside the supported producer domain; native fails before connecting with `PostgreSQL connection failed` (exit 1), while Python/libpq preserves the raw username/database bytes through startup and leaves rejection to the server.
+
 ## Phase 4 integration of accepted PostgreSQL repair
 
 Phase 4 merges accepted master

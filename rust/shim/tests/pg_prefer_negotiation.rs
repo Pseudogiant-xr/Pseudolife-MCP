@@ -156,6 +156,7 @@ async fn each_sslmode_pins_negotiation_errors_and_attempt_counts() {
             let environment = TlsEnvironment {
                 default_directory: Some(directory.clone()),
                 ambient_controls: vec![],
+                ..TlsEnvironment::default()
             };
             let count = Arc::new(AtomicUsize::new(0));
             let recorded = count.clone();

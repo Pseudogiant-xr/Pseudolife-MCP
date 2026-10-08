@@ -312,6 +312,7 @@ async fn cell(
     let environment = TlsEnvironment {
         default_directory: Some(directory.0.clone()),
         ambient_controls: vec![],
+        ..TlsEnvironment::default()
     };
     let (port, peer) = peer(tls, certificate).await;
     let mut text = format!("host={host} port={port} user=fixture dbname=fixture sslmode={mode}");
@@ -450,13 +451,14 @@ async fn ambient_and_unavailable_ca_controls_refuse_before_network() {
         "PGSSLROOTCERT",
         "PGTLS_TEST",
         "PGHOST",
-        "PGPASSWORD",
+        "PGPASSFILE",
         "PGSERVICE",
         "PGOPTIONS",
     ] {
         let environment = TlsEnvironment {
             default_directory: None,
             ambient_controls: vec![control.into()],
+            ..TlsEnvironment::default()
         };
         let error = match Session::open_in(&dsn, &environment).await {
             Ok(_) => panic!("ambient control admitted"),
@@ -471,6 +473,7 @@ async fn ambient_and_unavailable_ca_controls_refuse_before_network() {
         let environment = TlsEnvironment {
             default_directory: Some(directory.0.clone()),
             ambient_controls: vec![],
+            ..TlsEnvironment::default()
         };
         assert_eq!(
             environment.validate(),
