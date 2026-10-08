@@ -12,6 +12,7 @@ import time
 from .harness import capture_platform, write_new
 from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version, source_metadata
 from .stdio import capture
+from .oracle_selection import selected_oracle, stale_pin_report
 
 ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
 ORACLE_SCHEMA = 55
@@ -22,16 +23,31 @@ BEHAVIOR_TESTS = ("tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/fake_embedder.py", "tests/pg_fixtures.py")
 
 
+def require_pinned_phase1_source(root):
+    """Validate historical inventory regeneration against its recorded pin."""
+    return _require_source(root, ORACLE_HEAD, ORACLE_SCHEMA)
+
+
 def require_phase1_source(root):
+    selection = selected_oracle()
+    oracle_head = selection["oracle_head"]
+    # The source check includes the schema file; its literal version therefore
+    # comes from the selected commit, without a second schema pin.
+    oracle_schema = schema_version(root / "pseudolife_memory/storage/schema.py")
+    return {**_require_source(root, oracle_head, oracle_schema), "oracle_selection": selection,
+            "stale_pin_report": stale_pin_report(root, ORACLE_HEAD, (*SOURCE_PATHS, *BEHAVIOR_TESTS))}
+
+
+def _require_source(root, oracle_head, oracle_schema):
     checked_paths = (*SOURCE_PATHS, *BEHAVIOR_TESTS)
-    result = subprocess.run(["git", "diff", "--quiet", ORACLE_HEAD, "--", *checked_paths],
+    result = subprocess.run(["git", "diff", "--quiet", oracle_head, "--", *checked_paths],
                             cwd=root, capture_output=True, timeout=10)
     untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard",
                                         "--", *checked_paths], cwd=root)
-    if result.returncode != 0 or untracked or schema_version(root / "pseudolife_memory/storage/schema.py") != ORACLE_SCHEMA:
-        raise RuntimeError("phase-1 pinned production source required")
-    return {**source_metadata(root, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_SCHEMA),
-            "oracle_head": ORACLE_HEAD, "oracle_schema": ORACLE_SCHEMA,
+    if result.returncode != 0 or untracked or schema_version(root / "pseudolife_memory/storage/schema.py") != oracle_schema:
+        raise RuntimeError("phase-1 selected production source required")
+    return {**source_metadata(root, oracle_head=oracle_head, oracle_schema=oracle_schema),
+            "oracle_head": oracle_head, "oracle_schema": oracle_schema,
             "production_source_matches_pin": True, "behavior_test_sources_match_pin": True}
 
 

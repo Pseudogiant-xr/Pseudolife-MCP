@@ -244,7 +244,8 @@ def test_actual_corpus_helper_binding_admits_committed_clean_disposable_tree(tmp
     assert binding["instrument"]["source_head"] == commit
     assert binding["instrument"]["source_dirty"] is False
     from evals.rust_port.cli_public import CLI_HELPERS
-    assert len(binding["instrument"]["source_files_sha256"]) == 18
+    assert len(binding["instrument"]["source_files_sha256"]) == 19
+    assert "evals/rust_port/oracle_selection.py" in CLI_HELPERS
     for field in ("source_files_sha256", "source_files_git_blob"):
         assert set(binding["instrument"][field]) == set(CLI_HELPERS)
     assert "tests/fake_embedder.py" in binding["production_ownership"]["source_files_sha256"]

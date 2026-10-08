@@ -24,6 +24,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Nonempty chains, bank verification, other argument forms, export and stats
   remain deferred.
 
+### Changed (2026-10-09 — Rust parity oracle selection)
+
+- Rust parity builds its Python oracle from the PR merge base, the push commit
+  or the frozen master capture head, recording that SHA in new receipts.
+  Historical pins remain unchanged and stale-pin reports are informational.
+  Manual dispatch requires the master branch ref and its matching frozen head
+  in both CI and capture modes; selection receipts also record the ref.
+
 ### Changed (2026-10-09 — Rust-only pull requests skip the Python suite lanes)
 
 - CI classifies each pull request first. One that touches `rust/`, and whose
