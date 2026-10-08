@@ -14,6 +14,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
   controls retain their named refusals. Runtime parity remains unverified.
 
+### Fixed (2026-10-08 — transient Codex coordination checks)
+
+- Ordinary Codex coordination calls recover one transient bank-authority
+  check automatically, using the same adapter and saved mailbox. Existing
+  adapters use a context-validation deadline compatible with the HTTP
+  timeout instead of the shorter startup deadline. Authentication,
+  binding and credential changes still fail closed without retry, and
+  failure hints distinguish validation, access and attachment failures.
+  Existing-adapter checks request strict read-only context and cannot
+  initialize a missing bank identity or cold storage. Initial startup and
+  legacy migration retain their authority-establishment behavior.
+  Cancellation during validation or cleanup propagates before retry or
+  dispatch. Message operations are never replayed by this recovery.
+
 ### Added (2026-10-08 — current Claude models in the dreamer menus)
 
 - The Claude dreamer model lists now offer `claude-sonnet-5-5`,

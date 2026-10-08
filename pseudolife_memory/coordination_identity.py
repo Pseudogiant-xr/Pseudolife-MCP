@@ -118,14 +118,15 @@ def read_legacy(path: Path, url: str) -> dict:
         raise AdapterError("legacy adapter state is unavailable or invalid; state was preserved") from None
 
 
-async def fetch_context(client, url: str, snapshot, *, identity=None) -> dict:
+async def fetch_context(client, url: str, snapshot, *, identity=None,
+                        read_only: bool = False) -> dict:
     import httpx
 
     from .coordination_adapter import AdapterError
 
-    body = {}
+    body = {"read_only": True} if read_only else {}
     if identity is not None:
-        body = {"agent_id": identity["agent_id"], "nonce": uuid.uuid4().hex}
+        body.update(agent_id=identity["agent_id"], nonce=uuid.uuid4().hex)
     try:
         response = await client.post(url + "/api/coordination/context", json=body,
             headers={"Authorization": "Bearer " + snapshot.token}, timeout=5,
