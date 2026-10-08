@@ -289,6 +289,57 @@ jobs:
       CAPTURE_MODE: ${{ inputs.mode }}
       CAPTURE_CASE_LIST: ${{ inputs.case_list }}
       CAPTURE_FROZEN_HEAD: ${{ inputs.frozen_head }}
+      CAPTURE_BOOTSTRAP: |
+        import hashlib, importlib.machinery, json, os, pathlib, runpy, subprocess, sys, types
+        instrument = pathlib.Path(sys.argv[1]).resolve(strict=True)
+        source = pathlib.Path(sys.argv[2]).resolve(strict=True)
+        module, arguments = sys.argv[3], sys.argv[4:]
+        evidence = pathlib.Path(os.environ["CAPTURE_OUTPUT_ROOT"]) / "helpers" / module
+        evidence.mkdir(parents=True, exist_ok=False)
+        records = evidence / "binding.jsonl"
+        ownership = {"pseudolife_memory.codex_doorbell", "pseudolife_memory.credentials",
+                     "pseudolife_memory.storage.schema", "tests.pg_defaults", "tests.fake_embedder"}
+        class BoundLoader(importlib.machinery.SourceFileLoader):
+            def get_code(self, fullname):
+                root = instrument if fullname.startswith("evals.") else source
+                actual = pathlib.Path(self.path).resolve(strict=True)
+                relative = actual.relative_to(root).as_posix()
+                expected = subprocess.check_output(["git", "cat-file", "--filters", "--path=" + relative,
+                    os.environ["CAPTURE_FROZEN_HEAD"] + ":" + relative], cwd=root, timeout=10)
+                loaded = actual.read_bytes()
+                expected_sha256 = hashlib.sha256(expected).hexdigest()
+                loaded_sha256 = hashlib.sha256(loaded).hexdigest()
+                if loaded_sha256 != expected_sha256:
+                    raise RuntimeError("Capture helper differs from expected checkout bytes: " + relative)
+                retained = evidence / relative
+                retained.parent.mkdir(parents=True, exist_ok=True)
+                with retained.open("xb") as output:
+                    output.write(loaded)
+                with records.open("a", encoding="utf-8") as output:
+                    output.write(json.dumps({"resolved_path": str(actual), "relative_path": relative,
+                        "expected_source_head": os.environ["CAPTURE_FROZEN_HEAD"],
+                        "expected_bytes": "git cat-file --filters", "expected_sha256": expected_sha256,
+                        "loaded_sha256": loaded_sha256, "retained_path": str(retained)}) + "\n")
+                return compile(loaded, str(actual), "exec", dont_inherit=True)
+        class BoundHelpers:
+            def find_spec(self, fullname, path=None, target=None):
+                if not fullname.startswith("evals.") and fullname not in ownership:
+                    return None
+                specification = importlib.machinery.PathFinder.find_spec(fullname, path)
+                if specification is not None and specification.origin is not None:
+                    specification.loader = BoundLoader(fullname, specification.origin)
+                return specification
+        sys.path[:0] = [str(source), str(instrument)]
+        evals = types.ModuleType("evals")
+        evals.__path__ = [str(instrument / "evals")]
+        evals.__package__ = "evals"
+        evals.__spec__ = importlib.machinery.ModuleSpec("evals", loader=None, is_package=True)
+        evals.__spec__.submodule_search_locations = evals.__path__
+        sys.modules["evals"] = evals
+        sys.meta_path.insert(0, BoundHelpers())
+        sys.argv = [module, *arguments]
+        os.chdir(source)
+        runpy.run_module(module, run_name="__main__")
     steps:
       - name: Validate the dispatch selector
         shell: pwsh
@@ -300,6 +351,15 @@ jobs:
           $selected = $env:CAPTURE_CASE_LIST.Split(',')
           if ($selected.Count -lt 1 -or $selected.Count -gt 3 -or (@($selected | Select-Object -Unique).Count -ne $selected.Count)) { throw 'Invalid case list' }
           foreach ($caseId in $selected) { if ($allowed -cnotcontains $caseId) { throw 'Unsupported case' } }
+      - name: Allocate a fresh capture output root
+        shell: pwsh
+        run: |
+          $launchUtc = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss.fffffffZ')
+          $launchUuid = [Guid]::NewGuid().ToString('D')
+          $receiptRoot = Join-Path (Join-Path $env:RUNNER_TEMP 'hosted-windows-capture') ($launchUtc + '-' + $launchUuid)
+          if (Test-Path -LiteralPath $receiptRoot) { throw 'Refusing existing capture output root' }
+          New-Item -ItemType Directory -Path $receiptRoot -ErrorAction Stop | Out-Null
+          "CAPTURE_OUTPUT_ROOT=$receiptRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -328,23 +388,24 @@ jobs:
         env:
           GITHUB_REF: ${{ github.ref }}
         run: |
-          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          $checkoutRoot = (Get-Location).Path
+          python -c $env:CAPTURE_BOOTSTRAP $checkoutRoot $checkoutRoot evals.rust_port.oracle_selection --out (Join-Path $env:CAPTURE_OUTPUT_ROOT 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
       - name: Prepare the selected oracle
         timeout-minutes: 10
         shell: pwsh
         run: |
-          $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
-          python -m evals.rust_port.phase1_oracle --destination $oracleRoot
+          $checkoutRoot = (Get-Location).Path
+          $oracleRoot = Join-Path $env:CAPTURE_OUTPUT_ROOT 'oracle'
+          python -c $env:CAPTURE_BOOTSTRAP $checkoutRoot $checkoutRoot evals.rust_port.phase1_oracle --destination $oracleRoot
           exit $LASTEXITCODE
       - name: Build and bind the candidate
         timeout-minutes: 20
         shell: pwsh
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+          CARGO_TARGET_DIR: ${{ env.CAPTURE_OUTPUT_ROOT }}/cargo
         run: |
-          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
-          New-Item -ItemType Directory -Path $receiptRoot -ErrorAction Stop | Out-Null
+          $receiptRoot = $env:CAPTURE_OUTPUT_ROOT
           $beforeHead = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $beforeHead -cne $env:CAPTURE_FROZEN_HEAD) { throw 'Source head mismatch' }
           cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-stdio -j 4 *> (Join-Path $receiptRoot 'build.log')
@@ -368,22 +429,15 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+          CARGO_TARGET_DIR: ${{ env.CAPTURE_OUTPUT_ROOT }}/cargo
         run: |
           $checkoutRoot = (Get-Location).Path
-          $oracleSource = Join-Path $env:RUNNER_TEMP 'phase1-oracle/source'
-          $oraclePython = Join-Path $env:RUNNER_TEMP 'phase1-oracle/runtime/Scripts/python.exe'
+          $oracleSource = Join-Path $env:CAPTURE_OUTPUT_ROOT 'oracle/source'
+          $oraclePython = Join-Path $env:CAPTURE_OUTPUT_ROOT 'oracle/runtime/Scripts/python.exe'
           $candidate = Join-Path $env:CARGO_TARGET_DIR 'release/pseudolife-stdio.exe'
-          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
+          $receiptRoot = $env:CAPTURE_OUTPUT_ROOT
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
-          $bootstrap = @'
-          import pathlib, subprocess, sys
-          from evals.rust_port.provenance import module_command
-          root = pathlib.Path(sys.argv[1]).resolve()
-          command = module_command("evals.rust_port.hosted_wait_mail_capture", root, sys.argv[2:])
-          raise SystemExit(subprocess.run(command, cwd=root).returncode)
-          '@
-          & $oraclePython -c $bootstrap $oracleSource --mode $env:CAPTURE_MODE --case-list $env:CAPTURE_CASE_LIST --frozen-head $env:CAPTURE_FROZEN_HEAD --oracle-root $oracleSource --candidate-root $checkoutRoot --candidate $candidate --out (Join-Path $receiptRoot 'raw-receipt.json') *> (Join-Path $receiptRoot 'capture.log')
+          & $oraclePython -c $env:CAPTURE_BOOTSTRAP $checkoutRoot $oracleSource evals.rust_port.hosted_wait_mail_capture --mode $env:CAPTURE_MODE --case-list $env:CAPTURE_CASE_LIST --frozen-head $env:CAPTURE_FROZEN_HEAD --oracle-root $oracleSource --candidate-root $checkoutRoot --candidate $candidate --out (Join-Path $receiptRoot 'raw-receipt.json') *> (Join-Path $receiptRoot 'capture.log')
           exit $LASTEXITCODE
       - name: Retain raw capture evidence
         if: always()
@@ -391,7 +445,10 @@ jobs:
         with:
           name: hosted-windows-capture-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/hosted-windows-capture/
-            ${{ runner.temp }}/oracle-selection.json
+            ${{ env.CAPTURE_OUTPUT_ROOT }}/build.log
+            ${{ env.CAPTURE_OUTPUT_ROOT }}/build-binding.json
+            ${{ env.CAPTURE_OUTPUT_ROOT }}/capture.log
+            ${{ env.CAPTURE_OUTPUT_ROOT }}/*.json
+            ${{ env.CAPTURE_OUTPUT_ROOT }}/helpers/
           if-no-files-found: warn
           retention-days: 7
