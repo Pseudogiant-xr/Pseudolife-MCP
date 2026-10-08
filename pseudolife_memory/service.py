@@ -1249,8 +1249,8 @@ class MemoryService(DreamOps, MaintainerOps):
             raise
         self._init_refusal = None
         self._not_ready = None
-        logger.info("storage: postgres (%s)",
-                    self._db_url.rsplit("@", 1)[-1])
+        from pseudolife_memory.storage.schema import dsn_endpoint
+        logger.info("storage: postgres (%s)", dsn_endpoint(self._db_url))
         # Invariant: unqualified tables MUST resolve to the real `public`
         # bank, never the role-named `pseudolife` shadow schema (v0.4
         # collision fix). PostgresStorage pins this; fail loud if regressed.
