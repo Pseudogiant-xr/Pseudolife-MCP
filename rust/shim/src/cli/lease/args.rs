@@ -143,6 +143,17 @@ fn valid_name(name: &str) -> bool {
         && !name.chars().any(char::is_control)
 }
 
+// Classify unmatched argv using argparse's literal ASCII-space rule.
+fn argument_value(text: &str, options: &[&str]) -> bool {
+    if text == "-" || !text.starts_with('-') {
+        return true;
+    }
+    let flag = text.split_once('=').map_or(text, |(flag, _)| flag);
+    let known_option = text.starts_with("-h")
+        || (flag.starts_with("--") && options.iter().any(|option| option.starts_with(flag)));
+    !known_option && (negative_number(text) || text.contains(' '))
+}
+
 fn negative_number(text: &str) -> bool {
     let Some(rest) = text.strip_prefix('-') else {
         return false;
@@ -231,7 +242,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         if let Some(code) = help("top", item) {
             return Err(code);
         }
-        if !item.starts_with('-') || negative_number(item) {
+        if argument_value(item, &["--help"]) {
             break;
         }
         unrecognized.push(item.as_str());
@@ -305,6 +316,27 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
     } else {
         &["--help", "--json"]
     };
+    // argparse classifies every token before consuming option values. An
+    // ambiguous abbreviation therefore precedes a missing-value diagnostic.
+    for item in &before[action_index + 1..] {
+        let flag = item.split_once('=').map_or(item.as_str(), |(flag, _)| flag);
+        if flag.starts_with("--") {
+            let matches: Vec<_> = options
+                .iter()
+                .copied()
+                .filter(|option| option.starts_with(flag))
+                .collect();
+            if matches.len() > 1 {
+                return Err(error(
+                    action,
+                    &format!(
+                        "ambiguous option: {item} could match {}",
+                        matches.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
     let mut index = action_index + 1;
     while index < before.len() {
         let item = &before[index];
@@ -356,10 +388,7 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
             let value = if let Some(v) = inline {
                 v
             } else {
-                let Some(v) = before
-                    .get(index)
-                    .filter(|v| !v.starts_with('-') || negative_number(v))
-                else {
+                let Some(v) = before.get(index).filter(|v| argument_value(v, options)) else {
                     return Err(error(
                         action,
                         &format!("argument {option}: expected one argument"),
@@ -407,10 +436,10 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         } else if action == "delegate"
             && args.name.is_some()
             && args.agent.is_none()
-            && (!item.starts_with('-') || negative_number(item))
+            && argument_value(item, options)
         {
             args.agent = Some(item.clone());
-        } else if item.starts_with('-') && !negative_number(item) || args.name.is_some() {
+        } else if !argument_value(item, options) || args.name.is_some() {
             unrecognized.push(item.as_str());
         } else {
             if !valid_name(item) {
@@ -468,6 +497,86 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         return Err(error(action, &format!("{action} takes no command")));
     }
     Ok(args)
+}
+
+#[cfg(test)]
+mod argv_tests {
+    use super::parse;
+
+    fn parsed(argv: &[&str]) -> super::Args {
+        parse(
+            &argv
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn argparse_lone_dash_and_ascii_space_are_argument_values() {
+        for name in ["-", "- with space", "-1", "-.5", "-١٢"] {
+            assert_eq!(
+                parsed(&["run", name, "--no-board", "--", "child"])
+                    .name
+                    .as_deref(),
+                Some(name)
+            );
+        }
+        for value in ["-", "-unknown with space"] {
+            assert_eq!(
+                parsed(&["run", "resource", "--purpose", value, "--", "child"])
+                    .purpose
+                    .as_deref(),
+                Some(value)
+            );
+            assert_eq!(
+                parsed(&["hold", "resource", "--while-pid", "1", "--worktree", value]).worktree,
+                value
+            );
+            assert_eq!(
+                parsed(&["delegate", "project", value]).agent.as_deref(),
+                Some(value)
+            );
+            assert_eq!(
+                parsed(&["delegate", value, "agent"]).name.as_deref(),
+                Some(value)
+            );
+        }
+        assert_eq!(parsed(&["designate", "project", "-"]).action, "delegate");
+    }
+
+    #[test]
+    fn option_precedence_and_name_validation_remain_unchanged() {
+        for argv in [
+            vec!["-"],
+            vec!["- with space"],
+            vec!["hold", "resource", "--while-pid", "-"],
+            vec!["hold", "resource", "--while-pid", "- 1"],
+            vec!["run", "resource", "--purpose", "--ttl=30 with space"],
+            vec!["run", "resource", "--purpose", "--tt=30 with space"],
+            vec!["run", "resource", "--purpose", "--t=30 with space"],
+            vec!["run", "resource", "--purpose", "-h attached"],
+            vec!["run", "resource", "--purpose", "-unknown\tvalue"],
+            vec!["run", "- with\tspace", "--", "child"],
+            vec!["check", "-unknown"],
+        ] {
+            assert_eq!(
+                parse(
+                    &argv
+                        .iter()
+                        .map(|item| (*item).to_owned())
+                        .collect::<Vec<_>>()
+                )
+                .unwrap_err(),
+                2
+            );
+        }
+        assert_eq!(
+            parsed(&["run", "resource", "--tt=30", "--", "child"]).ttl,
+            30
+        );
+    }
 }
 
 #[cfg(test)]
