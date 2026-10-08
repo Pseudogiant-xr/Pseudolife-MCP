@@ -175,8 +175,9 @@ function Get-InstallerPython {
 # ValidateSet for that reason.)
 $extractorModes = @("sidecar", "claude-only", "claude-fallback", "openai-only",
     "openai-fallback", "endpoint", "endpoint-fallback")
-$claudeModels = @("claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
-    "claude-haiku-4-5", "claude-fable-5")
+$claudeModels = @("claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
+    "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5", "claude-fable-5-1",
+    "claude-fable-5")
 $openaiModels = @("gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol",
     "gpt-6-luna")
 # An explicit -Model "" is refused like a whitespace one; an absent -Model
@@ -1033,19 +1034,25 @@ if ($claudeShimMode -and -not $Model) {
     if ($interactive) {
         Write-Host ""
         Write-Host "Which Claude model should extract memories (the 'dreamer')?"
-        Write-Host "  1) claude-opus-5-5  - recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
-        Write-Host "  2) claude-opus-5    - the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
-        Write-Host "  3) claude-sonnet-5  - balanced"
-        Write-Host "  4) claude-haiku-4-5 - fastest / lightest on plan usage"
-        Write-Host "  5) claude-fable-5   - most capable tier"
+        Write-Host "  1) claude-opus-5-5   - recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        Write-Host "  2) claude-opus-5     - the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
+        Write-Host "  3) claude-sonnet-5-5 - balanced"
+        Write-Host "  4) claude-sonnet-5   - the earlier Sonnet"
+        Write-Host "  5) claude-haiku-5-5  - fastest / lightest on plan usage"
+        Write-Host "  6) claude-haiku-4-5  - the earlier Haiku"
+        Write-Host "  7) claude-fable-5-1  - most capable tier"
+        Write-Host "  8) claude-fable-5    - the earlier Fable"
         while (-not $Model) {
-            switch (Read-Host "Choose 1/2/3/4/5 (Enter = 1)") {
+            switch (Read-Host "Choose 1-8 (Enter = 1)") {
                 { $_ -in "", "1" } { $Model = "claude-opus-5-5" }
                 "2" { $Model = "claude-opus-5" }
-                "3" { $Model = "claude-sonnet-5" }
-                "4" { $Model = "claude-haiku-4-5" }
-                "5" { $Model = "claude-fable-5" }
-                default { Write-Host "  please answer 1, 2, 3, 4 or 5" }
+                "3" { $Model = "claude-sonnet-5-5" }
+                "4" { $Model = "claude-sonnet-5" }
+                "5" { $Model = "claude-haiku-5-5" }
+                "6" { $Model = "claude-haiku-4-5" }
+                "7" { $Model = "claude-fable-5-1" }
+                "8" { $Model = "claude-fable-5" }
+                default { Write-Host "  please answer 1-8" }
             }
         }
     } else {

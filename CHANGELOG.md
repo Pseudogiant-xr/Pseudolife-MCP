@@ -14,6 +14,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
   controls retain their named refusals. Runtime parity remains unverified.
 
+### Added (2026-10-08 — current Claude models in the dreamer menus)
+
+- The Claude dreamer model lists now offer `claude-sonnet-5-5`,
+  `claude-haiku-5-5` and `claude-fable-5-1` beside the models they follow,
+  everywhere the list is written: both installers' lists and menus (now
+  numbered 1-8), the Claude shim autostart help text, the dreaming guide,
+  the Console's Dreamer card, the Extractor panel's override suggestions and
+  the Claude shim's `/models`. They join as options only: `claude-opus-5-5`
+  stays the default and the only recommended model until a ladder run
+  measures the new ones.
+
+### Fixed (2026-10-08 — daemon log no longer carries the database password)
+
+- The daemon's `storage: postgres (...)` startup line is now the endpoint
+  (`host:port/dbname`) parsed with libpq's rules. It used to split the DSN on
+  `@`, which left a keyword-form DSN (`host=... password=... dbname=...`)
+  logged whole, password included. Rotate any credential that reached a
+  daemon log through that line.
+
 ### Fixed (2026-10-08 — native lease argument classification)
 
 - The experimental native lease parser accepts a lone `-` and unmatched

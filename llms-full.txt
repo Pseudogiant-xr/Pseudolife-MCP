@@ -3268,9 +3268,12 @@ menu):
   - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
     comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
     (`evals/results/dreamer-choice-verdict.json`).
-  - `claude-sonnet-5`: balanced.
-  - `claude-haiku-4-5`: fastest, lightest on plan usage.
-  - `claude-fable-5`: the most capable tier.
+  - `claude-sonnet-5-5`: balanced.
+  - `claude-sonnet-5`: the earlier Sonnet.
+  - `claude-haiku-5-5`: fastest, lightest on plan usage.
+  - `claude-haiku-4-5`: the earlier Haiku.
+  - `claude-fable-5-1`: the most capable tier.
+  - `claude-fable-5`: the earlier Fable.
 - OpenAI:
   - `gpt-5.6-terra`: the default, balanced.
   - `gpt-5.6-sol`: flagship.
@@ -3318,8 +3321,9 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
-   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5-5` /
+   `claude-sonnet-5` / `claude-haiku-5-5` / `claude-haiku-4-5` /
+   `claude-fable-5-1` / `claude-fable-5` (or any `claude-*` name typed in),
    no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.
@@ -10364,9 +10368,15 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
 | **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. Forgetting an entry also retires the facts, dream edges and lessons it alone supported (Postgres); the links tell you what else to retire | On |
 
-Two of these deserve their exact claim restated, because overselling them
+Three of these deserve their exact claim restated, because overselling them
 would be the same failure this page is about:
 
+- The **provenance tiers** key on a label the caller supplies, not on
+  who actually spoke: `origin=` on a write, or for a dream claim the
+  backing entry's `source` tag (`user` and `conversation` map to the
+  `user` tier). They stop an honestly labelled agent write from
+  displacing a user fact. A write that lies about its own tier is a
+  different attack, listed below.
 - The **consolidation quarantine** does not stop a poisoned entry from
   being *stored* or *retrieved* — episodic search still surfaces it. It
   stops poison from silently gaining *canonical* authority. And writer
@@ -10398,6 +10408,13 @@ problem than the limitation it hides.
   really made a given write. This is roadmap, not a promise. The one
   signed channel is the maintainer's: maintainer mail and board role
   changes carry a WebAuthn passkey assertion made in the Console.
+- **Origin-tier authentication.** The provenance tier is self-declared in
+  the same way. Nothing checks it against who actually spoke, so a model
+  steered into calling `memory_store(source="conversation", ...)` or
+  `memory_fact_set(..., origin="user")` writes with user-tier standing,
+  and the tier rule and the consolidation quarantine treat that write as
+  the user's. The tiers defend against an honestly labelled agent write,
+  not against a write that misstates its own tier.
 - **Ranking as a defense.** Retrieval scoring is optimizable by an
   attacker who can influence stored text. Treat rank as convenience, not
   as a trust signal.

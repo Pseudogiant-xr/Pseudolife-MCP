@@ -434,3 +434,17 @@ diagnostics have rejecting controls; the retained container transport compares
 its actual argv and inherited streams. Use the existing `cli_process` fixture
 and `harness.run_cli` capture, preserving raw observations before policy. This
 plan supplies no execution receipt or acceptance claim.
+
+Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
+Windows wait-mail pairs using the Parity job's pinned Python oracle and a fresh
+native release image; ordinary CI remains the default dispatch mode. Set
+`case_list` to comma-separated `wait-mail-long-ring-watermark`,
+`wait-mail-bad-ring-reason` or `wait-mail-unicode-delivery` IDs and `frozen_head`
+to the full commit ID of the dispatched branch/tag. Start with the long-ring
+case after this workflow and selector land. The selector uses whole CLI arms,
+disposable homes, existing comparison policies and rejecting output controls,
+without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,
+source/image build bindings, logs and cleanup; download and hash it before
+using it as evidence. Capture does not promote acceptance or establish
+installed-image timing. An OS selector is a later increment; this lane runs
+only on Windows.

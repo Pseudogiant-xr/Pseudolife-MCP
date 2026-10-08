@@ -5,12 +5,28 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Ordinary CI or the bounded wait-mail capture'
+        type: choice
+        options: [ci, wait-mail]
+        default: ci
+        required: true
+      case_list:
+        description: 'Comma-separated supported wait-mail case IDs'
+        type: string
+        default: wait-mail-long-ring-watermark
+        required: false
+      frozen_head:
+        description: 'Full reviewed commit ID, equal to the dispatched ref head'
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: rust-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:
@@ -22,6 +38,7 @@ env:
 
 jobs:
   rust:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -103,6 +120,7 @@ jobs:
           if-no-files-found: error
 
   parity:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Parity / ${{ matrix.os }}
     needs: rust
     strategy:
@@ -245,3 +263,115 @@ jobs:
             ${{ runner.temp }}/phase2b-cli-process-public.json
             ${{ runner.temp }}/lease-header-policy.json
           if-no-files-found: warn
+
+  capture-windows:
+    name: Capture / Windows / wait-mail
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CAPTURE_MODE: ${{ inputs.mode }}
+      CAPTURE_CASE_LIST: ${{ inputs.case_list }}
+      CAPTURE_FROZEN_HEAD: ${{ inputs.frozen_head }}
+    steps:
+      - name: Validate the dispatch selector
+        shell: pwsh
+        run: |
+          if ($env:CAPTURE_MODE -cne 'wait-mail') { throw 'Unsupported mode' }
+          if ($env:CAPTURE_FROZEN_HEAD -cnotmatch '^[0-9a-f]{40}$') { throw 'Full commit ID required' }
+          if ($env:CAPTURE_FROZEN_HEAD -cne $env:GITHUB_SHA) { throw 'Dispatch ref and frozen head must match' }
+          $allowed = @('wait-mail-long-ring-watermark', 'wait-mail-bad-ring-reason', 'wait-mail-unicode-delivery')
+          $selected = $env:CAPTURE_CASE_LIST.Split(',')
+          if ($selected.Count -lt 1 -or $selected.Count -gt 3 -or (@($selected | Select-Object -Unique).Count -ne $selected.Count)) { throw 'Invalid case list' }
+          foreach ($caseId in $selected) { if ($allowed -cnotcontains $caseId) { throw 'Unsupported case' } }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Fetch only the immutable oracle source pins
+        shell: pwsh
+        run: |
+          # The existing oracle builder clones this checkout and selects old pins.
+          git fetch --no-tags --depth=1 origin '3c01bb31abd60178e15dea99adda369b4bbf92fc:refs/heads/capture-phase1-oracle' 'eb0c13e9c5036aa2b95e7fccb77f41ca1c095493:refs/heads/capture-wait-mail-oracle' '136a34ae95e981a691fcc31ba9fb4f35d83d4249:refs/heads/capture-historical-oracle'
+          exit $LASTEXITCODE
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Install checkout and test dependencies
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install "setuptools>=68" wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          exit $LASTEXITCODE
+      - name: Prepare the existing pinned oracle
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
+          python -m evals.rust_port.phase1_oracle --destination $oracleRoot
+          exit $LASTEXITCODE
+      - name: Build and bind the candidate
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+        run: |
+          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
+          New-Item -ItemType Directory -Path $receiptRoot -ErrorAction Stop | Out-Null
+          $beforeHead = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $beforeHead -cne $env:CAPTURE_FROZEN_HEAD) { throw 'Source head mismatch' }
+          cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-stdio -j 4 *> (Join-Path $receiptRoot 'build.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = Join-Path $env:CARGO_TARGET_DIR 'release/pseudolife-stdio.exe'
+          $manifest = [ordered]@{
+            head = $beforeHead
+            tree = (git rev-parse 'HEAD^{tree}')
+            sourceEntries = @(git ls-files -s)
+            candidateSha256 = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+            buildArgv = @('cargo','build','--manifest-path','rust/Cargo.toml','--locked','--release','--bin','pseudolife-stdio','-j','4')
+            rustc = (rustc --version)
+            cargo = (cargo --version)
+            runnerOS = $env:RUNNER_OS
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $receiptRoot 'build-binding.json') -Encoding utf8
+      - name: Capture the named disposable cases
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+        run: |
+          $checkoutRoot = (Get-Location).Path
+          $oracleSource = Join-Path $env:RUNNER_TEMP 'phase1-oracle/source'
+          $oraclePython = Join-Path $env:RUNNER_TEMP 'phase1-oracle/runtime/Scripts/python.exe'
+          $candidate = Join-Path $env:CARGO_TARGET_DIR 'release/pseudolife-stdio.exe'
+          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
+          $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
+          $bootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.hosted_wait_mail_capture", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          & $oraclePython -c $bootstrap $oracleSource --mode $env:CAPTURE_MODE --case-list $env:CAPTURE_CASE_LIST --frozen-head $env:CAPTURE_FROZEN_HEAD --oracle-root $oracleSource --candidate-root $checkoutRoot --candidate $candidate --out (Join-Path $receiptRoot 'raw-receipt.json') *> (Join-Path $receiptRoot 'capture.log')
+          exit $LASTEXITCODE
+      - name: Retain raw capture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-windows-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hosted-windows-capture/
+          if-no-files-found: warn
+          retention-days: 7
