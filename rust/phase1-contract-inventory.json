@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "oracle_commit": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "oracle_commit": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
   "database_schema": 55,
   "config_sections": {
     "EmbeddingConfig": [

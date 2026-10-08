@@ -1,4 +1,4 @@
-//! UTF-8 CLI streams and scalar argv at Python oracle 3c01bb31abd60178e15dea99adda369b4bbf92fc.
+//! UTF-8 CLI streams and scalar argv at Python oracle 686b3f95c4a4d4e6c2d81e1b76be9901945a8da1.
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
