@@ -129,6 +129,7 @@ fn dead_pid_does_not_create_lock_stamp_or_contact_board() {
         ))
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+    #[cfg(windows)]
     drop(completed);
 }
 #[cfg(windows)]

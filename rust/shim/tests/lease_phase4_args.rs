@@ -140,5 +140,6 @@ fn hold_rejects_command_separator_and_preserves_unicode_names() {
         ))
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
+    #[cfg(windows)]
     drop(completed);
 }
