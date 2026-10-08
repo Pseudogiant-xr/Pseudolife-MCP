@@ -1,7 +1,10 @@
 # Porting contract
 
 The selected master behavioural oracle target is Python 0.17.0 at
-`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, using PostgreSQL schema 55. The #637 squash commit is selected. Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`. Earlier receipts retain their original oracle identities. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, using PostgreSQL schema 55. The #637 squash commit is selected; fresh platform-scoped validation, exact-head CI and independent review remain pending; earlier receipts retain their original oracle identities. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
+
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
@@ -568,7 +571,7 @@ never the reverse: a production change is never held for the port. Re-pin to
 a selected master commit at each phase start and after each batch of production
 merges. Re-pinning is a routine root task: enumerate the selected source and
 counts, regenerate manifests, preserve historical identities, then obtain fresh
-both-OS parity and independent review before Rust merges resume. Production
+platform-scoped parity and independent review before Rust merges resume. Production
 merges with source-pin-only Parity failures require the maintainer's explicit
 gate exception. Any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
@@ -661,9 +664,28 @@ its seven startup and six concurrent candidate cells require executable bindings
 
 ## Measurement and acceptance
 
+### OS-sensitive surfaces
+
+Both-OS executable proof is required for paths, process spawn and kill, file
+locks, stdio, signals, line endings and the Windows console. Other behavior
+requires Linux proof; hosted Windows CI still compiles and tests the candidate.
+Apply this scope to every open and future cell, including mixed cells containing
+an OS-sensitive surface. This replaces general both-OS proof requirements;
+historical receipts retain their recorded platform, source and scope.
+
+### Review tiers within a PR
+
+Every PR still receives one full independent review. Concurrency,
+authentication, schema, lifecycle, delete paths and dream writes receive full
+review at every freeze. Pure, formatting and read-only cells covered by goldens
+may use sampled cell review, about one in five, within that full PR review.
+This does not replace the independent review of the complete PR or turn source
+preparation into golden coverage. A nightly mutation test is to check that the
+harness rejects injected faults; its job remains design-only until implemented.
+
 Daemon oracle captures and baselines run on Linux; the current phase 0b receipts
 were captured on WSL2, while the production daemon runs in a Linux container.
-Shim and CLI captures run on Windows and Linux. Every capture receipt
+Shim and CLI captures follow the OS-sensitive scope above. Every capture receipt
 records its platform; a missing platform is a validation failure. Historical
 PR #540 captures retain their original commit and platform and cannot stand in
 for the phase 0b pin.
