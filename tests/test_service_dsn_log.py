@@ -5,6 +5,8 @@ whole string, password included (2026-10-08 incident: a reviewer printed it
 from a private daemon log). ``evals/quarantine_replay.py`` wrote the same
 split into its result file; both now use ``dsn_endpoint``."""
 
+from pathlib import Path
+
 import pytest
 
 from pseudolife_memory import service as service_module
@@ -61,9 +63,7 @@ def test_storage_log_line_never_carries_keyword_dsn_password(monkeypatch, caplog
 def test_quarantine_replay_result_payload_uses_endpoint_summary():
     """The eval's result file carries the endpoint, not the DSN it was run
     with (a keyword DSN would otherwise land in a committed artifact)."""
-    source = (service_module.__file__.rsplit("pseudolife_memory", 1)[0]
-              + "evals/quarantine_replay.py")
-    with open(source, encoding="utf-8") as handle:
-        text = handle.read()
+    source = Path(__file__).resolve().parents[1] / "evals" / "quarantine_replay.py"
+    text = source.read_text(encoding="utf-8")
     assert '"dsn_host": dsn_endpoint(args.dsn)' in text
     assert 'rsplit("@"' not in text
