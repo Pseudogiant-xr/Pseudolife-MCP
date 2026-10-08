@@ -297,6 +297,11 @@ python -m evals.rust_port.oracle_selection --event-name pull_request --event-pat
 export PSEUDOLIFE_PORT_ORACLE_SELECTION="$(cat /private/selection.json)"
 ```
 
+The historical selected pin was master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`
+(the #637 squash commit, Python 0.17.0, schema 55).
+
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
+
 Then prepare an isolated oracle from the checkout-installed dependency runtime:
 
 ```sh
