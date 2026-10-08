@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native empty board-audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` verifies a
+  zero-byte archive without Python delegation or bank attachment. Option
+  tokens used as input values and archive open/read failures explicitly defer;
+  existing parser filename-value exceptions retain the empty-chain report.
+  Nonempty chains, bank verification, other argument forms, export and stats
+  remain deferred.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority
