@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -13,6 +14,9 @@ from .provenance import ROOT
 
 OUTPUTS = ("evals/rust_port/oracle_tests.json", "rust/phase1-test-buckets.json",
            "rust/phase1-contract-inventory.json")
+HISTORICAL = ("evals/rust_port/stdio_startup_contract.f709.json",
+              "rust/test-buckets.json", "rust/contract-inventory.json",
+              "rust/phase0b-oracle-tests.json")
 
 
 def raw_hashes(root, paths):
@@ -22,7 +26,16 @@ def raw_hashes(root, paths):
 @pytest.fixture(scope="module")
 def disposable_inventory(tmp_path_factory):
     root = tmp_path_factory.mktemp("phase1-regeneration") / "source"
-    subprocess.run(["git", "clone", "--shared", "--quiet", str(ROOT), str(root)], check=True)
+    subprocess.run(["git", "clone", "--shared", "--quiet", "--no-checkout",
+                    str(ROOT), str(root)], check=True)
+    subprocess.run(["git", "checkout", "--quiet", "--detach", phase1_inventory.ORACLE_HEAD],
+                   cwd=root, check=True)
+    # Regenerate current reviewed artifacts with current inventory instruments,
+    # while production and scoped behavior tests remain at the immutable pin.
+    for path in (*OUTPUTS, "rust/contract_inventory.py", *HISTORICAL):
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / path, root / path)
+    shutil.copytree(ROOT / "evals/results", root / "evals/results", dirs_exist_ok=True)
     buckets = json.loads((root / OUTPUTS[1]).read_text(encoding="utf-8"))
     files = {}
     for row in buckets["phase1_functions"]:
@@ -40,12 +53,10 @@ def test_current_pin_regeneration_matches_canonical_artifacts_and_preserves_raw_
     root, evidence = disposable_inventory
     exploration = tmp_path / "exploration.json"
     exploration.write_text(json.dumps(evidence), encoding="utf-8")
-    expected = {path: json.loads((root / path).read_text(encoding="utf-8")) for path in OUTPUTS}
+    expected = {path: json.loads((ROOT / path).read_text(encoding="utf-8")) for path in OUTPUTS}
     historical = [path.relative_to(root).as_posix()
                   for path in (root / "evals/results").rglob("*") if path.is_file()]
-    historical += ["evals/rust_port/stdio_startup_contract.f709.json",
-                   "rust/test-buckets.json", "rust/contract-inventory.json",
-                   "rust/phase0b-oracle-tests.json"]
+    historical += HISTORICAL
     before = raw_hashes(root, historical)
     first = phase1_inventory.regenerate(exploration, root)
     assert first == {"candidate_functions": 10, "classified_functions": 191,
@@ -56,6 +67,22 @@ def test_current_pin_regeneration_matches_canonical_artifacts_and_preserves_raw_
     assert phase1_inventory.regenerate(exploration, root) == first
     assert raw_hashes(root, OUTPUTS) == after_first
     assert raw_hashes(root, historical) == before
+
+
+def test_changed_production_cannot_overwrite_inventory(disposable_inventory, tmp_path):
+    root, evidence = disposable_inventory
+    exploration = tmp_path / "exploration.json"
+    exploration.write_text(json.dumps(evidence), encoding="utf-8")
+    source = root / "pseudolife_memory/cli.py"
+    original = source.read_bytes()
+    before = raw_hashes(root, OUTPUTS)
+    try:
+        source.write_bytes(original + b"\n# fixture source change\n")
+        with pytest.raises(RuntimeError, match="phase-1 pinned production source required"):
+            phase1_inventory.regenerate(exploration, root)
+        assert raw_hashes(root, OUTPUTS) == before
+    finally:
+        source.write_bytes(original)
 
 
 @pytest.mark.parametrize("fault,error", [
