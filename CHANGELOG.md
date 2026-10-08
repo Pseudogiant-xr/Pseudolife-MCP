@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-09 — Rust-only pull requests skip the Python suite lanes)
+
+- CI classifies each pull request first. One that touches `rust/`, and whose
+  other changed files are only `.github/workflows/rust.yml` or
+  `CHANGELOG.md`, skips the four Python suite lanes. A `guards` job runs
+  instead: every test file that reads `CHANGELOG.md`, plus the tracked-tree
+  identifier and control-byte scan. The lanes still run when the
+  classification fails. Master pushes run everything, and a nightly
+  scheduled run covers master on days with only Rust merges. Only pull
+  request runs cancel superseded runs.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority

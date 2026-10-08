@@ -49,7 +49,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Only pull requests cancel superseded runs: the nightly shares master's
+  # group and must not cancel a master push run (or the reverse).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   scope:
@@ -75,14 +77,16 @@ jobs:
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if ! files=$(git diff --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
+          if ! files=$(git diff --no-renames --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
             echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$files"
           # Skip only when nothing falls outside the allowlist AND the PR
           # touches rust/ (a CHANGELOG-only docs PR keeps the full suite).
-          if printf '%s\n' "$files" | grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$)' \
-             || ! printf '%s\n' "$files" | grep -qE '^rust/'; then
+          # Here-strings, not pipes: under pipefail an early-exiting grep -q
+          # can SIGPIPE the writer and flip the result on a long file list.
+          if grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$)' <<<"$files" \
+             || ! grep -qE '^rust/' <<<"$files"; then
             echo "python=true" >> "$GITHUB_OUTPUT"
           else
             echo "python=false" >> "$GITHUB_OUTPUT"
@@ -126,7 +130,9 @@ jobs:
 
   test:
     needs: scope
-    if: needs.scope.outputs.python == 'true'
+    # Fail-safe: run unless scope affirmatively says skip, so a failed or
+    # empty scope runs the suite instead of skipping it.
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
     # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
@@ -257,7 +263,9 @@ jobs:
 
   test-lite-linux:
     needs: scope
-    if: needs.scope.outputs.python == 'true'
+    # Fail-safe: run unless scope affirmatively says skip, so a failed or
+    # empty scope runs the suite instead of skipping it.
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
@@ -347,7 +355,9 @@ jobs:
 
   test-lite-windows:
     needs: scope
-    if: needs.scope.outputs.python == 'true'
+    # Fail-safe: run unless scope affirmatively says skip, so a failed or
+    # empty scope runs the suite instead of skipping it.
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
     runs-on: windows-latest
     # The curated lite surface needs no embedding model (torch installs as
     # a core dep but never loads weights here), so this lane is minutes,
@@ -379,7 +389,9 @@ jobs:
 
   test-lite-macos:
     needs: scope
-    if: needs.scope.outputs.python == 'true'
+    # Fail-safe: run unless scope affirmatively says skip, so a failed or
+    # empty scope runs the suite instead of skipping it.
+    if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
     runs-on: macos-latest
     # Curated like the Windows lane: the hook and installer surface needs no
     # embedding model, so this is minutes, not the full suite.

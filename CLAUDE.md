@@ -90,8 +90,10 @@ exactly; they exist because each one was violated at least once.
 
    **Rust-only PRs skip the Python suite lanes** (maintainer decision
    2026-10-09). A PR that touches `rust/`, and whose every other changed file
-   is `.github/workflows/rust.yml` or `CHANGELOG.md`, changes no Python: CI's
-   `scope` job skips `test` and the three lite lanes, and the `guards` job runs
+   is `.github/workflows/rust.yml` or `CHANGELOG.md`, changes nothing the
+   Python suite covers (`rust/`'s own Python is checked by the Rust
+   workflow): CI's `scope` job skips `test` and the three lite lanes (they
+   still run if `scope` itself fails), and the `guards` job runs
    every test file that reads `CHANGELOG.md` plus the tracked-tree identifier
    and control-byte scan. Such a PR's gate is the Rust workflow (Rust and
    Parity on both OSes) plus `guards`. The full suite still runs on every
