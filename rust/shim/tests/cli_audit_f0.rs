@@ -66,7 +66,7 @@ fn nonempty_and_blank_archives_cannot_claim_an_intact_chain() {
 }
 
 #[test]
-fn missing_input_and_incomplete_argv_fail_without_creating_a_bank() {
+fn missing_input_and_incomplete_argv_defer_without_creating_a_bank() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let missing = command(&home)
@@ -74,23 +74,44 @@ fn missing_input_and_incomplete_argv_fail_without_creating_a_bank() {
         .arg(home.join("missing"))
         .output()
         .unwrap();
-    assert_eq!(missing.status.code(), Some(2));
+    assert_eq!(missing.status.code(), Some(1));
     assert!(missing.stdout.is_empty());
     assert!(
         String::from_utf8(missing.stderr)
             .unwrap()
-            .contains("cannot read")
+            .contains("deferred")
     );
     let incomplete = command(&home).args(["verify", "--input"]).output().unwrap();
-    assert_eq!(incomplete.status.code(), Some(2));
+    assert_eq!(incomplete.status.code(), Some(1));
     assert!(incomplete.stdout.is_empty());
     assert!(
         String::from_utf8(incomplete.stderr)
             .unwrap()
-            .contains("usage:")
+            .contains("deferred")
     );
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn joined_input_option_defers_even_for_an_empty_archive() {
+    let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let path = home.join("archive.jsonl");
+    fs::write(&path, b"").unwrap();
+    let mut option = std::ffi::OsString::from("--input=");
+    option.push(&path);
+    let output = command(&home).arg("verify").arg(option).output().unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"");
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+    fs::remove_dir_all(&home).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("deferred")
+    );
 }
 
 #[test]
@@ -98,6 +119,7 @@ fn remaining_audit_operations_stay_explicitly_deferred() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     for args in [
+        vec![],
         vec!["export"],
         vec!["stats"],
         vec!["redact"],
