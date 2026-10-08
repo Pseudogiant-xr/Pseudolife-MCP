@@ -9,7 +9,8 @@ import subprocess
 import sys
 import tempfile
 
-ALLOWED = frozenset({"wait-mail-long-ring-watermark", "wait-mail-bad-ring-reason", "wait-mail-unicode-delivery"})
+ALLOWED = frozenset({"wait-mail-long-ring-watermark", "wait-mail-bad-ring-reason", "wait-mail-unicode-delivery",
+                     "wait-mail-positive-long-ring-watermark"})
 WAIT_PIN = "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
 
 

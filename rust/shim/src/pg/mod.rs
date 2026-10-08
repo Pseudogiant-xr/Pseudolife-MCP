@@ -1,10 +1,12 @@
 //! Dedicated PostgreSQL connections shared by native SQL clients and operators.
 mod dsn;
+mod password;
 pub mod resolution;
 mod tls;
 mod transport;
 
 pub use dsn::{Dsn, SslMode};
+pub use password::PasswordEnvironment;
 use std::{fmt, time::Duration};
 pub use tls::TlsEnvironment;
 use tokio::task::JoinHandle;
@@ -88,11 +90,12 @@ impl Session {
     /// changing process-global environment or touching the operator's files.
     pub async fn open_in(dsn: &Dsn, environment: &TlsEnvironment) -> Result<Self, Error> {
         let tls = transport::Negotiator::new(tls::connector(dsn, environment)?, dsn.mode);
+        let config = password::configure(dsn, &environment.password)?;
         // libpq18 prefer tries plaintext once after a failed TLS attempt. Keep
         // both attempts inside the existing connect deadline; never retry a
         // configuration refusal, invalid SSLRequest reply or session setup.
         let connect = async {
-            match dsn.config().connect(tls.clone()).await {
+            match config.connect(tls.clone()).await {
                 Err(error)
                     if dsn.mode == SslMode::Prefer
                         && (transport::handshake_failed(&error)
@@ -102,7 +105,7 @@ impl Session {
                                         != &tokio_postgres::error::SqlState::CANNOT_CONNECT_NOW
                                 }))) =>
                 {
-                    let mut plaintext = dsn.config().clone();
+                    let mut plaintext = config.clone();
                     plaintext.ssl_mode(tokio_postgres::config::SslMode::Disable);
                     plaintext.ssl_negotiation(tokio_postgres::config::SslNegotiation::Postgres);
                     plaintext.connect(tls).await
