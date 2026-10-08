@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-08 — daemon log no longer carries the database password)
+
+- The daemon's `storage: postgres (...)` startup line is now the endpoint
+  (`host:port/dbname`) parsed with libpq's rules. It used to split the DSN on
+  `@`, which left a keyword-form DSN (`host=... password=... dbname=...`)
+  logged whole, password included. Rotate any credential that reached a
+  daemon log through that line.
+
 ### Fixed (2026-10-08 — native lease argument classification)
 
 - The experimental native lease parser accepts a lone `-` and unmatched
