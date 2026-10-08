@@ -63,14 +63,30 @@ fn environment_password() -> Option<Vec<u8>> {
     let count = i32::try_from(wide.len()).ok()?;
     // libpq's getenv() consumes the Windows ANSI representation.
     unsafe {
-        let size = WideCharToMultiByte(CP_ACP, 0, wide.as_ptr(), count,
-            std::ptr::null_mut(), 0, std::ptr::null(), std::ptr::null_mut());
+        let size = WideCharToMultiByte(
+            CP_ACP,
+            0,
+            wide.as_ptr(),
+            count,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
         if size <= 0 {
             return None;
         }
         let mut bytes = vec![0; size as usize];
-        let written = WideCharToMultiByte(CP_ACP, 0, wide.as_ptr(), count,
-            bytes.as_mut_ptr(), size, std::ptr::null(), std::ptr::null_mut());
+        let written = WideCharToMultiByte(
+            CP_ACP,
+            0,
+            wide.as_ptr(),
+            count,
+            bytes.as_mut_ptr(),
+            size,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
         (written == size).then_some(bytes)
     }
 }
@@ -86,15 +102,22 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
     // libpq uses the effective UID and a 1024-byte getpwuid_r scratch buffer.
     let found = unsafe {
         libc::getpwuid_r(
-            libc::geteuid(), record.as_mut_ptr(), scratch.as_mut_ptr(),
-            scratch.len(), &mut result,
-        ) == 0 && !result.is_null()
+            libc::geteuid(),
+            record.as_mut_ptr(),
+            scratch.as_mut_ptr(),
+            scratch.len(),
+            &mut result,
+        ) == 0
+            && !result.is_null()
     };
     let (user, home) = if found {
         // The successful call populated both pointers inside the live scratch buffer.
         unsafe {
             let record = record.assume_init();
-            let user = CStr::from_ptr(record.pw_name).to_str().ok().map(str::to_owned);
+            let user = CStr::from_ptr(record.pw_name)
+                .to_str()
+                .ok()
+                .map(str::to_owned);
             let home = OsString::from_vec(CStr::from_ptr(record.pw_dir).to_bytes().to_vec());
             (user, Some(PathBuf::from(home)))
         }
@@ -127,14 +150,26 @@ fn platform_defaults() -> (Option<String>, Option<PathBuf>) {
     // The source contract is Shell32's current caller Roaming AppData folder.
     // APPDATA environment redirection does not bind this lookup.
     let home = unsafe {
-        if SHGetFolderPathA(std::ptr::null_mut(), CSIDL_APPDATA as i32,
-            std::ptr::null_mut(), SHGFP_TYPE_CURRENT as u32, path.as_mut_ptr()) != 0 {
+        if SHGetFolderPathA(
+            std::ptr::null_mut(),
+            CSIDL_APPDATA as i32,
+            std::ptr::null_mut(),
+            SHGFP_TYPE_CURRENT as u32,
+            path.as_mut_ptr(),
+        ) != 0
+        {
             None
         } else {
             path.iter().position(|byte| *byte == 0).and_then(|length| {
                 let mut wide = [0; 260];
-                let written = MultiByteToWideChar(CP_ACP, 0, path.as_ptr(), length as i32,
-                    wide.as_mut_ptr(), wide.len() as i32);
+                let written = MultiByteToWideChar(
+                    CP_ACP,
+                    0,
+                    path.as_ptr(),
+                    length as i32,
+                    wide.as_mut_ptr(),
+                    wide.len() as i32,
+                );
                 (written > 0).then(|| PathBuf::from(OsString::from_wide(&wide[..written as usize])))
             })
         }
@@ -149,8 +184,11 @@ pub(super) fn configure(
     let mut config = dsn.config().clone();
     if config.get_user().is_none_or(str::is_empty) {
         config.user(
-            environment.default_user.as_deref()
-                .filter(|user| !user.is_empty()).ok_or(Error::Connection)?,
+            environment
+                .default_user
+                .as_deref()
+                .filter(|user| !user.is_empty())
+                .ok_or(Error::Connection)?,
         );
     }
     if config.get_dbname().is_none_or(str::is_empty) {
@@ -172,7 +210,8 @@ pub(super) fn configure(
             return Err(Error::InvalidOption("host"));
         };
         let tokens = [
-            host.as_bytes(), dsn.password_port.as_bytes(),
+            host.as_bytes(),
+            dsn.password_port.as_bytes(),
             config.get_dbname().ok_or(Error::Connection)?.as_bytes(),
             config.get_user().ok_or(Error::Connection)?.as_bytes(),
         ];
@@ -185,11 +224,7 @@ pub(super) fn configure(
     Ok(config)
 }
 
-fn read_password(
-    path: &Path,
-    tokens: [&[u8]; 4],
-    warnings: &mut impl Write,
-) -> Option<Vec<u8>> {
+fn read_password(path: &Path, tokens: [&[u8]; 4], warnings: &mut impl Write) -> Option<Vec<u8>> {
     let file = File::open(path).ok()?;
     #[cfg(unix)]
     {
@@ -198,7 +233,10 @@ fn read_password(
         let warning = if !metadata.is_file() {
             Some(b" is not a plain file\n".as_slice())
         } else if metadata.permissions().mode() & 0o077 != 0 {
-            Some(b" has group or world access; permissions should be u=rw (0600) or less\n".as_slice())
+            Some(
+                b" has group or world access; permissions should be u=rw (0600) or less\n"
+                    .as_slice(),
+            )
         } else {
             None
         };
@@ -216,7 +254,9 @@ fn read_password(
     let reader = BufReader::new(file);
     #[cfg(windows)]
     let reader = BufReader::new(TextReader {
-        reader: BufReader::new(file), pending: None, eof: false,
+        reader: BufReader::new(file),
+        pending: None,
+        eof: false,
     });
     parse_password(reader, tokens).ok().flatten()
 }
@@ -305,10 +345,7 @@ fn match_line(mut line: &[u8], tokens: [&[u8]; 4]) -> Option<Vec<u8>> {
     Some(password)
 }
 
-fn parse_password(
-    mut reader: impl BufRead,
-    tokens: [&[u8]; 4],
-) -> io::Result<Option<Vec<u8>>> {
+fn parse_password(mut reader: impl BufRead, tokens: [&[u8]; 4]) -> io::Result<Option<Vec<u8>>> {
     let mut line = Vec::new();
     let mut capacity = 256;
     loop {
@@ -326,7 +363,8 @@ fn parse_password(
                 break;
             }
             let limit = available.len().min(room - chunk.len());
-            let length = available[..limit].iter()
+            let length = available[..limit]
+                .iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(limit, |offset| offset + 1);
             let newline = available[length - 1] == b'\n';
@@ -339,7 +377,10 @@ fn parse_password(
         if chunk.is_empty() {
             break;
         }
-        let length = chunk.iter().position(|byte| *byte == 0).unwrap_or(chunk.len());
+        let length = chunk
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(chunk.len());
         line.extend_from_slice(&chunk[..length]);
         if line.last() != Some(&b'\n') && !eof {
             continue;
@@ -360,18 +401,22 @@ mod tests {
     struct Fixture(PathBuf);
     impl Fixture {
         fn new(contents: &[u8]) -> Self {
-            let root = std::env::temp_dir().join(format!("pseudolife-pgpass-{}", uuid::Uuid::new_v4()));
+            let root =
+                std::env::temp_dir().join(format!("pseudolife-pgpass-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&root).unwrap();
             let fixture = Self(root);
             std::fs::write(fixture.path(), contents).unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+                std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o600))
+                    .unwrap();
             }
             fixture
         }
-        fn path(&self) -> PathBuf { self.0.join("password-file") }
+        fn path(&self) -> PathBuf {
+            self.0.join("password-file")
+        }
         fn environment(&self, password: Option<&[u8]>) -> PasswordEnvironment {
             PasswordEnvironment {
                 password: password.map(<[u8]>::to_vec),
@@ -394,16 +439,51 @@ mod tests {
         let fixture = Fixture::new(b"localhost:5432:fixture_db:fixture_user:file-value\n");
         let base = "host=localhost user=fixture_user dbname=fixture_db";
         let environment = fixture.environment(Some(b"env-value"));
-        assert_eq!(resolve(base, &environment).get_password(), Some(b"env-value".as_slice()));
-        assert_eq!(resolve(&format!("{base} password=dsn-value"), &environment).get_password(), Some(b"dsn-value".as_slice()));
-        assert_eq!(resolve(&format!("{base} password=''"), &environment).get_password(), Some(b"file-value".as_slice()));
-        assert_eq!(resolve(base, &fixture.environment(Some(b""))).get_password(), Some(b"file-value".as_slice()));
-        assert_eq!(resolve(base, &fixture.environment(None)).get_password(), Some(b"file-value".as_slice()));
-        assert_eq!(resolve("postgres://fixture_user:@localhost/fixture_db", &environment).get_password(), Some(b"file-value".as_slice()));
-        assert_eq!(resolve("postgres://fixture_user:authority@localhost/fixture_db?password=", &environment).get_password(), Some(b"file-value".as_slice()));
+        assert_eq!(
+            resolve(base, &environment).get_password(),
+            Some(b"env-value".as_slice())
+        );
+        assert_eq!(
+            resolve(&format!("{base} password=dsn-value"), &environment).get_password(),
+            Some(b"dsn-value".as_slice())
+        );
+        assert_eq!(
+            resolve(&format!("{base} password=''"), &environment).get_password(),
+            Some(b"file-value".as_slice())
+        );
+        assert_eq!(
+            resolve(base, &fixture.environment(Some(b""))).get_password(),
+            Some(b"file-value".as_slice())
+        );
+        assert_eq!(
+            resolve(base, &fixture.environment(None)).get_password(),
+            Some(b"file-value".as_slice())
+        );
+        assert_eq!(
+            resolve(
+                "postgres://fixture_user:@localhost/fixture_db",
+                &environment
+            )
+            .get_password(),
+            Some(b"file-value".as_slice())
+        );
+        assert_eq!(
+            resolve(
+                "postgres://fixture_user:authority@localhost/fixture_db?password=",
+                &environment
+            )
+            .get_password(),
+            Some(b"file-value".as_slice())
+        );
         std::fs::remove_file(fixture.path()).unwrap();
-        assert_eq!(resolve(&format!("{base} password=''"), &environment).get_password(), None);
-        assert_eq!(resolve(base, &fixture.environment(Some(b""))).get_password(), None);
+        assert_eq!(
+            resolve(&format!("{base} password=''"), &environment).get_password(),
+            None
+        );
+        assert_eq!(
+            resolve(base, &fixture.environment(Some(b""))).get_password(),
+            None
+        );
     }
 
     #[test]
@@ -420,7 +500,11 @@ mod tests {
     #[test]
     fn port_matching_keeps_dsn_text_and_socket_port_keeps_its_number() {
         let fixture = Fixture::new(b"localhost:5432:*:*:canonical\nlocalhost:05432:*:*:textual\n");
-        for text in ["host=localhost port=05432", "postgres://localhost:05432", "postgres://localhost?port=05432"] {
+        for text in [
+            "host=localhost port=05432",
+            "postgres://localhost:05432",
+            "postgres://localhost?port=05432",
+        ] {
             let config = resolve(text, &fixture.environment(None));
             assert_eq!(config.get_ports(), &[5432]);
             assert_eq!(config.get_password(), Some(b"textual".as_slice()));
@@ -430,12 +514,33 @@ mod tests {
     #[test]
     fn matching_retains_first_entry_comments_escapes_and_empty_password() {
         let contents = b"#localhost:5432:fixture_db:fixture_user:comment\n*:5432:*:*:first\\:part\\\\tail:ignored\nlocalhost:5432:fixture_db:fixture_user:second\n";
-        assert_eq!(parse_password(&contents[..], TOKENS).unwrap(), Some(b"first:part\\tail".to_vec()));
+        assert_eq!(
+            parse_password(&contents[..], TOKENS).unwrap(),
+            Some(b"first:part\\tail".to_vec())
+        );
         let empty_first = b"*:*:*:*:\n*:*:*:*:later\n";
-        assert_eq!(parse_password(&empty_first[..], TOKENS).unwrap(), Some(Vec::new()));
-        assert_eq!(match_line(b"\\*:5432:db\\:part:user\\\\part:escaped\\\r\n", [b"*", b"5432", b"db:part", b"user\\part"]), Some(b"escaped\\".to_vec()));
-        assert_eq!(match_line(b" localhost:5432:fixture_db:fixture_user:value", TOKENS), None);
-        assert_eq!(match_line(b"localhost:5432:fixture_db:fixture_user: trailing space \r\n", TOKENS), Some(b" trailing space ".to_vec()));
+        assert_eq!(
+            parse_password(&empty_first[..], TOKENS).unwrap(),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            match_line(
+                b"\\*:5432:db\\:part:user\\\\part:escaped\\\r\n",
+                [b"*", b"5432", b"db:part", b"user\\part"]
+            ),
+            Some(b"escaped\\".to_vec())
+        );
+        assert_eq!(
+            match_line(b" localhost:5432:fixture_db:fixture_user:value", TOKENS),
+            None
+        );
+        assert_eq!(
+            match_line(
+                b"localhost:5432:fixture_db:fixture_user: trailing space \r\n",
+                TOKENS
+            ),
+            Some(b" trailing space ".to_vec())
+        );
     }
 
     #[test]
@@ -443,9 +548,15 @@ mod tests {
         let mut contents = b"#".to_vec();
         contents.extend(vec![b'x'; 8192]);
         contents.extend_from_slice(b"\nlocalhost:5432:fixture_db:fixture_user:final");
-        assert_eq!(parse_password(&contents[..], TOKENS).unwrap(), Some(b"final".to_vec()));
+        assert_eq!(
+            parse_password(&contents[..], TOKENS).unwrap(),
+            Some(b"final".to_vec())
+        );
         let contents = b"localhost:5432:fixture_db:fixture_user:prefix\0discarded\ncontinued\n";
-        assert_eq!(parse_password(&contents[..], TOKENS).unwrap(), Some(b"prefixcontinued".to_vec()));
+        assert_eq!(
+            parse_password(&contents[..], TOKENS).unwrap(),
+            Some(b"prefixcontinued".to_vec())
+        );
     }
 
     #[cfg(unix)]
@@ -454,35 +565,58 @@ mod tests {
         use std::os::unix::fs::{PermissionsExt, symlink};
         let fixture = Fixture::new(b"*:*:*:*:value\n");
         for mode in [0o600, 0o400, 0o700] {
-            std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+            std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(mode))
+                .unwrap();
             let mut warnings = Vec::new();
-            assert_eq!(read_password(&fixture.path(), TOKENS, &mut warnings), Some(b"value".to_vec()));
+            assert_eq!(
+                read_password(&fixture.path(), TOKENS, &mut warnings),
+                Some(b"value".to_vec())
+            );
             assert!(warnings.is_empty());
         }
         std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o640)).unwrap();
         let mut warnings = Vec::new();
         assert_eq!(read_password(&fixture.path(), TOKENS, &mut warnings), None);
-        let expected = format!("WARNING: password file \"{}\" has group or world access; permissions should be u=rw (0600) or less\n", fixture.path().display());
+        let expected = format!(
+            "WARNING: password file \"{}\" has group or world access; permissions should be u=rw (0600) or less\n",
+            fixture.path().display()
+        );
         assert_eq!(warnings, expected.as_bytes());
         std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
         let link = fixture.0.join("link");
         symlink(fixture.path(), &link).unwrap();
-        assert_eq!(read_password(&link, TOKENS, &mut Vec::new()), Some(b"value".to_vec()));
+        assert_eq!(
+            read_password(&link, TOKENS, &mut Vec::new()),
+            Some(b"value".to_vec())
+        );
         std::fs::remove_file(fixture.path()).unwrap();
         let mut warnings = Vec::new();
         assert_eq!(read_password(&fixture.path(), TOKENS, &mut warnings), None);
         assert!(warnings.is_empty());
         assert_eq!(read_password(&fixture.0, TOKENS, &mut warnings), None);
-        assert_eq!(warnings, format!("WARNING: password file \"{}\" is not a plain file\n", fixture.0.display()).as_bytes());
+        assert_eq!(
+            warnings,
+            format!(
+                "WARNING: password file \"{}\" is not a plain file\n",
+                fixture.0.display()
+            )
+            .as_bytes()
+        );
     }
 
     #[cfg(windows)]
     #[test]
     fn default_file_uses_the_supplied_shell_folder_and_no_permission_warning() {
-        assert_eq!(default_file(PathBuf::from(r"C:\fixture\Roaming")), PathBuf::from(r"C:\fixture\Roaming\postgresql\pgpass.conf"));
+        assert_eq!(
+            default_file(PathBuf::from(r"C:\fixture\Roaming")),
+            PathBuf::from(r"C:\fixture\Roaming\postgresql\pgpass.conf")
+        );
         let fixture = Fixture::new(b"*:*:*:*:value\r\n*:*:*:*:later\n");
         let mut warnings = Vec::new();
-        assert_eq!(read_password(&fixture.path(), TOKENS, &mut warnings), Some(b"value".to_vec()));
+        assert_eq!(
+            read_password(&fixture.path(), TOKENS, &mut warnings),
+            Some(b"value".to_vec())
+        );
         assert!(warnings.is_empty());
         std::fs::write(fixture.path(), b"\x1a*:*:*:*:hidden\n").unwrap();
         assert_eq!(read_password(&fixture.path(), TOKENS, &mut warnings), None);
@@ -510,6 +644,9 @@ mod tests {
             ambient_controls: vec!["PGPASSFILE".into()],
             ..Default::default()
         };
-        assert_eq!(environment.validate(), Err(Error::AmbientControl("PGPASSFILE".into())));
+        assert_eq!(
+            environment.validate(),
+            Err(Error::AmbientControl("PGPASSFILE".into()))
+        );
     }
 }
