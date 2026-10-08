@@ -1,7 +1,14 @@
 # Porting contract
 
-The selected master behavioural oracle target is Python 0.17.0 at
-`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, using PostgreSQL schema 55. The #637 squash commit is selected; fresh both-OS validation, exact-head CI and independent review remain pending; earlier receipts retain their original oracle identities. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+New parity uses the PR's actual merge base as its Python behavioral oracle.
+Push validation selects the event's `after` commit; manual master captures select
+their exact `frozen_head`. Each receipt records its selected SHA and observed
+schema; a stale historical pin is informational. The harness still binds clean
+selected source, original assertions, runtime imports and actual behavior.
+Historical receipts and reviewed inventory snapshots retain their own pins.
+See [event selection and isolated preparation](../evals/rust_port/README.md#phase-1-stdio-judge).
+The previous master target was Python 0.17.0 at
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 

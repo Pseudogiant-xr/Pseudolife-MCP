@@ -1,4 +1,4 @@
-"""Compare OS-native invalid argv against pinned Python, retaining every byte."""
+"""Compare OS-native invalid argv against selected Python, retaining every byte."""
 from __future__ import annotations
 
 import argparse
@@ -50,7 +50,7 @@ def compare_case(case, oracle, candidate):
 
 def oracle_command(root):
     # The source is selected explicitly; cwd or an editable install cannot
-    # silently replace the pin. Invalid dispatch does not import the daemon.
+    # silently replace it. Invalid dispatch does not import the daemon.
     code = ("import runpy,sys; "
             f"sys.path.insert(0, {str(Path(root).resolve())!r}); "
             "runpy.run_module('pseudolife_memory.cli',run_name='__main__')")
