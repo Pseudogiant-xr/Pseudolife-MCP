@@ -316,6 +316,27 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
     } else {
         &["--help", "--json"]
     };
+    // argparse classifies every token before consuming option values. An
+    // ambiguous abbreviation therefore precedes a missing-value diagnostic.
+    for item in &before[action_index + 1..] {
+        let flag = item.split_once('=').map_or(item.as_str(), |(flag, _)| flag);
+        if flag.starts_with("--") {
+            let matches: Vec<_> = options
+                .iter()
+                .copied()
+                .filter(|option| option.starts_with(flag))
+                .collect();
+            if matches.len() > 1 {
+                return Err(error(
+                    action,
+                    &format!(
+                        "ambiguous option: {item} could match {}",
+                        matches.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
     let mut index = action_index + 1;
     while index < before.len() {
         let item = &before[index];
