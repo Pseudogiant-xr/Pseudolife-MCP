@@ -15,6 +15,8 @@ candidate and exercised cases. Source preparation is not executable parity.
 | Exceptions to `Result` | Does each Rust error preserve the boundary's CLI exit/streams, HTTP status/body or MCP code/data/message, including pinned diagnostics? Are invalid input, auth, unavailable state and transport failure still distinct? Is an observer/serializer failure reported as a harness failure rather than an oracle exception or successful empty result? A traceback policy applies only to its named instances and fields. See [errors/recovery](PORTING.md#errors-and-recovery), [trial corrections](PORTING.md#disposable-trial-corrections), and [lease diagnostics](PORTING.md#lease-diagnostic-boundaries). |
 | asyncio to tokio | At each await, who owns the child, task, socket, body, lock and cursor update? On disconnect, timeout, EOF or cancellation, is owned work cancelled and joined/reaped, and can the next ordinary operation succeed? Do frame order and multiplicity follow the specific observed-order rules? The first-frame callback follows successful write **and flush**; a failed flush starts no update. See [errors/recovery](PORTING.md#errors-and-recovery), [spawn/update boundary](PORTING.md#evidence-and-ownership), [stdio ordering](PORTING.md#phase-1-stdio-comparison), [web/api.py](../pseudolife_memory/web/api.py) `_wait_while_connected`, and [wire_json.rs](shim/src/wire_json.rs) `output_after_first_frame`. |
 
+Add a rule for every escaped regression, with its producer and rejecting control.
+
 Retain raw failures and rejecting controls beside successful captures. Existing
 tests remain unchanged; when they are silent, record the Python behavior and
 coverage gap before porting it. A historical receipt, source test or compiling
