@@ -23,8 +23,6 @@ def delivery_case():
 @pytest.mark.parametrize("extension,raw", [
     ("txt", b"+12\npeer\n"), ("txt", b"1_2\npeer\n"), ("txt", b"12\r\npeer\n"),
     ("txt", b"12\npeer"), ("txt", b"12"), ("txt", b" 12\npeer\n"),
-    ("ring", b"+12\nrung anyone\n"), ("ring", b"12\nrung anyone"),
-    ("ring", b"12\nrung anyone\r\n"), ("ring", b"12\nrung anyone\nextra\n"),
     ("seen", b"+12\n"), ("seen", b"-12\n"), ("seen", b"1_2\n"),
     ("seen", "١٢\n".encode("utf-8")),
 ])
@@ -43,6 +41,49 @@ def test_native_corrupt_writer_record_exits_2_without_delivery_or_marker_change(
         expected = ("wait-mail: corrupt coordination " + kind
                     + " record; expected canonical unsigned ASCII decimal and LF framing; left the mail unshown.\n")
         assert base64.b64decode(response["stderr_b64"]) == expected.replace("\n", os.linesep).encode()
+        assert response["post_files_b64"] == observation["pre_files_b64"]
+    finally:
+        reset_home(home)
+
+
+@pytest.mark.parametrize("raw", [b"12\nrung anyone", b"12\nrung anyone\r\n", b"12\nrung anyone\nextra\n"])
+def test_native_tolerated_ring_framing_delivers_and_advances_marker(tmp_path, raw):
+    root, commands = native_commands()
+    case = delivery_case()
+    case["id"] = "wait-mail-reduced-tolerated-ring"
+    case["pre_files_b64"][STEM + ".ring"] = base64.b64encode(raw).decode()
+    home = tmp_path / "home"
+    try:
+        observation, window = capture(case, commands, "candidate", root, home)
+        response = observation["response"]
+        assert response["exit_code"] == 0
+        assert base64.b64decode(response["stdout_b64"]) == "peer — café 🧠\n".encode()
+        assert base64.b64decode(response["post_files_b64"][STEM + ".seen"]) == b"12\n"
+        ledger = ".pseudolife-mcp/digests/ledger.log"
+        projected, instance = delivery_projection(response, window, ledger)
+        assert instance["policy"] == "nondeterministic-bytes-semantic"
+        expected = "<epoch>\twait\taaaaaaaa\t12\t14\trung anyone\n"
+        assert base64.b64decode(projected["post_files_b64"][ledger]) == expected.replace("\n", os.linesep).encode()
+        assert response["post_files_b64"].keys() == observation["pre_files_b64"].keys() | {ledger}
+        for path, contents in observation["pre_files_b64"].items():
+            if path != STEM + ".seen":
+                assert response["post_files_b64"][path] == contents
+    finally:
+        reset_home(home)
+
+
+@pytest.mark.parametrize("raw", [b"+12\nrung anyone\n", b"1234567890123\nrung anyone\n"])
+def test_native_invalid_ring_watermark_times_out_without_delivery_or_marker_change(tmp_path, raw):
+    root, commands = native_commands()
+    case = delivery_case()
+    case["id"] = "wait-mail-reduced-invalid-ring-watermark"
+    case["pre_files_b64"][STEM + ".ring"] = base64.b64encode(raw).decode()
+    home = tmp_path / "home"
+    try:
+        observation = capture(case, commands, "candidate", root, home)[0]
+        response = observation["response"]
+        assert response["exit_code"] == 3
+        assert base64.b64decode(response["stdout_b64"]) == b""
         assert response["post_files_b64"] == observation["pre_files_b64"]
     finally:
         reset_home(home)
@@ -108,14 +149,14 @@ def test_native_stdout_failure_exits_2_independent_of_python_buffer_setting(tmp_
     assert {file.name: file.read_bytes() for file in tmp_path.iterdir()} == before
 
 
-def test_native_arbitrary_width_writer_watermarks_deliver_and_advance_exactly(tmp_path):
+def test_native_arbitrary_width_digest_and_seen_watermarks_deliver_and_advance_exactly(tmp_path):
     root, commands = native_commands()
     case = delivery_case()
     case["id"] = "wait-mail-reduced-large-watermark"
     counter = b"1" * 4301
     body = b"peer\n"
     case["pre_files_b64"][STEM + ".txt"] = base64.b64encode(counter + b"\n" + body).decode()
-    case["pre_files_b64"][STEM + ".ring"] = base64.b64encode(counter + b"\nrung anyone\n").decode()
+    case["pre_files_b64"][STEM + ".ring"] = base64.b64encode(b"123456789012\nrung anyone\n").decode()
     home = tmp_path / "home"
     try:
         observation, window = capture(case, commands, "candidate", root, home)
