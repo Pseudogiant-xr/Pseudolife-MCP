@@ -87,11 +87,24 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
     let runtime = runtime(&fixture, true);
     let mut options = options(&runtime, &home, "1");
     options.wake = true;
-    options.timing.startup = Duration::from_millis(300);
-    let (url, log, server) = host_url(false, Duration::from_millis(170)).await;
+    let startup = Duration::from_secs(3);
+    let phase_delay = Duration::from_millis(1700);
+    // Verification and registration each fit, but cannot share one startup budget.
+    assert!(phase_delay < startup && phase_delay * 2 > startup);
+    options.timing.startup = startup;
+    fixture.answer(
+        "register",
+        Answer::json(
+            200,
+            json!({"agent_id":"fixture-agent","credential":"fixture-agent-key"}),
+        )
+        .delayed(phase_delay),
+    );
+    let (url, log, server) = host_url(false, phase_delay).await;
     options.delivery_url = Some(url);
     options.delivery_token = Some("fictional-host-token".into());
     let board = pseudolife_stdio::board::Board::attach_options(runtime, options).await;
+    let started = tokio::time::Instant::now();
     let pseudolife_stdio::board::Preparation::Forward(call) = board
         .prepare_call("memory_stats", None, &json!({"threadId":BANK}))
         .await
@@ -100,6 +113,7 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
         panic!("forward");
     };
     assert!(call.operation.headers.contains_key("x-pl-agent-key"));
+    assert!(started.elapsed() > startup);
     {
         let requests = fixture.requests.lock().unwrap();
         let register = requests
