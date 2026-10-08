@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native empty board-audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` verifies a
+  zero-byte archive without Python delegation or bank attachment. Input path
+  tokens starting with `-` defer unless exactly `-`; negative numeric and
+  dash-prefixed space-containing tokens also defer. Archive open/read failures
+  explicitly defer.
+  Nonempty chains, bank verification, other argument forms, export and stats
+  remain deferred.
+
 ### Changed (2026-10-09 — Rust parity oracle selection)
 
 - Rust parity builds its Python oracle from the PR merge base, the push commit
@@ -24,6 +34,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   classification fails. Master pushes run everything, and a nightly
   scheduled run covers master on days with only Rust merges. Only pull
   request runs cancel superseded runs.
+
+### Fixed (2026-10-08 — native PostgreSQL password lookup)
+
+- The experimental Rust PostgreSQL client resolves an explicit password,
+  `PGPASSWORD`, or the platform default password file in libpq order. An empty
+  explicit password suppresses `PGPASSWORD` and still permits default-file
+  lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
+  controls retain their named refusals. Runtime parity remains unverified.
 
 ### Fixed (2026-10-08 — native lease zombie detection)
 

@@ -66,11 +66,16 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
             .unwrap();
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            output.stderr,
+        let expected = if mode == "board-audit" {
+            bytes(concat!(
+                "board-audit: this path is deferred; ",
+                "only verify --input of an empty archive is implemented\n"
+            ))
+        } else {
             bytes(&format!(
                 "pseudolife-stdio: mode '{mode}' is deferred in this candidate\n"
             ))
-        );
+        };
+        assert_eq!(output.stderr, expected);
     }
 }
