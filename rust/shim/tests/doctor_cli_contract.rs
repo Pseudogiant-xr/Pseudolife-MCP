@@ -24,18 +24,6 @@ fn refusal(output: Output) {
     assert!(output.stderr.is_empty());
 }
 
-fn usage_error(output: Output, message: &str) {
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.starts_with("usage: pseudolife-stdio doctor "));
-    let ending = String::from_utf8(native_text(&format!(
-        "pseudolife-stdio doctor: error: {message}\n"
-    )))
-    .unwrap();
-    assert!(stderr.ends_with(&ending));
-}
-
 fn deferred(output: Output) {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
@@ -64,42 +52,53 @@ fn original_absent_and_empty_disposable_dsn_cells() {
 }
 
 #[test]
-fn original_incompatible_owned_agent_state_cell() {
+fn canonical_saved_state_requests_stay_deferred_without_mutation() {
     let home = Home::new();
     let path = home.0.join("owned-state.json");
     let sentinel = b"owned state sentinel\n";
     std::fs::write(&path, sentinel).unwrap();
-    let output = command(&home)
-        .args(["doctor", "--disposable-proof", "--agent-state"])
-        .arg(&path)
-        .output()
-        .unwrap();
-    usage_error(
-        output,
-        "--disposable-proof cannot use a saved --agent-state",
-    );
+    for dsn in ["", "postgresql://fixture.invalid/disposable"] {
+        for proof_first in [None, Some(false), Some(true)] {
+            let mut command = command(&home);
+            command
+                .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
+                .arg("doctor");
+            if proof_first == Some(true) {
+                command.arg("--disposable-proof");
+            }
+            command.arg("--agent-state").arg(&path);
+            if proof_first == Some(false) {
+                command.arg("--disposable-proof");
+            }
+            deferred(command.output().unwrap());
+        }
+    }
     assert_eq!(std::fs::read(&path).unwrap(), sentinel);
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 1);
 }
 
 #[test]
-fn refusal_uses_parsed_options_and_original_timeout_predicate() {
+fn canonical_options_allow_any_order_and_the_four_hosts() {
     let home = Home::new();
-    refusal(
-        command(&home)
-            .args([
-                "doctor",
-                "--time=1",
-                "--ho",
-                "claude-code",
-                "--dispos",
-                "--timeout",
-                "2_0",
-            ])
-            .output()
-            .unwrap(),
-    );
-    for timeout in ["nan", "inf"] {
+    for host in ["codex", "claude-code", "claude-desktop", "generic"] {
+        for arguments in [
+            vec!["--disposable-proof", "--timeout", "20", "--host", host],
+            vec!["--disposable-proof", "--host", host, "--timeout", "20"],
+            vec!["--timeout", "20", "--disposable-proof", "--host", host],
+            vec!["--timeout", "20", "--host", host, "--disposable-proof"],
+            vec!["--host", host, "--disposable-proof", "--timeout", "20"],
+            vec!["--host", host, "--timeout", "20", "--disposable-proof"],
+        ] {
+            refusal(
+                command(&home)
+                    .arg("doctor")
+                    .args(arguments)
+                    .output()
+                    .unwrap(),
+            );
+        }
+    }
+    for timeout in ["0.5", ".5", "1.", "00020.0"] {
         refusal(
             command(&home)
                 .args(["doctor", "--timeout", timeout, "--disposable-proof"])
@@ -111,55 +110,62 @@ fn refusal_uses_parsed_options_and_original_timeout_predicate() {
 }
 
 #[test]
-fn parser_and_timeout_errors_precede_state_and_dsn_checks() {
+fn noncanonical_arguments_defer_without_parser_diagnostics() {
     let home = Home::new();
-    for (arguments, message) in [
-        (
-            vec!["--timeout", "0", "--agent-state=", "--host", "invalid"],
-            "argument --host: invalid choice: 'invalid' (choose from 'codex', 'claude-code', 'claude-desktop', 'generic')",
-        ),
-        (
-            vec!["--timeout", "bad", "--agent-state="],
-            "argument --timeout: invalid float value: 'bad'",
-        ),
-        (
-            vec!["--timeout", "0", "--agent-state="],
-            "--timeout must be positive",
-        ),
-        (
-            vec!["--agent-state="],
-            "--disposable-proof cannot use a saved --agent-state",
-        ),
-        (
-            vec!["--agent-state", "-1\n"],
-            "--disposable-proof cannot use a saved --agent-state",
-        ),
-        (vec!["--timeout", "-1\n"], "--timeout must be positive"),
-        (vec!["--timeout", "-.5\n"], "--timeout must be positive"),
-        (
-            vec!["--timeout", "-1\n\n"],
-            "argument --timeout: expected one argument",
-        ),
-        (
-            vec!["--host", "-1\n"],
-            "argument --host: invalid choice: '-1\\n' (choose from 'codex', 'claude-code', 'claude-desktop', 'generic')",
-        ),
-        (
-            vec!["--host", "--agent-state="],
-            "argument --host: expected one argument",
-        ),
-        (
-            vec!["--disposable-proof=false"],
-            "argument --disposable-proof: ignored explicit argument 'false'",
-        ),
+    for arguments in [
+        vec!["--time", "20"],
+        vec!["--timeout=20"],
+        vec!["--host=generic"],
+        vec!["--agent-state=owned-state.json"],
+        vec!["--disposable-proof=false"],
+        vec!["--dispos"],
+        vec!["--h"],
+        vec!["--help"],
+        vec!["-h"],
+        vec!["--"],
+        vec!["unexpected"],
+        vec!["--host", "invalid"],
+        vec!["--host"],
+        vec!["--timeout"],
+        vec!["--agent-state"],
+        vec!["--agent-state", ""],
+        vec!["--agent-state", "-owned-state.json"],
+        vec!["--disposable-proof"],
+        vec!["--timeout", "20", "--timeout", "30"],
+        vec!["--host", "generic", "--host", "codex"],
     ] {
-        usage_error(
+        deferred(
             command(&home)
                 .args(["doctor", "--disposable-proof"])
                 .args(arguments)
                 .output()
                 .unwrap(),
-            message,
+        );
+    }
+    let overflow = "9".repeat(400);
+    for timeout in [
+        "",
+        ".",
+        "0",
+        "-1",
+        "-1\n",
+        "-.5\n",
+        "+20",
+        "2_0",
+        "nan",
+        "inf",
+        "1e2",
+        " 20",
+        "20\n",
+        "1.2.3",
+        "２０",
+        &overflow,
+    ] {
+        deferred(
+            command(&home)
+                .args(["doctor", "--disposable-proof", "--timeout", timeout])
+                .output()
+                .unwrap(),
         );
     }
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
