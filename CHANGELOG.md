@@ -16,6 +16,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Nonempty chains, bank verification, other argument forms, export and stats
   remain deferred.
 
+### Changed (2026-10-09 — Rust-only pull requests skip the Python suite lanes)
+
+- CI classifies each pull request first. One that touches `rust/`, and whose
+  other changed files are only `.github/workflows/rust.yml` or
+  `CHANGELOG.md`, skips the four Python suite lanes. A `guards` job runs
+  instead: every test file that reads `CHANGELOG.md`, plus the tracked-tree
+  identifier and control-byte scan. The lanes still run when the
+  classification fails. Master pushes run everything, and a nightly
+  scheduled run covers master on days with only Rust merges. Only pull
+  request runs cancel superseded runs.
+
+### Fixed (2026-10-08 — native PostgreSQL password lookup)
+
+- The experimental Rust PostgreSQL client resolves an explicit password,
+  `PGPASSWORD`, or the platform default password file in libpq order. An empty
+  explicit password suppresses `PGPASSWORD` and still permits default-file
+  lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
+  controls retain their named refusals. Runtime parity remains unverified.
+
+### Fixed (2026-10-08 — native lease zombie detection)
+
+- The experimental native `lease hold` recognizes exited Linux processes whose
+  names contain non-UTF-8 bytes or embedded right parentheses. Live-process and
+  unreadable-procfs behavior remain unchanged; native lease acceptance remains
+  deferred.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority

@@ -26,6 +26,8 @@ Source paths naming a Python module without a root refer to `pseudolife_memory/`
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
 
+Semantic by default: non-UTF-8 implicit OS usernames are outside the supported producer domain; native fails before connecting with `PostgreSQL connection failed` (exit 1), while Python/libpq preserves the raw username/database bytes through startup and leaves rejection to the server.
+
 ## Phase 4 integration of accepted PostgreSQL repair
 
 Phase 4 merges accepted master
@@ -563,6 +565,24 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | move | 2 | deferred | B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
 | maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
 | test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
+
+## Retained wait-mail evidence boundary (2026-10-09)
+
+The [ring-admission receipt](evidence/wait-mail-ring219.json) records completed
+Windows/Linux cells at `33f55402`, with images built at `57c720ef`; it does not
+certify a new ec697 runtime. Long-ring and bad-reason pairs retain exit 3 and
+unchanged files; Unicode delivery retains exit 0 and its existing named clock
+policy. Raw REDs, overlapping focused/workflow counts, and the four named source
+gaps stay separate. No status row or producer substitution is promoted.
+The original long-ring exit 3/3 observation remains an acceptance RED/blocker,
+separate from its historical comparator pass; accepted-master provenance and
+the hosted long-ring proof are still outstanding.
+
+For new findings, stderr wording is semantic by default when diagnostic class
+and exit code match, except pinned lines. Timing within bounds, identities,
+entropy and clock fields are semantic. Exit codes, consumed stdout, shared files,
+help at COLUMNS=80 and argv acceptance remain contract surfaces; this additive
+note does not rewrite historical comparisons or discard failed receipts.
 
 ## Wait-mail producer substitutions
 
