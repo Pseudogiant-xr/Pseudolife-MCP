@@ -13,7 +13,7 @@ from .harness import capture_platform, write_new
 from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version, source_metadata
 from .stdio import capture
 
-ORACLE_HEAD = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
+ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
 ORACLE_SCHEMA = 55
 BEHAVIOR_TESTS = ("tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/test_shim_board_retry.py", "tests/test_version_handshake.py", "tests/test_update_offer.py",

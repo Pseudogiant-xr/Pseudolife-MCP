@@ -1,7 +1,7 @@
 # Porting contract
 
-The current version-branch behavioural oracle target is Python 0.17.0 at
-`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+The selected master behavioural oracle target is Python 0.17.0 at
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, using PostgreSQL schema 55. The #637 squash commit is selected. Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`. Earlier receipts retain their original oracle identities. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
@@ -563,8 +563,14 @@ credential defaults from the caller's installed client configuration.
 
 Read and write the recorded phase-start schema (55 at the current Phase 1
 pin; historical close-out evidence keeps schema 54) without
-DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
-each phase start; any upstream schema bump follows CLAUDE.md's seven-place
+DDL changes, new tables or repurposed columns. The oracle pin follows master,
+never the reverse: a production change is never held for the port. Re-pin to
+a selected master commit at each phase start and after each batch of production
+merges. Re-pinning is a routine root task: enumerate the selected source and
+counts, regenerate manifests, preserve historical identities, then obtain fresh
+both-OS parity and independent review before Rust merges resume. Production
+merges with source-pin-only Parity failures require the maintainer's explicit
+gate exception. Any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
 oracle-equivalent isolation/locking behaviour. Preserve HLC ordering, contender
 selection, audit-chain bytes, mail cursors, lease fencing and FIFO queue rules.

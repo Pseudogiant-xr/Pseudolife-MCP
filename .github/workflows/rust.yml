@@ -293,7 +293,7 @@ jobs:
         shell: pwsh
         run: |
           # The existing oracle builder clones this checkout and selects old pins.
-          git fetch --no-tags --depth=1 origin '3c01bb31abd60178e15dea99adda369b4bbf92fc:refs/heads/capture-phase1-oracle' 'eb0c13e9c5036aa2b95e7fccb77f41ca1c095493:refs/heads/capture-wait-mail-oracle' '136a34ae95e981a691fcc31ba9fb4f35d83d4249:refs/heads/capture-historical-oracle'
+          git fetch --no-tags --depth=1 origin '686b3f95c4a4d4e6c2d81e1b76be9901945a8da1:refs/heads/capture-phase1-oracle' 'eb0c13e9c5036aa2b95e7fccb77f41ca1c095493:refs/heads/capture-wait-mail-oracle' '136a34ae95e981a691fcc31ba9fb4f35d83d4249:refs/heads/capture-historical-oracle'
           exit $LASTEXITCODE
       - uses: actions/setup-python@v5
         with:
