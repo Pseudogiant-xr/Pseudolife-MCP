@@ -1,5 +1,17 @@
 # Rust port state
 
+## Backup help and missing-directory first slice
+
+The native backup leaf admits `backup --help` at `COLUMNS=80` and
+`backup --data-dir PATH` for an explicit absolute UTF-8 path that does not
+exist. The help payload comes from genuine public Python module captures at
+`ce0960ba188669eea67028f1c1eba7f5ef90bf44`; it is not constructed from parser
+constants. The missing-directory branch checks the filesystem before bank
+resolution. Existing paths, other argument forms, archive/dump/compression,
+rotation, implicit data-directory resolution and embedded ownership remain
+deferred. Backup's acceptance disposition is unchanged: Linux first-cell
+proof cannot supply the required Windows path/stdio evidence.
+
 ## Selected master oracle re-pin
 
 The maintainer's 2026-10-08 policy makes the oracle follow master after each

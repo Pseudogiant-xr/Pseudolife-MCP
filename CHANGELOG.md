@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native backup help and missing-directory refusal)
+
+- The experimental native backup leaf handles `backup --help` at `COLUMNS=80`
+  and refuses `backup --data-dir PATH` when an explicit absolute UTF-8 path
+  does not exist. It checks the filesystem before any bank resolution.
+  Other argument forms, existing paths and backup creation remain deferred.
+
 ### Added (2026-10-09 — native empty board-audit archive verification)
 
 - The experimental native `board-audit verify --input PATH` verifies a
