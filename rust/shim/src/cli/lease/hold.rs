@@ -10,6 +10,17 @@ use super::{
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{sync::watch, time::Instant};
 
+#[cfg(unix)]
+fn proc_stat_is_zombie(stat: std::io::Result<Vec<u8>>) -> bool {
+    stat.ok().and_then(|stat| {
+        // The comm field can contain non-UTF-8 bytes and right parentheses.
+        // Python replaces undecodable bytes; the state after the last ')' is ASCII.
+        String::from_utf8_lossy(&stat)
+            .rsplit_once(')')
+            .map(|(_, tail)| tail.trim_start().starts_with('Z'))
+    }) == Some(true)
+}
+
 /// Probe another process without signalling or acquiring ownership of it.
 #[cfg_attr(windows, allow(unsafe_code))]
 fn pid_alive(pid: u32) -> bool {
@@ -52,13 +63,7 @@ fn pid_alive(pid: u32) -> bool {
             _ => (),
         }
         // A Linux zombie has exited even while its parent has not reaped it.
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .and_then(|stat| {
-                stat.rsplit_once(')')
-                    .map(|(_, tail)| tail.trim_start().starts_with('Z'))
-            })
-            != Some(true)
+        !proc_stat_is_zombie(std::fs::read(format!("/proc/{pid}/stat")))
     }
 }
 fn park_field<'a>(agent: &'a Value, field: &str) -> &'a Value {
@@ -536,5 +541,24 @@ mod tests {
     fn probe_current_process_is_read_only() {
         assert!(pid_alive(std::process::id()));
         assert!(pid_alive(std::process::id()));
+    }
+    #[test]
+    #[cfg(unix)]
+    fn proc_state_survives_non_utf8_comm_and_embedded_right_parentheses() {
+        for comm in [b"owner".as_slice(), b"owner)\xffproc", b"Z)R)\xff"] {
+            for state in [b'S', b'R', b'Z'] {
+                let mut stat = b"123 (".to_vec();
+                stat.extend_from_slice(comm);
+                stat.extend_from_slice(b") ");
+                stat.push(state);
+                stat.extend_from_slice(b" 1 123 123 0\n");
+                assert_eq!(proc_stat_is_zombie(Ok(stat)), state == b'Z');
+            }
+        }
+    }
+    #[test]
+    #[cfg(unix)]
+    fn unreadable_proc_stat_does_not_make_a_process_dead() {
+        assert!(!proc_stat_is_zombie(std::fs::read(Path::new(""))));
     }
 }

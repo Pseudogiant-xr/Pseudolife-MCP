@@ -17,6 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scheduled run covers master on days with only Rust merges. Only pull
   request runs cancel superseded runs.
 
+### Fixed (2026-10-08 — native lease zombie detection)
+
+- The experimental native `lease hold` recognizes exited Linux processes whose
+  names contain non-UTF-8 bytes or embedded right parentheses. Live-process and
+  unreadable-procfs behavior remain unchanged; native lease acceptance remains
+  deferred.
+
 ### Fixed (2026-10-08 — transient Codex coordination checks)
 
 - Ordinary Codex coordination calls recover one transient bank-authority
