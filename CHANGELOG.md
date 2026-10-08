@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-08 — native lease argument classification)
+
+- The experimental native lease parser accepts a lone `-` and unmatched
+  dash-prefixed arguments containing a literal ASCII space, matching Python
+  argparse. Recognized options, argument validation and refusal before effects
+  retain their existing behavior; native lease acceptance remains deferred.
+
 ### Added (2026-10-07 — Phase 4 lease action candidate)
 
 - Add a native Rust `lease hold` candidate with a read-only external-process
