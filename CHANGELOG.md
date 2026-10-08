@@ -17,6 +17,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stays the default and the only recommended model until a ladder run
   measures the new ones.
 
+### Fixed (2026-10-08 — daemon log no longer carries the database password)
+
+- The daemon's `storage: postgres (...)` startup line is now the endpoint
+  (`host:port/dbname`) parsed with libpq's rules. It used to split the DSN on
+  `@`, which left a keyword-form DSN (`host=... password=... dbname=...`)
+  logged whole, password included. Rotate any credential that reached a
+  daemon log through that line.
+
 ### Fixed (2026-10-08 — native lease argument classification)
 
 - The experimental native lease parser accepts a lone `-` and unmatched
@@ -35,6 +43,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
+
+### Fixed (2026-10-07 — native wait-mail ring predicate)
+
+- The experimental native `wait-mail` follows the shared Python/Stop-hook ring
+  predicate: malformed or over-width markers do not wake, while accepted CR/space
+  spellings and markers without a final newline retain their existing behavior.
+  Digest and seen-marker policies remain unchanged.
 
 ### Added (2026-10-07 — native maintainer sent candidate)
 

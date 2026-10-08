@@ -119,8 +119,9 @@ How this maps onto Pseudolife:
   canonical cortex facts that outrank raw entries at recall time. A
   poisoned entry that survives to a dream becomes a poisoned *fact* with
   elevated authority. Mitigations that exist today: provenance tiers
-  (`user` origin outranks `action`, which outranks `agent` — a planted
-  agent-origin claim cannot silently overwrite a user-stated fact),
+  (`user` origin outranks `action`, which outranks `agent` — a claim
+  labelled agent-origin cannot silently overwrite a user-stated fact; the
+  label is the caller's, see below),
   per-entry `source` tags, `source="status"` exclusion from dream
   extraction, the engram cross-index (every cortex fact links back to
   its source entries, so a bad fact is auditable to the entry that fed
@@ -131,6 +132,13 @@ How this maps onto Pseudolife:
   is deliberately narrow: it does not stop a poisoned entry from being
   stored or retrieved — episodic search still surfaces it — it stops
   poison from silently gaining *canonical* authority.
+  The tier itself is declared by the caller, not verified: a write's
+  `origin=` argument, or for a dream claim the backing entry's `source`
+  tag (`source="user"` or `"conversation"` maps to `user`). A model
+  steered into labelling its own write `user` gets user-tier standing,
+  and the tier rule and the quarantine both treat it as one. The tiers
+  stop an honestly labelled agent write from displacing a user fact; they
+  do not establish who actually spoke.
 - **Board mail is another read path.** On an authenticated install, peer
   sessions' messages reach the agent's context through the board (digest
   previews, `memory_message` receive, wakes). They are framed as
