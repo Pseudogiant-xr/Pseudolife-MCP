@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — native register audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` computes chained
+  register hashes and walks archive rows in order without Python delegation or
+  bank attachment. It detects decoded duplicate keys and retains sequence,
+  previous-hash, hash and body-failure precedence for this bounded slice.
+  Archive acceptance remains partial: unsupported JSON and numeric domains,
+  other event families, retention, expected-head checks, bank verification,
+  export and stats remain deferred. Exhaustive finite-float correspondence
+  with Python and Windows integration remain unverified; the full audit mode
+  is not accepted.
+
 ### Added (2026-10-09 — native empty board-audit archive verification)
 
 - The experimental native `board-audit verify --input PATH` verifies a
