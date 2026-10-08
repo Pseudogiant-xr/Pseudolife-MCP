@@ -24,9 +24,11 @@ minute-precision observation are distinct evidence.
 These cells establish bounded historical doorbell behavior, not dedicated
 briefing payload, HTTP wire, persistent-turn, original hook routing or durable
 state coverage. Capable-host symlink, distinct-UID, remaining corpus/features
-and measurement gaps remain open. Current acceptance/publication remains
-`HELD_PENDING_COORDINATOR_ORACLE307`; the final oracle307 SHA is absent.
-No parity row is promoted and no current-head execution is inferred.
+and measurement gaps remain open. The final oracle307 integration target is
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; the historical receipt predates
+that pin and retains oracle3c attribution. Current acceptance/publication
+remains `HELD_PENDING_COORDINATOR_ORACLE307`. No parity row is promoted and
+no current-head execution is inferred.
 
 ## Episode integration with accepted lease master
 

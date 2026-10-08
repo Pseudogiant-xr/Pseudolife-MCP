@@ -82,29 +82,54 @@ fn digest_requires_lf_framing_and_seen_strips_writer_whitespace() {
 }
 
 #[test]
-fn ring_requires_two_lf_records_and_has_no_interpreter_width_limit() {
+fn ring_matches_the_oracle_and_stop_hook_predicate() {
     let home = Home::new();
     let path = home.0.join("record.ring");
-    fs::write(&path, b"1234567890123\nrung anyone\n").unwrap();
-    assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "1234567890123");
-    fs::write(&path, b"00042\nrung anyone\n").unwrap();
-    assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "42");
     for raw in [
         b"12\nrung anyone".as_slice(),
         b"12\r\nrung anyone\n",
         b"12\nrung anyone\r\n",
         b"12\nrung anyone\nextra\n",
         b" 1 2 \nrung anyone\n",
-        b"+12\nrung anyone\n",
+        b"00012\nrung anyone\n",
+        b"123456789012\nrung anyone\n",
+        b"1\r2 \nrung anyone\n",
     ] {
         fs::write(&path, raw).unwrap();
+        let (watermark, reason) = read_ring(&path).unwrap().unwrap();
         assert_eq!(
-            read_ring(&path).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
+            watermark.text(),
+            if raw.starts_with(b"123456") {
+                "123456789012"
+            } else {
+                "12"
+            }
         );
+        assert_eq!(reason, "rung anyone");
     }
-    fs::write(&path, b"12\nplain anyone\n").unwrap();
-    assert!(read_ring(&path).unwrap().is_none());
+    for raw in [
+        b"".as_slice(),
+        b"12",
+        b"12\n",
+        b"x\nrung anyone\n",
+        b"+12\nrung anyone\n",
+        b"1_2\nrung anyone\n",
+        b"12\t\nrung anyone\n",
+        b"1234567890123\nrung anyone\n",
+        b"0000000000000\nrung anyone\n",
+        b"12\nrung anyone\r\r\n",
+        b"12\nrung anyone!\n",
+        b"12\nrung caf\xc3\xa9\n",
+        b"12\nplain anyone\n",
+    ] {
+        fs::write(&path, raw).unwrap();
+        assert!(read_ring(&path).unwrap().is_none(), "{raw:?}");
+    }
+    fs::write(&path, b"0\nrung -ABC_xyz 09\n").unwrap();
+    assert_eq!(
+        read_ring(&path).unwrap(),
+        Some((Integer::zero(), "rung -ABC_xyz 09".into()))
+    );
 }
 
 #[test]

@@ -24,8 +24,10 @@ Dedicated briefing payload, original hook routing, persistent-turn cursor and
 output ordering, capable-host Windows symlinks, distinct real/effective UID,
 remaining corpus/features, real-daemon evidence and measurements remain gaps.
 Observer failures/corrections, sampling limits and first-output observations
-remain distinct from runtime verdicts in the receipt. Current acceptance and
-publication remain `HELD_PENDING_COORDINATOR_ORACLE307`, with no final SHA;
+remain distinct from runtime verdicts in the receipt. The final oracle307
+integration target is `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; these
+historical cells retain oracle3c and establish no current-target parity.
+Current acceptance and publication remain `HELD_PENDING_COORDINATOR_ORACLE307`;
 all existing deferred/retired/ported labels are unchanged.
 
 Current version-branch oracle target: Python 0.17.0 at `3c01bb31abd60178e15dea99adda369b4bbf92fc`, schema 55. Published `95d5402d` passed all 14 checks. Frozen `5220b5ee` now has both-OS named-console and warm-protocol CLI proofs; successor hosted checks and independent review remain pending, so version stays deferred.
@@ -601,7 +603,7 @@ unvalidated and `wait-mail` remains deferred.
 
 | Input/output | Producer | Declared native substitution |
 |---|---|---|
-| `wait-mail-writer-records`: Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal followed by LF. Additional `.seen` writers are `plugin/hooks/coordination-prompt.sh:86`, `plugin/hooks/stop-wake.sh:661`, and `rust/shim/src/board/adapter.rs:953-960,1116-1121`. The prompt hook truncates before its `printf` write. | Arbitrary-width decimal ordering by numeric value, including leading zeros, with no CPython 4,300-digit ceiling; native output is canonical decimal. The seen reader strips precisely ASCII byte whitespace, treats empty/whitespace-only as zero, and accepts an unsigned counter without a final LF. Signs, underscores and non-ASCII digits remain corrupt. Digest headers retain their LF and bodies their final LF; rings retain exactly two LF-terminated lines. Malformed admitted records retain exit 2 and the existing canonical/LF-framing diagnostic, with no stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
+| `wait-mail-writer-records`: Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal followed by LF. Additional `.seen` writers are `plugin/hooks/coordination-prompt.sh:86`, `plugin/hooks/stop-wake.sh:661`, and `rust/shim/src/board/adapter.rs:953-960,1116-1121`. The prompt hook truncates before its `printf` write. | Digest and seen counters retain arbitrary-width decimal ordering by numeric value, including leading zeros, with no CPython 4,300-digit ceiling; native output is canonical decimal. The seen reader strips precisely ASCII byte whitespace, treats empty/whitespace-only as zero, and accepts an unsigned counter without a final LF. Signs, underscores and non-ASCII digits remain corrupt. Digest headers retain their LF and bodies their final LF. Rings follow the shared `wait_mail_cli._read_ring` (lines110–130) / `plugin/hooks/stop-wake.sh::ring_past_seen` (lines564–577) predicate: regular file, first-line CR/space removal, 1–12 ASCII digits, second-line single trailing CR removal and `rung [-A-Za-z0-9_ ]*`; missing final LF or extra later lines do not invalidate an otherwise matching ring. Nonmatching ring records mean no ring and keep waiting (`Ok(None)`), rather than exit2. This ring clause supersedes the prior framing/width substitution; the `wait-mail-cr-spaces-ring` fixture remains historical. Malformed admitted digest/seen records retain exit 2 and the existing canonical/LF-framing diagnostic, with no stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
 | `wait-mail-ascii-numeric-options`: Timeout and interval | Shell/CLI callers and existing launchers supply finite decimal seconds. | ASCII `[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`, finite after conversion; existing timeout `(0,86400]` and interval `[0.01,60]` bounds remain. Unicode digits, underscores, outer whitespace, NaN/Infinity and overflow refuse with argparse-shaped usage/error and exit 2. |
 | `wait-mail-ascii-columns-help`: Terminal dimensions and help | Terminals/callers supply COLUMNS; the help drift guard runs at COLUMNS80. | Positive ASCII integers; invalid grammar, zero or machine-integer overflow falls back to 80. COLUMNS80 retains the exact help asset and usage. Other widths use simple word wrapping, retain whole words and omit argparse's extreme-width thresholds/action-group emulation. |
 | `wait-mail-direct-stdout`: Failed stdout writes/flushes | Caller-owned pipes and redirected descriptors. | Direct failure exits 2 and leaves mail unshown, without seen/ledger advance. `PYTHONUNBUFFERED`, block size and CPython shutdown retries do not change this behavior. Delivery retains `wait-mail: could not write the mail to stdout (<error>); left it unshown.` Help failure uses `wait-mail: could not write help to stdout (<error>).` No synthetic `TextIOWrapper` shutdown exception is emitted. |
@@ -610,8 +612,10 @@ unvalidated and `wait-mail` remains deferred.
 | `wait-mail-native-temporary-collisions`: Temporary-file collisions | Native atomic marker/listener writes. | Keep `.tmp-[a-z0-9_]{8}.seen`, exclusive creation, private permissions and cleanup of owned files. Sixteen collisions exhaust the native budget with `temporary file creation exhausted after 16 collisions`, without overwriting a colliding file/directory. The copied CPython platform retry count and exhaustion exception are removed. |
 
 The native ring reason gate and symlink refusal stay exact. A canonical `plain`
-decision does not wake the wait. A ring watermark is no longer limited to twelve
-digits; actual writers use the same decimal counter representation as digests.
+decision does not wake the wait. Ring watermarks retain the shared 1–12 ASCII
+digit limit after removing first-line CR and spaces; the former arbitrary-width
+ring substitution is superseded. Digest and seen counters retain their declared
+arbitrary-width representation.
 An explicit user-authored `--digest` file is subject to the same declared record
 grammar. The approved legacy-test exceptions are applied. The shared candidate
 contract fixture binds 19 changed cases to exact declared requests and retained
