@@ -42,6 +42,8 @@ Config section records collect field evidence, not a complete config document.
 and `unverified`. Documentation includes historical plans/specs: verify their
 status before using them as current inputs. Environment and dotted config
 `usage: reference` records are conservative leads, not proof of an assignment.
+Environment help operands such as `<the token>` stay full expressions with
+`placeholder: true`, incomplete shapes and documented example evidence.
 Unsupported request syntax remains `dynamic: unresolved`; an unknown verb has
 `method: null`, including when associated with both inventory verbs for a path.
 Plugin instructions naming a tool without arguments remain unverified

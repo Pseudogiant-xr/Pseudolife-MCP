@@ -237,6 +237,56 @@ def test_windows_shell_path_is_not_decoded_as_python_escapes():
     assert call["shape"]["parameters"]["value"] == {"expression": '"C:\\temp\\config.yaml"'}
 
 
+def test_real_help_placeholders_are_full_unresolved_operands():
+    cases = [
+        ("rust/shim/src/lifecycle.rs", "PSEUDOLIFE_MCP_TOKEN", "<the token>"),
+        ("rust/shim/src/lifecycle.rs", "PSEUDOLIFE_MCP_TOKEN_FILE", "<absolute path to a private file holding the token>"),
+        ("rust/shim/src/cli_help.txt", "PSEUDOLIFE_MCP_TOKEN_FILE", "<owner-only file holding it>"),
+    ]
+    for path, name, operand in cases:
+        calls = census.env_calls((census.ROOT / path).read_text(encoding="utf-8-sig"), path)
+        call = next(row for row in calls if row["name"] == name and operand in row["shape"].get("expression", ""))
+        assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
+        assert not call["shape"]["complete"]
+        assert call["dynamic"] == "unresolved"
+        assert call["usage"] == "assignment-example"
+
+
+def test_compound_and_quoted_env_placeholders_are_not_literals():
+    for operand in ['<token-1>:<machine>-client', '"<a multiword path>"']:
+        call = census.env_calls('PSEUDOLIFE_MCP_TOKEN=' + operand, "docs/demo.md")[0]
+        assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
+        assert not call["shape"]["complete"]
+
+
+def test_actual_env_scalar_remains_literal():
+    call = census.env_calls('PSEUDOLIFE_MCP_PORT=8765', "ops/demo.sh")[0]
+    assert call["shape"]["parameters"]["value"] == {"literal": "8765"}
+    assert call["shape"]["complete"]
+
+
+def test_multiword_placeholder_keeps_compound_suffix():
+    operand = '<absolute path>/token.txt'
+    call = census.env_calls('PSEUDOLIFE_MCP_TOKEN_FILE=' + operand, "docs/demo.md")[0]
+    assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
+
+
+def test_csv_placeholder_operand_is_whole_but_help_punctuation_is_not_value():
+    operand = '<token-1>:<machine>-client,<token-2>:<machine>-other'
+    call = census.env_calls('PSEUDOLIFE_MCP_TOKENS=' + operand, "docs/demo.md")[0]
+    assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
+    help_call = census.env_calls('PSEUDOLIFE_MCP_TOKEN=<bearer>, or use a file', "rust/shim/src/cli_help.txt")[0]
+    assert help_call["shape"]["parameters"]["value"]["expression"] == '<bearer>'
+
+
+def test_less_than_in_actual_scalar_path_is_not_placeholder_syntax():
+    for operand in ['"/tmp/a<b.yaml"', '"/tmp/a<b>.yaml"']:
+        call = census.env_calls('PSEUDOLIFE_MCP_TOKEN_FILE=' + operand, "ops/demo.sh")[0]
+        assert call["shape"]["parameters"]["value"] == {"literal": operand[1:-1]}
+        assert call["shape"]["complete"]
+        assert call["usage"] == "assignment"
+
+
 def test_prose_parenthetical_is_not_a_tool_call():
     assert not census.tool_calls('memory_fact_resolve (core); memory_set_add (a set-valued slot errors here)', "docs/demo.md")
 
