@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// `SCHEMA_META_VERSION` (`storage/schema.py:20`).
-pub const SCHEMA: i64 = 55;
+pub const SCHEMA: i64 = crate::storage::schema::SCHEMA_META_VERSION;
 const NEAR_LIMIT_FRACTION: f64 = 0.90;
 const HOOK_SCRIPTS: [&str; 9] = [
     "lifecycle.ps1",
@@ -305,6 +305,22 @@ pub async fn payload(svc: &Service) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn payload_reports_the_generated_schema_version() {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Service::new(
+            Config::default(),
+            env,
+            std::path::PathBuf::from("__schema_version_test_without_storage__"),
+            String::new(),
+            false,
+        );
+        assert_eq!(
+            payload(&service).await["schema"],
+            json!(crate::storage::schema::SCHEMA_META_VERSION)
+        );
+    }
 
     fn dir(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("pl-health-{name}-{}", std::process::id()));

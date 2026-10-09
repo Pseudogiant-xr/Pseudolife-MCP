@@ -34,6 +34,7 @@ PARITY_CHECKS = {
     "CLI lease differential harness": "cli",
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
+    "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -108,8 +109,13 @@ def check_executable_coverage(jobs):
                     ("python", "rust/cli_harness/lease_ci.py"))
     schema = commands(parity["Daemon schema startup parity"]["run"])
     require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
-                    ("--out",), ("--record-goldens",))
+                    ("--out", "--test-bin-out"), ("--record-goldens",))
     assert not any(words[0] == "cargo" for words in schema)
+    startup = commands(parity["Daemon resident startup parity"]["run"])
+    require_command(startup, ("python", "rust/daemon/harness/startup_ci.py"),
+                    ("--out", "--no-build", "--rust-test-bin"), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in startup)
+    assert "daemon-storage-test-path.txt" in parity["Daemon resident startup parity"]["run"]
     embedding = parity["Offline embedding golden and mutant row"]
     invocations = commands(embedding["run"])
     require_command(invocations, ("python", "-m", "pytest"),
@@ -273,6 +279,9 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Daemon resident startup parity", "--no-build", ""),
+    ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
+    ("Daemon resident startup parity", "--no-build", "--no-build --record-goldens"),
     ("Daemon schema startup parity", "--out", "--record-goldens --out"),
     ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
