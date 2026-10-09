@@ -504,6 +504,17 @@
    "status": 200
   },
   {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "ok": true
+   },
+   "status": 200
+  },
+  {
    "bytes": "Internal Server Error",
    "headers": {
     "content-type": "text/plain; charset=utf-8"
