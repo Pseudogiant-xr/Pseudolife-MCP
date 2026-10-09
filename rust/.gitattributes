@@ -4,3 +4,4 @@ shim/src/cli_help.txt text eol=lf
 shim/src/cli/wait_mail_help.txt text eol=lf
 shim/src/cli/lease/assets/*.txt text eol=lf
 shim/src/cli/backup_help.txt text eol=lf
+shim/src/cli/transfer/*.txt text eol=lf
