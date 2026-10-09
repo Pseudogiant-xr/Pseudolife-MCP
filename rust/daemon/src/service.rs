@@ -154,8 +154,18 @@ impl Service {
         Ok(storage)
     }
 
+    /// `_ensure_init`, run in its own task: a request whose client goes
+    /// away mid-init drops only its wait, never the init itself (which
+    /// writes to the shared writer session).
+    pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
+        let me = self.clone();
+        tokio::spawn(async move { me.ensure_init_inner().await })
+            .await
+            .map_err(|e| format!("initialization task failed: {e}"))?
+    }
+
     /// `_ensure_init`, cold and fast paths.
-    pub async fn ensure_init(&self) -> Result<Arc<Ready>, String> {
+    async fn ensure_init_inner(&self) -> Result<Arc<Ready>, String> {
         let mut inner = self.inner.lock().await;
         if let Some(r) = &inner.ready {
             return Ok(r.clone());
@@ -213,7 +223,8 @@ impl Service {
                 }
                 // `_abandon_partial_init`: retryable unless it is the refusal
                 // already recorded.
-                let reason = e.to_string();
+                // `hydrate_cms` failures are re-raised as this RuntimeError (service.py:1543).
+                let reason = format!("entry hydration failed: {e}");
                 let refusal = self.snapshot().init_refusal;
                 self.update(|s| {
                     s.not_ready = if refusal.as_deref() == Some(reason.as_str()) {

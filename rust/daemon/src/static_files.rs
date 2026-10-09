@@ -149,8 +149,9 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
 mod tests {
     use super::*;
 
-    fn tree() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("pl-static-{}", std::process::id()));
+    fn tree(name: &str) -> PathBuf {
+        // One directory per test: tests run in parallel in one process.
+        let root = std::env::temp_dir().join(format!("pl-static-{}-{name}", std::process::id()));
         std::fs::create_dir_all(root.join("assets/sub")).unwrap();
         std::fs::write(root.join("index.html"), b"<html>").unwrap();
         std::fs::write(root.join("assets/a.js"), b"js").unwrap();
@@ -161,7 +162,7 @@ mod tests {
 
     #[test]
     fn index_fallback_traversal_and_types() {
-        let root = tree();
+        let root = tree("types");
         let s = serve(&root, "/ui").unwrap();
         assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
         let s = serve(&root, "/ui/assets/a.js").unwrap();
@@ -188,7 +189,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_out_of_the_root_is_forbidden() {
-        let root = tree();
+        let root = tree("symlink");
         let outside = root.with_extension("outside");
         std::fs::write(&outside, b"outside\n").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("escape.txt")).unwrap();

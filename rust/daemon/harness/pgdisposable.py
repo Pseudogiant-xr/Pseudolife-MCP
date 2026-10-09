@@ -17,7 +17,13 @@ from psycopg import sql
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-DISPOSABLE_NAME = re.compile(r"pl_cf_w1a_[a-z0-9_]{1,40}")
+# Each port slice keeps its own prefix (PL_HARNESS_SLICE, default w1a), so
+# parallel slices running this harness never share a database.
+SLICE = os.environ.get("PL_HARNESS_SLICE", "w1a")
+if not re.fullmatch(r"w[0-9][a-z]", SLICE):
+    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a or w2g")
+PREFIX = f"pl_cf_{SLICE}_"
+DISPOSABLE_NAME = re.compile(re.escape(PREFIX) + r"[a-z0-9_]{1,40}")
 
 
 def _login() -> tuple[str, str]:
@@ -83,5 +89,5 @@ def drop(name: str, attempts: int = 10) -> None:
 
 def existing() -> list[str]:
     with _admin() as conn:
-        rows = conn.execute("SELECT datname FROM pg_database WHERE datname LIKE 'pl_cf_w1a_%'")
+        rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (PREFIX,))
         return sorted(r[0] for r in rows if DISPOSABLE_NAME.fullmatch(r[0]))

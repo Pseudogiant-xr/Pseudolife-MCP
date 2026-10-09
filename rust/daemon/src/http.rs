@@ -78,7 +78,12 @@ impl App {
 }
 
 pub fn json_response(status: u16, body: &Value) -> Response {
-    let bytes = serde_json::to_vec(body).expect("serializable");
+    // `json.dumps(payload, default=str)`, byte for byte (pyjson.rs).
+    let bytes = if crate::mutants::active("serde-json-writer") {
+        serde_json::to_vec(body).expect("serializable")
+    } else {
+        crate::pyjson::dumps(body).into_bytes()
+    };
     (
         StatusCode::from_u16(status).expect("valid status"),
         [

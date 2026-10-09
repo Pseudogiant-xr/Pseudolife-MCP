@@ -58,7 +58,7 @@ DB_DECLARED = [
 HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
                                "capacity_warning", "lesson_reconciliation_required"}
 NOT_IMPLEMENTED = "not_implemented"
-MUTANTS = ["skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
+MUTANTS = ["serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff"]
 
@@ -85,7 +85,7 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     ctype = hdrs.get("content-type", "")
     if ctype.startswith("application/json"):
         try:
-            payload = {"json": json.loads(raw)}
+            payload = {"json": json.loads(raw), "raw": raw.decode("utf-8")}
         except ValueError:
             payload = {"bytes": raw.decode("latin-1")}
     else:
@@ -120,7 +120,8 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
         body["db"] = "error: <free>"
     for key in ("init_refusal", "not_ready"):
         if isinstance(body.get(key), str):
-            body[key] = body[key][:40] + "<free>"
+            # The reason text is free (spec L); its kind, before the first ": ", is not.
+            body[key] = body[key].split(": ", 1)[0][:60] + ": <free>"
     emb = body.get("embedder")
     if isinstance(emb, dict) and set(emb) == {"backend", "device", "dtype"} \
             and emb["backend"] in ("torch", "onnx") and (emb["dtype"] is None or isinstance(emb["dtype"], str)):
@@ -157,6 +158,48 @@ def normalize_response(resp: dict, path: str, declared: list[str]) -> dict:
         if isinstance(err, str) and (" " in err or ":" in err):
             resp["json"]["error"] = "<free text>"
     return resp
+
+
+def _raw_tree(text: str):
+    """The body as written: objects as ordered pairs, numbers as their text."""
+    return json.loads(text, object_pairs_hook=lambda pairs: ("obj", pairs),
+                      parse_float=lambda t: ("num", t), parse_int=lambda t: ("num", t),
+                      parse_constant=lambda t: ("num", t))
+
+
+def _free(v) -> bool:
+    return isinstance(v, str) and v.startswith("<") and (">" in v)
+
+
+def raw_diffs(py: dict, rs: dict, normalized: dict) -> list[str]:
+    """What a by-value comparison cannot see: number spellings, key order
+    and ``ensure_ascii``, everywhere the normalized value is not free."""
+    if "raw" not in py or "raw" not in rs:
+        return []
+    out = []
+    if py["raw"].isascii() != rs["raw"].isascii():
+        out.append(f"raw: ensure_ascii differs (python ascii={py['raw'].isascii()}, rust ascii={rs['raw'].isascii()})")
+
+    def walk(a, b, n, path):
+        if _free(n):
+            return
+        if isinstance(n, dict) and isinstance(a, tuple) and a[0] == "obj" and isinstance(b, tuple) and b[0] == "obj":
+            ka = [k for k, _ in a[1] if k in n]
+            kb = [k for k, _ in b[1] if k in n]
+            if ka != kb:
+                out.append(f"raw {path}: key order python {ka} vs rust {kb}")
+            da, db = dict(a[1]), dict(b[1])
+            for k, v in n.items():
+                if k in da and k in db:
+                    walk(da[k], db[k], v, f"{path}.{k}")
+        elif isinstance(n, list) and isinstance(a, list) and isinstance(b, list):
+            for i, (x, y, m) in enumerate(zip(a, b, n)):
+                walk(x, y, m, f"{path}[{i}]")
+        elif isinstance(a, tuple) and a[0] == "num" and isinstance(b, tuple) and b[0] == "num":
+            if a[1] != b[1]:
+                out.append(f"raw {path}: number python {a[1]} vs rust {b[1]}")
+    walk(_raw_tree(py["raw"]), _raw_tree(rs["raw"]), normalized.get("json"), "")
+    return out
 
 
 def diff_values(a, b, path="") -> list[str]:
@@ -598,6 +641,16 @@ class SeededBank(Scenario):
                            capture_output=True, text=True, timeout=900)
         if r.returncode != 0:
             raise RuntimeError(f"seeding failed: {r.stderr[-2000:]}")
+        # Number spellings Python never writes but a bank can hold (another
+        # writer, a migration): jsonb keeps 1.10's scale and 1E2 as 100.
+        import psycopg
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(
+                "UPDATE entries SET slots = '[[\"daemon\", \"port\", 1.10, true], "
+                "[\"daemon\", \"ratio\", 2.50, true], [\"daemon\", \"hundred\", 1E2, true], "
+                "[\"daemon\", \"tiny\", 1e-7, true], [\"daemon\", \"huge\", 12345678901234567890, true], "
+                "[\"caf\u00e9\", \"note\", \"d\u00e9ploy\", true]]'::jsonb "
+                "WHERE text LIKE 'Deploy only via%'")
 
     def cases(self):
         auth = bearer(T_DEFAULT)
@@ -679,8 +732,8 @@ class DbLost(Scenario):
     def timeline(self, procs, holders):
         import psycopg
         out = []
-        dbs = [f"pl_cf_w1a_db_lost_{side}" for side in ("py", "rs")]
-        with psycopg.connect(pg.dsn("pl_cf_w1a_db_lost_t"), autocommit=True) as conn:
+        dbs = [f"{pg.PREFIX}db_lost_{side}" for side in ("py", "rs")]
+        with psycopg.connect(pg.dsn(f"{pg.PREFIX}db_lost_t"), autocommit=True) as conn:
             for db in dbs:
                 conn.execute(f'ALTER DATABASE "{db}" WITH ALLOW_CONNECTIONS false')
             try:
@@ -774,7 +827,11 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
         return row
     a = normalize_response(py, c["path"], declared)
     b = normalize_response(rs, c["path"], [])
+    a.pop("raw", None)
+    b.pop("raw", None)
     row["diffs"] = diff_values(a, b)
+    if not row["diffs"]:
+        row["diffs"] = raw_diffs(py, rs, a)
     row["declared_omissions"] = declared
     if row["diffs"]:
         row["raw"] = {"python": py, "rust": rs}
@@ -783,16 +840,16 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
 
 def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
-    template = f"pl_cf_w1a_{tag}_t"
+    template = f"{pg.PREFIX}{tag}_t"
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
     # The banks' state before either daemon touched them: declared writes and
     # clock values are judged against it, so changes to existing rows show.
     before = dbstate.dump(dsn_t)
-    dbs = {"python": f"pl_cf_w1a_{tag}_py", "rust": f"pl_cf_w1a_{tag}_rs"}
+    dbs = {"python": f"{pg.PREFIX}{tag}_py", "rust": f"{pg.PREFIX}{tag}_rs"}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     if scn.name == "db-down":
-        dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/pl_cf_w1a_down" for k in dsns}
+        dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/{pg.PREFIX}down" for k in dsns}
     procs = {}
     holders = take_leases(list(dsns.values())) if scn.hold_lease else []
     try:
@@ -884,7 +941,7 @@ def run_refusals(binary: Path, root: Path) -> list[dict]:
                 (home / "data" / extra).write_text('{"moved_to": "elsewhere", "move_id": "m1"}', encoding="utf-8")
             elif extra:
                 (home / "data" / "config.yaml").write_text(extra, encoding="utf-8")
-            e = daemons.base_env(home, common_env(Scenario(), "postgresql://nobody@127.0.0.1:9/pl_cf_w1a_none"))
+            e = daemons.base_env(home, common_env(Scenario(), f"postgresql://nobody@127.0.0.1:9/{pg.PREFIX}none"))
             e.update(env)
             port = daemons.free_port()
             d = (daemons.python_daemon(home, port, e) if side == "python"
@@ -931,6 +988,7 @@ def main() -> int:
     ap.add_argument("--record", action="store_true")
     ap.add_argument("--no-refusals", action="store_true")
     args = ap.parse_args()
+    args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
     names = args.only or list(SCENARIOS) + ["refusals"]
     unknown = [n for n in names if n not in SCENARIOS and n != "refusals"]

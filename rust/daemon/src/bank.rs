@@ -60,7 +60,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         // A NULL vector fails hydration (torch.as_tensor(None) in Python):
         // an ordinary error, recorded as not_ready.
         let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
-            anyhow::bail!("TypeError: entry {} has no embedding", r.get::<_, i64>(0));
+            anyhow::bail!("entry {} has no embedding", r.get::<_, i64>(0));
         };
         if emb.len() == DIM {
             normalize(&mut emb);
@@ -114,18 +114,16 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
     }
     for e in &entries {
         if e.stored_band != e.band {
-            let write = async {
-                client.batch_execute("BEGIN").await?;
-                client
-                    .execute(
-                        "UPDATE entries SET band = $1 WHERE id = $2",
-                        &[&e.band, &e.id],
-                    )
-                    .await?;
-                client.batch_execute("COMMIT").await
-            };
-            if let Err(err) = write.await {
-                let _ = client.batch_execute("ROLLBACK").await;
+            // Python wraps the one UPDATE in BEGIN/COMMIT; a single
+            // autocommit statement is the same atomic write, and leaves no
+            // transaction open on the shared session if this future is dropped.
+            if let Err(err) = client
+                .execute(
+                    "UPDATE entries SET band = $1 WHERE id = $2",
+                    &[&e.band, &e.id],
+                )
+                .await
+            {
                 eprintln!("band-stamp write-through failed for entry {}: {err}", e.id);
             }
         }

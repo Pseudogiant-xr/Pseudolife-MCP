@@ -11,6 +11,7 @@ mod health;
 mod http;
 mod mutants;
 mod principals;
+mod pyjson;
 mod routes;
 mod search;
 mod service;

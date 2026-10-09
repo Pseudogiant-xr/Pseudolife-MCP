@@ -283,7 +283,7 @@ fn slot_text(v: Option<&Value>) -> String {
     match v {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Null) | None => "None".into(),
-        Some(other) => other.to_string(),
+        Some(other) => crate::pyjson::py_str(other),
     }
 }
 
