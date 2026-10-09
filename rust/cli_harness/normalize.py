@@ -119,32 +119,39 @@ def episode_title_minute(obs: dict) -> None:
         request["body"] = _TITLE.sub(stamp, request["body"].encode()).decode()
 
 
-def episode_rows(rows: list[str], lo: float, hi: float, offset: int) -> list:
+def episode_rows(rows: list[str], run_start: float, case_start: float, case_end: float,
+                 offset: int, ids: dict[str, str]) -> list:
     """Episode and client-session rows from a bank, with generated values
-    replaced after validation: uuid4-hex episode ids by first-seen symbols,
-    wall-clock seconds inside [lo, hi] by ``<t>``, and title minutes inside
-    the same span by ``<minute>``. Anything that fails validation stays raw."""
+    replaced after validation: uuid4-hex episode ids by symbols first seen in
+    ``ids`` (shared across the case's tables), wall-clock seconds by
+    ``<t:case>`` when written during this case and ``<t:earlier>`` when
+    written by an earlier case of the run (so a refresh, or a missed one,
+    still shows), and title minutes inside the run by ``<minute>``. Anything
+    that fails validation stays raw."""
     import json as _json  # noqa: PLC0415
-    ids: dict[str, str] = {}
 
     def walk(value):
         if isinstance(value, dict):
             return {k: walk(v) for k, v in value.items()}
         if isinstance(value, list):
             return [walk(v) for v in value]
-        if isinstance(value, float) and lo - 1 <= value <= hi + 1:
-            return "<t>"
+        if isinstance(value, float):
+            # Same host clock on both sides; the arm's start is read before
+            # launch, so the lower bound is strict (arms run < 1 s apart).
+            if case_start <= value <= case_end + 0.5:
+                return "<t:case>"
+            if run_start - 1 <= value < case_start:
+                return "<t:earlier>"
         if isinstance(value, str):
             if re.fullmatch(r"[0-9a-f]{32}", value):
                 return ids.setdefault(value, f"<episode-{len(ids) + 1}>")
             match = re.fullmatch(r"(.* - )([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2})", value)
-            if match and _minute_in(match.group(2), lo, hi, offset):
+            if match and _minute_in(match.group(2), run_start, case_end, offset):
                 return match.group(1) + "<minute>"
         return value
     return [walk(_json.loads(row)) for row in rows]
 
 
-# Python's float repr for these magnitudes: digits, a point, digits.
 _LEGACY = re.compile(rb'"legacy_first_seen":([0-9]+\.[0-9]+)|"expires_at":([0-9]+\.[0-9]+)')
 
 
