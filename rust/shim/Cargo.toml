@@ -46,6 +46,8 @@ bytes.workspace = true
 yaml-rust2.workspace = true
 regex-lite.workspace = true
 serde_stacker.workspace = true
+flate2.workspace = true
+tar.workspace = true
 stacker.workspace = true
 toml.workspace = true
 
