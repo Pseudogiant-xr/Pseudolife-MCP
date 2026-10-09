@@ -35,3 +35,6 @@ tokenizers = { version = "=0.21.4", default-features = false, features = ["fancy
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

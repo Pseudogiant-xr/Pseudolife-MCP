@@ -1038,6 +1038,8 @@ class StaticPaths(StaticBuild):
                   "/ui/C:index.html", "/ui/C:%5c__pl_http_outside%5cfile",
                   "/ui/%5c%5c127.0.0.1%5cpl_http_missing_share%5cfile",
                   "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
+        paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
+                  "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
         if os.name != "nt":
             paths += ["/ui/notice.js", "/ui/loop-a", "/ui/unreadable.txt",
                       "/ui/linked-index", "/ui/linked-index/index.html"]
@@ -1047,6 +1049,8 @@ class StaticPaths(StaticBuild):
             for c in out:
                 if c["path"] == "/ui/C:index.html":
                     c["refusal_policy"] = "lexical-outside-root"
+                if "..%20/" in c["path"]:
+                    c["refusal_policy"] = "parent-space-refusal"
         else:
             for c in out:
                 if c["path"] == "/ui/linked-index":
@@ -1154,7 +1158,7 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
-    if c.get("refusal_policy") in {"lexical-outside-root", "directory-index-containment"}:
+    if c.get("refusal_policy") in {"lexical-outside-root", "directory-index-containment", "parent-space-refusal"}:
         sys.path.insert(0, str(REPO))
         from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
         headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}

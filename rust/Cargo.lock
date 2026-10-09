@@ -1706,6 +1706,7 @@ dependencies = [
  "chrono",
  "form_urlencoded",
  "hex",
+ "libc",
  "ndarray",
  "ort",
  "percent-encoding",

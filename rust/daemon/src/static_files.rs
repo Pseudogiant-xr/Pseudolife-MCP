@@ -28,18 +28,16 @@ pub struct Served {
 fn guess_type(path: &Path) -> Option<String> {
     #[cfg(windows)]
     let platform = registry_type;
-    #[cfg(not(windows))]
-    let platform = |ext: &str| {
-        if ext == "webp" {
-            Some("image/webp".into())
-        } else {
-            #[cfg(target_os = "linux")]
-            return markdown_type(Path::new("/etc/mime.types"));
-            #[cfg(not(target_os = "linux"))]
-            None
-        }
-    };
+    #[cfg(target_os = "linux")]
+    let platform = |ext: &str| linux_type(ext, Path::new("/etc/mime.types"));
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let platform = |_: &str| None;
     guess_type_with(path, platform)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_type(ext: &str, table: &Path) -> Option<String> {
+    table_type(table, ext)
 }
 
 fn guess_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> Option<String> {
@@ -118,16 +116,15 @@ fn registry_type(ext: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Only the shipped vendor notice needs the system MIME table. Preserve
-/// its absence and last mapping; unshipped extensions remain deferred.
+/// Optional shipped types use the system table's last mapping, or absence.
 #[cfg(target_os = "linux")]
-fn markdown_type(path: &Path) -> Option<String> {
+fn table_type(path: &Path, extension: &str) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut found = None;
     for line in text.lines() {
         let mut fields = line.split('#').next().unwrap_or("").split_whitespace();
         if let Some(kind) = fields.next()
-            && fields.any(|ext| ext == "md")
+            && fields.any(|ext| ext == extension)
         {
             found = Some(kind.to_string());
         }
@@ -218,16 +215,24 @@ fn forbidden() -> Served {
 fn metadata(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
     match std::fs::metadata(path) {
         Ok(meta) => Ok(Some(meta)),
-        Err(e)
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            Ok(None)
-        }
+        Err(e) if missing_metadata_error(&e) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+fn missing_metadata_error(error: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    let ignored = matches!(error.raw_os_error(), Some(21 | 123 | 1921));
+    #[cfg(unix)]
+    let ignored = matches!(error.raw_os_error(), Some(libc::EBADF | libc::ELOOP));
+    #[cfg(not(any(windows, unix)))]
+    let ignored = false;
+    // pathlib's is_file/is_dir ignore these OS errors, but not EACCES.
+    ignored
+        || matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+        )
 }
 
 /// `_serve_static(path)`: `path` is the full request path (`/ui/...`).
@@ -243,6 +248,14 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
     if rel.contains('\0') {
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
+    }
+    #[cfg(windows)]
+    if rel
+        .split(['/', '\\'])
+        .any(|part| part != ".." && part.trim_end_matches(' ') == "..")
+        && !crate::mutants::active("static-traversal-open")
+    {
+        return Ok(forbidden());
     }
     let original_root = lexical_path(&std::env::current_dir()?.join(root));
     let joined = original_root.join(rel);
@@ -313,6 +326,46 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_absence_preserves_pathlib_error_classes() {
+        #[cfg(windows)]
+        let codes = [21, 123, 1921];
+        #[cfg(unix)]
+        let codes = [libc::EBADF, libc::ELOOP];
+        for code in codes {
+            assert!(
+                missing_metadata_error(&std::io::Error::from_raw_os_error(code)),
+                "{code}"
+            );
+        }
+        assert!(!missing_metadata_error(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
+        assert!(!missing_metadata_error(&std::io::Error::other(
+            "not absence"
+        )));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_webp_uses_missing_unmapped_and_last_mapping() {
+        let root = tree("webp-mime");
+        let table = root.join("mime.types");
+        assert_eq!(linux_type("webp", &table), None);
+        std::fs::write(&table, "image/png png # webp\n").unwrap();
+        assert_eq!(linux_type("webp", &table), None);
+        std::fs::write(
+            &table,
+            "image/webp webp\napplication/octet-stream webp # last\n",
+        )
+        .unwrap();
+        assert_eq!(
+            linux_type("webp", &table).as_deref(),
+            Some("application/octet-stream")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn webp_mapping_can_be_absent() {
@@ -408,15 +461,15 @@ mod tests {
     fn markdown_table_missing_unmapped_and_last_mapping() {
         let root = tree("mime");
         let table = root.join("mime.types");
-        assert_eq!(markdown_type(&table), None);
+        assert_eq!(table_type(&table, "md"), None);
         std::fs::write(&table, "text/plain txt # md\n").unwrap();
-        assert_eq!(markdown_type(&table), None);
+        assert_eq!(table_type(&table, "md"), None);
         std::fs::write(
             &table,
             "text/markdown md markdown\ntext/x-markdown md # last\n",
         )
         .unwrap();
-        assert_eq!(markdown_type(&table).as_deref(), Some("text/x-markdown"));
+        assert_eq!(table_type(&table, "md").as_deref(), Some("text/x-markdown"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }
