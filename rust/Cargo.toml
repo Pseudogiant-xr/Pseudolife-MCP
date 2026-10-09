@@ -48,3 +48,4 @@ yaml-rust2 = { version = "=0.13.0", default-features = false }
 regex-lite = "=0.1.9"
 serde_stacker = "=0.1.14"
 stacker = "=0.1.25"
+toml = { version = "=0.8.2", default-features = false, features = ["parse"] }
