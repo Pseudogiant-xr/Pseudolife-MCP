@@ -99,6 +99,12 @@ fn not_superseded_digest(e: &Entry) -> bool {
     !(e.source == "digest" && e.superseded_at.is_some())
 }
 
+/// A `REAL` column as psycopg hands it to Python: the float of its shortest
+/// decimal text (`0.42048538`), not the exact widening of the f32.
+pub fn py_real(x: f32) -> f64 {
+    format!("{x}").parse().unwrap_or(x as f64)
+}
+
 /// `_recency_weight` (cms.py:2878).
 fn recency_weight(now: f64, ts: f64, half_life: f64) -> f64 {
     let age = (now - ts).max(0.0);
@@ -223,7 +229,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                     obj(json!({
                         "channel": "dense", "dense": score, "recency": recency,
                         "recency_boost": boost, "source_mult": src,
-                        "supersession_mult": sup, "surprise": e.surprise as f64,
+                        "supersession_mult": sup, "surprise": py_real(e.surprise),
                         "band": name, "band_depth": depth,
                     })),
                 );
