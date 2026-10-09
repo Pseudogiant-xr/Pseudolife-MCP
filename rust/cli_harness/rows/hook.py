@@ -341,7 +341,10 @@ MUTANTS = [
     Mutant("hook-first-address-only", "hook", "shim/src/cli/hook_http.rs",
            "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()? {",
            "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()?.take(1) {",
-           ("briefing-hook-json-localhost",)),
+           ("briefing-hook-json-localhost",),
+           # Linux resolves localhost to 127.0.0.1 first; only Windows
+           # (::1 first) exercises the fallback to the next address.
+           platforms=("windows",)),
     Mutant("hook-whole-reply-budget", "hook", "shim/src/cli/hook_http.rs",
            "            Poll::Ready(result) => {\n                this.read = None;\n",
            "            Poll::Ready(result) => {\n",

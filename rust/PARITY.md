@@ -677,7 +677,8 @@ the Windows registry) are not consulted (deferred; no shipped producer sets
 a proxy for the daemon URL).
 Nine source mutants (cap order, hook event name, dropped bearer, first
 address only, whole-reply read budget, redirect repeat limit, unsaved cursor,
-dropped `since`, inverted receipt match) are each caught. Not covered:
+dropped `since`, inverted receipt match) are each caught (first-address-only
+on Windows only, where `localhost` resolves `::1` first). Not covered:
 Windows symlink parents,
 POSIX distinct real/effective UID and empty HOME, briefing's own output
 failure (a declared substitution), non-UTF-8 locale output encoding (the
