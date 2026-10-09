@@ -333,8 +333,9 @@ def body_limit(port):
            norm(request(port, "POST", edge + b" ", s._headers())),
            norm(request(port, "POST", big, JSON_HDRS + auth + [("mcp-session-id", "deadbeef" * 4)])),
            norm(request(port, "GET", None, auth + [("Content-Length", "9999999")])),
-           norm(request(port, "GET", None, auth + [("Content-Length", " 9999999 ")])),
-           norm(request(port, "GET", None, auth + [("Content-Length", "x9")]))]
+           norm(request(port, "GET", None, auth + [("Content-Length", " 9999999 ")]))]
+    # A malformed Content-Length is refused by the HTTP parser (uvicorn vs
+    # hyper) before any application code: declared, not compared.
     s.close()
     return out
 
