@@ -10,6 +10,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 |---|---|
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
 | `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
 | `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
 | `harness/` | The differential harness, its goldens and helpers |
 
@@ -45,3 +46,20 @@ the same moment and are live-only. It checks bank state only where the bank
 starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
+
+The graph-store boundary uses the same disposable-bank and state helpers:
+
+```bash
+cargo build --manifest-path rust/Cargo.toml --bin graph-contract --features graph-harness,mutants -j 3
+python rust/daemon/harness/graph_store.py live --candidate <graph-contract> --out graph-live.json
+python rust/daemon/harness/graph_store.py golden --candidate <graph-contract>
+python rust/daemon/harness/graph_store.py mutants --candidate <graph-contract> --out graph-mutants.json
+```
+
+It compares every response and all bank state after each operation. Clocks
+are checked in each arm's operation window and keep their change identity;
+stored REAL responses use PostgreSQL's text-format spelling like Psycopg.
+Goldens retain all-row and sequence digests; catalogs must remain unchanged
+within each arm, and live mode also compares them across arms. The fixture
+binary is available only with `graph-harness`; it has no model or HTTP server.
+These are store APIs for subsequent services, not installed graph routes.

@@ -1,0 +1,1697 @@
+{
+ "operations": [
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "load_relations"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "missing"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "first"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "display": "Changed",
+   "etype": "service"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "etype": "person"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "node-b",
+   "entity_id": 1
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-b"
+  },
+  {
+   "op": "entity_id_map"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "z-last",
+   "entity_id": 1
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "first",
+   "entity_id": 2
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "first"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-a"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "custom",
+   "description": "new",
+   "transitive": true,
+   "inverse_of": "uses"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "custom",
+   "description": "updated",
+   "src_type": "service"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "uses",
+   "description": "updated builtin",
+   "dst_type": "runtime"
+  },
+  {
+   "op": "load_relations"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.65,
+   "origin": "user"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1,
+   "origin": "agent"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.95,
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1,
+   "origin": "agent",
+   "revive": false
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "action"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    2,
+    999
+   ],
+   "revive": false
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    1,
+    2,
+    1
+   ],
+   "origin": "agent",
+   "revive": false
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    1
+   ],
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "other"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "new-other"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "user"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 3
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 3
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 1,
+   "into_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-a"
+  },
+  {
+   "op": "entity_id_map"
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 2,
+   "into_id": 2
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 1,
+   "into_id": 3
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 2,
+   "into_id": 999
+  },
+  {
+   "op": "delete_entity",
+   "entity_id": 2
+  },
+  {
+   "op": "delete_entity",
+   "entity_id": 2
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "display": "Node A"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-b",
+   "display": "Node B"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "g",
+   "display": "G:"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "alphabeta"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "\u03bf\u03c2",
+   "display": "\u039f\u03a3"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "100%-done",
+   "display": "100%_done"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "",
+   "display": ""
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "g"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "bad",
+   "entity_id": 999
+  },
+  {
+   "op": "upsert_relation",
+   "name": "bad-relation",
+   "description": "invalid",
+   "inverse_of": "missing"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 999,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "load_relations"
+  }
+ ],
+ "cases": [
+  {
+   "index": 0,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     },
+     "edges": []
+    }
+   },
+   "state_sha256": "b99c509cd58a9a07d25f69b10ee4624175ee62005f820c3c3a49a4bf84d86656",
+   "diffs": []
+  },
+  {
+   "index": 1,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "src makes use of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "b99c509cd58a9a07d25f69b10ee4624175ee62005f820c3c3a49a4bf84d86656",
+   "diffs": []
+  },
+  {
+   "index": 2,
+   "op": "find_entity",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "b99c509cd58a9a07d25f69b10ee4624175ee62005f820c3c3a49a4bf84d86656",
+   "diffs": []
+  },
+  {
+   "index": 3,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 1,
+     "canonical": "node-a",
+     "display": "Node A",
+     "etype": null,
+     "created_at": 1.0,
+     "aliases": [
+      "first"
+     ]
+    }
+   },
+   "state_sha256": "b99c509cd58a9a07d25f69b10ee4624175ee62005f820c3c3a49a4bf84d86656",
+   "diffs": []
+  },
+  {
+   "index": 4,
+   "op": "ensure_entity",
+   "response": {
+    "value": 1
+   },
+   "state_sha256": "faf3f53a374e028aa04dea687f3f8b0d2ed760cdaa331430b42ce30ac6390b0f",
+   "diffs": []
+  },
+  {
+   "index": 5,
+   "op": "ensure_entity",
+   "response": {
+    "value": 1
+   },
+   "state_sha256": "bd3d75980cff98222b335641079655507cc62719656c69891162042631ea9901",
+   "diffs": []
+  },
+  {
+   "index": 6,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "b2bbaf210a5bc93154d3b17769b05abf41abe1694eea6e0c9334f674c5c5d2e9",
+   "diffs": []
+  },
+  {
+   "index": 7,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": []
+    }
+   },
+   "state_sha256": "b2bbaf210a5bc93154d3b17769b05abf41abe1694eea6e0c9334f674c5c5d2e9",
+   "diffs": []
+  },
+  {
+   "index": 8,
+   "op": "entity_id_map",
+   "response": {
+    "value": {
+     "first": 1,
+     "node-b": 2,
+     "node-c": 3,
+     "node-a": 1
+    }
+   },
+   "state_sha256": "b2bbaf210a5bc93154d3b17769b05abf41abe1694eea6e0c9334f674c5c5d2e9",
+   "diffs": []
+  },
+  {
+   "index": 9,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "2f8a8c7a7c1882fd8f259ab3cc9a56e116f218401f7975ee620f02b8a976cc06",
+   "diffs": []
+  },
+  {
+   "index": 10,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "7321eb155e948a9134d15fd1ee92a121bce12c4db8e85a09690ecde82e07341b",
+   "diffs": []
+  },
+  {
+   "index": 11,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": [
+      "first"
+     ]
+    }
+   },
+   "state_sha256": "7321eb155e948a9134d15fd1ee92a121bce12c4db8e85a09690ecde82e07341b",
+   "diffs": []
+  },
+  {
+   "index": 12,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 1,
+     "canonical": "node-a",
+     "display": "Node A",
+     "etype": "service",
+     "created_at": 1.0,
+     "aliases": [
+      "node-b",
+      "z-last"
+     ]
+    }
+   },
+   "state_sha256": "7321eb155e948a9134d15fd1ee92a121bce12c4db8e85a09690ecde82e07341b",
+   "diffs": []
+  },
+  {
+   "index": 13,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "738ee5b7242c962df58f19b72d18b10dd0c2c7b5ce06cf5fb077727cd8c028d8",
+   "diffs": []
+  },
+  {
+   "index": 14,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "9e01d21a9e2027f36f207465040c5ddbfbc0bcbda4c7b7d664372419e944b141",
+   "diffs": []
+  },
+  {
+   "index": 15,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "696eccf1d8547e216ac6396cc97671d979a3d59939e39b15169abc819e20f5eb",
+   "diffs": []
+  },
+  {
+   "index": 16,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "custom",
+      "description": "updated",
+      "src_type": "service",
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": false
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "updated builtin",
+      "src_type": null,
+      "dst_type": "runtime",
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "696eccf1d8547e216ac6396cc97671d979a3d59939e39b15169abc819e20f5eb",
+   "diffs": []
+  },
+  {
+   "index": 17,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.65
+    }
+   },
+   "state_sha256": "6000a42a0e083a46cc5aab23de0869c51b695367cb98148d479cbb5b0bc0984b",
+   "diffs": []
+  },
+  {
+   "index": 18,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.7
+    }
+   },
+   "state_sha256": "50543183a997e406397f8f7d07be44234f2ae88038aedde874ece26502fb3147",
+   "diffs": []
+  },
+  {
+   "index": 19,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.95
+    }
+   },
+   "state_sha256": "9ce6c947dd7ca564eb4d5789938e8cb464764613d42b18aad637111316149d7d",
+   "diffs": []
+  },
+  {
+   "index": 20,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "4e1b11a1aea45232e4b74a172ff28d09e4745815b91d4818efdd0cb70289c92d",
+   "diffs": []
+  },
+  {
+   "index": 21,
+   "op": "supersede_edge",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "f283d7269c2e4627159df918eed82eae07362dfe8c4d1a5a9ab9f78c9fbd1969",
+   "diffs": []
+  },
+  {
+   "index": 22,
+   "op": "supersede_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "f283d7269c2e4627159df918eed82eae07362dfe8c4d1a5a9ab9f78c9fbd1969",
+   "diffs": []
+  },
+  {
+   "index": 23,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "6ffa9ce50deee41ca76ae5830358f7b328bc332fabd197eb97c679f08bca55af",
+   "diffs": []
+  },
+  {
+   "index": 24,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": "service",
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first"
+      ],
+      "1": [
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": []
+    }
+   },
+   "state_sha256": "6ffa9ce50deee41ca76ae5830358f7b328bc332fabd197eb97c679f08bca55af",
+   "diffs": []
+  },
+  {
+   "index": 25,
+   "op": "bless_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "6ffa9ce50deee41ca76ae5830358f7b328bc332fabd197eb97c679f08bca55af",
+   "diffs": []
+  },
+  {
+   "index": 26,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "ca1495b03dbf1cd40d4b32c492a7a543cebe3cf3d707887a3fee56eb3e14a151",
+   "diffs": []
+  },
+  {
+   "index": 27,
+   "op": "bless_edge",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "224cdeb8358053b0f2aec1fa226262a345f7b8fb5fbb2d7833b12c51a6fed89b",
+   "diffs": []
+  },
+  {
+   "index": 28,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": "service",
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first"
+      ],
+      "1": [
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": [
+      {
+       "id": 1,
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.99,
+       "origin": "user",
+       "asserted_at": "<clock:27>"
+      }
+     ]
+    }
+   },
+   "state_sha256": "224cdeb8358053b0f2aec1fa226262a345f7b8fb5fbb2d7833b12c51a6fed89b",
+   "diffs": []
+  },
+  {
+   "index": 29,
+   "op": "bless_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "224cdeb8358053b0f2aec1fa226262a345f7b8fb5fbb2d7833b12c51a6fed89b",
+   "diffs": []
+  },
+  {
+   "index": 30,
+   "op": "supersede_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "224cdeb8358053b0f2aec1fa226262a345f7b8fb5fbb2d7833b12c51a6fed89b",
+   "diffs": []
+  },
+  {
+   "index": 31,
+   "op": "upsert_edge",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "224cdeb8358053b0f2aec1fa226262a345f7b8fb5fbb2d7833b12c51a6fed89b",
+   "diffs": []
+  },
+  {
+   "index": 32,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "d56448db7249517a0cc39c0a0e9955b778201f58002f302f251d245e75e6705c",
+   "diffs": []
+  },
+  {
+   "index": 33,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.85
+    }
+   },
+   "state_sha256": "fe84908ece8c67dcd18b7f63675d298c31fc161ce5844ef02991a3850b7c3fda",
+   "diffs": []
+  },
+  {
+   "index": 34,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.90000004
+    }
+   },
+   "state_sha256": "99216ae0074763ba449bc419dd30bf47ea15a649740b0155c951c44d32d46fff",
+   "diffs": []
+  },
+  {
+   "index": 35,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.95000005
+    }
+   },
+   "state_sha256": "b3a839786ab5aa2dc86bc3b86df38117c051011cf10cf0ddf5e8c9885d78dfbf",
+   "diffs": []
+  },
+  {
+   "index": 36,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "b1d247dee0d7a297e67be090662ea74e4c5260f1d147b77fb80d720b1b913965",
+   "diffs": []
+  },
+  {
+   "index": 37,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "782dae85d12aa49ef689685437bdf1ff774b3d79cea406ac1ec67b995f9e02cd",
+   "diffs": []
+  },
+  {
+   "index": 38,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 13,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "d1c6c9eb7fc5501ab20733b2f5fd1fcb42779441f85eba2d7ceb1fed0484e2cc",
+   "diffs": []
+  },
+  {
+   "index": 39,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 14,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "4cc4b15b22156eeeca967d444a6e8142659eba92a27cc06cdc84937d633de33a",
+   "diffs": []
+  },
+  {
+   "index": 40,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 15,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "d4a5179b223b4a5553b585987f3542cc7c3218bd1108454e52513c319d2ee479",
+   "diffs": []
+  },
+  {
+   "index": 41,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 16,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "c669138969b4d1c5bd2d2ab2889b0b44ae6e182392a34fecc6989e1c66680b06",
+   "diffs": []
+  },
+  {
+   "index": 42,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 17,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "033eb4b5e49b40be9d8ef27870695088a02b2a13c28dbc0e64944249fb3abf74",
+   "diffs": []
+  },
+  {
+   "index": 43,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 18,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "a12dde24d781e12050b58b5d5e1d8a4921104c7d2fe6ed4839d1d3c3ffacefd2",
+   "diffs": []
+  },
+  {
+   "index": 44,
+   "op": "merge_entity",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 45,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first",
+       "node-a",
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": [
+      {
+       "id": 7,
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.99,
+       "origin": "user",
+       "asserted_at": "<clock:37>"
+      },
+      {
+       "id": 13,
+       "src_id": 2,
+       "relation": "uses",
+       "dst_id": 3,
+       "confidence": 0.8,
+       "origin": null,
+       "asserted_at": "<clock:38>"
+      },
+      {
+       "id": 17,
+       "src_id": 2,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "asserted_at": "<clock:42>"
+      }
+     ]
+    }
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 46,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": [
+      "first",
+      "node-a",
+      "node-b",
+      "z-last"
+     ]
+    }
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 47,
+   "op": "entity_id_map",
+   "response": {
+    "value": {
+     "first": 2,
+     "node-a": 2,
+     "node-b": 2,
+     "z-last": 2,
+     "node-c": 3
+    }
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 48,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 49,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 50,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "ca419caed018f77cdef075ebb3e9ee8ebf6f4ad3c2e031f018e4e8c1e34fce30",
+   "diffs": []
+  },
+  {
+   "index": 51,
+   "op": "delete_entity",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "e546b62f79c6eeb9ff2a0706396306c3d709f82663c54bb0df433c55926242c3",
+   "diffs": []
+  },
+  {
+   "index": 52,
+   "op": "delete_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "e546b62f79c6eeb9ff2a0706396306c3d709f82663c54bb0df433c55926242c3",
+   "diffs": []
+  },
+  {
+   "index": 53,
+   "op": "ensure_entity",
+   "response": {
+    "value": 6
+   },
+   "state_sha256": "2c909ce78b092304a05ef7bd6ea09f4c4c84180b6c3cb2fc1dbd83c28e6177a5",
+   "diffs": []
+  },
+  {
+   "index": 54,
+   "op": "ensure_entity",
+   "response": {
+    "value": 7
+   },
+   "state_sha256": "242b17275f68578b9a42e10880a25d60cf4250ed8dd298aa0ff0a8bd7b29fcb5",
+   "diffs": []
+  },
+  {
+   "index": 55,
+   "op": "ensure_entity",
+   "response": {
+    "value": 8
+   },
+   "state_sha256": "0e83402de0683c06c7fa464586d738d0e7db78f72d99865d2288c036f2d2fe87",
+   "diffs": []
+  },
+  {
+   "index": 56,
+   "op": "ensure_entity",
+   "response": {
+    "value": 9
+   },
+   "state_sha256": "b0529aedb7661763780fdf9b3d3006440f2fea497628fec1da89333b13e12477",
+   "diffs": []
+  },
+  {
+   "index": 57,
+   "op": "ensure_entity",
+   "response": {
+    "value": 10
+   },
+   "state_sha256": "2828ecda63615638648b2d2bd078a24093406685e3513d7fec944b0fa63b2465",
+   "diffs": []
+  },
+  {
+   "index": 58,
+   "op": "ensure_entity",
+   "response": {
+    "value": 11
+   },
+   "state_sha256": "31315f8727c72a6af51071f7ae0ad595327eea53ec1258c7180f0a930dc8f249",
+   "diffs": []
+  },
+  {
+   "index": 59,
+   "op": "ensure_entity",
+   "response": {
+    "value": 12
+   },
+   "state_sha256": "682a3a8c3ba79486776e53183fea95380c0da758d1bab0e2ecbfc0605f8c6f36",
+   "diffs": []
+  },
+  {
+   "index": 60,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 6,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": "<clock:53>"
+      },
+      {
+       "id": 7,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": null,
+       "created_at": "<clock:54>"
+      },
+      {
+       "id": 8,
+       "canonical": "g",
+       "display": "G:",
+       "etype": null,
+       "created_at": "<clock:55>"
+      },
+      {
+       "id": 9,
+       "canonical": "alphabeta",
+       "display": "alphabeta",
+       "etype": null,
+       "created_at": "<clock:56>"
+      },
+      {
+       "id": 10,
+       "canonical": "\u03bf\u03c2",
+       "display": "\u039f\u03a3",
+       "etype": null,
+       "created_at": "<clock:57>"
+      },
+      {
+       "id": 11,
+       "canonical": "100%-done",
+       "display": "100%_done",
+       "etype": null,
+       "created_at": "<clock:58>"
+      },
+      {
+       "id": 12,
+       "canonical": "",
+       "display": "",
+       "etype": null,
+       "created_at": "<clock:59>"
+      }
+     ],
+     "aliases": {},
+     "edges": []
+    }
+   },
+   "state_sha256": "682a3a8c3ba79486776e53183fea95380c0da758d1bab0e2ecbfc0605f8c6f36",
+   "diffs": []
+  },
+  {
+   "index": 61,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 8,
+     "canonical": "g",
+     "display": "G:",
+     "etype": null,
+     "created_at": "<clock:55>",
+     "aliases": []
+    }
+   },
+   "state_sha256": "682a3a8c3ba79486776e53183fea95380c0da758d1bab0e2ecbfc0605f8c6f36",
+   "diffs": []
+  },
+  {
+   "index": 62,
+   "op": "add_alias",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "682a3a8c3ba79486776e53183fea95380c0da758d1bab0e2ecbfc0605f8c6f36",
+   "diffs": []
+  },
+  {
+   "index": 63,
+   "op": "upsert_relation",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "682a3a8c3ba79486776e53183fea95380c0da758d1bab0e2ecbfc0605f8c6f36",
+   "diffs": []
+  },
+  {
+   "index": 64,
+   "op": "upsert_edge",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "4fb7cec205ea389067c8a8fbf072721bb32a8e612b8bc623dccb3c0a939eaf15",
+   "diffs": []
+  },
+  {
+   "index": 65,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 6,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": "<clock:53>"
+      },
+      {
+       "id": 7,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": null,
+       "created_at": "<clock:54>"
+      },
+      {
+       "id": 8,
+       "canonical": "g",
+       "display": "G:",
+       "etype": null,
+       "created_at": "<clock:55>"
+      },
+      {
+       "id": 9,
+       "canonical": "alphabeta",
+       "display": "alphabeta",
+       "etype": null,
+       "created_at": "<clock:56>"
+      },
+      {
+       "id": 10,
+       "canonical": "\u03bf\u03c2",
+       "display": "\u039f\u03a3",
+       "etype": null,
+       "created_at": "<clock:57>"
+      },
+      {
+       "id": 11,
+       "canonical": "100%-done",
+       "display": "100%_done",
+       "etype": null,
+       "created_at": "<clock:58>"
+      },
+      {
+       "id": 12,
+       "canonical": "",
+       "display": "",
+       "etype": null,
+       "created_at": "<clock:59>"
+      }
+     ],
+     "aliases": {},
+     "edges": []
+    }
+   },
+   "state_sha256": "4fb7cec205ea389067c8a8fbf072721bb32a8e612b8bc623dccb3c0a939eaf15",
+   "diffs": []
+  },
+  {
+   "index": 66,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "custom",
+      "description": "updated",
+      "src_type": "service",
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": false
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "updated builtin",
+      "src_type": null,
+      "dst_type": "runtime",
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "4fb7cec205ea389067c8a8fbf072721bb32a8e612b8bc623dccb3c0a939eaf15",
+   "diffs": []
+  }
+ ],
+ "normalizers": "ClockState in graph_store.py; operation-specific windows; JSON object order free"
+}

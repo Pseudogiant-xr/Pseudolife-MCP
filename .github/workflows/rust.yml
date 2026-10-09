@@ -207,12 +207,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: Graph store differential and recorded oracle
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          cargo build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --bin graph-contract --features graph-harness -j 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
+          python rust/daemon/harness/test_graph_store_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
+          exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
-          path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          path: |
+            ${{ runner.temp }}/rust-eval-harness.junit.xml
+            ${{ runner.temp }}/graph-store-live.json
+            ${{ runner.temp }}/graph-store-golden.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         timeout-minutes: 15

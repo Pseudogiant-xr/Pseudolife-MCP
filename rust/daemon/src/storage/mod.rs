@@ -14,6 +14,7 @@
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
+pub mod graph;
 pub mod schema;
 
 use std::sync::Mutex;
@@ -645,6 +646,11 @@ impl Storage {
     /// The writer session, for later slices.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Exclusive access for a transaction spanning a graph mutation.
+    pub fn client_mut(&mut self) -> &mut Client {
+        &mut self.client
     }
 
     /// `close()`: end the session and wait until the connection task has
