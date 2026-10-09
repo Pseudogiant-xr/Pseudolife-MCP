@@ -27,8 +27,8 @@ def collect(count):
               "--status", "completed", "--limit", str(count), "--json",
               "databaseId,headSha,event,conclusion,createdAt,url")
     for run in runs:
-        run["jobs"] = gh("run", "view", str(run["databaseId"]), "--repo", REPOSITORY,
-                         "--json", "jobs")["jobs"]
+        run.update(gh("run", "view", str(run["databaseId"]), "--repo", REPOSITORY,
+                      "--json", "jobs,attempt,startedAt"))
         for job in run["jobs"]:
             job.pop("databaseId", None)
             for step in job["steps"]:
@@ -45,7 +45,12 @@ def summarize(artifact):
         active = [job for job in run["jobs"] if job["conclusion"] == "success"]
         if not active:
             continue
-        walls.append(seconds(run["createdAt"], max(job["completedAt"] for job in active)))
+        start = run["startedAt"]
+        if run["attempt"] > 1 and seconds(run["createdAt"], start) <= 0:
+            raise ValueError("retry has no distinct attempt start")
+        if any(seconds(start, job["startedAt"]) < 0 for job in active):
+            raise ValueError("job timestamps precede the selected attempt")
+        walls.append(seconds(start, max(job["completedAt"] for job in active)))
         for job in active:
             jobs[job["name"]].append(seconds(job["startedAt"], job["completedAt"]))
             for step in job["steps"]:

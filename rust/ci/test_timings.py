@@ -13,7 +13,8 @@ spec.loader.exec_module(timings)
 
 
 def test_failed_runs_and_skipped_steps_do_not_reduce_the_median():
-    run = {"conclusion": "success", "createdAt": "2026-10-10T00:00:00Z", "jobs": [
+    run = {"conclusion": "success", "attempt": 1,
+           "createdAt": "2026-10-10T00:00:00Z", "startedAt": "2026-10-10T00:00:00Z", "jobs": [
         {"name": "Rust / ubuntu-latest", "conclusion": "success",
          "startedAt": "2026-10-10T00:00:10Z", "completedAt": "2026-10-10T00:01:10Z",
          "steps": [{"name": "Nextest", "conclusion": "success",
@@ -34,3 +35,23 @@ def test_failed_runs_and_skipped_steps_do_not_reduce_the_median():
 def test_no_success_is_not_a_zero_time_speedup():
     with pytest.raises(ValueError, match="no successful runs"):
         timings.summarize({"runs": [{"conclusion": "failure"}]})
+
+
+def test_retry_wall_does_not_include_the_previous_day():
+    artifact = {"runs": [{"conclusion": "success", "attempt": 2,
+                         "createdAt": "2026-10-09T00:00:00Z",
+                         "startedAt": "2026-10-10T00:00:00Z", "jobs": [
+        {"name": "Rust / ubuntu-latest", "conclusion": "success",
+         "startedAt": "2026-10-10T00:00:10Z", "completedAt": "2026-10-10T00:05:00Z",
+         "steps": []}]}]}
+    assert timings.summarize(artifact)["wall_median_seconds"] == 300
+
+
+def test_retry_without_an_attempt_start_is_refused():
+    artifact = {"runs": [{"conclusion": "success", "attempt": 2,
+                         "createdAt": "2026-10-09T00:00:00Z",
+                         "startedAt": "2026-10-09T00:00:00Z", "jobs": [
+        {"name": "Rust", "conclusion": "success", "startedAt": "2026-10-10T00:00:10Z",
+         "completedAt": "2026-10-10T00:05:00Z", "steps": []}]}]}
+    with pytest.raises(ValueError, match="distinct attempt start"):
+        timings.summarize(artifact)

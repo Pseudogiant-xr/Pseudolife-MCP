@@ -370,7 +370,9 @@
           "steps": [],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37966656849/job/113945815925"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T17:29:39Z"
     },
     {
       "conclusion": "success",
@@ -1017,7 +1019,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37957602491/job/113916633199"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T16:13:57Z"
     },
     {
       "conclusion": "success",
@@ -1664,7 +1668,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37952979526/job/113900056354"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T15:36:21Z"
     },
     {
       "conclusion": "failure",
@@ -2325,7 +2331,9 @@
           "steps": [],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37952726143/job/113912100368"
         }
-      ]
+      ],
+      "attempt": 2,
+      "startedAt": "2026-10-09T16:14:04Z"
     },
     {
       "conclusion": "success",
@@ -2972,7 +2980,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37951567358/job/113896239149"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T15:25:01Z"
     },
     {
       "conclusion": "success",
@@ -3619,7 +3629,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37937333546/job/113847025679"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T13:30:32Z"
     },
     {
       "conclusion": "success",
@@ -4266,7 +4278,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37932590137/job/113831072105"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T12:49:34Z"
     },
     {
       "conclusion": "failure",
@@ -4913,7 +4927,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37926773044/job/113811320403"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T11:55:51Z"
     },
     {
       "conclusion": "success",
@@ -5532,7 +5548,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37926024058/job/113808639271"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T11:48:39Z"
     },
     {
       "conclusion": "success",
@@ -6151,7 +6169,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37924837612/job/113804651289"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T11:37:04Z"
     },
     {
       "conclusion": "failure",
@@ -6770,7 +6790,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37921292888/job/113794292794"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T11:02:32Z"
     },
     {
       "conclusion": "success",
@@ -7389,7 +7411,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37920227486/job/113791539764"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:52:11Z"
     },
     {
       "conclusion": "success",
@@ -8008,7 +8032,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37919861950/job/113790418078"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:48:34Z"
     },
     {
       "conclusion": "success",
@@ -8627,7 +8653,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37919774519/job/113790964093"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:47:42Z"
     },
     {
       "conclusion": "cancelled",
@@ -9246,7 +9274,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37919617626/job/113788135467"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:46:09Z"
     },
     {
       "conclusion": "cancelled",
@@ -9616,7 +9646,9 @@
           "steps": [],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37919605788/job/113784588413"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:46:02Z"
     },
     {
       "conclusion": "success",
@@ -10235,7 +10267,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37917319953/job/113780731013"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:23:39Z"
     },
     {
       "conclusion": "success",
@@ -10854,7 +10888,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37916894975/job/113779837283"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:19:34Z"
     },
     {
       "conclusion": "success",
@@ -11473,7 +11509,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37915531158/job/113778551217"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:06:26Z"
     },
     {
       "conclusion": "success",
@@ -12092,7 +12130,9 @@
           ],
           "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37915526488/job/113778443070"
         }
-      ]
+      ],
+      "attempt": 1,
+      "startedAt": "2026-10-09T10:06:23Z"
     }
   ]
 }
