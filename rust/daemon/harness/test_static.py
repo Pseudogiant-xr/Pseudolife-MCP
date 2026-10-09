@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 from unittest.mock import patch
+import os
 
 import pytest
 
@@ -16,3 +17,14 @@ def test_trust_bind_refuses_unsupported_binary_before_bank_or_listener(tmp_path,
         with pytest.raises(RuntimeError, match="refuse before any wildcard listener"):
             run.run_scenario(run.TrustBind(), Path("not-executed"), tmp_path, "live", False)
     create.assert_not_called()
+
+
+def test_production_capability_switch_does_not_replace_startup(tmp_path):
+    candidate = os.environ.get("PL_STATIC_DEFAULT_BIN")
+    if not candidate:
+        pytest.skip("requires the explicit production candidate")
+    env = run.daemons.base_env(tmp_path, {"PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES": "1"})
+    result = subprocess.run([candidate], env=env, capture_output=True, timeout=10)
+    # Without a DSN ordinary startup refuses; it never prints capabilities.
+    assert result.returncode == 2
+    assert result.stdout == b""

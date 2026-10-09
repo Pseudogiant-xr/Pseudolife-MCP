@@ -108,7 +108,6 @@ fn resolve_path(path: &Path, links: &mut HashSet<PathBuf>) -> std::io::Result<Pa
     Ok(out)
 }
 
-#[cfg(windows)]
 fn lexical_path(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -117,10 +116,56 @@ fn lexical_path(path: &Path) -> PathBuf {
                 out.pop();
             }
             Component::CurDir => {}
+            Component::Normal(name) => {
+                #[cfg(windows)]
+                use std::os::windows::ffi::{OsStrExt, OsStringExt};
+                #[cfg(windows)]
+                let mut units: Vec<u16> = name.encode_wide().collect();
+                #[cfg(windows)]
+                while units.last().is_some_and(|u| matches!(*u, 32 | 46)) {
+                    units.pop();
+                }
+                #[cfg(windows)]
+                let name = std::ffi::OsString::from_wide(&units);
+                out.push(name);
+            }
             other => out.push(other.as_os_str()),
         }
     }
     out
+}
+
+fn contained(path: &Path, root: &Path) -> bool {
+    if crate::mutants::active("static-string-prefix") {
+        path.to_string_lossy()
+            .starts_with(root.to_string_lossy().as_ref())
+    } else {
+        path.starts_with(root)
+    }
+}
+
+fn forbidden() -> Served {
+    Served {
+        status: 403,
+        body: b"forbidden".to_vec(),
+        content_type: "text/plain".into(),
+        cache: "no-store",
+    }
+}
+
+fn metadata(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
+    match std::fs::metadata(path) {
+        Ok(meta) => Ok(Some(meta)),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// `_serve_static(path)`: `path` is the full request path (`/ui/...`).
@@ -137,23 +182,25 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
     }
-    let original_root = std::env::current_dir()?.join(root);
-    let root = resolve_path(&original_root, &mut HashSet::new())?;
-    let mut target = resolve_path(&original_root.join(rel), &mut HashSet::new())?;
-    if !target.starts_with(&root) && !crate::mutants::active("static-traversal-open") {
-        return Ok(Served {
-            status: 403,
-            body: b"forbidden".to_vec(),
-            content_type: "text/plain".into(),
-            cache: "no-store",
-        });
+    let original_root = lexical_path(&std::env::current_dir()?.join(root));
+    let joined = original_root.join(rel);
+    // Refuse out-of-root paths before filesystem access.
+    if !contained(&lexical_path(&joined), &original_root)
+        && !crate::mutants::active("static-traversal-open")
+    {
+        return Ok(forbidden());
     }
-    if target.is_dir() {
+    let root = resolve_path(&original_root, &mut HashSet::new())?;
+    let mut target = resolve_path(&joined, &mut HashSet::new())?;
+    if !contained(&target, &root) && !crate::mutants::active("static-traversal-open") {
+        return Ok(forbidden());
+    }
+    if metadata(&target)?.is_some_and(|m| m.is_dir()) {
         target = target.join("index.html");
     }
-    if !target.is_file() {
+    if !metadata(&target)?.is_some_and(|m| m.is_file()) {
         let index = root.join("index.html");
-        if index.is_file() {
+        if metadata(&index)?.is_some_and(|m| m.is_file()) {
             return Ok(Served {
                 status: 200,
                 body: std::fs::read(index)?,
@@ -200,6 +247,12 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexical_escape_is_refused_before_an_invalid_root_is_resolved() {
+        let root = std::env::temp_dir().join("pl-static-invalid\0root");
+        assert_eq!(serve(&root, "/ui/../outside").unwrap().status, 403);
+    }
 
     fn tree(name: &str) -> PathBuf {
         // One directory per test: tests run in parallel in one process.

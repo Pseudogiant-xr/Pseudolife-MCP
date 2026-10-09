@@ -62,7 +62,7 @@ NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
-           "static-json-whitespace"]
+           "static-json-whitespace", "static-string-prefix"]
 
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
@@ -273,6 +273,9 @@ class Scenario:
     def prepare_home(self, home: Path) -> dict[str, str]:
         """Optional per-arm files/environment, confined to the disposable home."""
         return {}
+
+    def cleanup_home(self, home: Path) -> None:
+        """Restore fixture permissions before a later pass removes the home."""
 
     def cases(self) -> list[dict]:
         return []
@@ -992,6 +995,9 @@ class StaticPaths(StaticBuild):
         outside = home / "outside"
         outside.mkdir()
         (outside / "secret.txt").write_bytes(b"outside")
+        sibling = home / "static-x"
+        sibling.mkdir()
+        (sibling / "secret.txt").write_bytes(b"sibling")
         # Junctions are available without Windows symlink privileges. File
         # symlinks are exercised on Linux; both arms get the same fixtures.
         if os.name == "nt":
@@ -1007,6 +1013,9 @@ class StaticPaths(StaticBuild):
             (root / "unreadable.txt").chmod(0)
             (root / "linked-index").mkdir()
             (root / "linked-index" / "index.html").symlink_to(outside / "secret.txt")
+            (root / "unsearchable").mkdir()
+            (root / "unsearchable" / "child.txt").write_bytes(b"hidden")
+            (root / "unsearchable").chmod(0)
         return {"PL_HARNESS_STATIC_DIR": str(root), "PSEUDOLIFE_DAEMON_STATIC_DIR": str(root)}
 
     def cases(self):
@@ -1015,10 +1024,28 @@ class StaticPaths(StaticBuild):
                  "/ui/%2e%2e/outside/secret.txt", "/ui/escape/secret.txt",
                  "/ui/escape/missing", "/ui/escape/../static/index.html",
                  "/ui/escape/../index.html"]
+        paths += ["/ui/../static-x/secret.txt", "/ui/%2e%2e%2fstatic-x%2fsecret.txt",
+                  "/ui/%2e%2e%5cstatic-x%5csecret.txt", "/ui/%2f__pl_http_outside%2ffile",
+                  "/ui/%5c__pl_http_outside%5cfile", "/ui/notice.txt.", "/ui/notice.txt%20",
+                  "/ui/C:index.html", "/ui/C:%5c__pl_http_outside%5cfile",
+                  "/ui/%5c%5c127.0.0.1%5cpl_http_missing_share%5cfile",
+                  "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
         if os.name != "nt":
             paths += ["/ui/notice.js", "/ui/loop-a", "/ui/unreadable.txt",
                       "/ui/linked-index", "/ui/linked-index/index.html"]
-        return [case("path " + p, "GET", p) for p in paths]
+            paths.append("/ui/unsearchable/child.txt")
+        out = [case("path " + p, "GET", p) for p in paths]
+        if os.name == "nt":
+            for c in out:
+                if c["path"] == "/ui/C:index.html":
+                    c["refusal_policy"] = "lexical-outside-root"
+        return out
+
+    def cleanup_home(self, home):
+        if os.name != "nt":
+            blocked = home / "static" / "unsearchable"
+            if blocked.exists():
+                blocked.chmod(0o700)
 
 
 class StaticMissing(StaticPaths):
@@ -1049,9 +1076,14 @@ class StaticRootLink(StaticPaths):
         return {"PL_HARNESS_STATIC_DIR": str(alias), "PSEUDOLIFE_DAEMON_STATIC_DIR": str(alias)}
 
     def cases(self):
-        return [case("linked root " + p, "GET", p) for p in
+        out = [case("linked root " + p, "GET", p) for p in
                 ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
                  "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
+        if os.name != "nt":
+            for c in out:
+                if "/../" in c["path"] or "%2e%2e" in c["path"]:
+                    c["refusal_policy"] = "lexical-outside-root"
+        return out
 
 
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
@@ -1110,6 +1142,15 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c.get("refusal_policy") == "lexical-outside-root":
+        sys.path.insert(0, str(REPO))
+        from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
+        headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}
+        headers.update({"content-type": "text/plain", "cache-control": "no-store", "content-length": "9"})
+        want = {"status": 403, "headers": headers, "bytes": "forbidden"}
+        row["substitution"] = "lexical-outside-root"
+        row["diffs"] = diff_values(want, rs)
+        return row
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1205,6 +1246,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         release(holders)
         for d in procs.values():
             d.stop()
+            scn.cleanup_home(d.cwd)
     states, scrubbed = {}, {}
     unchanged_diffs = []
     if scn.name != "db-down":

@@ -48,7 +48,9 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
-    if std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some() {
+    if cfg!(feature = "mutants")
+        && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
+    {
         println!("{}", mutants::supports_loopback_bind_fixture());
         return;
     }
