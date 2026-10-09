@@ -11,11 +11,16 @@ struct DisposableHome(std::path::PathBuf);
 impl DisposableHome {
     fn new() -> Self {
         // Beside the built binary rather than in the system temp directory,
-        // so `install_shim` can hard-link it (/tmp is often a separate tmpfs).
-        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-            "pseudolife-version-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        // so `install_shim` can hard-link it: a link cannot cross filesystems,
+        // /tmp is often a separate tmpfs, and Cargo's build-dir (which holds
+        // CARGO_TARGET_TMPDIR) can be configured apart from the binaries.
+        let path = Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+            .parent()
+            .unwrap()
+            .join(format!(
+                "pseudolife-version-test-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
         fs::create_dir(&path).unwrap();
         Self(path)
     }
