@@ -38,10 +38,12 @@ class Daemon:
                  port: int, log: Path):
         self.kind, self.argv, self.env, self.cwd, self.port, self.log = kind, argv, env, cwd, port, log
         self.proc: subprocess.Popen | None = None
+        self.started_at_unix: float | None = None
 
     def start(self, wait_s: float = 120.0, expect_exit: bool = False) -> "Daemon":
         self._out = open(self.log, "wb")
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        self.started_at_unix = time.time()
         self.proc = subprocess.Popen(self.argv, env=self.env, cwd=self.cwd, stdout=self._out,
                                      stderr=subprocess.STDOUT, creationflags=flags)
         deadline = time.monotonic() + wait_s

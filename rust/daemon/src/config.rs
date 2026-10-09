@@ -48,6 +48,10 @@ pub struct MemoryConfig {
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+    pub retrieval_retention_days: f64,
+    pub compaction_enabled: bool,
+    pub compaction_keep_per_slot: i64,
+    pub compaction_min_age_days: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,6 +122,8 @@ pub struct DreamConfig {
     pub extractor_model_override: Option<String>,
     /// `float(sweep_interval_seconds)` succeeds (`mcp_server.py:3268`).
     pub sweep_interval_ok: bool,
+    pub sweep_interval_seconds: f64,
+    pub runs_keep: i64,
 }
 
 impl Config {
@@ -133,7 +139,7 @@ impl Config {
             &self.updates,
             &self.dream,
         );
-        serde_json::json!({
+        let mut dump = serde_json::json!({
             "memory.top_k": m.top_k,
             "memory.hide_superseded": m.hide_superseded,
             "memory.search_confidence_floor": m.search_confidence_floor,
@@ -172,7 +178,25 @@ impl Config {
             "memory.dream.fallback_base_url": d.fallback_base_url,
             "memory.dream.fallback_model": d.fallback_model,
             "memory.dream.extractor_model_override": d.extractor_model_override,
-        })
+        });
+        let map = dump.as_object_mut().expect("config dump object");
+        map.insert(
+            "memory.retrieval_log.retention_days".into(),
+            serde_json::json!(m.retrieval_retention_days),
+        );
+        map.insert(
+            "memory.compaction.enabled".into(),
+            serde_json::json!(m.compaction_enabled),
+        );
+        map.insert(
+            "memory.compaction.keep_per_slot".into(),
+            serde_json::json!(m.compaction_keep_per_slot),
+        );
+        map.insert(
+            "memory.compaction.min_age_days".into(),
+            serde_json::json!(m.compaction_min_age_days),
+        );
+        dump
     }
 }
 
@@ -289,6 +313,10 @@ impl Default for MemoryConfig {
             bm25: Bm25Config::default(),
             reranker_enabled: false,
             retrieval_log_enabled: true,
+            retrieval_retention_days: 365.0,
+            compaction_enabled: true,
+            compaction_keep_per_slot: 3,
+            compaction_min_age_days: 30.0,
         }
     }
 }
@@ -350,6 +378,8 @@ impl Default for DreamConfig {
             fallback_model: None,
             extractor_model_override: None,
             sweep_interval_ok: true,
+            sweep_interval_seconds: 600.0,
+            runs_keep: 50,
         }
     }
 }
@@ -1137,6 +1167,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
             memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
+            memory.retrieval_retention_days =
+                want_float(r, "retention_days", "memory.retrieval_log", 365.0)?;
+        }
+        if let Some(r) = section(m, "compaction", "memory.")? {
+            memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
+            memory.compaction_keep_per_slot = want_int(r, "keep_per_slot", "memory.compaction", 3)?;
+            memory.compaction_min_age_days =
+                want_float(r, "min_age_days", "memory.compaction", 30.0)?;
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
@@ -1291,6 +1329,22 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
                 .is_ok(),
             Some(_) => false,
         },
+        sweep_interval_seconds: match lookup(d, "sweep_interval_seconds") {
+            None => 600.0,
+            Some(Node::Bool(value)) => {
+                if *value {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Some(Node::Str(value)) => crate::storage::py_strip(value)
+                .replace('_', "")
+                .parse()
+                .unwrap_or(f64::NAN),
+            Some(value) => node_f64(value).unwrap_or(f64::NAN),
+        },
+        runs_keep: want_int(d, "runs_keep", p, def.runs_keep)?,
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {

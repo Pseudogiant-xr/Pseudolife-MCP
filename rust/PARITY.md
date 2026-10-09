@@ -286,7 +286,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | DOCS-CUTOVER | 5 | Guide/provider/tunnel/config/schema/atlas/defaults/help/LLMS and benchmark claim currency, oracle retained pending maintainer retirement. `docs/guide/`, `docs/atlas/`, READMEs, `llms*`, `server.json`, `pyproject.toml`, release manifests | `test_release_ux.py`, `test_atlas_currency.py`, `test_llms_txt.py`, `test_i18n_readme.py`, `test_eval_evidence.py`, `test_extractor_model_lists.py`, `test_repository_claims.py` A; regenerate LLMS after doc edits | deferred |
 | CONFIG-LOAD | 1/2/3/4/5 | YAML path/missing-file defaults, unknown-key filtering, recursive dataclass construction, section-specific load rules and env precedence at each reader. `utils/config.py`, service/daemon/client/ops readers; every dataclass and variable is enumerated below and in `contract-inventory.json` | `test_memory_config.py`, `test_ops_env_example.py`, `test_dream.py`, `test_client_environment.py` I/A; preserve defaults, coercion and validation errors | deferred |
 | BACKGROUND-SWEEP | 4 | `mcp_server.start_dream_sweep` starts once when dream OR retrieval logging is enabled; sweep drives superseded compaction, dream-run journal pruning and retrieval-log pruning even with dreams off; automatic dream remains backlog/quiescence gated. `memory/dream.py:run_sweep_once` | `test_dream.py`, `test_compaction.py`, `test_dream_runs.py`, `test_retrieval_log.py` I/DB; daemon wire/restart equivalents pending | deferred |
-| BACKGROUND-SESSIONS | 4 | `mcp_server.start_session_reaper` idempotence, idle/reap intervals, close/end dream, empty-session resume window and tombstones; `start_background_durability` registers clean-exit flush, autosave and warmup exactly once. `service.py`, `mcp_server.py` | `test_session_identity.py`, `test_episode_service.py`, `test_loop_health.py` I; startup/clean-exit/reap wire cases pending | deferred |
+| BACKGROUND-SESSIONS | 4 | `mcp_server.start_session_reaper` idempotence, idle/reap intervals, close/end dream, empty-session resume window and tombstones; `start_background_durability` registers clean-exit flush, autosave and warmup exactly once. `service.py`, `mcp_server.py` | `test_session_identity.py`, `test_episode_service.py`, `test_loop_health.py` I; native scheduling/reaper source and unit coverage added, daemon reap/restart and writer integration still pending; see background-duty preparation below | deferred |
 | HEALTH | 3 | Open /health payload mandatory and conditional fields and 200/503/500 mapping listed below; bank fingerprint only after successful DB ping; warnings that leave status ok remain non-fatal. `daemon.py:_build_health_payload`, `web/api.py` | `test_daemon_http.py`, `test_dim_mismatch_health.py`, `test_daemon_moved_fence.py` I/P; network health corpus pending | deferred |
 | MCP-MOUNT | 3 | /mcp and /mcp/* pass to SDK after bearer gate; a supplied bound identity must resolve an authenticated principal and match the coordination context, failing closed before forwarding to `mcp_app`, including on open loopback installs. Streamable HTTP mount and token-aware transport security: tokenless DNS-rebinding protection allows loopback Host/Origin patterns; configured auth disables SDK rebinding protection. `mcp_server.transport_security_for`, `build_streamable_http_app`, `daemon.py`, `web/api.py` | `test_daemon_http.py`, `test_mcp_client_neutrality.py`, `test_web.py` I/P; negotiate and probe mount over HTTP | deferred |
 | DISPOSABLE-GUARDS | 2/3/4/5 | `storage/schema.py:refuse_production_database` rejects known production names after stripping trailing slashes and casefolding; unresolved production identity, including the literal `<unresolved>` sentinel, fails every check closed. `assert_disposable_database` asks the connected server for its actual database and applies that same refusal before reap/DDL/truncate. It does not impose a disposable-name prefix allowlist. Existing guards precede destructive work. | `test_disposable_database_guard.py`, `test_bench_production_port_guard.py` I/DB; equivalent Rust refusal tests pending | deferred |
@@ -1910,3 +1910,30 @@ remain evidence for their own revisions.
 CLI-LEASE's phase 4 remainder and the daemon coordination
 `lease`/`release`/`leases` rows retain their separate acceptance boundaries.
 No per-row performance claim or installed-candidate claim is made.
+
+## Background-duty preparation
+
+The experimental daemon now owns cancellable, idempotent durability/reaper/sweep
+scheduling; an initialized session log supports cascade idle close, deferred
+empty-root retention, and persisted tombstones. Release checks and glibc trim
+run outside requests and service locks. Sweep pruning keeps the newest dream
+journal rows, marks stale running rows failed, and deletes expired retrieval
+and lesson-search rows even with dreams disabled. The native compaction
+selection and update-offer formatter use live Python policy goldens.
+
+`BACKGROUND-SESSIONS`, `BACKGROUND`, and `BACKGROUND-SWEEP` remain deferred.
+Writer durability and canonical-store slot synchronization require W2-E;
+session write/resume routes and generic close-time titles are not integrated;
+automatic dreams and graph sweep ticks require W3-H. The session trigger is
+an explicit no-op interface. File-mode tensors and embedded bank lifecycle
+remain separately deferred. Source preparation and unit tests do not establish
+those missing process-boundary contracts.
+
+The pruning scenario uses the existing daemon differential harness. It checks
+whole-bank state after the observed pruning milestone. For portable goldens,
+catalog fields must first match the arm's seeded baseline exactly, then become
+an unchanged-baseline marker; sequence values remain exact. Seeded relation
+clocks must remain unchanged before their declared clock normalization. The
+session scenarios validate new close clocks against each arm's own start/end
+window and check equality of episode, client-session, deferred-map and
+tombstone clocks before normalizing them by root identity.

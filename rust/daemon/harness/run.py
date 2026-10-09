@@ -257,6 +257,8 @@ class Scenario:
     settle = True          # wait until both report db + embedder
     hold_lease = False     # take each bank's writer lease before the daemons start
     files: dict[str, str] = {}  # extra files in each data dir
+    golden_replay = False
+    golden_db_state = False
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
         """Scenarios whose answers depend on time (lease, backoff, reaper):
@@ -268,6 +270,12 @@ class Scenario:
 
     def cases(self) -> list[dict]:
         return []
+
+    def normalize_db(self, state: dict, before: dict, side: str) -> dict:
+        return dbstate.normalize(state, DB_NONDETERMINISTIC, before)
+
+    def configure_daemons(self, procs: dict) -> None:
+        """Optional explicit dependency seams, declared by the scenario."""
 
 
 
@@ -757,6 +765,10 @@ print(json.dumps({
  "memory.bm25.enabled": b.enabled, "memory.bm25.k1": b.k1, "memory.bm25.b": b.b, "memory.bm25.weight": b.weight,
  "memory.bm25.top_n": b.top_n, "memory.bm25.min_score": b.min_score,
  "memory.reranker.enabled": c.memory.reranker.enabled, "memory.retrieval_log.enabled": c.memory.retrieval_log.enabled,
+ "memory.retrieval_log.retention_days": float(c.memory.retrieval_log.retention_days),
+ "memory.compaction.enabled": c.memory.compaction.enabled,
+ "memory.compaction.keep_per_slot": c.memory.compaction.keep_per_slot,
+ "memory.compaction.min_age_days": float(c.memory.compaction.min_age_days),
  "embedding.model_name": e.model_name, "embedding.device": e.device, "embedding.query_prefix": e.query_prefix,
  "embedding.max_seq_length": e.max_seq_length,
  "coordination.enabled": co.enabled, "coordination.wake": asdict(co.wake), "coordination.allowed_principals": co.allowed_principals,
@@ -953,6 +965,11 @@ SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, Ex
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed)}
 
+from background_sessions import register as register_background_sessions
+SCENARIOS.update(register_background_sessions(sys.modules[__name__]))
+from background_maintenance import register as register_background_maintenance
+SCENARIOS.update(register_background_maintenance(sys.modules[__name__]))
+
 
 # ---- running ---------------------------------------------------------------------------
 
@@ -1027,6 +1044,16 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
 
 def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
+    try:
+        return _run_scenario(scn, binary, root, mode, record)
+    finally:
+        # Only this scenario's three exact names, including seed failure.
+        for suffix in ("t", "py", "rs"):
+            pg.drop(f"{pg.PREFIX}{tag}_{suffix}")
+
+
+def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+    tag = scn.name.replace("-", "_")
     template = f"{pg.PREFIX}{tag}_t"
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
@@ -1051,6 +1078,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             (home / "data" / name).write_text(text, encoding="utf-8")
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(common_env(scn, dsns["rust"]))))
+        scn.configure_daemons(procs)
         for d in procs.values():
             d.start(240)
         if scn.settle:
@@ -1061,6 +1089,8 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for i, c in enumerate(cases):
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
+                if py_r is None and mode == "golden":
+                    py_r, rs_r = golden["responses"][i], golden_scrub(rs_r)
             else:
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"]) if "python" in procs else golden["responses"][i]
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"])
@@ -1082,20 +1112,18 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for side, name in sides.items():
             raw = dbstate.dump(pg.dsn(name))
             out = scrub_declared_rows(raw, before)
-            states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
+            states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
     # A template seeded at record time holds run-specific values (pairing
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
     seeded_template = type(scn).prepare_template is not Scenario.prepare_template
-    if mode == "golden" and golden.get("db_state") and not seeded_template:
+    if mode == "golden" and golden.get("db_state") and (not seeded_template or scn.golden_db_state):
         db_diffs = dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if record:
         save_golden(scn.name, rows, states.get("python"))
-    for name in [template, *dbs.values()]:
-        pg.drop(name)
     return result
 
 
@@ -1248,7 +1276,7 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
-            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
+            if mode == "golden" and type(scn).timeline is not Scenario.timeline and not scn.golden_replay:
                 # Timing scenarios ask both daemons the same question at the
                 # same moment: live-only (README).
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)
