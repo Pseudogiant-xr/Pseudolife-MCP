@@ -179,6 +179,19 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      # This fixture creates a small graph locally; no model is downloaded.
+      - name: Offline embedding golden and mutant row
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          python -m pytest -q rust/daemon/harness/test_embedding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/debug' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
+          exit $LASTEXITCODE
       - name: CLI differential harness
         timeout-minutes: 10
         shell: pwsh

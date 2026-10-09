@@ -17,9 +17,12 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 
 The daemon needs `PSEUDOLIFE_MCP_DATABASE_URL` (it has no file mode) and
 reads the Python daemon's environment and `<data dir>/config.yaml`. The
-embedder loads lazily from `PSEUDOLIFE_DAEMON_ONNX_DIR` (a directory with
-`model.onnx`, `model.onnx_data` and `tokenizer.json`, the verified fp32
-Qwen3-Embedding-0.6B export) through the ONNX Runtime library named by
+embedder resolves `embedding.model_name` from the existing local model or
+Hub cache, or from the complete model root in `PSEUDOLIFE_DAEMON_ONNX_DIR`.
+It validates `embedding.onnx_file_name` (default `onnx/model.onnx`) relative
+to the Transformer module and reads the model's pooling/tokenizer metadata.
+Missing artifacts refuse; it never downloads, exports or falls back to torch.
+It uses the CPU provider through the ONNX Runtime library named by
 `ORT_DYLIB_PATH`. `PSEUDOLIFE_DAEMON_STATIC_DIR` points at the Console build
 and `PSEUDOLIFE_PLUGIN_DIR` at the plugin tree for `hooks_digest`.
 
@@ -45,3 +48,14 @@ the same moment and are live-only. It checks bank state only where the bank
 starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
+
+`run.py embedding --rust-bin <binary> --model <existing model> --out <file>`
+runs Python torch, Python ONNX and Rust sequentially on a canonical text corpus.
+`--ranking-banks <dir>` adds all 78 replicated-eval bank dumps (read-only).
+Default vector comparison is exact; `--accepted-fp32` applies the declared,
+artifact-specific bounds in `spec-embedding.md`, preserving exact tokens, cache
+behavior and full/top-eight order. A missing or failing arm stays a failure.
+The Qwen Python ONNX `position_ids` failure is recorded, never treated as a
+successful ONNX comparison. `--fixture --golden harness/goldens/embedding-fixture.json`
+uses a locally generated small graph for CI and catches six compiled mutants.
+It certifies the process/cache/tokenization seam, not real-model equivalence.
