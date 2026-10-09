@@ -372,6 +372,38 @@ def run_all(port):
     return {c.__name__: run_case(c, port) for c in CASES}
 
 
+def ntools(resp):
+    """Tool count in a tools/list response, or None."""
+    try:
+        return len(json.loads(resp["body"]["sse"][0])["result"]["tools"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def sanity(data, diffs):
+    """Checks on the oracle's own answers that each case exercised the path
+    it is meant to (a case both sides answer 401 would compare equal)."""
+    want = {
+        # lists: default, alice, bob, carol, writer-m x3, bob+writer-m, empty writer (two lists each)
+        "lists": [24, 24, 10, 10, 24, 24, 24, 24, 10, 10, 10, 10, 10, 10, 24, 24, 24, 24],
+    }
+    if "stored" in data:
+        st = data["stored"]
+        want_stored = [10, 24, 38, 24, 24]  # dave, erin, frank, writer=dave, writer=frank
+        got = [ntools(st[i * 6]) for i in range(5)]
+        if got != want_stored:
+            diffs.append(f"sanity stored: tool counts {got} != {want_stored}")
+    for case, counts in want.items():
+        if case in data:
+            got = [ntools(r) for r in data[case]]
+            if got != counts:
+                diffs.append(f"sanity {case}: tool counts {got} != {counts}")
+    if "rebinding" in data:
+        statuses = sorted({r["status"] for r in data["rebinding"]})
+        if statuses != [200, 403, 421]:
+            diffs.append(f"sanity rebinding: statuses {statuses}")
+
+
 def diff_case(name, a, b, diffs):
     if len(a) != len(b):
         diffs.append(f"{name}: {len(a)} vs {len(b)} responses")
@@ -419,6 +451,7 @@ def main():
         print(__doc__)
         return 2
     diffs = []
+    sanity(a, diffs)
     for c in CASES:
         diff_case(c.__name__, a[c.__name__], b[c.__name__], diffs)
     served = []
