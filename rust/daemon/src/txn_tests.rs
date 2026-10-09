@@ -49,6 +49,133 @@ async fn query(stream: &mut TcpStream) -> String {
     String::from_utf8(data[..data.len() - 1].to_vec()).unwrap()
 }
 
+async fn terminal_error(stream: &mut TcpStream, code: &str) {
+    let data = format!("SERROR\0VERROR\0C{code}\0Mfixture terminal-command refusal\0\0");
+    message(stream, b'E', data.as_bytes()).await;
+    message(stream, b'Z', b"E").await;
+}
+
+async fn failed_exit_case(mode: &'static str) {
+    let _test = TESTS.lock().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        let mut trace = vec![query(&mut stream).await];
+        assert_eq!(trace[0], "BEGIN");
+        completion(&mut stream, b"BEGIN\0", b'T').await;
+        if mode != "recovery" {
+            trace.push(query(&mut stream).await);
+            assert_eq!(trace.last().unwrap(), "INSERT INTO fixture VALUES (1)");
+            completion(&mut stream, b"INSERT 0 1\0", b'T').await;
+        }
+        trace.push(query(&mut stream).await);
+        assert_eq!(
+            trace.last().unwrap(),
+            if mode.starts_with("commit") {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            }
+        );
+        terminal_error(&mut stream, "57014").await;
+        trace.push(query(&mut stream).await);
+        let mut recovered = trace.last().unwrap() == "ROLLBACK";
+        if recovered && mode == "commit-cleanup" {
+            terminal_error(&mut stream, "57014").await;
+            trace.push(query(&mut stream).await);
+            recovered = trace.last().unwrap() == "ROLLBACK";
+        }
+        if recovered {
+            completion(&mut stream, b"ROLLBACK\0", b'I').await;
+            trace.push(query(&mut stream).await);
+        }
+        assert_eq!(trace.last().unwrap(), "INSERT INTO fixture VALUES (2)");
+        if recovered {
+            completion(&mut stream, b"INSERT 0 1\0", b'I').await;
+        } else {
+            terminal_error(&mut stream, "25P02").await;
+        }
+        (recovered, trace)
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(connection);
+    let client = Arc::new(client);
+    let first = if mode == "recovery" {
+        let (body_tx, body_rx) = oneshot::channel();
+        let writer = client.clone();
+        let task = tokio::spawn(async move {
+            run(&writer, |_| async move {
+                body_tx.send(()).unwrap();
+                std::future::pending::<Result<(), tokio_postgres::Error>>().await
+            })
+            .await
+        });
+        body_rx.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        with_client(
+            &client,
+            |c| async move { c.batch_execute("NEVER RUN").await },
+        )
+        .await
+        .map_err(Failure::from)
+    } else {
+        run(&client, |c| async move {
+            c.batch_execute("INSERT INTO fixture VALUES (1)").await?;
+            if mode == "body" {
+                Err(Failure::Refusal)
+            } else {
+                Ok(())
+            }
+        })
+        .await
+    };
+    if mode == "body" {
+        assert!(matches!(first, Err(Failure::Refusal)));
+    } else {
+        assert!(
+            matches!(&first, Err(Failure::Operational(error)) if error.code().unwrap().code() == "57014")
+        );
+    }
+    let next = with_client(&client, |c| async move {
+        c.batch_execute("INSERT INTO fixture VALUES (2)").await
+    })
+    .await;
+    let (recovered, trace) = server.await.unwrap();
+    drop(client);
+    connection_task.abort();
+    assert!(
+        recovered && next.is_ok(),
+        "{mode}: next statement received an unrecovered transaction; trace={trace:?}"
+    );
+}
+
+#[tokio::test]
+async fn failed_recovery_rollback_remains_open() {
+    failed_exit_case("recovery").await;
+}
+
+#[tokio::test]
+async fn failed_body_rollback_remains_open() {
+    failed_exit_case("body").await;
+}
+
+#[tokio::test]
+async fn failed_commit_is_cleaned_up() {
+    failed_exit_case("commit").await;
+}
+
+#[tokio::test]
+async fn failed_commit_cleanup_remains_open() {
+    failed_exit_case("commit-cleanup").await;
+}
+
 #[tokio::test]
 async fn cancelled_begin_is_recovered_before_single_statement() {
     let _test = TESTS.lock().await;

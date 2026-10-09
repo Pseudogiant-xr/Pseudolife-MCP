@@ -20,6 +20,14 @@ static TX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// disconnecting client does not drop them; this guard covers the rest.
 static OPEN: AtomicBool = AtomicBool::new(false);
 
+/// Caller holds TX. An error or dropped future keeps the recovery marker;
+/// only a confirmed transaction-exit command makes the writer reusable.
+async fn finish(client: &Client, command: &str) -> Result<(), tokio_postgres::Error> {
+    client.batch_execute(command).await?;
+    OPEN.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
 /// `BEGIN`, the body, then `COMMIT`; `ROLLBACK` when the body fails.
 pub async fn run<'c, T, E, F, Fut>(client: &'c Client, body: F) -> Result<T, E>
 where
@@ -28,24 +36,24 @@ where
     Fut: Future<Output = Result<T, E>>,
 {
     let _guard = TX.lock().await;
-    if OPEN.swap(false, Ordering::SeqCst) {
-        client.batch_execute("ROLLBACK").await?;
+    if OPEN.load(Ordering::SeqCst) {
+        finish(client, "ROLLBACK").await?;
     }
     OPEN.store(true, Ordering::SeqCst);
     client.batch_execute("BEGIN").await?;
-    let out = match body(client).await {
-        Ok(v) => client
-            .batch_execute("COMMIT")
-            .await
-            .map(|_| v)
-            .map_err(E::from),
+    match body(client).await {
+        Ok(v) => match finish(client, "COMMIT").await {
+            Ok(()) => Ok(v),
+            Err(error) => {
+                let _ = finish(client, "ROLLBACK").await;
+                Err(E::from(error))
+            }
+        },
         Err(e) => {
-            let _ = client.batch_execute("ROLLBACK").await;
+            let _ = finish(client, "ROLLBACK").await;
             Err(e)
         }
-    };
-    OPEN.store(false, Ordering::SeqCst);
-    out
+    }
 }
 
 /// `set_meta` (`storage/postgres.py:2722`): one upsert of a JSON value.
@@ -75,8 +83,8 @@ where
     Fut: Future<Output = Result<T, E>>,
 {
     let _guard = TX.lock().await;
-    if OPEN.swap(false, Ordering::SeqCst) {
-        client.batch_execute("ROLLBACK").await?;
+    if OPEN.load(Ordering::SeqCst) {
+        finish(client, "ROLLBACK").await?;
     }
     body(client).await
 }

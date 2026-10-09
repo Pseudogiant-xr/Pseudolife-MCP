@@ -17,7 +17,7 @@ BEGIN response proved the original code's gap: cancellation left OPEN false,
 so the next autocommit INSERT inherited that transaction and returned success
 without committing. The rejecting protocol peer observes BEGIN/INSERT and an
 uncommitted write; the fix observes BEGIN/ROLLBACK/INSERT and a committed write.
-The rest of `run` remains unchanged. Its error parameter is generalized to
+The shared lock and calling convention are retained. Its error parameter is generalized to
 `E: From<tokio_postgres::Error>` so a typed refusal from a body rolls back a
 prior write rather than committing an `Ok(Err(refusal))`. Existing PostgreSQL
 error callers retain their inferred type. A rejecting test first failed to
@@ -25,6 +25,13 @@ compile against the PostgreSQL-only interface, then proves BEGIN/write/ROLLBACK
 and a successful next statement while retaining the typed refusal.
 A recovery ROLLBACK when
 BEGIN never reached the server may emit PostgreSQL's warning, but must succeed.
+
+Independent review correction: clear OPEN only after a confirmed COMMIT or
+ROLLBACK. A canceled exit command may leave the connection in failed-transaction
+state; a next statement must retry recovery rather than receive `25P02`.
+COMMIT errors attempt cleanup while retaining the original error. Failed body
+cleanup retains the typed body error and the open marker. Four rejecting cases
+cover recovery ROLLBACK, body ROLLBACK, COMMIT and failed COMMIT cleanup.
 
 Tool bodies use spawned completion tasks so a disconnected caller does not
 drop durable work. Statement/transaction isolation and pending-query recovery
