@@ -186,14 +186,14 @@ def list_changed_stream(port):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     c.putrequest("GET", "/mcp", skip_accept_encoding=True)
     for k, v in [("Accept", "text/event-stream"), ("Authorization", f"Bearer {TOK['carol']}"),
-                 ("mcp-session-id", s.sid), ("mcp-protocol-version", PROTOCOL)]:
+                 ("mcp-session-id", s.sid or ""), ("mcp-protocol-version", PROTOCOL)]:
         c.putheader(k, v)
     c.endheaders()
     g = c.getresponse()
     head = {"status": g.status, "headers": [(k.lower(), v) for k, v in g.getheaders()], "body": b""}
     second = request(port, "GET", None, [("Accept", "text/event-stream"),
                                          ("Authorization", f"Bearer {TOK['carol']}"),
-                                         ("mcp-session-id", s.sid)])
+                                         ("mcp-session-id", s.sid or "")])
     s.tool("memory_toolset", {"action": "expand"})
     buf = b""
     while b"\r\n\r\n" not in buf.lstrip(b": ping"):
@@ -233,7 +233,7 @@ def transport(port):
     out.append(norm(request(port, "POST", [{"jsonrpc": "2.0", "id": 9, "method": "ping"}], h)))
     out.append(norm(request(port, "PUT", b"{}", h)))
     out.append(norm(request(port, "GET", None, [("Accept", "application/json")] + auth
-                            + [("mcp-session-id", s.sid)])))
+                            + [("mcp-session-id", s.sid or "")])))
     out.append(norm(s.close()))
     out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 5, "method": "tools/list"}, h)))
     out.append(norm(request(port, "DELETE", None, h)))
@@ -274,6 +274,13 @@ def paths(port):
 
 def stub_tools(port):
     """One call per tool, to compare or (unserved on Rust) to check the stub."""
+    try:
+        return _stub_tools(port)
+    except Exception as exc:  # noqa: BLE001
+        return {"<exception>": {"exception": f"{type(exc).__name__}: {exc}"}}
+
+
+def _stub_tools(port):
     s = Session(port, TOK["carol"])
     s.tool("memory_toolset", {"action": "expand"})
     out = {name: norm(s.tool(name, {})) for name in UNSERVED}
@@ -336,8 +343,17 @@ def stub_expected(name):
     return data
 
 
+def run_case(case, port):
+    """A case that raises is recorded as one response-shaped failure, so a
+    broken side shows as a diff rather than a harness crash."""
+    try:
+        return case(port)
+    except Exception as exc:  # noqa: BLE001
+        return [{"exception": f"{type(exc).__name__}: {exc}"}]
+
+
 def run_all(port):
-    return {c.__name__: c(port) for c in CASES}
+    return {c.__name__: run_case(c, port) for c in CASES}
 
 
 def diff_case(name, a, b, diffs):
@@ -350,7 +366,9 @@ def diff_case(name, a, b, diffs):
 
 def check_stubs(py_stub, rust_stub, diffs, served):
     for name, resp in rust_stub.items():
-        if name in UNSERVED:
+        if "exception" in resp:
+            diffs.append(f"stub calls raised: {resp['exception']}")
+        elif name in UNSERVED:
             data = resp["body"].get("sse", [None])[0]
             want_suffix = stub_expected(name)
             if resp["status"] != 200 or data is None or not data.endswith(f'"result":{want_suffix}}}'):

@@ -111,8 +111,16 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 print(f"drop {name} failed: {exc}", file=sys.stderr)
     if mutant:
-        print(f"mutant {mutant}: harness exit {code} ({'caught' if code == 1 else 'MISSED'})")
-        return 0 if code == 1 else 1
+        # Caught means the comparison ran and found diffs, not that it crashed.
+        import json
+        try:
+            summary = json.loads((out / f"mutant-{mutant}.json").read_text())["summary"]
+        except (OSError, ValueError, KeyError):
+            summary = {"diffs": 0}
+        caught = code == 1 and summary["diffs"] > 0
+        print(f"mutant {mutant}: harness exit {code}, {summary['diffs']} diffs "
+              f"({'caught' if caught else 'MISSED'})")
+        return 0 if caught else 1
     return code
 
 
