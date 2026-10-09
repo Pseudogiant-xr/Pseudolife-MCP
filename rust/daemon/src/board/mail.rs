@@ -1240,8 +1240,11 @@ impl Store {
         if !agent.wake_enabled {
             return Err(BoardError::code("wake_disabled"));
         }
-        // A non-string id matches no row, as the Python query would.
-        let id = message_id.as_str().unwrap_or("");
+        // Python binds a non-string id as a number, boolean, array or
+        // nothing at all; Postgres refuses `text = <that>`: a 500.
+        let Some(id) = message_id.as_str() else {
+            return Err(BoardError::Internal("message_id is not text".into()));
+        };
         let Some(row) = tx
             .query_opt(
                 "SELECT * FROM coordination_messages WHERE message_id=$1 \

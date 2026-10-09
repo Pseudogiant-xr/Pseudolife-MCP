@@ -389,7 +389,14 @@ pub fn check_limit(limit: &Value) -> Result<i64> {
 /// `deadline or 0` preserve it).
 pub fn min_keep_type(value: &Value, cap: f64) -> Value {
     let v = canon::as_f64(value).unwrap_or(0.0);
-    if cap < v { float_value(cap) } else { value.clone() }
+    if cap < v {
+        float_value(cap)
+    } else if canon::is_py_int(value) {
+        value.clone()
+    } else {
+        // json.loads makes it a float, which Jsonb spells as repr does.
+        float_value(v)
+    }
 }
 
 impl Store {
@@ -814,10 +821,13 @@ impl Store {
         }
         let parent_thread = params.get("parent_thread").filter(|v| !v.is_null()).cloned();
         if let Some(pt) = &parent_thread {
+            // A non-string is `canonical = None`, never equal to it (Codex
+            // review finding 3).
             let canonical = pt
                 .as_str()
                 .and_then(|s| python_uuid_canonical(s));
-            if canonical.as_deref() != pt.as_str()
+            if !pt.is_string()
+                || canonical.as_deref() != pt.as_str()
                 || thread.is_none()
                 || thread.as_deref() == pt.as_str()
             {
@@ -1882,7 +1892,7 @@ pub fn python_uuid_canonical(s: &str) -> Option<String> {
 fn ascii_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if c.is_ascii() {
+        if (' '..='~').contains(&c) || (c.is_ascii() && (c as u32) < 0x20) {
             out.push(c);
         } else {
             let mut buf = [0u16; 2];
@@ -1892,6 +1902,17 @@ fn ascii_escape(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod proof_tests {
+    #[test]
+    fn ensure_ascii_escapes_del_and_non_ascii() {
+        // CPython 3.11: json.dumps(["a\x7f\u00e9\U0001f600"], ensure_ascii=True).
+        let input = "[\"a\u{7f}\u{e9}\u{1f600}\"]";
+        let want = r#"["a\u007f\u00e9\ud83d\ude00"]"#;
+        assert_eq!(super::ascii_escape(input), want);
+    }
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

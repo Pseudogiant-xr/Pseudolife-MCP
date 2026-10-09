@@ -129,10 +129,17 @@ impl Board {
         principal: &str,
     ) -> Result<Value> {
         let hub = &self.hub;
-        if hub.pending_calls.load(Ordering::SeqCst) >= MAX_WAITERS {
+        // Check and reserve in one step: concurrent calls cannot both take
+        // the last slot (Codex review finding 2).
+        if hub
+            .pending_calls
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_WAITERS).then_some(n + 1)
+            })
+            .is_err()
+        {
             return Err(BoardError::code("wait_capacity_exceeded"));
         }
-        hub.pending_calls.fetch_add(1, Ordering::SeqCst);
         let board = self.clone();
         let workers = hub.workers.clone();
         let pending = hub.pending_calls.clone();
@@ -176,6 +183,10 @@ impl Board {
         let truthy = attachment_id.is_some_and(super::store::py_truthy);
         if !truthy || !generation.is_some_and(super::canon::is_py_int) {
             return Err(BoardError::code("attachment_required"));
+        }
+        if attachment_id.is_some_and(|a| a.is_array() || a.is_object()) {
+            // An unhashable value in Python's tuple key: TypeError.
+            return Err(BoardError::code("invalid_request"));
         }
         let key = (
             recipient.clone(),

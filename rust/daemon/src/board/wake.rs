@@ -457,7 +457,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
         if let Some(event) = event {
             let stamp: Option<Value> = event.get(1);
             let stamp = stamp.as_ref().and_then(canon::as_f64);
-            if stamp.is_some() && stamp == park_since {
+            if stamp == park_since {
                 park_seq = Some(event.get(0));
             }
         }

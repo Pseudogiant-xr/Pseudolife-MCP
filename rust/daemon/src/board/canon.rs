@@ -27,8 +27,16 @@ pub fn py_float(x: f64) -> String {
     if x.is_infinite() {
         return if x > 0.0 { "Infinity" } else { "-Infinity" }.into();
     }
-    // Rust's LowerExp is the shortest round-trip spelling: "1.5e16", "-0e0".
-    let sci = format!("{x:e}");
+    // Python's repr is the shortest correctly rounded spelling that reads
+    // back as `x` (ties broken on the exact binary value). Rust's bare
+    // LowerExp picks a different one of two equally short candidates on a
+    // tie (1790000000.00390625), so take the first precision whose
+    // correctly rounded form round-trips.
+    let sci = (0..17)
+        .map(|p| format!("{x:.p$e}"))
+        .find(|s| s.parse::<f64>().ok() == Some(x))
+        .unwrap_or_else(|| format!("{x:e}"));
+    let sci = trim_mantissa(&sci);
     let (mantissa, exp) = sci.split_once('e').expect("LowerExp has an exponent");
     let exp: i32 = exp.parse().expect("integer exponent");
     let negative = mantissa.starts_with('-');
@@ -54,6 +62,17 @@ pub fn py_float(x: f64) -> String {
     };
     let esign = if exp < 0 { '-' } else { '+' };
     format!("{sign}{first}{frac}e{esign}{:02}", exp.abs())
+}
+
+/// "1.500e3" -> "1.5e3": a fixed precision may end in zeros.
+fn trim_mantissa(sci: &str) -> String {
+    let (m, e) = sci.split_once('e').expect("LowerExp has an exponent");
+    let m = if m.contains('.') {
+        m.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        m
+    };
+    format!("{m}e{e}")
 }
 
 /// `json.dumps(s, ensure_ascii=False)` for one string.
@@ -285,6 +304,25 @@ mod tests {
         for (x, want) in cases {
             assert_eq!(py_float(*x), *want, "{x}");
         }
+    }
+
+    #[test]
+    fn python_float_repr_vectors() {
+        // CPython 3.11 `repr` over wall-clock times, dyadic ties and random
+        // finite doubles (float_vectors.json; Codex review finding 1: the
+        // shortest spelling must break ties as Python does).
+        let data: Value =
+            serde_json::from_str(include_str!("float_vectors.json")).expect("vector file");
+        let mut bad = Vec::new();
+        for v in data["vectors"].as_array().expect("vectors") {
+            let bits: u64 = v[0].to_string().parse().expect("bits");
+            let x = f64::from_bits(bits);
+            let want = v[1].as_str().expect("repr");
+            if py_float(x) != want {
+                bad.push(format!("{want} -> {}", py_float(x)));
+            }
+        }
+        assert!(bad.is_empty(), "{} mismatches, e.g. {:?}", bad.len(), &bad[..bad.len().min(5)]);
     }
 
     #[test]

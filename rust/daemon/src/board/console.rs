@@ -159,7 +159,13 @@ fn py_int_param(raw: Option<&String>, default: i64) -> i64 {
             return default;
         }
     }
-    t.replace('_', "").parse::<i64>().unwrap_or(default)
+    let digits = t.replace('_', "");
+    let unsigned = digits.strip_prefix(['+', '-']).unwrap_or(&digits);
+    if unsigned.is_empty() || !unsigned.bytes().all(|b| b.is_ascii_digit()) {
+        return default;
+    }
+    // A Python int too large for i64 still reaches `_limit` and fails it.
+    digits.parse::<i64>().unwrap_or(i64::MAX)
 }
 
 impl Board {

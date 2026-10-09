@@ -283,7 +283,8 @@ impl Board {
                     Some(action),
                 ));
             }
-            // Python iterates the supplied keys in their given order.
+            // Python iterates a set here, so which of two bad keys it names
+            // is hash-seed dependent; either answer is Python's.
             for key in params.keys().filter(|k| *k != "read_only") {
                 if !is_lower_hex32(&params[key]) {
                     return Err(BoardError::code(format!("invalid_{key}")));

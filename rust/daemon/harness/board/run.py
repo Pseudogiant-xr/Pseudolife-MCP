@@ -101,9 +101,11 @@ def normalize_state(state: dict, norm: Normalizer) -> dict:
         rows = []
         for r in state[t]:
             r = dict(r)
-            if t == "coordination_events":
-                r["payload"] = norm.payload(r["payload"])
-            rows.append(json.dumps(norm.value(r), sort_keys=True, default=str))
+            payload = r.pop("payload") if t == "coordination_events" else None
+            row = norm.value(r)
+            if payload is not None:
+                row["payload"] = norm.payload(payload)
+            rows.append(json.dumps(row, sort_keys=True, default=str))
         out[t] = sorted(rows)
     meta = {}
     for r in state["meta"]:
@@ -198,8 +200,18 @@ class Arm:
             step.save(self.ctx, resp["json"])
         if "json" in resp:
             self.norm.learn(resp["json"])
+        self.refresh_seqs()
         self.responses.append(resp)
         return resp
+
+    def refresh_seqs(self) -> None:
+        import psycopg
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            rows = conn.execute(
+                "SELECT seq, agent_id, recipient_agent_id, created_at, payload::jsonb->>'request_id' "
+                "FROM coordination_events WHERE event='send' ORDER BY seq").fetchall()
+        self.norm.refresh_seqs([{"seq": r[0], "agent_id": r[1], "recipient_agent_id": r[2],
+                                 "created_at": r[3], "request_id": r[4]} for r in rows])
 
 
 def normalize_response(resp: dict, norm: Normalizer) -> dict:
@@ -305,6 +317,7 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
     if record:
         save_golden(scn.name, recorded)
     problems = [f"{side} chain: {p}" for side, ps in chain.items() for p in ps]
+    problems += [f"{side}: {p}" for side in sides for p in sorted(set(arms[side].norm.problems))]
     problems += [f"{side}: {p}" for side, ps in creds.items() for p in ps]
     return {"scenario": scn.name, "steps": rows, "state_diffs": state_diffs, "chain": problems}
 
