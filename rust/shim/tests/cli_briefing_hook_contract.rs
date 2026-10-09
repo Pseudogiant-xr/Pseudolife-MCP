@@ -8,6 +8,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A stdout whose read end is closed before the child starts: dropping the
+/// child's piped stdout after spawn races the child's first write on a
+/// loaded runner (the help can land in the still-open pipe).
+fn closed_stdout() -> Stdio {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    Stdio::from(writer)
+}
+
 fn parser_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
     command
@@ -282,13 +291,12 @@ fn public_help_closed_output_has_native_failure_contract() {
         let mut command = parser_command();
         command
             .args(["briefing", "--help"])
-            .stdout(Stdio::piped())
+            .stdout(closed_stdout())
             .stderr(Stdio::piped());
         if unbuffered {
             command.env("PYTHONUNBUFFERED", "1");
         }
         let mut child = command.spawn().unwrap();
-        drop(child.stdout.take());
         let deadline = Instant::now() + Duration::from_secs(8);
         while child.try_wait().unwrap().is_none() {
             if Instant::now() >= deadline {
@@ -416,13 +424,14 @@ fn prompt_leaf(closed_output: bool, existing: bool) {
         .env("PSEUDOLIFE_MCP_PYTHON", "missing-fixture-interpreter")
         .env("PATH", "")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(if closed_output {
+            closed_stdout()
+        } else {
+            Stdio::piped()
+        })
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    if closed_output {
-        drop(child.stdout.take());
-    }
     child
         .stdin
         .take()
