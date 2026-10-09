@@ -35,6 +35,10 @@ ROW = "transfer"
 SRC = "pl_cf_w1c_transfer_src"
 TRICKY = "pl_cf_w1c_transfer_tricky"
 TGT = "pl_cf_w1c_transfer_tgt"
+INF = "pl_cf_w1c_transfer_inf"
+DEEP = "pl_cf_w1c_transfer_deep"
+NYC = "pl_cf_w1c_transfer_nyc"
+NYC_EMPTY = "pl_cf_w1c_transfer_nyc_empty"
 _CREATED: set[str] = set()
 _ARCHIVES: dict[str, bytes] = {}
 _EOL = "\r\n" if core.WINDOWS else "\n"
@@ -127,6 +131,8 @@ INSERT INTO meta (key, value) VALUES
  ('writer_lease_epoch', '7');
 UPDATE outcome_signals SET used_ids =
  '{"credited": [1], "unmatched": [], "served_elsewhere": []}';
+INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at)
+ SELECT 'bulk-a-' || g, 'bulk-b-' || g, g * 0.25 FROM generate_series(1, 1200) g;
 """
 
 
@@ -149,6 +155,24 @@ def _sources() -> None:
     _seed(SRC)
     _create(TRICKY)
     _seed_tricky(TRICKY)
+    _create(INF)
+    _create(DEEP)
+    _create(NYC)
+    _seed(NYC)
+    _create(NYC_EMPTY)
+    with _bank.connect(INF) as conn:
+        conn.execute("INSERT INTO chronicle_events (occurred_at, recorded_at, actor, "
+                     "actor_norm, description, description_norm) VALUES "
+                     "('infinity', 1.0, 'a', 'a', 'never', 'never')")
+        conn.commit()
+    with _bank.connect(DEEP) as conn:
+        conn.execute("INSERT INTO store_decisions (store, entity_norm, attribute_norm, "
+                     "action, record, decided_at) VALUES ('lesson', 'e', 'a', 'retire', "
+                     "%s::jsonb, 1.0)", ("[" * 250 + "]" * 250,))
+        conn.commit()
+    with _bank._admin() as conn:  # noqa: SLF001
+        for name in (NYC, NYC_EMPTY):
+            conn.execute(f'ALTER DATABASE "{name}" SET timezone = \'America/New_York\'')
     with tempfile.TemporaryDirectory() as tmp:
         for key, name in (("current", SRC), ("tricky", TRICKY)):
             path = Path(tmp) / f"{key}.zip"
@@ -156,8 +180,8 @@ def _sources() -> None:
             _ARCHIVES[key] = path.read_bytes()
     for key, mutate in _VARIANTS.items():
         _ARCHIVES[key] = _rewrite(_ARCHIVES["current"], mutate)
-    _wait_idle(SRC)
-    _wait_idle(TRICKY)
+    for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY):
+        _wait_idle(name)
 
 
 def _rewrite(blob: bytes, mutate) -> bytes:
@@ -271,6 +295,10 @@ _VARIANTS = {
     "format-float": _manifest_edit(format_version=1.0),
     "no-manifest": _no_manifest,
     "bad-evidence": _bad_evidence,
+    "string-in-float": _edit_first("episodes.jsonl", started_at="not-a-float"),
+    "float4-overflow": _edit_first("entries.jsonl", surprise=1e39),
+    "huge-int-float": _edit_first("entries.jsonl", ts=2 ** 64),
+    "bad-vector": _edit_first("entries.jsonl", embedding="[1,2]"),
 }
 
 
@@ -312,7 +340,11 @@ def transfer_zip(obs: dict) -> None:
                 if match and _window_utc(match.group(1).decode(), obs["window"]):
                     blob = blob[:match.start(1)] + b"<created_at>" + blob[match.end(1):]
                 blob = _VERSION.sub(b'"pseudolife_version": "<version>"', blob, count=1)
-            rendered.append([name, blob.decode("utf-8", "backslashreplace")])
+            try:
+                rendered.append([name, blob.decode("utf-8")])
+            except UnicodeDecodeError:
+                # Unambiguous: undecodable bytes never equal any text member.
+                rendered.append([name, {"base64": base64.b64encode(blob).decode()}])
         canonical = json.dumps(rendered, ensure_ascii=False, indent=0).encode()
         obs["files"][rel] = "file:" + base64.b64encode(canonical).decode()
 
@@ -337,12 +369,24 @@ def transfer_default_name(obs: dict) -> None:
         return _DEFAULT_NAME.sub(one, data)
 
     obs["stdout"] = base64.b64encode(swap(base64.b64decode(obs["stdout"]))).decode()
-    obs["files"] = {swap(k.encode()).decode(): v for k, v in obs["files"].items()}
+    files: dict = {}
+    for rel, value in obs["files"].items():
+        new_rel = swap(rel.encode()).decode()
+        while new_rel in files:
+            new_rel += " <normalized-collision>"
+        files[new_rel] = value
+    obs["files"] = files
 
 
 def _expect(line: str, keep_db: bool, oracle_shape):
+    """Each arm's database is compared with its own pre-run dump: a seed
+    written through the oracle's writers stamps wall-clock times, so the two
+    arms' banks differ before either runs. A deferring candidate must leave
+    its own bank exactly as it was."""
     def apply(obs: dict) -> None:
         if obs.get("arm") != "python":
+            if not keep_db and obs.get("db") == obs.get("db_before"):
+                obs["db"] = "<unchanged>"
             return
         stderr = base64.b64decode(obs["stderr"]).decode("utf-8", "replace")
         if not oracle_shape(obs, stderr):
@@ -352,7 +396,7 @@ def _expect(line: str, keep_db: bool, oracle_shape):
         obs["stderr"] = base64.b64encode((line + _EOL).encode()).decode()
         obs["files"] = obs["setup_files"]
         if not keep_db:
-            obs["db"] = obs.get("db_before")
+            obs["db"] = "<unchanged>"
     return apply
 
 
@@ -367,13 +411,22 @@ def _ran(obs, stderr):
 _GENERIC = "pseudolife-stdio: mode '{}' is deferred in this candidate"
 normalize.rule("expect-export-deferred")(
     _expect(_GENERIC.format("export"), False, _traceback))
+normalize.rule("expect-export-deferred-any")(
+    _expect(_GENERIC.format("export"), False, _ran))
+normalize.rule("expect-import-deferred")(
+    _expect(_GENERIC.format("import"), False, _ran))
 normalize.rule("expect-import-schema-deferred")(_expect(
-    "pseudolife-stdio: import into a bank below the current schema is deferred in "
-    "this candidate (needs native ensure_schema)", False, _ran))
+    "pseudolife-stdio: import into a bank not at this build's schema (55) is "
+    "deferred in this candidate (needs native ensure_schema)", False, _ran))
+_NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
+# Host-independent: an oracle with pg0 refuses the unreadable marker with a
+# traceback, one without pg0 never attaches and prints the no-database
+# refusal. The candidate defers by name either way.
 normalize.rule("expect-import-lite-deferred")(_expect(
     "pseudolife-stdio: mode 'import' on the embedded lite tier is deferred in this "
     "candidate (needs native embedded_pg)", False,
-    lambda obs, stderr: _traceback(obs, stderr) and "PG_VERSION" in stderr))
+    lambda obs, stderr: (_traceback(obs, stderr) and "PG_VERSION" in stderr)
+    or (obs["exit"] == 1 and stderr.startswith(_NO_DATABASE))))
 normalize.rule("expect-import-native-failure")(_expect(
     "pseudolife-stdio: import failed (native-pg-diagnostics); nothing was committed",
     True, lambda obs, stderr: _traceback(obs, stderr)
@@ -399,7 +452,7 @@ def _export_after(bank: str):
         obs["arm"] = arm.name
         obs["setup_files"] = arm.state["files"]
         obs["db"] = _bank.dump(bank)
-        obs["db_before"] = obs["db"]
+        obs["db_before"] = arm.state["db_before"]
     return after
 
 
@@ -414,7 +467,13 @@ def _import_setup(archive: str, seed=None, holder=False, schema=True):
         arm.state["db_before"] = _bank.dump(TGT)
         _wait_idle(TGT)
         (arm.cwd / "bank.zip").write_bytes(_ARCHIVES[archive])
-        if holder:
+        if holder == "locked":
+            # An open transaction holding ACCESS SHARE on entries: the
+            # oracle's ensure_schema ALTER waits 5 s and fails.
+            conn = _bank.connect(TGT)
+            conn.execute("SELECT 1 FROM entries LIMIT 1")
+            arm.state["holder"] = conn
+        elif holder:
             arm.state["holder"] = _bank.connect(TGT, autocommit=True)
         arm.state["files"] = core.snapshot(arm.home)
     return setup
@@ -423,6 +482,7 @@ def _import_setup(archive: str, seed=None, holder=False, schema=True):
 def _import_after(arm: core.Arm, obs: dict) -> None:
     holder = arm.state.pop("holder", None)
     if holder is not None:
+        holder.rollback()
         holder.close()
     obs["arm"] = arm.name
     obs["setup_files"] = arm.state["files"]
@@ -433,6 +493,23 @@ def _import_after(arm: core.Arm, obs: dict) -> None:
 def _seed_target(conn) -> None:
     from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415
     _seed_bank(conn)
+
+
+def _seed_null_stamps(conn) -> None:
+    """A non-empty schema-55 bank holding an edge as the daemon writes it
+    (``PostgresStorage.upsert_edge``: tx_time, valid_time, writer_id NULL),
+    which the oracle's ensure_schema backfills before refusing the import."""
+    from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415
+    from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415
+    _seed_bank(conn)
+    conn.commit()
+    storage = PostgresStorage(_bank.url(TGT))
+    try:
+        storage.upsert_edge(2, "uses", 1, origin="agent")
+    finally:
+        storage.close()
+    row = conn.execute("SELECT count(*) FROM edges WHERE tx_time IS NULL").fetchone()
+    assert row[0] == 1, "the daemon writer no longer leaves NULL stamps"
 
 
 def _seed_relation(conn) -> None:
@@ -470,12 +547,15 @@ def _lite_after(arm: core.Arm, obs: dict) -> None:
     obs["db_before"] = None
 
 
-def _export(cid, argv, bank=SRC, rules=("transfer-zip",), note="", existing=None,
+def _export(cid, argv, bank=SRC, rules=("transfer-zip",), note="", existing=(),
             dumped=True):
     def setup(arm: core.Arm) -> None:
-        if existing:
-            (arm.cwd / existing).write_bytes(b"not yet an archive")
+        for name in existing:
+            (arm.cwd / name).write_bytes(b"not yet an archive")
         _export_setup(arm)
+        if dumped:
+            arm.state["db_before"] = _bank.dump(bank)
+            _wait_idle(bank)
 
     after = _export_after(bank) if dumped else _lite_after
     return core.Case(cid, ["export", *argv], env=_dsn(bank), setup=setup, after=after,
@@ -511,7 +591,7 @@ def cases() -> list[core.Case]:
                 note="float4/float8 repr incl. NaN/inf/-0/1e16, jsonb re-serialisation, "
                      "timestamptz isoformat, control and astral text, meta skip keys, "
                      "used_ids dropped"),
-        _export("export-overwrites", ["--out", "bank.zip"], existing="bank.zip",
+        _export("export-overwrites", ["--out", "bank.zip"], existing=("bank.zip",),
                 note="an existing archive is replaced"),
         _export("export-connection-defers", ["--out", _SEP.join(["{CWD}", "d", "x.zip"])], bank=TGT + "_absent",
                 rules=("expect-export-deferred",), dumped=False,
@@ -556,6 +636,34 @@ def cases() -> list[core.Case]:
         _import("import-fk-violation-fails", "bad-evidence",
                 rules=("expect-import-native-failure",),
                 note="a SQL error inside the transaction: rolled back by both arms"),
+        # Review round 1 (2026-10-09): deferrals that must change nothing.
+        _export("export-part-exists-defers", ["--out", "bank.zip"],
+                existing=("bank.zip.part",), rules=("expect-export-deferred-any",),
+                note="a .part this run did not create is never touched"),
+        _export("export-infinity-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
+                bank=INF, rules=("expect-export-deferred",),
+                note="an 'infinity' timestamptz: deferred before any directory is made"),
+        _export("export-deep-jsonb-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
+                bank=DEEP, rules=("expect-export-deferred-any",),
+                note="jsonb nested past the ported depth: deferred before any effect"),
+        _export("export-non-utc-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
+                bank=NYC, rules=("expect-export-deferred-any",),
+                note="a non-UTC session with a non-null timestamptz"),
+        _export("export-non-utc-empty", ["--out", "x.zip"], bank=NYC_EMPTY,
+                note="a non-UTC session without timestamptz values is answered"),
+        _import("import-null-stamps-defers", "current", seed=_seed_null_stamps,
+                rules=("expect-import-deferred",),
+                note="ensure_schema would backfill daemon-written stamps before refusing"),
+        _import("import-force-locked-holder-defers", "current", argv=("--force",),
+                holder="locked", rules=("expect-import-deferred",),
+                note="a holder lock ensure_schema's DDL cannot take within 5 s"),
+        _import("import-string-in-float-defers", "string-in-float",
+                rules=("expect-import-deferred",)),
+        _import("import-float4-overflow-defers", "float4-overflow",
+                rules=("expect-import-deferred",)),
+        _import("import-bad-vector-defers", "bad-vector", rules=("expect-import-deferred",)),
+        _import("import-huge-int-float", "huge-int-float",
+                note="an int past int8 into float8 is typed numeric, as psycopg types it"),
     ]
 
 
@@ -580,4 +688,36 @@ MUTANTS = [
            '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1"',
            '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1 DESC"',
            ("export-seeded",)),
+    # Review round 1 (2026-10-09): each guard below is load-bearing.
+    Mutant("transfer-null-stamps", ROW, "shim/src/cli/transfer/import.rs",
+           'if unstamped.as_deref() != Some("f") {', 'if unstamped.as_deref() == Some("x") {',
+           ("import-null-stamps-defers",)),
+    Mutant("transfer-probe-share", ROW, "shim/src/cli/transfer/import.rs",
+           'IN ACCESS EXCLUSIVE MODE"', 'IN ACCESS SHARE MODE"',
+           ("import-force-locked-holder-defers",)),
+    Mutant("transfer-int-type", ROW, "shim/src/cli/transfer/import.rs",
+           '_ => "numeric",', '_ => "int8",', ("import-huge-int-float",)),
+    Mutant("transfer-float4-loads", ROW, "shim/src/cli/transfer/import.rs",
+           "fn float4_loads(value: f64) -> bool {",
+           "fn float4_loads(value: f64) -> bool {\n    if value.is_finite() {\n"
+           "        return true;\n    }", ("import-float4-overflow-defers",)),
+    Mutant("transfer-numeric-strings", ROW, "shim/src/cli/transfer/import.rs",
+           'matches!(udt, "text" | "uuid" | "vector" | "timestamptz")',
+           'matches!(udt, "text" | "uuid" | "vector" | "timestamptz" | "float8")',
+           ("import-string-in-float-defers",)),
+    Mutant("transfer-cast-check", ROW, "shim/src/cli/transfer/import.rs",
+           "if let Pass::Dry(client) = pass", "if let Pass::Real(client) = pass",
+           ("import-bad-vector-defers",)),
+    Mutant("transfer-part-guard", ROW, "shim/src/cli/transfer/export.rs",
+           'match fs::symlink_metadata(format!("{display}.part")) {',
+           'match fs::symlink_metadata(format!("{display}.part.absent")) {',
+           ("export-part-exists-defers",)),
+    Mutant("transfer-timestamp-range", ROW, "shim/src/cli/transfer/export.rs",
+           "IS NOT NULL AND NOT \\", "IS NULL AND NOT \\", ("export-infinity-defers",)),
+    Mutant("transfer-jsonb-precheck", ROW, "shim/src/cli/transfer/export.rs",
+           ".any(|text| json::loads(text).is_none())", ".any(|text| text.is_empty())",
+           ("export-deep-jsonb-defers",)),
+    Mutant("transfer-utc-precheck", ROW, "shim/src/cli/transfer/export.rs",
+           "Kind::Timestamptz if rendering.utc && rendering.iso => format!(",
+           "Kind::Timestamptz if rendering.iso => format!(", ("export-non-utc-defers",)),
 ]

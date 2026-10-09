@@ -89,10 +89,12 @@ pub(super) enum Outcome {
     Refused(String),
     /// A shape outside this candidate: the dispatcher's generic deferral.
     Deferred,
-    /// The named deferral for a bank below the current schema.
+    /// The named deferral for a bank not at this build's schema.
     SchemaDeferred,
-    /// A PostgreSQL or filesystem failure after the work began.
+    /// A PostgreSQL failure after the work began (`native-pg-diagnostics`).
     Failed,
+    /// A filesystem failure after export began writing (`native-io-diagnostics`).
+    FailedIo,
 }
 
 enum Request {
@@ -247,7 +249,7 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
         Outcome::SchemaDeferred => (
             emit(
                 &mut io::stderr().lock(),
-                "pseudolife-stdio: import into a bank below the current schema is deferred in this candidate (needs native ensure_schema)\n",
+                "pseudolife-stdio: import into a bank not at this build's schema (55) is deferred in this candidate (needs native ensure_schema)\n",
             ),
             1,
         ),
@@ -256,6 +258,15 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
                 &mut io::stderr().lock(),
                 &format!(
                     "pseudolife-stdio: {mode} failed (native-pg-diagnostics); nothing was committed\n"
+                ),
+            ),
+            1,
+        ),
+        Outcome::FailedIo => (
+            emit(
+                &mut io::stderr().lock(),
+                &format!(
+                    "pseudolife-stdio: {mode} failed (native-io-diagnostics); no archive was written\n"
                 ),
             ),
             1,
@@ -306,6 +317,15 @@ pub(super) fn run(mode: &str, arguments: Vec<OsString>) -> Option<ExitCode> {
             });
         }
     };
+    // The oracle still resolves `_default_data_dir` with a DSN: the lite
+    // default (home) and, unless pg0 finds that dir, `Path.cwd()`. Either
+    // failing is a Python traceback, so it defers.
+    if data_dir.is_none()
+        && std::env::var_os("PSEUDOLIFE_MCP_DATA_DIR").is_none_or(|v| v.is_empty())
+    {
+        lite_default_dir()?;
+        std::env::current_dir().ok()?;
+    }
     let dsn = crate::pg::Dsn::parse(&dsn).ok()?;
     let outcome = match request {
         Request::Help => unreachable!("help returned above"),

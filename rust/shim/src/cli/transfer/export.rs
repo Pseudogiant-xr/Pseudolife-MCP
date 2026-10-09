@@ -73,14 +73,17 @@ pub(super) fn destination(out: Option<String>) -> Option<Destination> {
         return None;
     }
     let path = PathBuf::from(&display);
-    let partial = PathBuf::from(format!("{display}.part"));
-    for target in [&path, &partial] {
-        match fs::symlink_metadata(target) {
-            Ok(meta) if meta.is_dir() => return None,
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return None,
-        }
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_dir() => return None,
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return None,
+    }
+    // A `.part` this run did not create is never overwritten or removed: the
+    // oracle would truncate and then unlink or rename it.
+    match fs::symlink_metadata(format!("{display}.part")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return None,
     }
     // mkdir(parents=True, exist_ok=True) fails on a non-directory ancestor.
     for ancestor in path.ancestors().skip(1) {
@@ -126,12 +129,15 @@ struct Table {
     columns: Vec<(String, Kind)>,
 }
 
+/// Every deferral is decided before the first filesystem effect. After it,
+/// failures keep the oracle's traceback effects: `.part` unlinked, created
+/// directories kept.
 enum Stop {
-    /// Unported data: leave the filesystem exactly as it was.
     Defer,
-    /// A server or filesystem failure: the oracle unlinks `.part` and keeps
-    /// the directories it created.
+    /// PostgreSQL, or a value the pre-checks should have deferred.
     Fail,
+    /// The filesystem.
+    FailIo,
 }
 
 struct Rendering {
@@ -253,7 +259,7 @@ async fn write_table(
         .compression_method(CompressionMethod::Deflated)
         .large_file(true);
     zip.start_file(format!("{}.jsonl", table.name), options)
-        .map_err(|_| Stop::Fail)?;
+        .map_err(|_| Stop::FailIo)?;
     let cursor = format!("pl_export_{}", table.name);
     sql::execute(
         client,
@@ -305,10 +311,10 @@ async fn write_table(
                 first = false;
                 json::write_str(&mut line, name, false);
                 line.push_str(": ");
-                cell(&mut line, *kind, value.as_deref(), rendering).ok_or(Stop::Defer)?;
+                cell(&mut line, *kind, value.as_deref(), rendering).ok_or(Stop::Fail)?;
             }
             line.push_str("}\n");
-            zip.write_all(line.as_bytes()).map_err(|_| Stop::Fail)?;
+            zip.write_all(line.as_bytes()).map_err(|_| Stop::FailIo)?;
             count += 1;
         }
     }
@@ -316,6 +322,81 @@ async fn write_table(
         .await
         .map_err(|_| Stop::Fail)?;
     Ok(count)
+}
+
+fn quoted(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+/// Value-level deferrals, decided inside the snapshot before any effect:
+/// timestamptz values psycopg's loader would not return as `cell` renders
+/// them, and jsonb documents `json::loads` does not carry.
+async fn admit_values(
+    client: &Client,
+    tables: &[Table],
+    rendering: &Rendering,
+) -> Result<(), Stop> {
+    for table in tables {
+        let mut documents = Vec::new();
+        for (name, kind) in &table.columns {
+            let column = quoted(name);
+            let probe = match kind {
+                Kind::Timestamptz if rendering.utc && rendering.iso => format!(
+                    "SELECT EXISTS (SELECT 1 FROM {} WHERE {column} IS NOT NULL AND NOT \
+                     ({column} >= '0001-01-01 00:00:00+00' \
+                     AND {column} < '10000-01-01 00:00:00+00'))",
+                    table.name
+                ),
+                Kind::Timestamptz => format!(
+                    "SELECT EXISTS (SELECT 1 FROM {} WHERE {column} IS NOT NULL)",
+                    table.name
+                ),
+                Kind::Jsonb => {
+                    documents.push(column);
+                    continue;
+                }
+                _ => continue,
+            };
+            let found = sql::scalar(client, &probe).await.map_err(|_| Stop::Defer)?;
+            if found.as_deref() != Some("f") {
+                return Err(Stop::Defer);
+            }
+        }
+        if documents.is_empty() {
+            continue;
+        }
+        let cursor = format!("pl_admit_{}", table.name);
+        sql::execute(
+            client,
+            &format!(
+                "DECLARE {cursor} CURSOR FOR SELECT {} FROM {}",
+                documents.join(", "),
+                table.name
+            ),
+        )
+        .await
+        .map_err(|_| Stop::Defer)?;
+        loop {
+            let rows = sql::rows(client, &format!("FETCH FORWARD {FETCH_ROWS} FROM {cursor}"))
+                .await
+                .map_err(|_| Stop::Defer)?;
+            if rows.is_empty() {
+                break;
+            }
+            if rows
+                .iter()
+                .flatten()
+                .flatten()
+                .any(|text| json::loads(text).is_none())
+            {
+                return Err(Stop::Defer);
+            }
+        }
+        sql::execute(client, &format!("CLOSE {cursor}"))
+            .await
+            .map_err(|_| Stop::Defer)?;
+    }
+    Ok(())
 }
 
 fn created_at() -> String {
@@ -333,7 +414,6 @@ async fn snapshot(
     client: &Client,
     destination: &Destination,
     partial: &Path,
-    created: &mut Vec<PathBuf>,
 ) -> Result<Vec<(&'static str, u64)>, Stop> {
     // The oracle's session has no lock_timeout; the shared session sets one.
     sql::execute(client, "RESET lock_timeout")
@@ -345,9 +425,14 @@ async fn snapshot(
     sql::execute(client, setup).await.map_err(|_| Stop::Defer)?;
     let zone = sql::scalar(client, "SHOW TimeZone").await;
     let style = sql::scalar(client, "SHOW DateStyle").await;
-    let (Ok(Some(zone)), Ok(Some(style))) = (zone, style) else {
+    let encoding = sql::scalar(client, "SHOW server_encoding").await;
+    let (Ok(Some(zone)), Ok(Some(style)), Ok(Some(encoding))) = (zone, style, encoding) else {
         return Err(Stop::Defer);
     };
+    // psycopg decodes in the server's encoding; the native client is UTF-8.
+    if encoding != "UTF8" {
+        return Err(Stop::Defer);
+    }
     let rendering = Rendering {
         utc: UTC_ZONES.contains(&zone.as_str()),
         iso: style.starts_with("ISO"),
@@ -367,6 +452,7 @@ async fn snapshot(
         Some(None) => Value::Null,
         Some(Some(text)) => json::loads(text).ok_or(Stop::Defer)?,
     };
+    admit_values(client, &tables, &rendering).await?;
 
     // First filesystem effect: the oracle's out.parent.mkdir(parents=True).
     let mut missing: Vec<&Path> = Vec::new();
@@ -377,10 +463,9 @@ async fn snapshot(
         missing.push(ancestor);
     }
     for directory in missing.into_iter().rev() {
-        fs::create_dir(directory).map_err(|_| Stop::Defer)?;
-        created.push(directory.to_path_buf());
+        fs::create_dir(directory).map_err(|_| Stop::FailIo)?;
     }
-    let file = File::create(partial).map_err(|_| Stop::Fail)?;
+    let file = File::create(partial).map_err(|_| Stop::FailIo)?;
     let mut zip = ZipWriter::new(BufWriter::new(file));
     let mut counts = Vec::new();
     for table in &tables {
@@ -432,11 +517,11 @@ async fn snapshot(
     ]);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     zip.start_file("manifest.json", options)
-        .map_err(|_| Stop::Fail)?;
+        .map_err(|_| Stop::FailIo)?;
     zip.write_all(json::dumps(&manifest, true, Some(2)).as_bytes())
-        .map_err(|_| Stop::Fail)?;
-    let mut writer = zip.finish().map_err(|_| Stop::Fail)?;
-    writer.flush().map_err(|_| Stop::Fail)?;
+        .map_err(|_| Stop::FailIo)?;
+    let mut writer = zip.finish().map_err(|_| Stop::FailIo)?;
+    writer.flush().map_err(|_| Stop::FailIo)?;
     drop(writer);
     sql::execute(client, "COMMIT")
         .await
@@ -449,24 +534,24 @@ pub(super) async fn run(dsn: &Dsn, destination: &Destination) -> Outcome {
         return Outcome::Deferred;
     };
     let partial = PathBuf::from(format!("{}.part", destination.display));
-    let mut created = Vec::new();
-    let result = snapshot(session.client(), destination, &partial, &mut created).await;
+    let result = snapshot(session.client(), destination, &partial).await;
     let _ = session.close().await;
     let counts = match result {
         Ok(counts) => counts,
+        // Decided before any effect: nothing to undo.
+        Err(Stop::Defer) => return Outcome::Deferred,
         Err(stop) => {
+            // destination() refused a pre-existing `.part`: this one is ours.
             let _ = fs::remove_file(&partial);
-            if matches!(stop, Stop::Fail) {
-                return Outcome::Failed;
-            }
-            for directory in created.iter().rev() {
-                let _ = fs::remove_dir(directory);
-            }
-            return Outcome::Deferred;
+            return match stop {
+                Stop::FailIo => Outcome::FailedIo,
+                _ => Outcome::Failed,
+            };
         }
     };
+    // The oracle's replace failing leaves `.part` in place, as here.
     if fs::rename(&partial, &destination.path).is_err() {
-        return Outcome::Failed;
+        return Outcome::FailedIo;
     }
     let mut text = format!("exported to: {}\n", destination.display);
     for (table, count) in counts {

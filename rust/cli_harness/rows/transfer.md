@@ -22,7 +22,11 @@ Argv and resolution (`run_transfer` 579-629):
   (needs native embedded_pg)`), otherwise the "no database configured" refusal
   on stderr, exit 1 (604-611). An existing lite default dir is the data dir
   (pg0 installed) or irrelevant (pg0 absent: never attached), so checking its
-  marker is exact for both installs.
+  marker is exact for both installs. Both outcomes are decided before path
+  admission, as in the oracle: `import ./x.zip` without a DSN gets the
+  no-database refusal, not a path deferral.
+- With a DSN and no data dir, the oracle still evaluates `_default_data_dir`
+  (home, then `Path.cwd()`); an unresolvable home or cwd defers.
 - Printed paths are `str(Path(arg))`: only spellings where that equals the
   argument are ported (Windows: drive-absolute or relative backslash paths,
   no `/`, `:`, `.` or empty components, trailing dot/space or device names;
@@ -55,11 +59,24 @@ Export (`perform_export` 205-244, `_export_table` 247-276):
   excluded_tables (87-108).
 - `out.parent.mkdir(parents=True)`, write `<out>.part`, then replace `out`
   (208-243).
+- Every deferral is decided inside the snapshot before the first filesystem
+  effect: server encoding UTF8; each non-null timestamptz value needs a UTC
+  session and ISO DateStyle and a year in 1-9999 (checked in SQL); every
+  jsonb document must decode under the leaf's JSON domain (a pre-pass over the
+  jsonb columns); `<out>.part` must not already exist (the oracle would
+  truncate and remove a file this run did not create).
 
-Import (`perform_import` 290-360), only into a bank whose
-`meta.schema_version` is already 55 with every rostered table present and
-`entries.embedding` at 1024 or undimensioned (so `ensure_schema`, 316, is a
-no-op; proven by the dump diff of catalog shape and rows):
+Import (`perform_import` 290-360). `ensure_schema` (316) is not run; it
+changes nothing only when all of these hold, and the leaf defers otherwise:
+`meta.schema_version` is 55 and every rostered table exists; `entries.embedding`
+is vector(1024) or undimensioned; the role owns (or has USAGE in the owner of)
+every public table and has CREATE on `public` (its ALTER/CREATE INDEX need
+ownership); and no `facts`/`world_facts`/`lessons`/`edges` row has a NULL
+`tx_time`, `valid_time` or `writer_id` (its v11 block backfills those and
+commits before the emptiness check; schema.py:361-376). A 5-second ACCESS
+EXCLUSIVE probe of every public table stands in for its DDL locks. The
+harness proves the no-op for fresh banks (the dump diff of catalog shape and
+rows) and the deferral for a non-empty bank holding daemon-written edges.
 
 - Manifest refusals before connecting (299-308): missing `manifest.json`;
   `format_version != 1` with its Python repr (None/False/ints/floats/strings).
@@ -80,6 +97,12 @@ no-op; proven by the dump diff of catalog shape and rows):
   psycopg's parameter typing (str untyped; int int2/int4/int8/numeric by
   range; float float8; bool; jsonb via `json.dumps`; `::vector`,
   `::jsonb`, `::timestamptz` placeholders 430-445). Counts are affected rows.
+- Before the transaction a dry pass runs the same loop without writing: it
+  finds the oracle's first refusal and defers any value the export would not
+  write for the column type (strings only for text/uuid/vector/timestamptz),
+  and casts every uuid/vector/timestamptz string with the server's input
+  function, so the transaction meets no value error. Archives with stored or
+  deflated members are read; the rest defer.
 - `_backfill_trace_invalidations` only when the member is absent, its count
   appended last (356-358); `_advance_sequences` including the entries
   high-water over invalidations and reinstatement decisions (523-558).
@@ -95,23 +118,43 @@ no-op; proven by the dump diff of catalog shape and rows):
 - The default archive name's timestamp: rule `transfer-default-name`.
 - Server-side cursor names, fetch batch sizes and statements per message.
 
+## Declared limits
+
+- Import reads each member whole, twice (dry pass, then transaction); memory
+  is bounded by the largest member, not streamed.
+- The lock probe takes ACCESS EXCLUSIVE on every public table for up to 5 s,
+  also under `--force` beside a running daemon; the oracle's ensure_schema
+  takes the same class of lock on the tables it alters.
+- The ownership check could not be exercised by the harness: the test login
+  cannot create a second role.
+
 ## Deferrals and named substitutions
 
 - Generic deferral (dispatcher line, exit 1, nothing changed): non-canonical
-  argv/paths; unreadable, encrypted, duplicate-member or non-deflate
-  archives; manifest that is not a UTF-8 JSON object; archive values outside
-  the export's own value domain or that would fail to load (dict/list for a
-  non-jsonb column, ints out of range, float4 overflow/underflow, NUL, NaN in
-  jsonb, lone surrogates, ints over 4,300 digits, nesting over 200); export
-  of a bank with a missing rostered table or an unported column type; a
-  timestamptz value outside a UTC session / ISO DateStyle / years 1-9999;
-  DSN not understood or connection failure; an ensure_schema lock that a
-  5-second ACCESS EXCLUSIVE probe cannot take.
-- `import into a bank below the current schema is deferred ... (needs native
-  ensure_schema)`: target without meta/roster tables or schema_version != 55.
+  argv/paths; unreadable, encrypted or duplicate-member archives, or members
+  neither stored nor deflated; manifest that is not a UTF-8 JSON object;
+  archive values outside the export's own value domain or that would fail to
+  load (strings for numeric/bool columns, dict/list for a non-jsonb column,
+  ints out of range, float4 overflow/underflow, NUL, NaN in jsonb, lone
+  surrogates, ints over 4,300 digits, nesting over 200, uuid/vector/
+  timestamptz strings the server refuses); export of a bank with a missing
+  rostered table or an unported column type, a non-UTF8 server, an
+  out-of-domain timestamptz or jsonb value, or an existing `<out>.part`;
+  import into a non-UTF8 server, a bank whose tables the role does not own,
+  or a bank with NULL v11 stamps; DSN not understood or connection failure; an
+  ensure_schema lock that the probe cannot take.
+- `import into a bank not at this build's schema (55) is deferred ... (needs
+  native ensure_schema)`: target without the rostered tables, or with
+  schema_version other than 55 (older or newer).
 - `mode '<m>' on the embedded lite tier is deferred ... (needs native
   embedded_pg)`.
 - `<mode> failed (native-pg-diagnostics); nothing was committed`: a
-  PostgreSQL error after the work began (Python prints a traceback). Import
-  rolls back exactly as the oracle does; export removes `.part` and keeps the
-  directories it made, as the oracle does.
+  PostgreSQL error after the work began, or an export value the pre-checks
+  should have deferred (Python prints a traceback). Import rolls back exactly
+  as the oracle does (a constraint violation is the reachable case); export
+  removes its own `.part` and keeps the directories it made, as the oracle
+  does.
+- `export failed (native-io-diagnostics); no archive was written`: a
+  filesystem failure after export began writing (creating directories or
+  `.part`, writing, or the final replace, which leaves `.part` as the oracle
+  does). Python prints a traceback.

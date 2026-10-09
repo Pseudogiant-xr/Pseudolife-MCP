@@ -44,6 +44,26 @@ enum Stop {
     Fail,
 }
 
+/// One target column: the oracle's `information_schema` udt_name (which
+/// selects its placeholder) and the full type a value is checked against.
+pub(super) struct Column {
+    name: String,
+    udt: String,
+    full: String,
+}
+
+/// The dry pass checks values against the server's input functions and
+/// writes nothing; the real pass writes and checks nothing.
+#[derive(Clone, Copy)]
+enum Pass<'a> {
+    Dry(&'a Client),
+    Real(&'a Client),
+}
+
+/// The tables ensure_schema's v11 block backfills on every call (tx_time,
+/// valid_time from asserted_at, writer_id 'legacy'; schema.py:361-376).
+const STAMPED_TABLES: [&str; 4] = ["facts", "world_facts", "lessons", "edges"];
+
 struct Archive {
     zip: ZipArchive<BufReader<File>>,
     names: HashSet<String>,
@@ -219,7 +239,6 @@ fn float4_loads(value: f64) -> bool {
 /// `json.dumps(value)`. Values the oracle's export never writes for the
 /// column's type, or that would fail inside the transaction, are `None`.
 fn literal(value: &Value, udt: &str) -> Option<String> {
-    let numeric = matches!(udt, "int2" | "int4" | "int8" | "float4" | "float8");
     let literal = match value {
         Value::Null => "NULL".to_owned(),
         _ if udt == "jsonb" => {
@@ -228,10 +247,11 @@ fn literal(value: &Value, udt: &str) -> Option<String> {
             }
             sql::text(&json::dumps(value, true, None))
         }
+        // The export writes strings only for these types; the server's input
+        // function is checked in the dry pass for the last three.
         Value::Str(text)
             if !text.contains('\0')
-                && (numeric
-                    || matches!(udt, "text" | "uuid" | "vector" | "timestamptz" | "bool")) =>
+                && matches!(udt, "text" | "uuid" | "vector" | "timestamptz") =>
         {
             sql::text(text)
         }
@@ -261,8 +281,8 @@ fn literal(value: &Value, udt: &str) -> Option<String> {
     })
 }
 
-async fn send(client: Option<&Client>, statements: &[String]) -> Result<u64, Stop> {
-    let Some(client) = client else {
+async fn send(pass: Pass<'_>, statements: &[String]) -> Result<u64, Stop> {
+    let Pass::Real(client) = pass else {
         return Ok(0);
     };
     let mut total = 0;
@@ -285,7 +305,7 @@ fn record(line: &str) -> Result<Vec<(String, Value)>, Stop> {
     }
 }
 
-async fn import_meta(client: Option<&Client>, text: &str) -> Result<u64, Stop> {
+async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
     let mut count = 0;
     for line in lines(text) {
         let rec = record(line)?;
@@ -318,16 +338,33 @@ async fn import_meta(client: Option<&Client>, text: &str) -> Result<u64, Stop> {
             sql::text(key),
             sql::text(&json::dumps(value, true, None))
         );
-        send(client, &[statement]).await?;
+        send(pass, &[statement]).await?;
         count += 1;
     }
     Ok(count)
 }
 
+/// Dry pass: every string headed for an input function that can refuse it
+/// (`vector(n)`, uuid, timestamptz in this session) is cast by the server
+/// first, so the transaction never meets a value error.
+async fn check(pass: Pass<'_>, checks: &mut Vec<String>) -> Result<(), Stop> {
+    if let Pass::Dry(client) = pass
+        && !checks.is_empty()
+    {
+        for chunk in checks.chunks(STATEMENTS_PER_MESSAGE) {
+            sql::execute(client, &chunk.join("; "))
+                .await
+                .map_err(|_| Stop::Defer)?;
+        }
+    }
+    checks.clear();
+    Ok(())
+}
+
 async fn import_table(
-    client: Option<&Client>,
+    pass: Pass<'_>,
     table: &str,
-    columns: &[(String, String)],
+    columns: &[Column],
     text: &str,
     legacy: bool,
 ) -> Result<u64, Stop> {
@@ -336,18 +373,15 @@ async fn import_table(
     } else {
         ""
     };
-    let udt = |name: &str| {
-        columns
-            .iter()
-            .find(|(column, _)| column == name)
-            .map(|(_, udt)| udt.as_str())
-    };
+    let column = |name: &str| columns.iter().find(|column| column.name == name);
+    let udt = |name: &str| column(name).map(|column| column.udt.as_str());
+    let mut checks = Vec::new();
     let mut groups: Vec<(Vec<String>, Vec<String>)> = Vec::new();
     let mut pending = 0;
     let mut inserted = 0;
     let mut inverses = Vec::new();
     async fn flush(
-        client: Option<&Client>,
+        pass: Pass<'_>,
         table: &str,
         on_conflict: &str,
         groups: &mut Vec<(Vec<String>, Vec<String>)>,
@@ -363,7 +397,7 @@ async fn import_table(
                     )
                 })
                 .collect();
-            total += send(client, &statements).await?;
+            total += send(pass, &statements).await?;
         }
         Ok(total)
     }
@@ -413,7 +447,20 @@ async fn import_table(
         rec.sort_by(|a, b| a.0.cmp(&b.0));
         let mut values = Vec::with_capacity(rec.len());
         for (key, value) in &rec {
-            values.push(literal(value, udt(key).ok_or(Stop::Defer)?).ok_or(Stop::Defer)?);
+            let target = column(key).ok_or(Stop::Defer)?;
+            values.push(literal(value, &target.udt).ok_or(Stop::Defer)?);
+            if let Value::Str(text) = value
+                && matches!(target.udt.as_str(), "uuid" | "vector" | "timestamptz")
+            {
+                checks.push(format!(
+                    "SELECT CAST({} AS {})",
+                    sql::text(text),
+                    target.full
+                ));
+                if checks.len() >= STATEMENTS_PER_MESSAGE {
+                    check(pass, &mut checks).await?;
+                }
+            }
         }
         let keys: Vec<String> = rec.into_iter().map(|(key, _)| key).collect();
         let tuple = values.join(", ");
@@ -423,20 +470,21 @@ async fn import_table(
         }
         pending += 1;
         if pending >= BATCH_ROWS {
-            inserted += flush(client, table, on_conflict, &mut groups).await?;
+            inserted += flush(pass, table, on_conflict, &mut groups).await?;
             pending = 0;
         }
     }
-    inserted += flush(client, table, on_conflict, &mut groups).await?;
-    send(client, &inverses).await?;
+    check(pass, &mut checks).await?;
+    inserted += flush(pass, table, on_conflict, &mut groups).await?;
+    send(pass, &inverses).await?;
     Ok(inserted)
 }
 
-/// The per-table loop of `perform_import`, dry (no client) or for real.
+/// The per-table loop of `perform_import`, dry or for real.
 async fn process(
-    client: Option<&Client>,
+    pass: Pass<'_>,
     archive: &mut Archive,
-    columns: &[Vec<(String, String)>],
+    columns: &[Vec<Column>],
     legacy: bool,
     counts: &mut Vec<(&'static str, u64)>,
 ) -> Result<(), Stop> {
@@ -447,9 +495,9 @@ async fn process(
         }
         let text = archive.text(&member).ok_or(Stop::Defer)?;
         let count = if *table == "meta" {
-            import_meta(client, &text).await?
+            import_meta(pass, &text).await?
         } else {
-            import_table(client, table, columns, &text, legacy && *table == "entries").await?
+            import_table(pass, table, columns, &text, legacy && *table == "entries").await?
         };
         counts.push((table, count));
     }
@@ -459,7 +507,7 @@ async fn process(
 async fn transaction(
     client: &Client,
     archive: &mut Archive,
-    columns: &[Vec<(String, String)>],
+    columns: &[Vec<Column>],
     legacy: bool,
 ) -> Result<Vec<(&'static str, u64)>, Stop> {
     let fail = |_| Stop::Fail;
@@ -498,7 +546,7 @@ async fn transaction(
     .await
     .map_err(fail)?;
     let mut counts = Vec::new();
-    process(Some(client), archive, columns, legacy, &mut counts)
+    process(Pass::Real(client), archive, columns, legacy, &mut counts)
         .await
         .map_err(|stop| match stop {
             Stop::Defer => Stop::Fail,
@@ -509,7 +557,7 @@ async fn transaction(
         counts.push(("memory_trace_invalidations", count));
     }
     for (table, columns) in EXPORTED_TABLES.iter().zip(columns) {
-        if !columns.iter().any(|(name, _)| name == "id") {
+        if !columns.iter().any(|column| column.name == "id") {
             continue;
         }
         let sequence = sql::scalar(
@@ -554,7 +602,7 @@ async fn admit(
     manifest: &Value,
     force: bool,
     legacy: bool,
-) -> Result<Option<Vec<Vec<(String, String)>>>, Stop> {
+) -> Result<Option<Vec<Vec<Column>>>, Stop> {
     let defer = |_| Stop::Defer;
     sql::execute(client, "RESET lock_timeout")
         .await
@@ -587,6 +635,46 @@ async fn admit(
     .map_err(defer)?;
     if version.as_deref() != Some(CURRENT_SCHEMA) {
         return Ok(None);
+    }
+    // psycopg decodes in the server's encoding; the native client is UTF-8.
+    let encoding = sql::scalar(client, "SHOW server_encoding")
+        .await
+        .map_err(defer)?;
+    if encoding.as_deref() != Some("UTF8") {
+        return Err(Stop::Defer);
+    }
+    // ensure_schema's ALTER/CREATE INDEX need table ownership and its CREATE
+    // TABLE IF NOT EXISTS needs CREATE on public; without them the oracle
+    // fails before importing.
+    let owner = sql::scalar(
+        client,
+        "SELECT coalesce(bool_and(pg_has_role(c.relowner, 'USAGE')), true) \
+         AND has_schema_privilege('public', 'CREATE') \
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')",
+    )
+    .await
+    .map_err(defer)?;
+    if owner.as_deref() != Some("t") {
+        return Err(Stop::Defer);
+    }
+    // ensure_schema commits its stamp backfill before the dimension and
+    // emptiness checks, so a bank holding NULL stamps would change.
+    let stamps = STAMPED_TABLES
+        .iter()
+        .map(|table| {
+            format!(
+                "EXISTS (SELECT 1 FROM {table} WHERE tx_time IS NULL \
+                 OR valid_time IS NULL OR writer_id IS NULL)"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let unstamped = sql::scalar(client, &format!("SELECT {stamps}"))
+        .await
+        .map_err(defer)?;
+    if unstamped.as_deref() != Some("f") {
+        return Err(Stop::Defer);
     }
     let live = sql::scalar(
         client,
@@ -628,24 +716,34 @@ async fn admit(
         let rows = sql::rows(
             client,
             &format!(
-                "SELECT column_name, udt_name FROM information_schema.columns \
-                 WHERE table_schema = 'public' AND table_name = '{table}'"
+                "SELECT c.column_name, c.udt_name, format_type(a.atttypid, a.atttypmod) \
+                 FROM information_schema.columns c JOIN pg_attribute a \
+                 ON a.attrelid = 'public.{table}'::regclass AND a.attname = c.column_name \
+                 WHERE c.table_schema = 'public' AND c.table_name = '{table}'"
             ),
         )
         .await
         .map_err(defer)?;
-        let mut pairs = Vec::new();
+        let mut found = Vec::new();
         for row in rows {
-            let [Some(name), Some(udt)] =
-                <[Option<String>; 2]>::try_from(row).map_err(|_| Stop::Defer)?
+            let [Some(name), Some(udt), Some(full)] =
+                <[Option<String>; 3]>::try_from(row).map_err(|_| Stop::Defer)?
             else {
                 return Err(Stop::Defer);
             };
-            pairs.push((name, udt));
+            found.push(Column { name, udt, full });
         }
-        columns.push(pairs);
+        columns.push(found);
     }
-    match process(None, archive, &columns, legacy, &mut Vec::new()).await {
+    match process(
+        Pass::Dry(client),
+        archive,
+        &columns,
+        legacy,
+        &mut Vec::new(),
+    )
+    .await
+    {
         Ok(()) | Err(Stop::Refuse(_)) => Ok(Some(columns)),
         Err(other) => Err(other),
     }
