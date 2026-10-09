@@ -91,6 +91,44 @@ enum Written {
     Part,
 }
 
+/// Where a report's bytes go.
+#[derive(Debug, PartialEq, Eq)]
+enum Sink {
+    /// std's stdout, which hands a Windows console UTF-16 through
+    /// `WriteConsoleW`, as CPython's console writer (`_WindowsConsoleIO`)
+    /// does: a label such as `☎` renders whatever the console's code page.
+    Console,
+    /// The UTF-8 bytes through a counted duplicate of the descriptor.
+    Counted,
+}
+
+/// A Windows console takes the console path; anything else (a pipe, a
+/// file, any POSIX stream, where CPython writes the encoded bytes) the
+/// counted one.
+fn report_sink(windows: bool, terminal: bool) -> Sink {
+    if windows && terminal {
+        Sink::Console
+    } else {
+        Sink::Counted
+    }
+}
+
+/// `bytes` (UTF-8 text) to stdout on the path [`report_sink`] picks. A
+/// console write that fails may already have shown text, so it is `Part`.
+fn write_report(bytes: &[u8]) -> Written {
+    use std::io::IsTerminal;
+    match report_sink(cfg!(windows), io::stdout().is_terminal()) {
+        Sink::Console => {
+            let mut stdout = io::stdout().lock();
+            match stdout.write_all(bytes).and_then(|()| stdout.flush()) {
+                Ok(()) => Written::All,
+                Err(_) => Written::Part,
+            }
+        }
+        Sink::Counted => write_unbuffered(bytes),
+    }
+}
+
 /// `bytes` to stdout through a duplicate of its descriptor, so every byte a
 /// write reports has left this process (std's own stdout buffers lines).
 fn write_unbuffered(bytes: &[u8]) -> Written {
@@ -251,6 +289,16 @@ mod tests {
             );
             assert_eq!(sink.taken, &b"0123456789"[..room.min(10)]);
         }
+    }
+
+    #[test]
+    fn only_a_windows_console_takes_the_console_path() {
+        // A Windows console renders UTF-16 through WriteConsoleW (CPython's
+        // _WindowsConsoleIO); bytes written to it are read in its code page.
+        assert_eq!(report_sink(true, true), Sink::Console);
+        assert_eq!(report_sink(true, false), Sink::Counted);
+        assert_eq!(report_sink(false, true), Sink::Counted);
+        assert_eq!(report_sink(false, false), Sink::Counted);
     }
 
     #[cfg(unix)]

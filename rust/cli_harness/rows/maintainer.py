@@ -5,12 +5,14 @@ issues challenges, ``bootstrap_code`` admits the first key, the Console's
 enrolment (``enrol_bootstrap``, ``approve_enrol`` + ``enrol_approved``),
 ``cancel`` and the sign-count flag run on the test suite's software
 authenticator (``tests.maintainer_authenticator``), and the host's
-``confirm`` activates the first key. Credential ids are chosen (the
-authenticator's id is its own random bytes in the tests; here fixed bytes,
-so prefixes are known), and the seed clock is fixed per harness process.
-Each kind is seeded once; every arm of every case gets its own ``CREATE
-DATABASE ... TEMPLATE`` copy, so both arms start from identical rows,
-including the random secret, codes and nonces seeding wrote.
+``confirm`` activates the first key. Seeding is deterministic, so a kind's
+bank is byte-identical on every host and run and goldens replay against it:
+credential ids and authenticator keys are fixed (the tests draw both at
+random), the store's ``secrets`` draws (the secret, codes, nonces) come
+from a generator seeded by the kind, and the seed clock is a fixed minute.
+Each kind is seeded once per harness process; every arm of every case gets
+its own ``CREATE DATABASE ... TEMPLATE`` copy, so both arms start from
+identical rows.
 
 The waiting ``enrol-code`` cases act from the harness while the CLI waits
 (``Case.during``): once the CLI's code row exists, the oracle's
@@ -29,6 +31,7 @@ import contextlib
 import hashlib
 import json
 import os
+import random
 import re
 import time
 import types
@@ -41,9 +44,13 @@ from . import _bank
 
 PREFIX = "pl_cf_w1c_maint_"
 ARM_DB = PREFIX + "arm"
-# Seed clock: two hours before this harness process started, whole minute.
-# Recent on purpose: Windows shows list times only in the current year.
-T0 = float(int(time.time()) // 60 * 60 - 7200)
+# Seed clock: a fixed whole minute, 2026-07-01T00:00:00Z, so seeded banks and
+# the goldens recorded from them are identical on every host and run. Mid
+# year: no common zone changes its UTC offset within two days of it. Windows
+# lists local times only inside the current local year (native_list_defers):
+# once 2026 has passed, the Windows listing cases check the native deferral
+# instead, until T0 is re-pinned and the goldens re-recorded.
+T0 = 1782864000.0
 # The waiting cases' redemption clock: after every seed, before any run.
 HOOK_T = T0 + 3600.0
 
@@ -82,6 +89,16 @@ def _store(conn, clock):
 
 
 _AUTHS: dict = {}
+_P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+
+
+def _fixed_key(name: str):
+    """A P-256 key fixed per chosen id (the stored public key is a seeded
+    value, so it must not change between runs)."""
+    from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
+    digest = hashlib.sha256(f"pl-cli-harness-maintainer-key-{name}".encode()).digest()
+    return ec.derive_private_key(int.from_bytes(digest, "big") % (_P256_ORDER - 1) + 1,
+                                 ec.SECP256R1())
 
 
 def auth(name: str):
@@ -91,6 +108,7 @@ def auth(name: str):
         # A nonzero count makes every assertion advance it, so a stale one
         # is a regression the store flags.
         made = SoftAuthenticator(sign_count=1)
+        made.private = _fixed_key(name)
         made.credential_id = base64.urlsafe_b64decode(IDS[name] + "==")
         if made.id != IDS[name]:
             raise RuntimeError(f"{name}: id {IDS[name]} is not canonical base64url")
@@ -173,6 +191,27 @@ def seed_rich(conn):
 
 SEEDERS = {"fresh": seed_fresh, "stale": seed_stale, "pending": seed_pending,
            "rich": seed_rich}
+
+
+class _SeededSecrets:
+    """The oracle store's ``secrets`` while a kind is seeded: the same
+    draws (secret, codes, nonces) on every host and run."""
+
+    def __init__(self, label: str):
+        self._draw = random.Random(label)
+
+    def token_hex(self, nbytes: int) -> str:
+        return self._draw.randbytes(nbytes).hex()
+
+    def choice(self, sequence):
+        return sequence[self._draw.randrange(len(sequence))]
+
+
+@contextmanager
+def _seeded(kind: str):
+    from pseudolife_memory.storage import maintainer  # noqa: PLC0415
+    with mock.patch.object(maintainer, "secrets", _SeededSecrets(f"pl-cli-harness-{kind}")):
+        yield
 _BASELINE: dict[str, dict] = {}
 _CREATED: set[str] = set()
 
@@ -225,10 +264,34 @@ def ensure(kind: str) -> str:
     else:
         _bank.create(name)
         if kind in SEEDERS:
-            with _bank.connect(name, autocommit=True) as conn:
+            with _bank.connect(name, autocommit=True) as conn, _seeded(kind):
                 SEEDERS[kind](conn)
     _BASELINE[name] = _bank.dump(name)
     return name
+
+
+def changes(baseline: dict, dump: dict) -> dict:
+    """A post-state as what differs from the arm's starting bank: the
+    starting rows' digest (both arms start from one seed, and seeding is
+    deterministic, so the digest is equal unless the seed changed), every
+    table whose rows changed (all its rows), any table that disappeared, and
+    every other dump section (sequences, columns, constraints, indexes) that
+    changed, in full. Equal for two arms exactly when their full dumps are,
+    given equal starting banks; a golden then holds only what each case
+    changed."""
+    seed = hashlib.sha256(json.dumps(baseline["tables"], sort_keys=True).encode()).hexdigest()
+    out: dict = {"seed": seed}
+    for section in sorted(set(baseline) | set(dump)):
+        before, after = baseline.get(section), dump.get(section)
+        if section == "tables":
+            out["tables"] = {name: rows for name, rows in sorted(after.items())
+                             if before.get(name) != rows}
+            gone = sorted(set(before) - set(after))
+            if gone:
+                out["tables_dropped"] = gone
+        elif before != after:
+            out[section] = after
+    return out
 
 
 def _secret(dump) -> str | None:
@@ -365,7 +428,30 @@ LAST_SHOWN = 253_402_300_799.0
 TWO_DAYS = 2 * 86_400
 
 
-def native_list_defers(dump) -> bool:
+def shown_times(dump) -> dict[str, list]:
+    """Each seeded key's listed times (``active_from``, ``last_used_at``),
+    by the 12-character id prefix the listing prints."""
+    shown = {}
+    for text in dump["tables"].get("maintainer_passkeys", []):
+        row = json.loads(text)
+        shown[row["credential_id"][:12]] = [row["active_from"], row["last_used_at"]]
+    return shown
+
+
+def local_times(shown: dict[str, list]) -> dict[str, list]:
+    """``_when`` (maintainer_cli.py:89-90) of each shown time on this host:
+    ``time.strftime("%Y-%m-%d %H:%M", time.localtime(value))``."""
+    def when(value):
+        if value is None or not 0 <= value <= LAST_SHOWN:
+            return None
+        try:
+            return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
+        except (OverflowError, OSError, ValueError):
+            return None
+    return {prefix: [when(value) for value in values] for prefix, values in shown.items()}
+
+
+def native_list_defers(shown: dict[str, list]) -> bool:
     """Whether the native listing defers its local times on this host, by
     the rule ``display.rs`` states, computed here with CPython's own
     ``time.localtime``: TZ set, a shown value outside 0..9999-12-31 UTC or
@@ -375,9 +461,8 @@ def native_list_defers(dump) -> bool:
     if "TZ" in os.environ:
         return True
     year = time.localtime().tm_year
-    for text in dump["tables"].get("maintainer_passkeys", []):
-        row = json.loads(text)
-        for value in (row["active_from"], row["last_used_at"]):
+    for values in shown.values():
+        for value in values:
             if value is None:
                 continue
             if not 0 <= value <= LAST_SHOWN:
@@ -396,11 +481,41 @@ def native_list_defers(dump) -> bool:
 
 @normalize.rule("maintainer-list-guard")
 def maintainer_list_guard(obs: dict) -> None:
-    """A listing the native rule defers on this host (``native_list_defers``
-    over the seeded bank): the oracle arm's result is replaced by the
-    deferral expectation, so the branch is checked rather than skipped."""
-    if obs.get("native_list_defers"):
+    """A listing the native rule defers (``native_list_defers`` over the
+    seeded bank's shown times): the oracle arm's result is replaced by the
+    deferral expectation, so the branch is checked rather than skipped. It
+    is decided when the arms are compared, on the host that ran the
+    candidate: a golden's oracle side was recorded on another host, in
+    another year perhaps."""
+    if native_list_defers(obs.get("shown") or {}):
         maintainer_deferral(obs)
+
+
+_LISTED = re.compile(rb"^(.{12})(  .*  active_from=)(.*?)(  last_used=)(.*?)"
+                     rb"((?:  FLAGGED \(sign count went backwards\))?\r?)$")
+
+
+@normalize.rule("maintainer-local-times")
+def maintainer_local_times(obs: dict) -> None:
+    """A listed key's ``active_from`` and ``last_used``, where each is
+    exactly what CPython's ``time.localtime`` renders for that key's seeded
+    value on the host that ran the arm (``local_times``, taken with the
+    observation), becomes ``<local>``: the minutes depend on that host's
+    zone, which a golden recorded elsewhere does not share. A time rendered
+    for another key, another value or another zone stays as written."""
+    rendered = obs.get("local_times") or {}
+    lines = []
+    for line in base64.b64decode(obs["stdout"]).split(b"\n"):
+        match = _LISTED.match(line)
+        expected = rendered.get(match.group(1).decode("utf-8", "replace")) if match else None
+        if expected:
+            parts = list(match.groups())
+            for index, want in ((2, expected[0]), (4, expected[1])):
+                if want is not None and parts[index] == want.encode():
+                    parts[index] = b"<local>"
+            line = b"".join(parts)
+        lines.append(line)
+    obs["stdout"] = base64.b64encode(b"\n".join(lines)).decode()
 
 
 # --- the waiting form's harness side ---------------------------------------------
@@ -537,8 +652,9 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
         dump = _bank.dump(ARM_DB)
         baseline = arm.state["prepared"]
         obs["seed_secret"] = _secret(baseline)
-        obs["native_list_defers"] = native_list_defers(baseline)
-        obs["db"] = "unchanged" if dump == baseline else dump
+        obs["shown"] = shown_times(baseline)
+        obs["local_times"] = local_times(obs["shown"])
+        obs["db"] = "unchanged" if dump == baseline else changes(baseline, dump)
 
     environment = dict(GUARDS)
     if dsn:
@@ -550,7 +666,7 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
                      programs=programs)
 
 
-LISTING = WRITES + ("maintainer-list-guard",)
+LISTING = WRITES + ("maintainer-list-guard", "maintainer-local-times")
 CLOSED = WRITES + ("maintainer-stdout-closed-trailer",)
 
 

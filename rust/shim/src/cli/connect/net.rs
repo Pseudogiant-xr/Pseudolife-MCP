@@ -1,43 +1,50 @@
 //! Connect's daemon traffic: the unauthenticated health probe, the
 //! installers' credential check, the board check-in probe and the MCP
-//! handshake through this candidate's own shim.
+//! handshake through this candidate's own shim. The first three are GETs as
+//! `urllib.request` sends them (`cli::hook_http`): urllib's request fields
+//! (Host as written, `User-Agent`, `Accept-Encoding: identity`,
+//! `Connection: close`), per-receive socket timeouts and
+//! `HTTPRedirectHandler`'s limits.
 use super::pyjson::{self, J};
 use super::{Cred, Defer};
+use crate::cli::hook_http;
 use std::time::Duration;
 
-/// `shim.probe_health(url, 2.0)`: any HTTP answer's body as JSON, else None.
-/// Redirects are followed, as urllib's default opener follows them.
+/// `shim.probe_health(url, 2.0)`: `urlopen(url + "/health")`, any HTTP
+/// answer's body as JSON, else None. Redirects are followed as the default
+/// opener follows them; a 3xx reply here is where its redirect handler
+/// raised `HTTPError` (no target, a refused scheme, the repeat limits), whose
+/// body `e.read()` parses like any other.
 pub(super) async fn probe_health(url: &str) -> Result<Option<J>, Defer> {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
+    let Some(reply) = hook_http::get_bounded(
+        url,
+        "/health",
+        None,
+        Duration::from_secs(2),
+        true,
+        (None, None),
+    )
+    .await
     else {
         return Ok(None);
     };
-    let Ok(response) = client.get(format!("{url}/health")).send().await else {
+    if reply.unsupported {
+        // An ftp: or non-text redirect target urllib would still follow.
+        return Err(Defer);
+    }
+    if reply.body_failed {
         return Ok(None);
-    };
-    let Ok(body) = response.bytes().await else {
-        return Ok(None);
-    };
-    let Ok(text) = std::str::from_utf8(&body) else {
+    }
+    let Ok(text) = std::str::from_utf8(&reply.body) else {
         return Ok(None);
     };
     pyjson::loads(text)
 }
 
-fn no_redirect(timeout: u64) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(timeout))
-        .build()
-        .ok()
-}
-
 /// The `Authorization` value urllib would send: `http.client` encodes a
 /// header as latin-1 and refuses CR or LF not followed by folding
 /// whitespace; either refusal means no request at all (`None`).
-pub(super) fn bearer(token: &str) -> Option<reqwest::header::HeaderValue> {
+pub(super) fn bearer(token: &str) -> Option<Vec<u8>> {
     let mut value = b"Bearer ".to_vec();
     for c in token.chars() {
         value.push(u8::try_from(u32::from(c)).ok()?);
@@ -53,27 +60,28 @@ pub(super) fn bearer(token: &str) -> Option<reqwest::header::HeaderValue> {
     if illegal {
         return None;
     }
-    reqwest::header::HeaderValue::from_bytes(&value).ok()
+    Some(value)
 }
 
-/// `codex_connection.installer_credential_valid`.
+/// `codex_connection.installer_credential_valid`: a no-redirect opener's
+/// GET (a 3xx is an `HTTPError`), `read(1)`, and status exactly 200.
 pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
-    let (Some(client), Some(header)) = (no_redirect(3), bearer(token)) else {
+    let Some(header) = bearer(token) else {
         return false;
     };
-    let Ok(mut response) = client
-        .get(format!("{url}/api/episodes?limit=1"))
-        .header(reqwest::header::AUTHORIZATION, header)
-        .send()
-        .await
+    let Some(reply) = hook_http::get_bounded(
+        url,
+        "/api/episodes?limit=1",
+        Some(&header),
+        Duration::from_secs(3),
+        false,
+        (Some(1), Some(0)),
+    )
+    .await
     else {
         return false;
     };
-    if !response.status().is_success() {
-        return false;
-    }
-    let ok = response.status().as_u16() == 200;
-    response.chunk().await.is_ok() && ok
+    !reply.body_failed && reply.status == 200
 }
 
 const REASONS: [(&str, &str); 6] = [
@@ -107,7 +115,9 @@ fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|b| char::from(*b)).collect()
 }
 
-/// `board_status.board_status(url, token)[1]`.
+/// `board_status.board_status(url, token)[1]`: a no-redirect opener's GET,
+/// `read(65536)` of a 2xx body; any other status is an `HTTPError` whose
+/// body is never read.
 pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
     let Some(token) = token.filter(|t| !t.is_empty()) else {
         return "off - no bearer token, so the daemon has no principal to admit (open-loopback install)"
@@ -115,46 +125,38 @@ pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
     };
     let unreachable = || "off - daemon unreachable".to_owned();
     // urllib's refusal to put the header is one more exception: unreachable.
-    let (Some(client), Some(header)) = (no_redirect(2), bearer(token)) else {
+    let Some(header) = bearer(token) else {
         return unreachable();
     };
-    let Ok(mut response) = client
-        .get(format!(
-            "{}/api/hook/coordination-start",
-            url.trim_end_matches('/')
-        ))
-        .header(reqwest::header::AUTHORIZATION, header)
-        .send()
-        .await
+    let Some(reply) = hook_http::get_bounded(
+        url.trim_end_matches('/'),
+        "/api/hook/coordination-start",
+        Some(&header),
+        Duration::from_secs(2),
+        false,
+        (Some(65536), Some(0)),
+    )
+    .await
     else {
         return unreachable();
     };
-    let status = response.status().as_u16();
+    let status = reply.status;
     if !(200..300).contains(&status) {
         return format!("off - board probe refused (HTTP {status})");
     }
-    let header = response
-        .headers()
+    // read(65536) failing inside the `with`: the probe's `except Exception`.
+    if reply.body_failed {
+        return unreachable();
+    }
+    let header = reply
+        .headers
         .get("X-PL-Board")
         .map(|value| latin1(value.as_bytes()))
         .unwrap_or_default();
     let header = pyjson::py_strip(&header).to_owned();
-    let mut body = Vec::new();
-    loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
-                body.extend_from_slice(&chunk);
-                if body.len() >= 65536 {
-                    body.truncate(65536);
-                    break;
-                }
-            }
-            Ok(None) => break,
-            Err(_) => return unreachable(),
-        }
-    }
     // bytes.strip(): ASCII whitespace including \x0b, which trim_ascii keeps.
-    let served = body
+    let served = reply
+        .body
         .iter()
         .any(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c'));
     if header == "on" || (header.is_empty() && served) {
