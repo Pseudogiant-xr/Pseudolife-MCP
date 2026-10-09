@@ -179,17 +179,27 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      - name: Prepare disposable PostgreSQL for CLI lease row
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
       - name: CLI differential harness
         timeout-minutes: 10
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row mail --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row mail --golden --candidate $candidate -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always()
