@@ -163,6 +163,13 @@ jobs:
         timeout-minutes: 10
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Compare sent YAML startup with PyYAML
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
+          python -m pytest rust/daemon/harness/test_sent_yaml.py -q
+          exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -307,6 +314,44 @@ jobs:
             ${{ runner.temp }}/lease-header-policy.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  daemon-image:
+    name: Rust daemon / disposable image
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Select changed image inputs
+        id: image-inputs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python rust/daemon/container_inputs.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Check the opt-in container contract
+        run: python rust/daemon/test_container.py
+      - name: Build the CPU image without publishing
+        if: steps.image-inputs.outputs.needed == 'true'
+        run: docker build --progress=plain -f ops/Dockerfile.daemon-rust -t w3j-daemon-rust:prep --build-arg GIT_SHA="$GITHUB_SHA" --build-arg GIT_DIRTY=false --build-arg BUILD_SOURCE=ci .
+      - name: Prove offline health and authenticated CPU query inference
+        if: steps.image-inputs.outputs.needed == 'true'
+        env:
+          W3J_RUST_TOKEN: w3j-disposable-ci-token
+        run: |
+          project="w3j-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            result=$?
+            if [ "$result" -ne 0 ]; then docker compose -p "$project" -f ops/docker-compose.rust.yml logs || true; fi
+            docker compose -p "$project" -f ops/docker-compose.rust.yml down || result=1
+            exit "$result"
+          }
+          trap cleanup EXIT
+          docker compose -p "$project" -f ops/docker-compose.rust.yml up --no-build --wait --wait-timeout 180
+          python rust/daemon/container_probe.py --timeout 180
 
   capture-windows:
     name: Capture / Windows / wait-mail

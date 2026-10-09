@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use yaml_rust2::{
     Yaml, YamlLoader,
     parser::{Event, EventReceiver, Parser},
-    scanner::TScalarStyle,
+    scanner::{Scanner, TScalarStyle, TokenType},
 };
 
 #[derive(Debug, PartialEq)]
@@ -134,7 +134,64 @@ fn string(value: &Yaml, path: &str) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or_else(|| refusal(&format!("{path} must be a string")))
 }
+
+// PyYAML's scanner permits only ASCII letters, digits, '-' and '_' in
+// anchors/aliases, and does not skip tabs between tokens (scanner.py's
+// scan_anchor / scan_to_next_token). yaml-rust2 accepts both presentations.
+// Let its scanner identify strings and comments instead of duplicating YAML
+// quoting, block indentation or escape rules here.
+fn scanner_compatible(text: &str) -> Result<(), String> {
+    let tokens = |source: &str| -> Result<Vec<TokenType>, String> {
+        let mut scanner = Scanner::new(source.chars());
+        let mut tokens = Vec::new();
+        while let Some(token) = scanner.next_token().map_err(|_| refusal("invalid YAML"))? {
+            tokens.push(token.1);
+        }
+        Ok(tokens)
+    };
+    let original = tokens(text)?;
+    for token in &original {
+        if let TokenType::Anchor(name) | TokenType::Alias(name) = token
+            && !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+        {
+            return Err(refusal("invalid YAML anchor or alias name"));
+        }
+    }
+    if text.contains('\t') {
+        // A fresh printable character remains content in quoted/block strings
+        // and disappears in comments. Between tokens, or in a plain scalar,
+        // it changes the token stream: those are precisely the refused tabs.
+        let marker = (0xe000..=0xf8ff)
+            .filter_map(char::from_u32)
+            .find(|c| !text.contains(*c))
+            .ok_or_else(|| refusal("tab presentation outside supported YAML"))?;
+        let marked = text.replace('\t', &marker.to_string());
+        let mut changed = tokens(&marked)?;
+        for (before, after) in original.iter().zip(&mut changed) {
+            if let (TokenType::Scalar(before_style, before_value), TokenType::Scalar(style, value)) =
+                (before, after)
+                && before_style == style
+                && *style != TScalarStyle::Plain
+            {
+                // Quoted/block strings can fold tab whitespace rather than
+                // retain it. Their value is still read from the original
+                // document; only their token kind/presentation is checked.
+                *value = before_value.clone();
+            }
+        }
+        if original != changed {
+            return Err(refusal(
+                "invalid YAML tab between tokens or in a plain scalar",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn parse(text: &str) -> Result<SentConfig, String> {
+    scanner_compatible(text)?;
     let mut presentation = Presentation::default();
     Parser::new_from_str(text)
         .load(&mut presentation, true)
@@ -318,6 +375,39 @@ mod tests {
                 parse(text).unwrap_err().starts_with("config-yaml-typed:"),
                 "{text}"
             );
+        }
+    }
+
+    #[test]
+    fn python_scanner_refusals_and_string_tabs() {
+        for text in [
+            "coordination:\n  enabled: \ttrue\n",
+            "coordination:\n  enabled: true\t# comment\n",
+            "ignored: a\tb\n",
+            "ignored: |\n\ta\n",
+            "ignored: |\n  a\n\t\n",
+            // yaml-rust2 refuses this quoted continuation indentation;
+            // retained noncanonical presentation, not a PyYAML refusal.
+            "ignored: 'a\n\tb'\n",
+            "coordination: &deny.name {enabled: false}\n",
+            "coordination: &deny/alias {enabled: false}\n",
+            "coordination: &雪 {enabled: false}\n",
+        ] {
+            assert!(parse(text).is_err(), "{text:?}");
+        }
+        for text in [
+            "ignored: \"a\tb\"\n",
+            "ignored: 'a\tb'\n",
+            "ignored: \"a\\tb\"\n",
+            "ignored: |\n  a\tb\n",
+            "ignored: >\n  a\tb\n",
+            "ignored: \"a\n  \tb\"\n",
+            "ignored: >\n  a\n  \tb\n",
+            "ignored: text # comment\twith tab\n",
+            "coordination: &deny_name-1 {enabled: false}\n",
+            "ignored: &deny_name-1 {enabled: false}\ncoordination: *deny_name-1\n",
+        ] {
+            assert!(parse(text).is_ok(), "{text:?}");
         }
     }
 }
