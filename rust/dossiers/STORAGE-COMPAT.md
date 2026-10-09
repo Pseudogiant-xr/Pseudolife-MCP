@@ -1,6 +1,6 @@
 # STORAGE-COMPAT
 
-Source commit: `3b4de2c515bee07e97cd35b6e1473ea48511ec77`. All repository-relative line anchors refer to that commit. Producer attribution: dossier author's source census, pending `rust/producer-census.json`; no application, test, model, database or build was executed for this dossier.
+Source commit: `3b4de2c515bee07e97cd35b6e1473ea48511ec77`. All repository-relative line anchors refer to that commit. Producer attribution: dossier author's source census, pending `rust/producer-census.json`. One original Python retention test and a pure chunk-unit oracle check were run for review corrections; no model, database, build or Rust harness was executed for this dossier.
 
 ## 1. What the row promises
 
@@ -38,7 +38,7 @@ Import call graph to durable SQL: `migrate_legacy` -> `PostgresStorage.load_entr
 | `data_dir/memory_state/cms_state.pt`, `data_dir/cortex_state.pt` | Migration paths `pseudolife_memory/storage/migrate.py:135`; originals become `.pre-v8.bak`, never deleted (`:479`). Fingerprint contains per-source byte size and SHA256 (`:64`). |
 | CMS checkpoint | `pseudolife_memory/memory/cms.py:2262` dictionary: `schema_version`, `preset_name`, `bands`, `interaction_count`, `logical_turn_count`, `surprise_history`, `consolidation_events`, `tier_hits`, `tier_queries`, `episodes`, `dream_ack_secret`, `dream_display_cursor`. `bands` maps names to `{entries:[...]}`. |
 | Entry dictionary | `pseudolife_memory/memory/miras/band.py:224`: text, CPU tensor embedding, surprise_score, timestamp, access_count, source, superseded_at/by_text, last_logical_turn, slots, episode_id/title, tags, authority, distortion_tolerance, dream_state, dream_id. No MLP weights in this producer. |
-| Legacy CMS layouts | `pseudolife_memory/memory/cms.py:2346`: absent schema means v1 `instant/short_term/long_term`; v2–7 use bands. Pre-v7 entries get a dream ID; unknown schema refuses loading and preserves fresh resident state. Unknown saved bands are skipped by the file loader; PG hydrate instead seats unknown band names into the first band. These are different contracts. |
+| Legacy CMS layouts | `pseudolife_memory/memory/cms.py:2346`: absent schema means v1 `instant/short_term/long_term`; v2–7 use bands. Pre-v7 entries get a dream ID; unknown schema refuses loading and preserves fresh resident state. For supported band layouts, unknown saved bands route their entries into the first configured band (`:2479`), then load rebalances (`:2420`); PG hydration uses the same retention fallback. Individual unrestorable entries can still be skipped (`:2517`). |
 | `memory_state/weights.pt` | `pseudolife_memory/memory/cms.py:2293`: `{schema_version,kind:'weights',preset_name,interaction_count,logical_turn_count,surprise_history,consolidation_events,tier_hits,tier_queries}`. Despite historical method/doc names, current producer stores counters and no entries or MLP weights. Missing cache returns false; both corrupt sets `weights_reset`; backup recovery returns true. |
 | Cortex snapshot | `pseudolife_memory/memory/cortex.py:1688`: version/config margins/cursor/log plus records containing claim/value/polarity/confidence/status/kind, provenance/support, assertion/confirmation/supersession, embedding/slot_embedding, temporal/HLC/writer/session/version/freshness, stance/labels. Preserve current member rows, not scalar-heal them. This save uses `torch.save` directly; do not attribute atomic CMS backup guarantees to it. |
 | Atomic checkpoint files | `pseudolife_memory/utils/atomic_io.py:27`: write `.tmp`, rotate old primary to `.bak`, replace tmp as primary. No fsync appears in this implementation; do not claim power-loss durability beyond the observed rename behavior. `_load_one` uses CPU, `weights_only=True` only. |
@@ -50,7 +50,7 @@ Import call graph to durable SQL: `migrate_legacy` -> `PostgresStorage.load_entr
 | Embedded backend | `pseudolife_memory/storage/embedded_pg.py:128`: `<data_dir>/embedded_pg`, PG_VERSION major check, start lock and registry name, `_owned` instance handles. Explicit DSN wins; files bypasses pg0; only started instances are stopped. Named deferral. |
 | Reference bank | `pseudolife_memory/memory/reference_bank.py:104`, `:135`, `:212`, `:253`: persistent directory/collection configured for cosine, `_client/_collection/_open_error/_open_lock`; `upsert(ids,embeddings,documents,metadatas)` and query. Chunk ID is MD5 UTF-8 `source:index:first100chars`; metadata is source/chunk_index/timestamp. No PostgreSQL document table exists at this source. Named deferral. |
 
-Chroma ingest encodes slices of at most 8 (`pseudolife_memory/memory/reference_bank.py:34`, `:189`), retaining chunk/vector correspondence before upsert; no SQL transaction guarantee applies to that backend. Chunking uses `size*4`, `overlap*4`, step max(size-overlap,1), strip and omit empty slices (`:46`). Chroma score is max(0,1-distance), query count is min(k,collection count), optional bank reads return empty while ingest refuses a failed open (`:122`, `:242`). Backend index/tie behavior is not established by wrapper inspection.
+Chroma ingest encodes slices of at most 8 (`pseudolife_memory/memory/reference_bank.py:34`, `:189`), retaining chunk/vector correspondence before upsert; no SQL transaction guarantee applies to that backend. Chunking sets `char_size=chunk_size*4`, `char_overlap=chunk_overlap*4`, then `step=max(char_size-char_overlap,1)` in characters; defaults advance 1792 characters. Slices use `char_size`, are stripped and omit empty text (`:46`). Chroma score is max(0,1-distance), query count is min(k,collection count), optional bank reads return empty while ingest refuses a failed open (`:122`, `:242`). Backend index/tie behavior is not established by wrapper inspection.
 
 ## 4. Shipped producers
 
@@ -76,6 +76,8 @@ Keep named deferrals **embedded PostgreSQL pg0 lite lifecycle** and **Chroma-bac
 
 ## 6. Oracle tests
 
+Behavioral retention pin: `tests/test_flat_migration.py::TestStateRestoreFallback::test_v2_restore_routes_unknown_bands_into_first_band` checks the supported saved-band fallback. This original Python node was rerun for the documentation correction; it is not Rust parity evidence.
+
 Behavioral:
 
 - `tests/test_cms_pt_schema.py::test_save_load_preserves_episode_and_tag_fields`, `::test_pre_v6_save_loads_with_defaults`, `::test_save_load_round_trips_episode_manager_state`, `::test_save_load_preserves_superseded_by_text`.
@@ -97,9 +99,11 @@ Use existing daemon/CLI harness isolation and DB observer (`rust/daemon/harness/
 2. Import matching-dimensional files, then a legacy-dimensional source with a deterministic fake embedder; assert re-embed call text and vectors for entries/facts, episode identity, cursor and source preservation. Restore the same mismatched source separately and require refusal before imported content.
 3. Interrupt after entry+cursor commit, then add a live fact and restart with exactly the same source; compare full duplicate multiplicity, source prefix and untouched live slot/history. Repeat after band stamp repair, a half rename and a vanished/replaced source.
 4. Interrupt each atomic save rename boundary; corrupt primary/backup independently; assert old-or-new complete data, backup selection/reset flag, unchanged resident entries in weights-only load. Cortex direct-save limitations remain visible.
-5. Supplemental parser/chunk cell: synthetic UTF-8 replacement/plain/HTML/PDF fixtures; size/overlap boundaries, whitespace-only tail and astral characters; record provider. Defer backend Chroma ranking and pg0 lifecycle cells by name.
+5. Supplemental parser/chunk cell: synthetic UTF-8 replacement/plain/HTML/PDF fixtures; size/overlap boundaries, whitespace-only tail and astral characters; record provider. Pin character units with 2048 non-whitespace characters at default size512/overlap64: exactly two chunks of lengths 2048 and 256, with the second starting at offset1792 (`pseudolife_memory/memory/reference_bank.py:46`). Defer backend Chroma ranking and pg0 lifecycle cells by name.
 
-Six mutants:
+6. Renamed-layout case: save a custom two-band checkpoint containing one entry in each band, restore under the flat preset, and assert both texts and all saved fields survive in the first band before/after rebalance (`tests/test_flat_migration.py:148`).
+
+Eight mutants:
 
 | Mutant | Rejecting observation |
 |---|---|
@@ -109,6 +113,8 @@ Six mutants:
 | Replace all facts on resume | Case 3 destroys a live intervening slot. |
 | Read cache in place / omit backup fallback | Case 4 loses recoverable checkpoint or resets incorrectly. |
 | Omit kind/labels/dream fields from file serializer | Case 1 loses members or checkpoint identity on restart. |
+| Skip unknown saved band names instead of routing entries | Renamed-layout case 6 loses the old second band's entry. |
+| Compute stride in token units without the character conversion | Case 5 produces extra chunks or wrong offsets. |
 
 These are proposals only; none was implemented or run.
 
