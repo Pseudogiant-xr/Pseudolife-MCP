@@ -111,6 +111,7 @@ class FixtureDaemon:
             # The disposable pg_tls test certificate: DNS SAN localhost,
             # issued by TLS_CA, which no system trust store holds.
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(TLS_DIR / "server.pem", TLS_DIR / "server-key.pem")
             self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
             self.url = f"https://localhost:{port}"
