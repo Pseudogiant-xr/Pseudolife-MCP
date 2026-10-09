@@ -19,6 +19,8 @@ Declared rules, never applied by hand:
 * Tie order: two entries may swap places only when their scores are within
   SCORE_TOL of each other (spec "Free": tie order).
 * ``retrieval_events.created_at`` and other wall-clock columns: null-or-not.
+* ``age`` (``_relative_time`` of the wall clock): equal, or the same unit
+  one step apart, since the two daemons answer moments apart.
 
 Environment: ORT_DYLIB_PATH, PSEUDOLIFE_DAEMON_ONNX_DIR (Qwen3 export) and
 PSEUDOLIFE_DAEMON_RERANK_DIR (cross-encoder export) for the Rust side;
@@ -45,6 +47,7 @@ from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F
 REPO = HERE.parents[2]
 GOLDENS = HERE / "goldens" / "w2d"
 SCORE_TOL = 2e-4
+AGE_RE = re.compile(r"(\d+) (\w+?)s? ago")
 TOKEN = "tok-w2d-search-0001"
 # Python-only init writes owned by other slices (W1-A's list, minus the
 # retrieval event this slice now writes).
@@ -240,6 +243,11 @@ def diff(a, b, path="", tol_keys=("score",), tol_all=False) -> list[str]:
         if len(a) != len(b):
             return [f"{path}: length python {len(a)} vs rust {len(b)}"]
         return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff(x, y, f"{path}[{i}]", tol_keys, tol_all)]
+    if path.endswith(".age") and isinstance(a, str) and isinstance(b, str) and a != b:
+        ma, mb = AGE_RE.fullmatch(a), AGE_RE.fullmatch(b)
+        if ma and mb and ma.group(2) == mb.group(2) and abs(int(ma.group(1)) - int(mb.group(1))) <= 1:
+            return []
+        return [f"{path}: python {a!r} vs rust {b!r}"]
     if isinstance(a, float) or isinstance(b, float):
         leaf = path.rsplit(".", 1)[-1]
         if tol_all or leaf in tol_keys:
