@@ -27,8 +27,9 @@ pub(super) struct Reply {
 ///   IPv4-only daemon after `::1` fails;
 /// - `timeout` bounds each send and receive, not the whole reply
 ///   (`socket.settimeout`): a daemon answering slowly but steadily completes,
-///   one that goes quiet for `timeout` fails. TLS records ride on the same
-///   timed socket;
+///   one that goes quiet for `timeout` fails. Over https the handshake has
+///   one deadline and each read must yield plaintext within `timeout`, as
+///   CPython's SSL socket bounds each SSL operation;
 /// - urllib's request fields: Host as written in the URL, User-Agent,
 ///   `Accept-Encoding: identity`, `Connection: close` and an optional
 ///   Authorization value already encoded as Latin-1;
@@ -110,21 +111,26 @@ async fn once(
             break;
         }
     }
-    let socket = Inactivity::new(connected?, timeout);
+    let socket = connected?;
     let stream: Box<dyn Stream> = if secure {
         let config = match tls {
             Some(config) => config,
             None => platform_tls()?,
         };
         let name = rustls::pki_types::ServerName::try_from(host).ok()?;
-        Box::new(
-            tokio_rustls::TlsConnector::from(config)
-                .connect(name, socket)
-                .await
-                .ok()?,
+        // CPython bounds the whole handshake by the socket timeout, then each
+        // SSL read by its own deadline until plaintext arrives: the timer goes
+        // above TLS, so encrypted fragments alone do not count as progress.
+        let tls = tokio::time::timeout(
+            timeout,
+            tokio_rustls::TlsConnector::from(config).connect(name, socket),
         )
+        .await
+        .ok()?
+        .ok()?;
+        Box::new(Inactivity::new(RaggedEof(tls), timeout))
     } else {
-        Box::new(socket)
+        Box::new(Inactivity::new(socket, timeout))
     };
     let (mut sender, connection) =
         hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
@@ -150,6 +156,9 @@ async fn once(
             .get(http::header::LOCATION)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
+        if !follow && !(200..300).contains(&status) {
+            return Some((Reply { status, body: Vec::new() }, location));
+        }
         let body = response
             .into_body()
             .collect()
@@ -177,6 +186,42 @@ fn platform_tls() -> Option<Arc<rustls::ClientConfig>> {
     // http.client offers ALPN http/1.1 on its default context.
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Some(Arc::new(config))
+}
+
+/// A TLS stream whose peer closing without close_notify reads as end of
+/// stream, as CPython's default `suppress_ragged_eofs=True` makes it; a body
+/// still short of its declared length then fails as `IncompleteRead` does.
+struct RaggedEof<S>(S);
+
+impl<S: AsyncRead + Unpin> AsyncRead for RaggedEof<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.0).poll_read(cx, buf) {
+            Poll::Ready(Err(error)) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for RaggedEof<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_shutdown(cx)
+    }
 }
 
 /// A socket whose every read and write must make progress within `timeout`
@@ -381,6 +426,85 @@ mod tests {
         )
         .await;
         assert!(reply.is_none());
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_tls_reply_that_stalls_past_the_timeout_fails() {
+        let (server_tls, client_tls) = tls_pair();
+        let (port, task) = server(OK.to_vec(), 20, Duration::from_millis(500), Some(server_tls)).await;
+        let reply = get_with(
+            &format!("https://localhost:{port}"),
+            "/health",
+            None,
+            Duration::from_millis(150),
+            true,
+            Some(client_tls),
+        )
+        .await;
+        assert!(reply.is_none());
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_handshake_slower_than_the_timeout_fails_even_while_bytes_flow() {
+        // A relay forwards the server's handshake 16 bytes every 40 ms: each
+        // TCP read progresses, but the handshake as a whole takes far longer
+        // than 250 ms, which CPython's do_handshake deadline refuses.
+        let (server_tls, client_tls) = tls_pair();
+        let (port, task) = server(OK.to_vec(), OK.len(), Duration::ZERO, Some(server_tls)).await;
+        let relay = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay_port = relay.local_addr().unwrap().port();
+        let relay_task = tokio::spawn(async move {
+            let (client, _) = relay.accept().await.unwrap();
+            let upstream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let (mut client_read, mut client_write) = client.into_split();
+            let (mut up_read, mut up_write) = upstream.into_split();
+            tokio::spawn(async move {
+                let _ = tokio::io::copy(&mut client_read, &mut up_write).await;
+            });
+            let mut buffer = [0u8; 16];
+            while let Ok(read) = up_read.read(&mut buffer).await {
+                if read == 0 || client_write.write_all(&buffer[..read]).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        });
+        let reply = get_with(
+            &format!("https://localhost:{relay_port}"),
+            "/health",
+            None,
+            Duration::from_millis(250),
+            true,
+            Some(client_tls),
+        )
+        .await;
+        assert!(reply.is_none());
+        relay_task.abort();
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_rejected_payload_returns_without_reading_its_body() {
+        // A 500 whose body trickles for seconds: the payload request is
+        // rejected at its head, as urllib's HTTPErrorProcessor raises.
+        let error = b"HTTP/1.1 500 Boom\r\nContent-Length: 400\r\nConnection: close\r\n\r\n";
+        let mut reply = error.to_vec();
+        reply.extend(std::iter::repeat_n(b'x', 400));
+        let (port, task) = server(reply, error.len(), Duration::from_millis(200), None).await;
+        let started = std::time::Instant::now();
+        let rejected = get(
+            &format!("http://127.0.0.1:{port}"),
+            "/api/briefing",
+            None,
+            Duration::from_secs(5),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!((rejected.status, rejected.body.len()), (500, 0));
+        assert!(started.elapsed() < Duration::from_secs(2));
         task.abort();
     }
 

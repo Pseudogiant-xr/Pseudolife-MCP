@@ -1,7 +1,7 @@
 {
  "row": "CLI-HOOK",
  "platform": "windows",
- "oracle_commit": "36fb6f90165257a6b9f0cc7ca72840383863e075",
+ "oracle_commit": "ce5abc272c9204e9604ea9d7925037029efd6150",
  "cases": {
   "briefing-help": {
    "home": null,
@@ -10,8 +10,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGJyaWVmaW5nIFstaF0gWy0tbWF4LXVuc3VyZSBNQVhfVU5TVVJFXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLW1heC1sZXNzb25zIE1BWF9MRVNTT05TXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLW1heC13b3JsZCBNQVhfV09STERdIFstLWhvb2stanNvbl0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1jb29yZGluYXRpb25dDQoNCm9wdGlvbnM6DQogIC1oLCAtLWhlbHAgICAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0DQogIC0tbWF4LXVuc3VyZSBNQVhfVU5TVVJFDQogICAgICAgICAgICAgICAgICAgICAgICBjYXAgc3VycHJpc2VzIEFORCBxdWVzdGlvbnMgYXQgdGhpcyBtYW55IEVBQ0ggKGRlZmF1bHQNCiAgICAgICAgICAgICAgICAgICAgICAgIDMgb2YgZWFjaCkNCiAgLS1tYXgtbGVzc29ucyBNQVhfTEVTU09OUw0KICAtLW1heC13b3JsZCBNQVhfV09STEQNCiAgLS1ob29rLWpzb24gICAgICAgICAgIGVtaXQgYSBDbGF1ZGUgQ29kZS9Db2RleCBTZXNzaW9uU3RhcnQgaG9vayBwYXlsb2FkDQogICAgICAgICAgICAgICAgICAgICAgICAoaG9va1NwZWNpZmljT3V0cHV0LmFkZGl0aW9uYWxDb250ZXh0KSBjYXJyeWluZyB0aGUNCiAgICAgICAgICAgICAgICAgICAgICAgIG1lbW9yeSBjb3JlIGFuZCB0aGUgYm91bmRlZCBicmllZmluZyB0aGUgcGx1Z2luIGhvb2sNCiAgICAgICAgICAgICAgICAgICAgICAgIHNlcnZlczsgdGhlIC0tbWF4LSogY2FwcyBkbyBub3QgYXBwbHkNCiAgLS1jb29yZGluYXRpb24gICAgICAgIHByaW50IHRoZSBhZ2VudC1ib2FyZCBjaGVjay1pbiBpbnN0ZWFkLCBvbmx5IHdoZXJlDQogICAgICAgICAgICAgICAgICAgICAgICB0aGlzIGJlYXJlciBjYW4gdXNlIHRoZSBib2FyZA0K",
    "stderr": "",
    "window": [
-    1791521831.0384202,
-    1791521832.4313886
+    1791524805.0658941,
+    1791524805.3778064
    ],
    "files": {
     "cwd": "dir"
@@ -25,8 +25,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521832.4334683,
-    1791521833.9302893
+    1791524805.381637,
+    1791524805.9169111
    ],
    "files": {
     "cwd": "dir"
@@ -40,14 +40,16 @@
    "stdout": "IyBTZXNzaW9uIGJyaWVmaW5nDQoNCi0gKiozKiogZmFjdHMgY2hhbmdlZA0KLSBuYcOvdmUgY2Fmw6kg4oCUIOKAnHF1b3RlZOKAnQ0K",
    "stderr": "",
    "window": [
-    1791521833.9504652,
-    1791521834.7399561
+    1791524805.9281235,
+    1791524806.190183
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -57,7 +59,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -76,14 +80,16 @@
    "stdout": "IyBTZXNzaW9uIGJyaWVmaW5nDQoNCi0gKiozKiogZmFjdHMgY2hhbmdlZA0KLSBuYcOvdmUgY2Fmw6kg4oCUIOKAnHF1b3RlZOKAnQ0K",
    "stderr": "",
    "window": [
-    1791521835.244531,
-    1791521836.141479
+    1791524806.6802783,
+    1791524806.909841
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -93,7 +99,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=5&max_lessons=2&max_world=0",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -112,14 +120,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521836.6386683,
-    1791521837.3907979
+    1791524807.4111562,
+    1791524807.764306
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -129,7 +139,9 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -148,14 +160,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521837.8914287,
-    1791521838.586207
+    1791524808.2576694,
+    1791524808.6342502
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -165,6 +179,8 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -183,14 +199,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIlBzZXVkb2xpZmUgY29vcmRpbmF0aW9uOiBhdCB0aGUgZmlyc3QgdGFzayBhbmQgb24gcmVzdW1lLCB1c2UgbWVtb3J5X2FnZW50cyhhY3Rpb249bGlzdCkgdG8gY2hlY2sgcGVlcnMuIn19DQo=",
    "stderr": "",
    "window": [
-    1791521839.0548463,
-    1791521839.589453
+    1791524809.1246214,
+    1791524809.5049798
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -200,7 +218,9 @@
      "method": "GET",
      "target": "/api/hook/coordination-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -219,14 +239,16 @@
    "stdout": "UHNldWRvbGlmZSBjb29yZGluYXRpb246IGF0IHRoZSBmaXJzdCB0YXNrIGFuZCBvbiByZXN1bWUsIHVzZSBtZW1vcnlfYWdlbnRzKGFjdGlvbj1saXN0KSB0byBjaGVjayBwZWVycy4NCg==",
    "stderr": "",
    "window": [
-    1791521840.090368,
-    1791521841.2555609
+    1791524810.0045617,
+    1791524810.310989
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -236,7 +258,9 @@
      "method": "GET",
      "target": "/api/hook/coordination-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -255,8 +279,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521841.7330637,
-    1791521842.4294071
+    1791524810.8004694,
+    1791524811.128594
    ],
    "requests": [],
    "files": {
@@ -271,14 +295,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIlBzZXVkb2xpZmUgY29vcmRpbmF0aW9uOiBhdCB0aGUgZmlyc3QgdGFzayBhbmQgb24gcmVzdW1lLCB1c2UgbWVtb3J5X2FnZW50cyhhY3Rpb249bGlzdCkgdG8gY2hlY2sgcGVlcnMuIn19DQo=",
    "stderr": "",
    "window": [
-    1791521842.7612247,
-    1791521843.3332667
+    1791524811.3256035,
+    1791524811.7047117
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -288,7 +314,9 @@
      "method": "GET",
      "target": "/api/hook/coordination-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -307,14 +335,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521843.8712332,
-    1791521844.3213522
+    1791524812.1979327,
+    1791524812.5678205
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -324,7 +354,9 @@
      "method": "GET",
      "target": "/api/hook/coordination-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -343,14 +375,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521844.803216,
-    1791521845.3382323
+    1791524813.0641923,
+    1791524813.4378443
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -360,7 +394,9 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -379,14 +415,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521845.8074975,
-    1791521846.21026
+    1791524813.9339144,
+    1791524814.3091393
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -405,14 +443,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521846.706038,
-    1791521847.2155912
+    1791524814.8027077,
+    1791524815.1868167
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -431,14 +471,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521847.7052004,
-    1791521848.2578273
+    1791524815.6742508,
+    1791524816.0113695
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -448,7 +490,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -467,14 +511,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521848.785328,
-    1791521849.3071842
+    1791524816.521565,
+    1791524816.8635519
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -484,7 +530,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -503,14 +551,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521849.8075306,
-    1791521850.61666
+    1791524817.3633146,
+    1791524817.6848023
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -520,7 +570,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -539,14 +591,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521851.0994487,
-    1791521851.7805605
+    1791524818.1982906,
+    1791524818.554972
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -556,7 +610,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -575,14 +631,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521852.1850636,
-    1791521852.6310837
+    1791524819.0490036,
+    1791524819.4511614
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -592,7 +650,9 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -611,14 +671,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521853.1060596,
-    1791521853.769658
+    1791524819.9435546,
+    1791524820.2197604
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -628,7 +690,9 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -647,14 +711,16 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521854.2736995,
-    1791521854.9585361
+    1791524820.706913,
+    1791524820.9539611
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -664,13 +730,372 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
      "body": ""
     }
    ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-health-trickle": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
+   "stderr": "",
+   "window": [
+    1791524821.4507532,
+    1791524823.42346
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/api/hook/session-start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-payload-trickle": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
+   "stderr": "",
+   "window": [
+    1791524823.9165726,
+    1791524832.057082
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/api/hook/session-start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-health-redirect-loop": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791524832.3931212,
+    1791524832.6388228
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-health-redirect-chain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791524833.1404102,
+    1791524833.465422
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h0",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h1",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h2",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h3",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h4",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h5",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h6",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h7",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h8",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/h9",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-health-redirect-once": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
+   "stderr": "",
+   "window": [
+    1791524833.9646525,
+    1791524834.2930624
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/healthz",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/api/hook/session-start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "briefing-https-untrusted": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791524834.8001325,
+    1791524835.427568
+   ],
+   "requests": [],
    "files": {
     "cwd": "dir"
    },
@@ -683,14 +1108,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521855.441445,
-    1791521858.2572575
+    1791524835.9242544,
+    1791524838.4584787
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -700,7 +1127,9 @@
      "method": "GET",
      "target": "/api/hook/session-start",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -719,14 +1148,16 @@
    "stdout": "IyBTZXNzaW9uIGJyaWVmaW5nDQoNCi0gKiozKiogZmFjdHMgY2hhbmdlZA0KLSBuYcOvdmUgY2Fmw6kg4oCUIOKAnHF1b3RlZOKAnQ0K",
    "stderr": "",
    "window": [
-    1791521858.7302308,
-    1791521861.6110673
+    1791524838.957811,
+    1791524841.6318564
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -736,7 +1167,9 @@
      "method": "GET",
      "target": "/api/briefing?max_unsure=3&max_lessons=3&max_world=3",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -755,8 +1188,8 @@
    "stdout": "",
    "stderr": "W3NoaW1dIGludmFsaWQgUFNFVURPTElGRV9NQ1BfREFFTU9OX1VSTDsgdXNlIGFuIGh0dHAocykgb3JpZ2luIHdpdGhvdXQgY3JlZGVudGlhbHMsIGEgcGF0aCwgcXVlcnksIG9yIGZyYWdtZW50Lg0K",
    "window": [
-    1791521862.0851939,
-    1791521862.8610604
+    1791524842.1210215,
+    1791524842.4068365
    ],
    "files": {
     "cwd": "dir"
@@ -770,14 +1203,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiU2Vzc2lvblN0YXJ0IiwgImFkZGl0aW9uYWxDb250ZXh0IjogIiMjIE1lbW9yeSBhdCBzZXNzaW9uIHN0YXJ0XG5Vc2UgdGhlIHNoYXJlZCBQc2V1ZG9saWZlIGJhbmsgZm9yIGV2ZXJ5IHRhc2suIEZpcnN0IGNhbGwgYG1lbW9yeV9zZWFyY2hgIHdpdGhcbnRoZSB0YXNrIGluIG5hdHVyYWwgbGFuZ3VhZ2UuXG5cbiMjIExlc3NvbnMgZnJvbSBwYXN0IHdvcmtcbi0gcHJlZmVyOiBxdW90ZSBcImV4YWN0XCIgaWRzIFx1MjAxNCBcdTAwZmNuXHUwMGVmY1x1MDBmNmRcdTAwZTkgXHUyNzEzIFx1ZDgzZFx1ZGU4MCJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521862.86559,
-    1791521863.9803252
+    1791524842.4144397,
+    1791524842.7477338
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/health",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -787,7 +1222,9 @@
      "method": "GET",
      "target": "/api/hook/session-start?launcher={HOME}%5CAppData%5CLocal%5Cpseudolife-mcp%5Cbin%5Cpseudolife-mcp.exe",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -811,15 +1248,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521864.5484066,
-    1791521865.0809338
+    1791524843.2386668,
+    1791524843.522173
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -841,15 +1280,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521868.959737,
-    1791521870.038814
+    1791524845.6768668,
+    1791524845.9169238
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session&since=1791515000.5",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -871,15 +1312,17 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521870.6325471,
-    1791521872.1116846
+    1791524846.4171329,
+    1791524846.7539334
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -901,15 +1344,17 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521872.5449295,
-    1791521873.4324405
+    1791524847.2491324,
+    1791524847.463279
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -931,15 +1376,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJub3RlIFx1MDBmYyJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521874.0431354,
-    1791521875.1940215
+    1791524847.9611704,
+    1791524848.2297535
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -961,15 +1408,17 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521875.6043434,
-    1791521876.3315427
+    1791524848.7307503,
+    1791524848.9613056
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session&since=12.0",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -991,15 +1440,17 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521876.869696,
-    1791521877.6638312
+    1791524849.4891915,
+    1791524849.773792
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session&since=12.0",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1021,11 +1472,43 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521878.1542184,
-    1791521880.8860571
+    1791524850.262811,
+    1791524852.5516803
    ],
    "files": {
     "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "prompt-trickle": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucy4ifX0NCg==",
+   "stderr": "",
+   "window": [
+    1791524852.5637512,
+    1791524856.1161797
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    ".pseudolife-mcp": "dir",
+    "cwd": "dir",
+    ".pseudolife-mcp/digests": "dir",
+    ".pseudolife-mcp/digests/20ea7e113a8512fa24155c982cc5ccf573bb212b66571ff66860aa38996a28e0.mark": "file:MTc5MTUxNjAwMC4yNQo="
    },
    "modes": {}
   },
@@ -1036,15 +1519,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521880.8923504,
-    1791521883.61978
+    1791524856.3866296,
+    1791524858.7716284
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1066,14 +1551,16 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521884.0715604,
-    1791521884.7032764
+    1791524859.2715948,
+    1791524859.5473883
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1095,15 +1582,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521885.171409,
-    1791521885.95097
+    1791524860.0526528,
+    1791524860.279281
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-file-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1126,8 +1615,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521886.4358442,
-    1791521887.025124
+    1791524860.7793965,
+    1791524861.0493758
    ],
    "requests": [],
    "files": {
@@ -1142,15 +1631,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521887.4582326,
-    1791521888.0192535
+    1791524861.292706,
+    1791524861.5354545
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1172,8 +1663,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521888.5412061,
-    1791521889.087963
+    1791524862.028242,
+    1791524862.241539
    ],
    "requests": [],
    "files": {
@@ -1188,8 +1679,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521889.5661314,
-    1791521889.9385967
+    1791524862.5434532,
+    1791524862.727873
    ],
    "requests": [],
    "files": {
@@ -1204,8 +1695,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521890.0742707,
-    1791521890.671838
+    1791524863.0542328,
+    1791524863.2819202
    ],
    "requests": [],
    "files": {
@@ -1220,15 +1711,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521891.0875669,
-    1791521891.546031
+    1791524863.572322,
+    1791524863.9769735
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1249,15 +1742,17 @@
    "stdout": "eyJob29rU3BlY2lmaWNPdXRwdXQiOiB7Imhvb2tFdmVudE5hbWUiOiAiVXNlclByb21wdFN1Ym1pdCIsICJhZGRpdGlvbmFsQ29udGV4dCI6ICJNZW1vcnkgY2hhbmdlZDogMiBuZXcgbGVzc29ucyBcdTIwMTQgcmVhZCB0aGVtLiJ9fQ0K",
    "stderr": "",
    "window": [
-    1791521892.034172,
-    1791521892.4792078
+    1791524864.4756281,
+    1791524864.6938827
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1280,15 +1775,17 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791521892.932288,
-    1791521893.4170005
+    1791524865.1842287,
+    1791524865.34591
    ],
    "requests": [
     {
      "method": "GET",
      "target": "/api/hook/memory-changes?session_id=w1b-prompt-session",
      "headers": {
+      "accept-encoding": "identity",
       "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
@@ -1310,8 +1807,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521893.9198759,
-    1791521894.3695633
+    1791524865.844089,
+    1791524866.111119
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1330,8 +1827,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521894.3800898,
-    1791521894.9094138
+    1791524866.1194303,
+    1791524866.3778946
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1350,8 +1847,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521894.9253347,
-    1791521895.3764985
+    1791524866.3884783,
+    1791524866.6911101
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1369,8 +1866,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521895.383507,
-    1791521895.9312692
+    1791524866.6956239,
+    1791524866.9446113
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1387,8 +1884,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521895.9420362,
-    1791521896.4113097
+    1791524866.9530802,
+    1791524867.1977496
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1405,8 +1902,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521896.4254928,
-    1791521897.0134232
+    1791524867.2067177,
+    1791524867.517986
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1423,8 +1920,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521897.0223732,
-    1791521897.3855083
+    1791524867.527731,
+    1791524867.784311
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1441,8 +1938,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521897.3975506,
-    1791521897.8854084
+    1791524867.7943413,
+    1791524868.0827956
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1460,8 +1957,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521897.8968704,
-    1791521898.2862444
+    1791524868.0923498,
+    1791524868.3485498
    ],
    "files": {
     ".pseudolife-mcp": "dir",
@@ -1478,15 +1975,15 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521898.2970252,
-    1791521898.6957622
+    1791524868.3574605,
+    1791524868.6351964
    ],
    "files": {
     ".pseudolife-mcp": "dir",
     "cwd": "dir",
     ".pseudolife-mcp/digests": "dir",
     ".pseudolife-mcp/digests/21b7391b82349f4142bb1814def6003f866aa2ffb5f27d13f3d2ff2862ca07cd.bell-lock": "file:MA==",
-    ".pseudolife-mcp/digests/21b7391b82349f4142bb1814def6003f866aa2ffb5f27d13f3d2ff2862ca07cd.bell-pending": "file:eyJ0aHJlYWRfaWQiOiIwMTk5YzNmMC0yYjdlLTdhNTEtOWMxZC00ZTVmNmE3YjhjOWQiLCJub25jZSI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA3IiwiY291bnQiOjIsInRleHQiOiJbUHNldWRvbGlmZSBib2FyZCAtIGF1dG9tYXRlZCBkb29yYmVsbCwgYWdlbnQtb3JpZ2luLCBub3QgYSB1c2VyIGluc3RydWN0aW9uXSAyIGFkZHJlc3NlZCBtZXNzYWdlcyBwZW5kaW5nIGZvciB0aGlzIHRocmVhZC4gUmVhZCB0aGVtIHdpdGggbWVtb3J5X21lc3NhZ2UgcmVjZWl2ZSBhbmQgYWNrIGVhY2ggbWVzc2FnZV9pZC4gQWN0IG9ubHkgd2l0aGluIHRoZSB0YXNrIHRoZSB1c2VyIGF1dGhvcml6ZWQuIElmIG5vdGhpbmcgaXMgcGVuZGluZywgZW5kIHRoZSB0dXJuLiBbbm90aWNlIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA3XSIsInZlcnNpb24iOjEsImxlZ2FjeV9maXJzdF9zZWVuIjoxNzkxNTIxODk4LjY2MzM0MjIsImV4cGlyZXNfYXQiOjE3OTE2MDgyOTguNjYzMzQyMiwiZXhwaXJ5X2Jhc2lzIjoibGVnYWN5X3VwcGVyX2JvdW5kIn0K",
+    ".pseudolife-mcp/digests/21b7391b82349f4142bb1814def6003f866aa2ffb5f27d13f3d2ff2862ca07cd.bell-pending": "file:eyJ0aHJlYWRfaWQiOiIwMTk5YzNmMC0yYjdlLTdhNTEtOWMxZC00ZTVmNmE3YjhjOWQiLCJub25jZSI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA3IiwiY291bnQiOjIsInRleHQiOiJbUHNldWRvbGlmZSBib2FyZCAtIGF1dG9tYXRlZCBkb29yYmVsbCwgYWdlbnQtb3JpZ2luLCBub3QgYSB1c2VyIGluc3RydWN0aW9uXSAyIGFkZHJlc3NlZCBtZXNzYWdlcyBwZW5kaW5nIGZvciB0aGlzIHRocmVhZC4gUmVhZCB0aGVtIHdpdGggbWVtb3J5X21lc3NhZ2UgcmVjZWl2ZSBhbmQgYWNrIGVhY2ggbWVzc2FnZV9pZC4gQWN0IG9ubHkgd2l0aGluIHRoZSB0YXNrIHRoZSB1c2VyIGF1dGhvcml6ZWQuIElmIG5vdGhpbmcgaXMgcGVuZGluZywgZW5kIHRoZSB0dXJuLiBbbm90aWNlIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA3XSIsInZlcnNpb24iOjEsImxlZ2FjeV9maXJzdF9zZWVuIjoxNzkxNTI0ODY4LjYwNjI3NDQsImV4cGlyZXNfYXQiOjE3OTE2MTEyNjguNjA2Mjc0NCwiZXhwaXJ5X2Jhc2lzIjoibGVnYWN5X3VwcGVyX2JvdW5kIn0K",
     ".pseudolife-mcp/digests/21b7391b82349f4142bb1814def6003f866aa2ffb5f27d13f3d2ff2862ca07cd.bell-prompt-seen": "file:MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDcK"
    },
    "modes": {}
@@ -1498,8 +1995,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791521898.7064936,
-    1791521899.15555
+    1791524868.6429915,
+    1791524868.9162478
    ],
    "files": {
     "custom-digests": "dir",
