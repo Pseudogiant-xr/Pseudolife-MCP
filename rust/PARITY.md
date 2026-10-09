@@ -11,6 +11,7 @@ resolution. Existing paths, other argument forms, archive/dump/compression,
 rotation, implicit data-directory resolution and embedded ownership remain
 deferred. Backup's acceptance disposition is unchanged: Linux first-cell
 proof cannot supply the required Windows path/stdio evidence.
+Non-canonical Windows path spellings (extended-length prefixes or repeated separators) may defer under the canonical-shapes rule; every non-deferred answer must match Python.
 
 ## Stream D retained cell scope (2026-10-08)
 
