@@ -307,16 +307,24 @@ pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) ->
     let utf8 = token.as_bytes().to_vec();
     let latin1: Option<Vec<u8>> = token.chars().map(|c| u8::try_from(c as u32).ok()).collect();
     let candidates: Vec<Vec<u8>> = std::iter::once(utf8).chain(latin1).collect();
-    for cand in &candidates {
+    // principals.py:290-300: every map token against both candidates first,
+    // then the singular token.
+    let matches = |token: &str| candidates.iter().any(|c| ct_eq(c, token.as_bytes()));
+    for (tok, principal) in &env.map {
+        if matches(tok) && !crate::mutants::active("auth-candidate-order") {
+            return Resolved::Principal(principal.clone());
+        }
+    }
+    if let Some(single) = &env.single
+        && matches(single)
+    {
+        return Resolved::Principal("default".into());
+    }
+    if crate::mutants::active("auth-candidate-order") {
         for (tok, principal) in &env.map {
-            if ct_eq(cand, tok.as_bytes()) {
+            if matches(tok) {
                 return Resolved::Principal(principal.clone());
             }
-        }
-        if let Some(single) = &env.single
-            && ct_eq(cand, single.as_bytes())
-        {
-            return Resolved::Principal("default".into());
         }
     }
     if !store.available() {
@@ -333,6 +341,20 @@ pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_map_token_is_tried_on_both_encodings_before_the_singular_token() {
+        // principals.py:290-300. The client sends UTF-8 "café"; the header
+        // arrives latin-1 decoded as "cafÃ©". Its UTF-8 candidate equals the
+        // singular token, its latin-1 candidate the mapped one: the map wins.
+        let e = EnvTokens {
+            single: Some("caf\u{c3}\u{a9}".into()),
+            map: parse_token_map("caf\u{e9}:alice"),
+        };
+        let s = PrincipalStore::new();
+        let header = "Bearer caf\u{c3}\u{a9}";
+        assert!(matches!(resolve(Some(header), &e, &s), Resolved::Principal(p) if p == "alice"));
+    }
 
     fn env(single: Option<&str>, map: &str) -> EnvTokens {
         EnvTokens {
