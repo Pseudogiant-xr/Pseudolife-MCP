@@ -104,7 +104,10 @@ def rust_target(binary: Path) -> Target:
 
 
 def _expand(value: str, arm: Arm) -> str:
-    value = value.replace("{HOME}", str(arm.home)).replace("{CWD}", str(arm.cwd))
+    home = str(arm.home)
+    # A host reporting the same home with a lowercase drive letter.
+    value = value.replace("{HOME_LOWER_DRIVE}", home[:1].lower() + home[1:])
+    value = value.replace("{HOME}", home).replace("{CWD}", str(arm.cwd))
     if arm.daemon is not None:
         value = value.replace("{DAEMON_PORT}", arm.daemon.url.rsplit(":", 1)[1])
     return value
