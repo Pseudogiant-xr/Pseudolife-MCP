@@ -10,7 +10,9 @@ use std::{
 struct DisposableHome(std::path::PathBuf);
 impl DisposableHome {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
+        // Beside the built binary rather than in the system temp directory,
+        // so `install_shim` can hard-link it (/tmp is often a separate tmpfs).
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
             "pseudolife-version-test-{}",
             uuid::Uuid::new_v4().simple()
         ));
@@ -48,8 +50,20 @@ fn native_executable(runtime: &Path) -> std::path::PathBuf {
     } else {
         "pseudolife-stdio"
     });
-    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    install_shim(&executable);
     executable
+}
+
+/// Places the built shim at `executable` by hard link, never by copy.
+///
+/// A copy holds a writable descriptor on the new file while it fills it, and
+/// a child that another test forks in that window keeps a duplicate until its
+/// own exec closes it. Linux refuses to exec a file anyone holds open for
+/// writing (ETXTBSY, "Text file busy"), so the copy-then-exec tests here
+/// failed whenever they raced a concurrent spawn. A link opens nothing for
+/// writing, so there is no descriptor to inherit.
+fn install_shim(executable: &Path) {
+    fs::hard_link(env!("CARGO_BIN_EXE_pseudolife-stdio"), executable).unwrap();
 }
 
 fn console_path(runtime: &Path) -> std::path::PathBuf {
@@ -302,7 +316,7 @@ fn a_binary_at_the_runtime_root_does_not_claim_installed_identity() {
     } else {
         "pseudolife-stdio"
     });
-    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    install_shim(&executable);
     assert_output(
         command(&executable, &home.0)
             .env("PSEUDOLIFE_SHIM_RUNTIMES", runtime.parent().unwrap())
