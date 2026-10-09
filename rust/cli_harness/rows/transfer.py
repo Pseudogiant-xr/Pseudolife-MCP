@@ -560,7 +560,13 @@ def _import_setup(archive: str, seed=None, holder=False, schema=True):
 def _import_after(arm: core.Arm, obs: dict) -> None:
     holder = arm.state.pop("holder", None)
     if holder is not None:
-        holder.rollback()
+        import psycopg  # noqa: PLC0415
+        try:
+            holder.rollback()
+        except psycopg.OperationalError:
+            # A --force import may terminate the holder's backend first
+            # (AdminShutdown); what the case compares is the bank dump.
+            pass
         holder.close()
     obs["arm"] = arm.name
     obs["setup_files"] = arm.state["files"]
