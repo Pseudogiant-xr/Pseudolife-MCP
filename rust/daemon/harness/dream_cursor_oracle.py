@@ -128,7 +128,9 @@ def dispatch(storage, service, action: dict):
 def main() -> int:
     dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
     if len(sys.argv) == 3 and sys.argv[1] == "--seed":
-        seed(dsn, json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")))
+        if sys.argv[2] != "-":
+            raise SystemExit("fixture setup accepts stdin only")
+        seed(dsn, json.load(sys.stdin))
         print("dream template seeded", flush=True)
         return 0
     from pseudolife_memory.storage.postgres import PostgresStorage

@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import copy
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dream_cursors import compare_step, golden_state, normalize_secret, normalize_state, scenarios
+import dream_cursors
 
 
 def state():
@@ -20,6 +24,17 @@ def state():
 
 
 class DreamHarnessTests(unittest.TestCase):
+    def test_seed_setup_passes_payload_without_materializing_it(self):
+        fixture = {"meta": {"dream_ack_secret_v1": "synthetic-fixture-value"}}
+        with tempfile.TemporaryDirectory(prefix="pl-w3d-seed-") as directory:
+            home = Path(directory)
+            with patch("dream_cursors.subprocess.run") as run:
+                run.return_value.returncode = 0
+                dream_cursors.seed_template("fixture-dsn", fixture, home)
+            self.assertEqual(list(home.iterdir()), [])
+            self.assertEqual(run.call_args.args[0][-2:], ["--seed", "-"])
+            self.assertEqual(json.loads(run.call_args.kwargs["input"]), fixture)
+
     def test_rejects_output_order_source_signature_and_numeric_mutations(self):
         response = {"entries": [{"db_id": 1, "source": "notes"},
                                 {"db_id": 2, "source": "notes"}], "count": 2}

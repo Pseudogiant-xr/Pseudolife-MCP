@@ -328,6 +328,16 @@ def wire_action(action, saved):
     return request
 
 
+def seed_template(dsn: str, fixture: dict, home: Path) -> None:
+    """Transfer setup over stdin; never materialize a signing key in a file."""
+    env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
+    seeded = subprocess.run([sys.executable, str(HERE / "dream_cursor_oracle.py"), "--seed", "-"],
+                            input=json.dumps(fixture), cwd=home, env=env,
+                            capture_output=True, text=True, timeout=60)
+    if seeded.returncode:
+        raise RuntimeError("Python template seed failed: " + seeded.stderr[-2000:])
+
+
 def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=None):
     name = scenario["name"]
     tag = f"{name.replace('-', '_')}_{os.getpid()}"
@@ -341,13 +351,7 @@ def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=
     try:
         dsn = pg.create(template)
         seed_home = daemons.make_home(root, tag + "_seed", None)
-        fixture_path = seed_home / "fixture.json"
-        fixture_path.write_text(json.dumps(scenario["fixture"]), encoding="utf-8")
-        env = daemons.base_env(seed_home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-        seeded = subprocess.run([sys.executable, str(HERE / "dream_cursor_oracle.py"), "--seed", str(fixture_path)],
-                                cwd=seed_home, env=env, capture_output=True, text=True, timeout=60)
-        if seeded.returncode:
-            raise RuntimeError("Python template seed failed: " + seeded.stderr[-2000:])
+        seed_template(dsn, scenario["fixture"], seed_home)
         before = dbstate.dump(dsn)
         for side, bank in dbs.items():
             dsns[side] = pg.create(bank, template=template)
