@@ -81,7 +81,13 @@ fn connection_error(error: tokio_postgres::Error) -> Error {
 pub struct Session {
     client: Option<Client>,
     driver: JoinHandle<Result<(), tokio_postgres::Error>>,
+    notices: Notices,
 }
+type Notices =
+    std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<tokio_postgres::error::DbError>>>;
+/// Notices kept until a caller takes them; beyond this the oldest are
+/// dropped, so a long-lived session that never takes them stays bounded.
+pub const NOTICE_LIMIT: usize = 4096;
 impl Session {
     pub async fn open(dsn: &Dsn) -> Result<Self, Error> {
         Self::open_in(dsn, &TlsEnvironment::from_environment()).await
@@ -117,9 +123,31 @@ impl Session {
             .await
             .map_err(|_| Error::Connection)?
             .map_err(connection_error)?;
+        // The driver is the Connection future's own poll loop, except that
+        // server notices are kept for the caller instead of being logged.
+        let notices = Notices::default();
+        let sink = std::sync::Arc::clone(&notices);
+        let mut connection = connection;
+        let driver = tokio::spawn(async move {
+            while let Some(message) =
+                std::future::poll_fn(|context| connection.poll_message(context)).await
+            {
+                if let tokio_postgres::AsyncMessage::Notice(notice) = message? {
+                    let mut kept = sink
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if kept.len() == NOTICE_LIMIT {
+                        kept.pop_front();
+                    }
+                    kept.push_back(notice);
+                }
+            }
+            Ok(())
+        });
         let session = Self {
             client: Some(client),
-            driver: tokio::spawn(connection),
+            driver,
+            notices,
         };
         session
             .client()
@@ -133,6 +161,17 @@ impl Session {
     }
     pub fn client_mut(&mut self) -> &mut Client {
         self.client.as_mut().expect("open PostgreSQL session")
+    }
+    /// Server notices received so far (in order), removed from the session.
+    /// At most the newest [`NOTICE_LIMIT`] are kept between takes.
+    pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
+        std::mem::take(
+            &mut *self
+                .notices
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into()
     }
     /// Close gracefully after all borrowed operations have ended.
     pub async fn close(mut self) -> Result<(), Error> {
