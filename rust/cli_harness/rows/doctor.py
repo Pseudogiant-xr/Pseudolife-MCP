@@ -1102,12 +1102,6 @@ MUTANTS = [
     Mutant("doctor-agent-path-unnormalized", "doctor", "shim/src/cli/doctor/agent.rs",
            "let normalized = super::pyenv::path_str(value)?;", "let normalized = value.to_owned();",
            ("agent-state-trailing-separator",)),
-    Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
-           'directories.insert(0, ".");', "", ("which-cwd-first",)),
-    Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
-           ("claude-config-dir-dot-parts",)),
     Mutant("doctor-escape-upper-hex", "doctor", "shim/src/cli/doctor/pyjson.rs",
            'format!("\\\\u{unit:04x}")', 'format!("\\\\u{unit:04X}")',
            ("claude-config-dir-non-ascii",)),
@@ -1138,6 +1132,14 @@ MUTANTS = [
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]
 if core.WINDOWS:
+    # shutil.which searches the working directory first, and pathlib drops
+    # '.' parts of a backslashed path, on Windows only.
+    MUTANTS.append(Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           'directories.insert(0, ".");', "", ("which-cwd-first",)))
+    MUTANTS.append(Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
+           ("claude-config-dir-dot-parts",)))
     # Its cases run only where the depth threshold was measured.
     MUTANTS.append(Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
                           "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",
