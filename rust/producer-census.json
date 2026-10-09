@@ -1521,7 +1521,7 @@
             "argv_source": "connect $DaemonUrl --token-file $TokenFile --client $names --dry-run --json",
             "channel": "argv",
             "complete": false,
-            "executable_expression": "= & $shim",
+            "executable_expression": "& $shim",
             "expression": "$DaemonUrl --token-file $TokenFile --client $names --dry-run --json",
             "omitted_optional": null,
             "parameters": {
@@ -1638,7 +1638,7 @@
             "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null) || connect_rc=$?",
             "channel": "argv",
             "complete": false,
-            "executable_expression": "$(\"$SHIM_PATH\"",
+            "executable_expression": "\"$SHIM_PATH\"",
             "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null) || connect_rc=$?",
             "omitted_optional": null,
             "parameters": {
@@ -1742,7 +1742,7 @@
                 "expression": "claude-code"
               },
               "--token-file": {
-                "expression": "$CLAUDE_TOKEN_FILE.\""
+                "expression": "$CLAUDE_TOKEN_FILE.\" >&2"
               }
             }
           }
@@ -3746,7 +3746,7 @@
             "argv_source": "pair $DaemonUrl --read-code --token-file $script:TokenFile --json",
             "channel": "argv",
             "complete": false,
-            "executable_expression": "| & $shim",
+            "executable_expression": "& $shim",
             "expression": "$DaemonUrl --read-code --token-file $script:TokenFile --json",
             "omitted_optional": null,
             "parameters": {
@@ -4783,7 +4783,7 @@
             "argv_source": "tunnel setup",
             "channel": "argv",
             "complete": false,
-            "executable_expression": "PSEUDOLIFE_MCP_DAEMON_URL=\"$CLIENT_DAEMON_URL\" PSEUDOLIFE_MCP_TOKEN_FILE=\"$board_file\" \"$SHIM_PATH\"",
+            "executable_expression": "\"$SHIM_PATH\"",
             "expression": "setup",
             "omitted_optional": null,
             "parameters": {}
@@ -54172,7 +54172,7 @@
         "argv_source": "maintainer setup --check *> $null } catch { $global:LASTEXITCODE = 1 }",
         "channel": "argv",
         "complete": false,
-        "executable_expression": "{ & $script:shimInstallPath",
+        "executable_expression": "& $script:shimInstallPath",
         "expression": "setup --check *> $null } catch { $global:LASTEXITCODE = 1 }",
         "parameters": {
           "--check": {
@@ -54285,7 +54285,7 @@
         "argv_source": "maintainer setup --yes || setup_rc=$?",
         "channel": "argv",
         "complete": false,
-        "executable_expression": "PSEUDOLIFE_MCP_TOKEN_FILE=\"$board_file\" \"$SHIM_PATH\"",
+        "executable_expression": "\"$SHIM_PATH\"",
         "expression": "setup --yes || setup_rc=$?",
         "parameters": {
           "--yes": {

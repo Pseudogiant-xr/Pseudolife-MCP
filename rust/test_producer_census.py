@@ -2,6 +2,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 _spec = importlib.util.spec_from_file_location("producer_census", Path(__file__).with_name("producer_census.py"))
 census = importlib.util.module_from_spec(_spec)
@@ -207,3 +209,14 @@ def test_internal_docstring_negative_examples_are_not_mcp_producers():
     calls = census.description_calls(text)
     assert len(calls) == 1
     assert calls[0]["shape"]["parameters"] == {"query": {"literal": "topic"}}
+
+
+def test_malformed_repeated_env_prefix_finishes_in_a_bounded_child():
+    # CodeQL's counterexample: adjacent empty quoted values can make the
+    # executable-position regex backtrack exponentially. Own child, capped at 3s.
+    script = ('import importlib.util; '
+              f's=importlib.util.spec_from_file_location("census", {str(Path(census.__file__))!r}); '
+              'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
+              'assert m.installer_cli_calls("A=" + (\'""\\tA=\' * 26) + "#", "ops/install.sh") == []')
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=3)
+    assert result.returncode == 0, result.stderr

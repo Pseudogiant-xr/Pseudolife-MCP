@@ -361,9 +361,34 @@ def cli_calls(text: str, path: str) -> list[dict]:
     return calls
 
 
+def shell_tokens(text: str) -> list[str]:
+    """Linear token boundaries for supported quoted argv; preserve source spelling."""
+    tokens, start, quote, escaped = [], None, None, False
+    for i, char in enumerate(text):
+        if start is None:
+            if char.isspace():
+                continue
+            start = i
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote == '"':
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char.isspace():
+            tokens.append(text[start:i])
+            start = None
+    if start is not None:
+        tokens.append(text[start:])
+    return tokens
+
+
 def cli_flags(tail: str) -> dict:
     """Resolve supported argv tokens, retaining quoted shell/PowerShell expansions."""
-    tokens = re.findall(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[^\s]+', tail)
+    tokens = shell_tokens(tail)
     switches = {"--yes", "--json", "--dry-run", "--read-code", "--read-token", "--hook-json",
                 "--check", "--all", "--daemon-only", "--clients-only", "--force", "--quiet"}
     flags = {}
@@ -392,8 +417,16 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
     calls = []
     # The named installer resolvers bind these executable variables to the installed CLI.
     # Restrict to command position (line/start, substitution, separator, then/try), never argv.
-    pattern = r'(?:^[ \t]*(?:[A-Z_]+=(?:"[^"\n]*"|[^ \t\n]+)[ \t]+)*|\$\(|[;|{][ \t]*|\bthen[ \t]+|=[ \t]*(?=&))(?:"\$SHIM_PATH"|&[ \t]+\$(?:script:shimInstallPath|shim))[ \t]+([a-z][a-z-]*)([^\n]*)'
+    pattern = r'(?:"\$SHIM_PATH"|&[ \t]+\$(?:script:shimInstallPath|shim))[ \t]+([a-z][a-z-]*)([^\n]*)'
     for match in re.finditer(pattern, text, re.M):
+        prefix = text[text.rfind("\n", 0, match.start()) + 1:match.start()].strip()
+        tokens = shell_tokens(prefix)
+        env_prefix = bool(tokens) and all(re.fullmatch(r"[A-Z_][A-Z0-9_]*=.*", token) for token in tokens)
+        command_position = (not prefix or prefix.endswith(("$(", "{", "|", ";"))
+                            or re.search(r"\bthen$", prefix)
+                            or (match[0].startswith("&") and prefix.endswith("=")) or env_prefix)
+        if not command_position:
+            continue
         snippet = "pseudolife-mcp " + match[1] + match[2]
         extracted = cli_calls(snippet, path)
         for call in extracted:
