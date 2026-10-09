@@ -176,7 +176,9 @@ fn sse_headers(r: &mut Response, sid: &str) {
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-transform"));
     h.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    h.insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+    if !crate::mutants::active("mcp-sse-no-session") {
+        h.insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+    }
     h.insert("x-accel-buffering", HeaderValue::from_static("no"));
 }
 
@@ -209,6 +211,7 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
         ["127.0.0.1", "localhost", "[::1]"]
             .iter()
             .any(|base| host.starts_with(&format!("{base}:")))
+            || (crate::mutants::active("mcp-bare-host") && host == "127.0.0.1")
     });
     if !host_ok {
         return Some(plain(421, "Invalid Host header"));
@@ -616,7 +619,9 @@ fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
         let message = unknown
             .iter()
             .map(|k| {
-                let hint = match difflib::close_match(k, &["action"]) {
+                let guess = difflib::close_match(k, &["action"])
+                    .filter(|_| !crate::mutants::active("mcp-no-hint"));
+                let hint = match guess {
                     Some(g) => format!("; did you mean '{g}'?"),
                     None => ".".to_string(),
                 };

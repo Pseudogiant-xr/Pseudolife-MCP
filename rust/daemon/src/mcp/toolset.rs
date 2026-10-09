@@ -44,6 +44,7 @@ pub fn run(
     }
     let new = match action {
         Action::Expand => current.step(1, Tier::Minimal),
+        _ if crate::mutants::active("mcp-toolset-floor") => current.step(-1, Tier::Minimal),
         _ => current.step(-1, default_tier),
     };
     if new == current {

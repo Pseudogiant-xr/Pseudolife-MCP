@@ -49,9 +49,16 @@ pub fn find(name: &str) -> Option<&'static Tool> {
 pub fn visible(tier: Tier) -> BTreeSet<&'static str> {
     tools()
         .iter()
-        .filter(|t| t.tier <= tier)
+        .filter(|t| shown(t, tier))
         .map(|t| t.name.as_str())
         .collect()
+}
+
+fn shown(t: &Tool, tier: Tier) -> bool {
+    if crate::mutants::active("mcp-tier-flip") && t.name == "memory_stats" {
+        return tier == Tier::Full;
+    }
+    t.tier <= tier
 }
 
 /// The `result` object of `tools/list` at `tier`, as JSON text: registration
@@ -59,7 +66,7 @@ pub fn visible(tier: Tier) -> BTreeSet<&'static str> {
 pub fn list_result(tier: Tier) -> String {
     let mut out = String::from("{\"tools\":[");
     let mut first = true;
-    for t in tools().iter().filter(|t| t.tier <= tier) {
+    for t in tools().iter().filter(|t| shown(t, tier)) {
         if !first {
             out.push(',');
         }
