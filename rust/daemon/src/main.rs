@@ -5,6 +5,7 @@
 mod auth;
 mod bank;
 mod embed;
+mod mcp;
 mod search;
 
 use anyhow::{Context, Result};
@@ -110,6 +111,7 @@ struct App {
     store: auth::PrincipalStore,
     bank: bank::Bank,
     embedder: embed::Embedder,
+    mcp: mcp::McpState,
 }
 
 fn json_response(status: StatusCode, body: &Value) -> Response {
@@ -387,7 +389,7 @@ async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
         );
     }
     let authz = latin1_header_last(&headers, header::AUTHORIZATION);
-    match auth::resolve(authz.as_deref(), &app.env, &app.store) {
+    let principal = match auth::resolve(authz.as_deref(), &app.env, &app.store) {
         auth::Resolved::Unavailable => {
             return json_response(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -400,7 +402,10 @@ async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
                 &json!({"error": "unauthorized", "hint": UNAUTHORIZED_HINT}),
             );
         }
-        auth::Resolved::Principal(_) => {}
+        auth::Resolved::Principal(p) => p,
+    };
+    if path == "/mcp" || path.starts_with("/mcp/") {
+        return mcp::handle(&app, &principal, &path, req).await;
     }
     if !is_api {
         // MCP, the Console and the other non-/api surfaces are outside the spike.
@@ -517,12 +522,14 @@ async fn main() -> Result<()> {
     embedder.embed_query("warmup")?;
     eprintln!("embedder ready in {:.2?}", t1.elapsed());
 
+    let mcp = mcp::McpState::from_env(env.configured());
     let app = Arc::new(App {
         db_url,
         env,
         store: auth::PrincipalStore::new(),
         bank,
         embedder,
+        mcp,
     });
     tokio::spawn(refresh_principals(app.clone()));
     let router = axum::Router::new().fallback(handle).with_state(app);

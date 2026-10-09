@@ -19,6 +19,8 @@ chrono.workspace = true
 sha2.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true
+uuid.workspace = true
+futures.workspace = true
 # Crate-local pins: the versions the 2026-10-09 contract-first spike was proven with.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"

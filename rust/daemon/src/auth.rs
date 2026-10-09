@@ -125,8 +125,6 @@ impl PrincipalStore {
 }
 
 pub enum Resolved {
-    // Read once callers map principals to tiers (the MCP surface).
-    #[allow(dead_code)]
     Principal(String),
     None,
     Unavailable,
