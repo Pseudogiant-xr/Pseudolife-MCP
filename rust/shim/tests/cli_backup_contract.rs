@@ -61,9 +61,11 @@ fn missing_directory_refusal_uses_the_real_filesystem() {
     assert_eq!(existing.status.code(), Some(1));
     assert_eq!(
         existing.stderr,
-        cli::native_text("pseudolife-stdio: mode 'backup' is deferred in this candidate\n")
+        cli::native_text(DEFERRED)
     );
 }
+
+const DEFERRED: &str = "pseudolife-stdio: mode 'backup' is deferred in this candidate\n";
 
 fn assert_missing_spelling(home: &Path, argument: &str, expected: &str) {
     let before = fs::read_dir(home).unwrap().count();
@@ -74,88 +76,67 @@ fn assert_missing_spelling(home: &Path, argument: &str, expected: &str) {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        cli::native_text(&format!(
-            "data dir {expected} does not exist — nothing to back up.\n"
-        ))
-    );
+    assert_eq!(output.stderr, cli::native_text(expected));
     assert!(!Path::new(argument).exists());
     assert_eq!(fs::read_dir(home).unwrap().count(), before);
 }
 
 #[test]
-fn missing_directory_spelling_collapses_separators_and_dots() {
-    let home = std::env::temp_dir().join(format!("backup-spelling-{}", uuid::Uuid::new_v4()));
+fn canonical_parent_components_are_echoed_verbatim() {
+    let home = std::env::temp_dir().join(format!("backup-parent-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    let argument = format!("{}/./missing-µ//", home.display()).replace('\\', "/");
+    fs::create_dir(home.join("anchor")).unwrap();
+    let argument = home.join("anchor").join("..").join("missing.µ");
+    let argument = argument.to_str().unwrap();
     assert_missing_spelling(
         &home,
-        &argument,
-        &home.join("missing-µ").display().to_string(),
+        argument,
+        &format!("data dir {argument} does not exist — nothing to back up.\n"),
     );
-    let existing = format!("{}//./", home.display()).replace('\\', "/");
-    let output = command(&home)
-        .arg("--data-dir")
-        .arg(existing)
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        cli::native_text("pseudolife-stdio: mode 'backup' is deferred in this candidate\n")
-    );
-    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
     fs::remove_dir_all(&home).unwrap();
 }
 
 #[test]
-fn missing_directory_spelling_preserves_parent_components() {
-    let home = std::env::temp_dir().join(format!("backup-parent-{}", uuid::Uuid::new_v4()));
+fn noncanonical_spellings_defer_without_effects() {
+    let home = std::env::temp_dir().join(format!("backup-spelling-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    fs::create_dir(home.join("anchor")).unwrap();
-    let argument = format!("{}/anchor/../missing.µ/", home.display()).replace('\\', "/");
-    let expected = home.join("anchor").join("..").join("missing.µ");
-    assert_missing_spelling(&home, &argument, &expected.display().to_string());
-    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+    let base = home.to_str().unwrap();
+    let separator = std::path::MAIN_SEPARATOR;
+    for argument in [
+        format!("{base}{separator}.{separator}missing-µ"),
+        format!("{base}{separator}{separator}missing-µ"),
+        format!("{base}{separator}missing-µ{separator}"),
+        format!("{base}/missing-µ").replace('\\', "/"),
+        String::from("relative-missing-µ"),
+    ] {
+        assert_missing_spelling(&home, &argument, DEFERRED);
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();
 }
 
 #[cfg(not(windows))]
 #[test]
-fn missing_directory_spelling_preserves_exactly_two_leading_slashes() {
+fn leading_double_slash_defers() {
     let home = std::env::temp_dir().join(format!("backup-root-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    let tail = home.to_str().unwrap().trim_start_matches('/');
-    for (root, printed_root) in [("//", "//"), ("///", "/")] {
-        let argument = format!("{root}{tail}//missing/");
-        let expected = format!("{printed_root}{tail}/missing");
-        assert_missing_spelling(&home, &argument, &expected);
-    }
+    let argument = format!("/{}/missing", home.display());
+    assert_missing_spelling(&home, &argument, DEFERRED);
     fs::remove_dir_all(&home).unwrap();
 }
 
 #[cfg(windows)]
 #[test]
-fn noncanonical_extended_drive_path_defers_without_effects() {
+fn extended_and_unc_prefixes_defer_without_effects() {
     let home = std::env::temp_dir().join(format!("backup-prefix-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    let argument = format!("\\\\?\\{}\\\\missing-µ\\", home.display());
-    let output = command(&home)
-        .arg("--data-dir")
-        .arg(&argument)
-        .output()
-        .unwrap();
-    let remaining = fs::read_dir(&home).unwrap().count();
-    let still_absent = !Path::new(&argument).exists();
+    for argument in [
+        format!("\\\\?\\{}\\missing-µ", home.display()),
+        String::from("\\\\localhost\\absent-share-µ\\missing"),
+    ] {
+        assert_missing_spelling(&home, &argument, DEFERRED);
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        cli::native_text("pseudolife-stdio: mode 'backup' is deferred in this candidate\n")
-    );
-    assert!(still_absent);
-    assert_eq!(remaining, 0);
 }
