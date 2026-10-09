@@ -44,3 +44,6 @@ windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+futures.workspace = true

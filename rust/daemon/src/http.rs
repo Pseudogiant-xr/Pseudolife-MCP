@@ -277,9 +277,20 @@ fn method_not_allowed() -> Response {
 
 /// `_read_body(receive, max_bytes)`: None when over the limit.
 async fn read_body(body: Body, limit: usize) -> Option<Vec<u8>> {
-    axum::body::to_bytes(body, limit)
+    let limit = if crate::mutants::active("body-limit-inclusive") {
+        limit.saturating_sub(1)
+    } else {
+        limit
+    };
+    let read_limit = if crate::mutants::active("body-stream-drain") {
+        usize::MAX
+    } else {
+        limit
+    };
+    axum::body::to_bytes(body, read_limit)
         .await
         .ok()
+        .filter(|b| b.len() <= limit)
         .map(|b| b.to_vec())
 }
 
@@ -392,10 +403,32 @@ async fn hook(app: &App, path: &str, method: &str, h: &HeaderMap, body: Body) ->
                 Resolved::None => return unauthorized(),
                 Resolved::Principal(..) => {}
             }
-            if read_body(body, SESSION_END_BODY_LIMIT).await.is_none() {
+            let Some(raw) = read_body(body, SESSION_END_BODY_LIMIT).await else {
                 return json_response(413, &json!({"error": "request_too_large"}));
+            };
+            let Ok(text) = std::str::from_utf8(&raw) else {
+                return uvicorn_500();
+            };
+            // Malformed JSON and non-object bodies become an empty object.
+            // With no session ID, hook_session_end returns without writes.
+            let parsed = serde_json::from_str::<Value>(text).ok();
+            let id = parsed
+                .as_ref()
+                .and_then(Value::as_object)
+                .and_then(|o| o.get("session_id"));
+            let present = match id {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(b)) => *b,
+                Some(Value::Number(n)) => n.as_f64().is_some_and(|n| n != 0.0),
+                Some(Value::String(s)) => !s.is_empty(),
+                Some(Value::Array(a)) => !a.is_empty(),
+                Some(Value::Object(o)) => !o.is_empty(),
+            };
+            if present {
+                not_implemented(path)
+            } else {
+                json_response(200, &json!({"ok": true}))
             }
-            not_implemented(path)
         }
         "/api/hook/coordination-start" => {
             // `coordination.unavailable_reason`: config, the bearer and the
@@ -461,7 +494,7 @@ fn body_limit(path: &str) -> usize {
     }
     if path.starts_with("/api/coordination/") {
         COORDINATION_BODY_LIMIT
-    } else if TEXT_BODY_PATHS.contains(&path) {
+    } else if TEXT_BODY_PATHS.contains(&path) && !crate::mutants::active("text-limit-control") {
         TEXT_BODY_LIMIT
     } else {
         CONTROL_BODY_LIMIT
@@ -506,7 +539,8 @@ async fn api(
     let coordination_path = path.starts_with("/api/coordination/");
     let coordination_errors = coordination_path
         || (path == "/api/agents"
-            && params.get("view").map(String::as_str) == Some("coordination"));
+            && params.get("view").map(String::as_str) == Some("coordination")
+            && !crate::mutants::active("agents-view-default"));
     let maintainer_path = is_maintainer_path(path);
     if coordination_path && method != "POST" {
         return method_not_allowed();
@@ -825,6 +859,31 @@ async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn body_stream_stops_after_the_first_over_limit_frame() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = Arc::new(AtomicUsize::new(0));
+        let count = seen.clone();
+        let stream =
+            futures::stream::iter([vec![b' '; 200000], vec![b' '; 70000], vec![b' '; 1000]]).map(
+                move |chunk| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, std::io::Error>(chunk)
+                },
+            );
+        assert!(
+            read_body(Body::from_stream(stream), CONTROL_BODY_LIMIT)
+                .await
+                .is_none()
+        );
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            read_body(Body::from("0123456789"), 10).await.unwrap(),
+            b"0123456789"
+        );
+    }
 
     #[test]
     fn host_part_matches_python() {

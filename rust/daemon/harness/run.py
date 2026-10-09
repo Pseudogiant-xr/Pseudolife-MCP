@@ -66,7 +66,7 @@ NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
-           "static-json-whitespace", "static-string-prefix"]
+           "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default"]
 
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
@@ -76,15 +76,25 @@ T_COLON = "tok:with:colons-0003"
 # ---- HTTP ---------------------------------------------------------------------------
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
-         timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False) -> dict:
+         timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False,
+         chunked: bool = False) -> dict:
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
     for k, v in headers:
         c.putheader(k, v)
     if body is not None:
-        c.putheader("Content-Length", str(len(body)))
-    c.endheaders(body)
+        c.putheader("Transfer-Encoding", "chunked") if chunked else c.putheader("Content-Length", str(len(body)))
+    try:
+        if chunked and body is not None:
+            width = max(1, (len(body) + 3) // 4)
+            c.endheaders((body[i:i + width] for i in range(0, len(body), width)), encode_chunked=True)
+        else:
+            c.endheaders(body)
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        # A server can send its refusal before the request finishes. Read
+        # that response; a missing or failed response remains a case error.
+        pass
     r = c.getresponse()
     raw = r.read()
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
@@ -264,6 +274,7 @@ class Scenario:
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
+    read_only_bank = False
     files: dict[str, str] = {}  # extra files in each data dir
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
@@ -990,6 +1001,7 @@ class StaticBuild(Scenario):
     name = "static-build"
     settle = False
     unreachable_database = True
+    read_only_bank = True
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
 
     def cases(self):
@@ -1122,11 +1134,48 @@ class StaticRootLink(StaticPaths):
         return out
 
 
+class BodyLimits(Scenario):
+    name = "body-limits"
+    settle = False
+    unreachable_database = True
+    read_only_bank = True
+    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+
+    def cases(self):
+        import body_cases
+        return body_cases.cases(case, bearer(T_DEFAULT))
+
+
+class BodyViewOpen(BodyLimits):
+    name = "body-view-open"
+    env = {}
+
+    def cases(self):
+        import body_cases
+        return body_cases.view_cases(case)
+
+
+class BodyTextWindow(BodyLimits):
+    name = "body-text-window"
+
+    def cases(self):
+        import body_cases
+        return body_cases.text_window_cases(case, bearer(T_DEFAULT))
+
+
+class BodyPairBudget(BodyLimits):
+    name = "body-pair-budget"
+
+    def cases(self):
+        import body_cases
+        return body_cases.pair_budget_cases(case)
+
+
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
-                                  StaticRootLink)}
+                                  StaticRootLink, BodyLimits, BodyViewOpen, BodyPairBudget, BodyTextWindow)}
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -1203,6 +1252,8 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
             if rs["headers"].get(header) != expected:
                 row["diffs"].append(f"future-schema refusal has incorrect {header}")
         return row
+    if "expected_status" in c and py is not None and py["status"] != c["expected_status"]:
+        row["diffs"].append(f"oracle status {py['status']} differs from contract {c['expected_status']}")
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1217,7 +1268,7 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     b = normalize_response(rs, c["path"], [])
     a.pop("raw", None)
     b.pop("raw", None)
-    row["diffs"] = diff_values(a, b)
+    row["diffs"] += diff_values(a, b)
     if not row["diffs"]:
         row["diffs"] = raw_diffs(py, rs, a)
     row["declared_omissions"] = declared
@@ -1283,9 +1334,11 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                 # by hyper. Static entities use fixed lengths in both arms.
                 compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
-                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild)) if "python" in procs else golden["responses"][i]
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
+                            chunked=c.get("chunked", False)) if "python" in procs else golden["responses"][i]
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
-                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild))
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
+                            chunked=c.get("chunked", False))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
                     if type(scn).prepare_template is not Scenario.prepare_template:
@@ -1308,7 +1361,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             out = scrub_declared_rows(raw, before)
             states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
             scrubbed[side] = out["declared"]
-            if isinstance(scn, StaticBuild):
+            if scn.read_only_bank:
                 # Static serving has no bank writes. Compare the complete
                 # catalog/rows to this arm's pre-start state, rather than pin
                 # the fixture server's template extensions into its golden.
@@ -1549,10 +1602,14 @@ def main() -> int:
             os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
             results, refusals = one_pass("live")
             cases, diff_cases, db = summarize(results, refusals)
-            outcome[m] = {"diff_cases": diff_cases, "db_diff_scenarios": db}
+            errors = [r["scenario"] for r in results if any(c["case"] == "scenario error" for c in r["cases"])]
+            outcome[m] = {"diff_cases": diff_cases, "db_diff_scenarios": db, "scenario_errors": errors,
+                          "changed_cases": [f"{r['scenario']}: {c['case']}" for r in results
+                                            for c in r["cases"] if c["diffs"]]}
             print(f"mutant {m}: {diff_cases} case diffs, {db} bank-state diffs", flush=True)
         os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
-        survivors = [m for m, o in outcome.items() if not (o["diff_cases"] or o["db_diff_scenarios"])]
+        survivors = [m for m, o in outcome.items()
+                     if o["scenario_errors"] or not (o["diff_cases"] or o["db_diff_scenarios"])]
         if args.out:
             args.out.write_text(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1), encoding="utf-8")
         print("survivors:", survivors or "none")
