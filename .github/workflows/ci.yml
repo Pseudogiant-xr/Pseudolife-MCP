@@ -99,7 +99,7 @@ jobs:
     # every tracked file and pin the release docs, so a Rust-only PR is still
     # checked for maintainer identifiers, stray control bytes, CHANGELOG and
     # release pins, and uncommitted evidence claims. Measured 2026-10-09 on
-    # Windows: these ten files run in about 65 s with no PostgreSQL service
+    # Windows: these files run in about 65 s with no PostgreSQL service
     # or model download.
     needs: scope
     if: needs.scope.outputs.python == 'false'
