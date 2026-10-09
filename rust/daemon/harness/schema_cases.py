@@ -30,6 +30,12 @@ GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
 
 def golden_state(state):
     from run import golden_scrub
+    state = json.loads(json.dumps(state))
+    # The schema installs the server's available extension version; the
+    # native and oracle arms still compare extversion exactly in live diff.
+    # Golden fixtures bind the DDL-controlled names and namespaces.
+    state["catalog"]["extensions"] = [[name, "<server-version>", namespace]
+                                       for name, version, namespace in state["catalog"]["extensions"]]
     return golden_scrub(state)
 
 
@@ -239,6 +245,7 @@ def main(argv=None):
         GOLDEN_FILE.write_text(json.dumps({"normalizers": {
             "relations.created_at": "newly seeded rows only, against the common template",
             "catalog": "golden_scrub: full catalog row counts and SHA-256 digests",
+            "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
         }, "oracle_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
            "cases": recorded}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(failed)

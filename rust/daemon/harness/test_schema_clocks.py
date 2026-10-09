@@ -15,6 +15,14 @@ class SchemaClocks(unittest.TestCase):
         self.assertEqual(schema_cases.clock_diffs(state, {"rows": {}}, (100.0, 100.0), 0.015625), [])
         state["rows"]["public.relations"]["rows"][0][1] = 100.02
         self.assertTrue(schema_cases.clock_diffs(state, {"rows": {}}, (100.0, 100.0), 0.015625))
+
+    def test_golden_extension_versions_do_not_mask_names_or_namespaces(self):
+        def state(name, version, namespace):
+            return {"rows": {}, "catalog": {"extensions": [[name, version, namespace]]}}
+        expected = schema_cases.golden_state(state("vector", "0.8.2", "public"))
+        self.assertEqual(expected, schema_cases.golden_state(state("vector", "0.8.3", "public")))
+        self.assertNotEqual(expected, schema_cases.golden_state(state("other", "0.8.2", "public")))
+        self.assertNotEqual(expected, schema_cases.golden_state(state("vector", "0.8.2", "other")))
     def test_zero_or_outside_window_is_not_normalized(self):
         for clock in [0.0, 99.0, 102.0, float("nan"), float("inf"), True]:
             state = {"rows": {"public.relations": {"columns": ["name", "created_at"],
