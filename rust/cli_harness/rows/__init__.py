@@ -11,6 +11,7 @@ ROWS = {
     "hook": "CLI-HOOK",
     "transfer": "CLI-TRANSFER-DSN",
     "test_login": "CLI-TEST-LOGIN",
+    "doctor": "CLI-DOCTOR",
     "backup": "CLI-BACKUP-DSN",
 }
 
