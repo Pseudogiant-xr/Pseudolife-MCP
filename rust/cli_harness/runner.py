@@ -63,16 +63,19 @@ def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
     return results
 
 
-def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path) -> Path:
+def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
+           commit: str | None) -> Path:
     import subprocess
-    golden = {"row": rows.ROWS[row], "platform": core.PLATFORM,
-              "oracle_commit": subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"],
-                                              capture_output=True, text=True).stdout.strip(),
+    if not commit:
+        commit = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip() or "unknown"
+    golden = {"row": rows.ROWS[row], "platform": core.PLATFORM, "oracle_commit": commit,
               "cases": {}}
     for case in cases:
         obs = core.run_arm(case, oracle, core._home_root() / "h")
         normal = normalize.apply(obs, (), obs["home"])
         normal["home"] = None
+        normal.pop("daemon_url", None)
         golden["cases"][case.id] = normal
         print(f"  recorded {case.id} (exit {obs['exit']})", flush=True)
     path = _golden_path(row)
@@ -90,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oracle-python", default=sys.executable)
     parser.add_argument("--oracle-source", type=Path, default=REPO)
     parser.add_argument("--candidate", type=Path, default=None)
+    parser.add_argument("--oracle-commit", help="recorded in goldens when the source has no .git")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record", action="store_true", help="write goldens from the oracle")
     mode.add_argument("--golden", action="store_true", help="compare against goldens")
@@ -113,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         cases = _select(row, args.case)
         print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
-            print(f"  wrote {record(row, cases, oracle, args.oracle_source.resolve())}")
+            print(f"  wrote {record(row, cases, oracle, args.oracle_source.resolve(), args.oracle_commit)}")
             continue
         if not candidate_path.is_file():
             raise SystemExit(f"candidate binary not found: {candidate_path}")
