@@ -120,6 +120,36 @@ def normalizer_controls():
     raise AssertionError("clock normalizer hid an undeclared rewrite")
 
 
+def prefix_admission_controls(check=pg._check):
+    if check("pl_cf_prn_1") != "pl_cf_prn_1":
+        raise AssertionError("principal fixture prefix refused")
+    for name in ("pl_cf_prn2_1", "pl_cf_pr_1", "pl_cf_principal_1"):
+        try:
+            check(name)
+        except ValueError:
+            continue
+        raise AssertionError("near-miss disposable prefix admitted")
+    return 3
+
+
+def prefix_mutant_control():
+    refused = prefix_admission_controls()
+    source = (HERE / "pgdisposable.py").read_text(encoding="utf-8")
+    original = "if not DISPOSABLE_NAME.fullmatch(name):"
+    if source.count(original) != 1:
+        raise AssertionError("disposable admission mutant anchor changed")
+    mutant = source.replace(original, "if not name.startswith(PREFIX[:-2]):")
+    namespace = {}
+    exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
+    try:
+        prefix_admission_controls(namespace["_check"])
+    except AssertionError as exc:
+        if str(exc) != "near-miss disposable prefix admitted":
+            raise
+        return {"near_miss_refusals": refused, "mutant_caught": True}
+    raise AssertionError("disposable admission source mutant survived")
+
+
 class PythonArm:
     def __init__(self, dsn):
         self.dsn = dsn
@@ -600,6 +630,7 @@ def main():
     parser.add_argument("--mutants", nargs="+", choices=MUTANTS)
     args = parser.parse_args()
     normalizer_controls()
+    prefix_controls = prefix_mutant_control()
     if args.mode != "oracle" and args.rust_bin is None:
         parser.error("--rust-bin required")
     try:
@@ -620,6 +651,7 @@ def main():
                       "mutants": results, "survivors": [m for m, r in results.items() if not r["caught"]]}
         args.out.parent.mkdir(parents=True, exist_ok=True)
         result["provenance"] = provenance(args.rust_bin)
+        result["prefix_controls"] = prefix_controls
         args.out.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
         print(json.dumps({k: v for k, v in result.items() if k not in ("records", "mutants")}))
         return int(bool(result.get("diffs") or result.get("survivors")))

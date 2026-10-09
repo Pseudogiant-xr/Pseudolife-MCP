@@ -66,4 +66,7 @@ The concurrent-redemption case verifies two blocked callers and exactly one
 durable winner; only that case's validated winning hash becomes a symbol.
 Eight rejecting clock and ownership controls guard the normalizer. Goldens contain outputs
 and post-state, never bearer tokens, pairing codes or connection strings.
+The disposable admission control refuses three near-miss prefixes before
+connection setup and kills a permissive-prefix source mutant in an isolated
+module namespace, leaving the actual database guard unchanged.
 The `principal-harness` feature is absent from the serving release build.
