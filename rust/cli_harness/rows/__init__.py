@@ -12,6 +12,7 @@ ROWS = {
     "transfer": "CLI-TRANSFER-DSN",
     "test_login": "CLI-TEST-LOGIN",
     "doctor": "CLI-DOCTOR",
+    "connect": "CLI-CONNECT",
     "backup": "CLI-BACKUP-DSN",
 }
 
