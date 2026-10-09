@@ -32,6 +32,8 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "Daemon schema startup parity": "cli",
+    "Graph store differential and recorded oracle": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -104,6 +106,10 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    schema = commands(parity["Daemon schema startup parity"]["run"])
+    require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
+                    ("--out",), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in schema)
     embedding = parity["Offline embedding golden and mutant row"]
     invocations = commands(embedding["run"])
     require_command(invocations, ("python", "-m", "pytest"),
@@ -113,6 +119,13 @@ def check_executable_coverage(jobs):
                     ("--record", "--model", "--mutant"))
     assert "rust/target/release" in embedding["run"]
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
+
+    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    for mode in ("live", "golden"):
+        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
+                        ("--candidate", "--out"), ("--record",))
+    require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -153,6 +166,8 @@ def test_shards_cover_both_systems_and_build_once():
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
     assert len(builds) == 1
     assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio -j 4"
+    assert not any("schema_ci.py" in step.get("run", "")
+                   for step in jobs["candidate"]["steps"])
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -189,9 +204,34 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     candidate = workflow()["jobs"]["candidate"]
     build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
     require_command(commands(build["run"]), ("cargo", "build"),
-                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bin", "--features", "mutants"))
+                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bins", "--features"))
     upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
+
+
+def test_daemon_artifact_is_built_once_and_shared_with_graph():
+    jobs = workflow()["jobs"]
+    builds = [step for job in jobs.values() for step in job.get("steps", [])
+              if "cargo build" in step.get("run", "") and
+              "-p pseudolife-daemon" in step["run"]]
+    assert len(builds) == 1
+    assert builds[0] in jobs["candidate"]["steps"]
+    words = commands(builds[0]["run"])[0]
+    assert {"--locked", "--release", "--bins"} <= set(words)
+    assert {"graph-harness", "mutants"} <= set(words[words.index("--features") + 1].split(","))
+    upload = next(s for s in jobs["candidate"]["steps"]
+                  if s.get("with", {}).get("name") == "rust-shim-${{ runner.os }}")
+    for binary in ("pseudolife-daemon", "graph-contract"):
+        for suffix in ("", ".exe"):
+            assert f"rust/target/release/{binary}{suffix}" in upload["with"]["path"].splitlines()
+    steps = jobs["parity-checks"]["steps"]
+    download = next(s for s in steps if s.get("uses") == "actions/download-artifact@v4"
+                    and s.get("with", {}).get("name") == upload["with"]["name"])
+    assert "if" not in download
+    assert download["with"]["path"] == "rust/target/release"
+    permission = next(s for s in steps if s.get("name") == "Restore graph store executable permission")
+    assert permission["if"] == "matrix.suite == 'cli' && runner.os == 'Linux'"
+    assert permission["run"] == "chmod +x rust/target/release/graph-contract"
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
@@ -233,7 +273,10 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Daemon schema startup parity", "--out", "--record-goldens --out"),
+    ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
+    ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
     ("CLI differential harness", "--golden", ""),
     ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),
     ("Run unchanged candidates and differential judges", "& $oraclePython -c $judgeBootstrap", "# & $oraclePython -c $judgeBootstrap"),

@@ -552,6 +552,26 @@ def env_calls(text: str, path: str) -> list[dict]:
             direct = re.search(re.escape(name) + r"(?:\s*=|[\"']\s*:)\s*(\"[^\"\n]*\"|'[^'\n]*'|[^\s`\"';,}\)]+)", content)
             if direct:
                 token = direct[1]
+                operand = token.strip("\"'")
+                closing = content.find(">", direct.start(1))
+                candidate = content[direct.start(1):closing + 1] if token.startswith("<") and closing >= direct.end(1) else token
+                if operand.startswith("<") and re.search(r"<[^<>\r\n]+>", candidate):
+                    # Help operands can contain spaces; preserve the whole
+                    # placeholder rather than promoting its first word to a value.
+                    if token.startswith("<"):
+                        end = max(closing + 1, direct.end(1))
+                        while end < len(content) and not content[end].isspace() and content[end] not in "`\"';})":
+                            if content[end] == "," and (end + 1 == len(content) or content[end + 1].isspace()):
+                                break
+                            if content.startswith(("\\n", "\\r", "\\t"), end):
+                                break
+                            end += 1
+                        token = content[direct.start(1):end]
+                    call["shape"]["parameters"] = {"value": {"expression": token, "placeholder": True}}
+                    call["usage"] = "assignment-example"
+                    call["evidence"] = "documented"
+                    result.append(call)
+                    continue
                 scalar = value_shape(token)
                 if "$" in token or "\\" in token:
                     scalar = {"expression": token}

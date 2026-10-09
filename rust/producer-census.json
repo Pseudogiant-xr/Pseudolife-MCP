@@ -23506,6 +23506,24 @@
       "producers": [
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/configuration.md:1210",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "\"<local-server-bearer>\"",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "\"<local-server-bearer>\"",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/setup-codex-coordination.py:116",
           "shape": {
@@ -23529,21 +23547,6 @@
             "parameters": {}
           },
           "usage": "reference"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/configuration.md:1210",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<local-server-bearer>"
-              }
-            }
-          },
-          "usage": "assignment"
         }
       ]
     },
@@ -27321,6 +27324,24 @@
         },
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/cli/lease/assets/run_help.txt:26",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<names>.",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<names>.",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/lease/run.rs:205",
           "shape": {
@@ -27357,21 +27378,6 @@
             "parameters": {}
           },
           "usage": "reference"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/lease/assets/run_help.txt:26",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<names>."
-              }
-            }
-          },
-          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -27807,6 +27813,42 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:450",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<url> \\",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<url>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:457",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<url> \\",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<url>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
         },
         {
           "dynamic": "unresolved",
@@ -28624,36 +28666,6 @@
             "parameters": {
               "value": {
                 "literal": "http://127.0.0.1:8765"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:450",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<url>"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:457",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<url>"
               }
             }
           },
@@ -31791,6 +31803,24 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:306",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<machine>-claude-code:full,<machine>-codex:full",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<machine>-claude-code:full,<machine>-codex:full",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:644",
           "shape": {
             "channel": "environment",
@@ -32084,21 +32114,6 @@
             "parameters": {
               "value": {
                 "literal": "claude-desktop:minimal,claude-code:core"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:306",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<machine>-claude-code:full"
               }
             }
           },
@@ -32773,6 +32788,60 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/cli/doctor/mod.rs:23",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<the token>) and retry; to fix a client, re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set.\";",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<the token>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/cli_help.txt:91",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<bearer>, or",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<bearer>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/lifecycle.rs:557",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<the token>\\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it — the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\"",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<the token>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
         },
         {
           "dynamic": "unresolved",
@@ -33791,51 +33860,6 @@
             }
           },
           "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:23",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<the"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli_help.txt:91",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<bearer>"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:557",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<the"
-              }
-            }
-          },
-          "usage": "assignment"
         }
       ]
     },
@@ -34065,6 +34089,24 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:304",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<token-1>:<machine>-claude-code,<token-2>:<machine>-codex",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<token-1>:<machine>-claude-code,<token-2>:<machine>-codex",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
         },
         {
           "dynamic": "unresolved",
@@ -34572,21 +34614,6 @@
             "parameters": {}
           },
           "usage": "reference"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:304",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<token-1>:<machine>-claude-code"
-              }
-            }
-          },
-          "usage": "assignment"
         }
       ]
     },
@@ -34833,6 +34860,42 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:449",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<path> \\",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<path>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/guide/remote-bank.md:456",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<path> \\",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<path>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
           "location": "docs/guide/remote-bank.md:478",
           "shape": {
             "channel": "environment",
@@ -34881,6 +34944,60 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/cli/doctor/mod.rs:23",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<path to a private file holding the token> (or PSEUDOLIFE_MCP_TOKEN=<the token>) and retry; to fix a client, re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set.\";",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<path to a private file holding the token>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/cli_help.txt:92",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<owner-only file holding it> for hosts that",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<owner-only file holding it>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "rust/shim/src/lifecycle.rs:557",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "<absolute path to a private file holding the token>   (preferred; reloaded per call)\\n    PSEUDOLIFE_MCP_TOKEN=<the token>\\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it — the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\"",
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "<absolute path to a private file holding the token>",
+                "placeholder": true
+              }
+            }
+          },
+          "usage": "assignment-example"
         },
         {
           "dynamic": "unresolved",
@@ -35858,36 +35975,6 @@
           "usage": "reference"
         },
         {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:449",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<path>"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:456",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<path>"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
           "evidence": "static",
           "location": "ops/install.ps1:2056",
           "shape": {
@@ -36309,36 +36396,6 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:23",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<path"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli_help.txt:92",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<owner-only"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "rust/shim/src/lifecycle.rs:546",
           "shape": {
             "channel": "environment",
@@ -36347,21 +36404,6 @@
             "parameters": {
               "value": {
                 "expression": "{"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/lifecycle.rs:557",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "<absolute"
               }
             }
           },
@@ -63965,6 +64007,12 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/configuration.md:1210",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_SERVER_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/configuration.md:1213",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
@@ -67263,6 +67311,18 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:304",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:306",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/remote-bank.md:312",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
@@ -67311,9 +67371,33 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:449",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "docs/guide/remote-bank.md:45",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:450",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:456",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/guide/remote-bank.md:457",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
@@ -82106,6 +82190,18 @@
     {
       "dynamic": "unresolved",
       "location": "rust/shim/src/cli/doctor/mod.rs:23",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:23",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:23",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -82397,6 +82493,12 @@
       "location": "rust/shim/src/cli/lease/assets/run_help.txt:23",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/lease/assets/run_help.txt:26",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_LEASES_HELD"
     },
     {
       "dynamic": "unresolved",
@@ -82955,6 +83057,18 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "rust/shim/src/cli_help.txt:91",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli_help.txt:92",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "rust/shim/src/credentials.rs:125",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
@@ -83090,6 +83204,18 @@
       "location": "rust/shim/src/lifecycle.rs:546",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/lifecycle.rs:557",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/lifecycle.rs:557",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",

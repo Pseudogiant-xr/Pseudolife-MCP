@@ -51,6 +51,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
+| Future or malformed schema version | `storage/schema.py:1657-1662` overwrites the stored version with the build's version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state | W3 PG-HYDRATE; required by the slice brief, retained for the maintainer's cutover decision |
 | Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
@@ -65,3 +66,10 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
 | Static types for `.md`, `.csv` and other extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## Graph and review
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
+| Traversal, communities, graph service/MCP wiring, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | graph store only; these services are not wired | W3-H, subsequent increments |

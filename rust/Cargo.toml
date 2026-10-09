@@ -51,4 +51,4 @@ stacker = "=0.1.25"
 zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
 toml = { version = "=0.8.2", default-features = false, features = ["parse"] }
 flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
-tar = { version = "=0.4.45", default-features = false }
+tar = { version = "=0.4.46", default-features = false }
