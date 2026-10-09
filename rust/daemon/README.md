@@ -64,8 +64,11 @@ timestamps must fall inside the arm's database-clock write window, including
 the invite TTL offset; unchanged timestamps retain their event identity.
 The concurrent-redemption case verifies two blocked callers and exactly one
 durable winner; only that case's validated winning hash becomes a symbol.
-Eight rejecting clock and ownership controls guard the normalizer. Goldens contain outputs
+Nine clock, ownership and fixture-version controls guard the normalizer. Goldens contain outputs
 and post-state, never bearer tokens, pairing codes or connection strings.
+Only a preinstalled vector extension's verified initial version is fixture
+metadata: extension names and namespaces remain exact, and changing its
+version during an arm fails. The principal store never uses that extension.
 The disposable admission control refuses three near-miss prefixes before
 connection setup and kills a permissive-prefix source mutant in an isolated
 module namespace, leaving the actual database guard unchanged.

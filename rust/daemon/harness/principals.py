@@ -43,9 +43,10 @@ NOW = "SELECT EXTRACT(EPOCH FROM clock_timestamp())::double precision"
 
 class ClockState:
     """Reject wrong timestamps before normalizing a declared write event."""
-    def __init__(self, fixture_role="fixture-role"):
+    def __init__(self, fixture_role="fixture-role", vector_extension=None):
         self.values = {}
         self.fixture_role = fixture_role
+        self.vector_extension = vector_extension
 
     def normalize(self, state, event, window, offsets=None):
         state = json.loads(json.dumps(state))
@@ -86,10 +87,33 @@ class ClockState:
             if entry[3] != self.fixture_role:
                 raise AssertionError("catalog owner differs from verified fixture role")
             entry[3] = "<test-role>"
+        # The fixture may preinstall vector even though this store never uses
+        # it. Its initial version is host metadata, but a change during an
+        # arm is a real catalog mutation and must still refuse comparison.
+        for entry in state["catalog"].get("extensions", []):
+            if entry[0] == "vector" and self.vector_extension is not None:
+                if tuple(entry[1:]) != self.vector_extension:
+                    raise AssertionError("vector extension changed from the verified fixture baseline")
+                entry[1] = "<fixture-vector-version>"
         return state
 
 
 def normalizer_controls():
+    vector_fixture = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.6", "public"]]}}
+    first, second = ClockState(), ClockState()
+    first.vector_extension = ("0.8.6", "public")
+    second.vector_extension = ("0.8.5", "public")
+    first_state = first.normalize(vector_fixture, "fixture-vector", (100.0, 101.0))
+    vector_fixture["catalog"]["extensions"][0][1] = "0.8.5"
+    second_state = second.normalize(vector_fixture, "fixture-vector", (100.0, 101.0))
+    if first_state != second_state:
+        raise AssertionError("fixture extension versions made compatible principals differ")
+    try:
+        first.normalize(vector_fixture, "changed-vector", (100.0, 101.0))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("normalizer hid a vector extension change during the arm")
     owner_tracker = ClockState()
     owned = {"rows": {}, "catalog": {"owners_and_comments": [
         ["public", "principals", "r", "fixture-role", None]]}}
@@ -116,7 +140,7 @@ def normalizer_controls():
     try:
         tracker.normalize(fixture(100.6), "second", (100.0, 101.0))
     except AssertionError:
-        return 8
+        return 9
     raise AssertionError("clock normalizer hid an undeclared rewrite")
 
 
@@ -355,7 +379,10 @@ class Paired:
                 self.dsns.append(dsn)
                 with psycopg.connect(dsn, autocommit=True) as conn:
                     fixture_role = conn.execute("SELECT current_user").fetchone()[0]
-                    self.trackers.append(ClockState(fixture_role))
+                    vector_extension = conn.execute(
+                        "SELECT e.extversion,n.nspname FROM pg_extension e "
+                        "JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='vector'").fetchone()
+                    self.trackers.append(ClockState(fixture_role, vector_extension))
                     conn.execute(PRINCIPALS_SCHEMA_SQL)
             self.arms = ([PythonArm(self.dsns[0])] if golden is None else [None]) + [
                 RustArm(binary, self.dsns[1], mutant) if binary else PythonArm(self.dsns[1])]
@@ -637,7 +664,7 @@ def main():
         golden = json.loads(GOLDEN.read_text(encoding="utf-8"))["records"] if args.mode == "golden" else None
         result = run(args.rust_bin, golden=golden)
         if args.record and not result["diffs"]:
-            GOLDEN.write_text(json.dumps({"normalizers": "per-arm database-clock windows; verified fixture owners; negative controls=8",
+            GOLDEN.write_text(json.dumps({"normalizers": "per-arm database-clock windows; verified fixture owners and initial vector version; controls=9",
                                          "records": result["records"]}, indent=1) + "\n", encoding="utf-8")
         if args.mode == "mutants":
             if result["diffs"]:

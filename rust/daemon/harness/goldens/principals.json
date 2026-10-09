@@ -1,5 +1,5 @@
 {
- "normalizers": "per-arm database-clock windows; verified fixture owners; negative controls=8",
+ "normalizers": "per-arm database-clock windows; verified fixture owners and initial vector version; controls=9",
  "records": [
   {
    "case": "initial-oracle-schema",
@@ -16,7 +16,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -1270,7 +1270,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -1765,7 +1765,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -2291,7 +2291,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -2817,7 +2817,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -3345,7 +3345,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -3860,7 +3860,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -4387,7 +4387,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -4926,7 +4926,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -5477,7 +5477,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -6040,7 +6040,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -6615,7 +6615,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -7202,7 +7202,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -7801,7 +7801,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -8410,7 +8410,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -9019,7 +9019,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -9640,7 +9640,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -10386,7 +10386,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -11007,7 +11007,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -11628,7 +11628,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -12249,7 +12249,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -12870,7 +12870,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -13491,7 +13491,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -14118,7 +14118,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -14802,7 +14802,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -15429,7 +15429,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -16050,7 +16050,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -16671,7 +16671,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -17298,7 +17298,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -18039,7 +18039,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -18706,7 +18706,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -19376,7 +19376,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -19997,7 +19997,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -20618,7 +20618,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -21239,7 +21239,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -21860,7 +21860,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -22682,7 +22682,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -23317,7 +23317,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -23950,7 +23950,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -24647,7 +24647,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
@@ -25287,7 +25287,7 @@
       ],
       [
        "vector",
-       "0.8.6",
+       "<fixture-vector-version>",
        "public"
       ]
      ],
