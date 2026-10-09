@@ -5,8 +5,14 @@ exactly; they exist because each one was violated at least once.
 
 ## Shipping checklist (any change that lands on master)
 
-1. **CHANGELOG.md entry under `[Unreleased]`** — every behavior, schema, or
-   perf change gets one, in the existing dated-subsection style. Docs-only and
+1. **A changelog fragment, not a CHANGELOG.md edit** — every behavior,
+   schema, or perf change adds one file, `changelog.d/<YYYY-MM-DD>-<slug>.md`,
+   holding its `### <Kind> (YYYY-MM-DD — title)` entry in the existing
+   dated-subsection style (maintainer decision 2026-10-09: direct
+   CHANGELOG.md edits made every merge conflict with every open PR). The
+   release cut folds the fragments into `[Unreleased]` with
+   `python ops/assemble_changelog.py`; `changelog.d/README.md` and
+   `tests/test_changelog_fragments.py` hold the format. Docs-only and
    test-only changes are exempt.
 2. **Schema bumps** touch seven places together: `SCHEMA_META_VERSION` in
    `pseudolife_memory/storage/schema.py`, the doc mentions (README
@@ -19,7 +25,8 @@ exactly; they exist because each one was violated at least once.
    bump adds gets a test beside its consumer, or a row in
    `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
    `test_schema_vNN.py`),
-   a CHANGELOG mention of `vNN` (pinned by `test_release_ux.py`), and
+   a `vNN` mention in its changelog fragment (pinned by `test_release_ux.py`,
+   which reads CHANGELOG.md plus pending fragments), and
    `docs/atlas/atlas.json` `meta.schema` (pinned by
    `tests/test_atlas_currency.py` — re-verify the affected storage cards,
    don't just renumber), the two `assert meta[0] == NN` literal pins in
@@ -90,7 +97,8 @@ exactly; they exist because each one was violated at least once.
 
    **Rust-only PRs skip the Python suite lanes** (maintainer decision
    2026-10-09). A PR that touches `rust/`, and whose every other changed file
-   is `.github/workflows/rust.yml` or `CHANGELOG.md`, changes nothing the
+   is `.github/workflows/rust.yml`, `CHANGELOG.md` or a `changelog.d/`
+   fragment, changes nothing the
    Python suite covers (`rust/`'s own Python is checked by the Rust
    workflow): CI's `scope` job skips `test` and the three lite lanes (they
    still run if `scope` itself fails), and the `guards` job runs
@@ -503,6 +511,25 @@ took 143 CUDA OOMs.
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;
   the pass is not optional because CI was green.
+- **Every review pass also runs a Codex second review, alongside it, not
+  instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
+  effort, started in the background over the same diff —
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1`,
+  with `$OUT` a per-pass path outside the working tree (the session
+  scratchpad, named by the reviewed short sha so a rerun does not
+  overwrite it). Use `--uncommitted` for a pre-commit pass and
+  `--commit <sha>` for a single commit. Pin the model and effort on the
+  command line, and check the log's header names both. To stop one early,
+  kill its own process tree while it is still running (the harness's task
+  stop, or `taskkill /PID <pid> /T /F` with the Windows PID taken at
+  launch: `cat /proc/$!/winpid` in Git Bash, since `$!` there is not a
+  Windows PID, or `(Start-Process ... -PassThru).Id` in PowerShell), never
+  by image name: `taskkill /IM codex.exe` on 2026-10-09 killed every Codex process
+  on the host, the Codex app and other sessions' turns included. Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR (or the commit body when there is no PR yet), each finding
+  labelled by source with its verdict. A missing, signed-out or failed
+  Codex run is recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
