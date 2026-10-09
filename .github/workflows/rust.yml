@@ -117,6 +117,28 @@ jobs:
         run: cargo clippy --locked --all-targets --no-default-features -j 4 -- -D warnings
       - name: Nextest without default features
         run: cargo nextest run --locked --all-targets --no-default-features -j 4
+
+  candidate:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    name: Candidate / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - uses: actions/upload-artifact@v4
@@ -127,14 +149,16 @@ jobs:
             rust/target/release/pseudolife-stdio.exe
           if-no-files-found: error
 
-  parity:
+  parity-checks:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
-    name: Parity / ${{ matrix.os }}
-    needs: rust
+    name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
+    needs: candidate
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
+        suite: [eval, cli, judges]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -159,10 +183,13 @@ jobs:
           python -m pip install "setuptools>=68" wheel
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
-      - name: Build candidate
-        timeout-minutes: 10
-        working-directory: rust
-        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-shim-${{ runner.os }}
+          path: rust/target/release
+      - name: Restore executable permission
+        if: runner.os == 'Linux'
+        run: chmod +x rust/target/release/pseudolife-stdio
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -170,7 +197,11 @@ jobs:
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
+      - name: Check CI coverage contract
+        if: matrix.suite == 'eval'
+        run: python -m pytest -q rust/ci
       - name: Run every eval harness test
+        if: matrix.suite == 'eval'
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -194,6 +225,7 @@ jobs:
           python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/debug' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
           exit $LASTEXITCODE
       - name: CLI differential harness
+        if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -206,12 +238,14 @@ jobs:
           python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
+        if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
       - name: CLI lease differential harness
+        if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -222,13 +256,14 @@ jobs:
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
-        if: always()
+        if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
+        if: matrix.suite == 'judges'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -309,7 +344,7 @@ jobs:
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
-        if: always()
+        if: always() && matrix.suite == 'judges'
         uses: actions/upload-artifact@v4
         with:
           name: rust-parity-${{ runner.os }}
@@ -321,6 +356,31 @@ jobs:
             ${{ runner.temp }}/lease-header-policy.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  parity:
+    # Preserve the required check names; a skipped/cancelled dependency is a failure.
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
+    name: Parity / ${{ matrix.os }}
+    needs: [rust, candidate, parity-checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - name: Require every Rust and parity job to pass
+        shell: pwsh
+        env:
+          GATE_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+          foreach ($job in @('rust', 'candidate', 'parity-checks')) {
+            if ($results[$job].result -cne 'success') {
+              Write-Error "$job did not succeed"
+              exit 1
+            }
+          }
 
   capture-windows:
     name: Capture / Windows / wait-mail
