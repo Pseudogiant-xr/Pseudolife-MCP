@@ -486,6 +486,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: CLI lease operator differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease_operator --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease-operator.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease_operator --golden --candidate $candidate -v
+          exit $LASTEXITCODE
       # Windows local 2026-10-10: 89-action golden 49s + eight live controls 209s
       # + recovery/control tests 38s; allow about twice the measured 296s gate.
       - name: Dream cursor differential harness
