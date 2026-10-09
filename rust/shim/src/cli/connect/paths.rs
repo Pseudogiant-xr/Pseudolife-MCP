@@ -439,11 +439,11 @@ mod tests {
     #[test]
     fn canonical_forms_only() {
         if cfg!(windows) {
-            assert!(canonical(r"C:\Users\x"));
+            assert!(canonical(r"C:\data\x"));
             assert!(canonical(r"C:\"));
-            assert!(!canonical(r"C:\Users\x\"));
-            assert!(!canonical("C:/Users/x"));
-            assert!(!canonical(r"C:\Users\.\x"));
+            assert!(!canonical(r"C:\data\x\"));
+            assert!(!canonical("C:/data/x"));
+            assert!(!canonical(r"C:\data\.\x"));
             assert!(!canonical(r"\\server\share"));
             assert_eq!(normcase(r"C:/A/İb"), r"c:\a\ib");
         } else {
