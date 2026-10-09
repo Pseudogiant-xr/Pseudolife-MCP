@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import importlib
 
-ROWS: dict[str, str] = {}
+ROWS: dict[str, str] = {"audit": "CLI-AUDIT"}
 
 
 def load(row: str):

@@ -1,4 +1,4 @@
-//! Lazy rows for the register archive slice; broader archive domains defer.
+//! Lazy archive rows as `_read_export` admits them; other domains defer.
 use super::super::doorbell_seen::json as scalar_json;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
@@ -91,6 +91,10 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64), Error> {
     // Reuse the scalar reader's protection against serde's private Number key;
     // its nonfinite, surrogate and nesting refusals remain deferred domains.
     let value: Value = scalar_json::from_str(text).map_err(|_| Error::Deferred)?;
+    // Python's reader refuses (as not JSON) an integer over its digit limit.
+    if !super::codec::python_int_domain(&value) {
+        return Err(Error::Deferred);
+    }
     let Some(object) = value.as_object() else {
         return Err(Error::InvalidRow);
     };

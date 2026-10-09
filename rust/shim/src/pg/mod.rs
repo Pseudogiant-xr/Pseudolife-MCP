@@ -81,6 +81,7 @@ fn connection_error(error: tokio_postgres::Error) -> Error {
 pub struct Session {
     client: Option<Client>,
     driver: JoinHandle<Result<(), tokio_postgres::Error>>,
+    notices: std::sync::Arc<std::sync::Mutex<Vec<tokio_postgres::error::DbError>>>,
 }
 impl Session {
     pub async fn open(dsn: &Dsn) -> Result<Self, Error> {
@@ -117,9 +118,28 @@ impl Session {
             .await
             .map_err(|_| Error::Connection)?
             .map_err(connection_error)?;
+        // The driver is the Connection future's own poll loop, except that
+        // server notices are kept for the caller instead of being logged.
+        let notices: std::sync::Arc<std::sync::Mutex<Vec<tokio_postgres::error::DbError>>> =
+            std::sync::Arc::default();
+        let sink = std::sync::Arc::clone(&notices);
+        let mut connection = connection;
+        let driver = tokio::spawn(async move {
+            while let Some(message) =
+                std::future::poll_fn(|context| connection.poll_message(context)).await
+            {
+                if let tokio_postgres::AsyncMessage::Notice(notice) = message? {
+                    sink.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(notice);
+                }
+            }
+            Ok(())
+        });
         let session = Self {
             client: Some(client),
-            driver: tokio::spawn(connection),
+            driver,
+            notices,
         };
         session
             .client()
@@ -133,6 +153,15 @@ impl Session {
     }
     pub fn client_mut(&mut self) -> &mut Client {
         self.client.as_mut().expect("open PostgreSQL session")
+    }
+    /// Server notices received so far (in order), removed from the session.
+    pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
+        std::mem::take(
+            &mut *self
+                .notices
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
     /// Close gracefully after all borrowed operations have ended.
     pub async fn close(mut self) -> Result<(), Error> {
