@@ -1,5 +1,6 @@
 //! The Console's static shell under `/ui` (spec R2-R3, `web/api.py:204-228`).
 
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 /// Every `/` and `/ui` answer carries these (`web/api.py:60-71`).
@@ -22,37 +23,95 @@ pub struct Served {
     pub cache: &'static str,
 }
 
-/// Python's built-in `mimetypes` table for the extensions a Console build
-/// ships, plus the four `add_type` calls in `web/api.py:96-99`. Platform
-/// tables (the Windows registry, `/etc/mime.types`) are not consulted.
-fn guess_type(path: &Path) -> Option<&'static str> {
+/// Types of the committed Console build, including its vendor notice.
+/// Python obtains Markdown's Linux type from `/etc/mime.types`; without
+/// that file (including the supported Windows oracle), it is octet-stream.
+fn guess_type(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "html" | "htm" => "text/html",
-        "css" => "text/css",
-        "js" | "mjs" => "application/javascript",
-        "json" => "application/json",
-        "svg" => "image/svg+xml",
-        "woff2" => "font/woff2",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "avif" => "image/avif",
-        "ico" => "image/vnd.microsoft.icon",
-        "txt" => "text/plain",
-        "xml" => "text/xml",
-        "wasm" => "application/wasm",
-        "pdf" => "application/pdf",
-        _ => return None,
-    })
+    #[cfg(target_os = "linux")]
+    if ext == "md" {
+        return markdown_type(Path::new("/etc/mime.types"));
+    }
+    Some(
+        match ext.as_str() {
+            "html" | "htm" => "text/html",
+            "css" => "text/css",
+            "js" | "mjs" => "application/javascript",
+            "json" => "application/json",
+            "svg" => "image/svg+xml",
+            "woff2" => "font/woff2",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "avif" => "image/avif",
+            "ico" => "image/vnd.microsoft.icon",
+            "txt" => "text/plain",
+            "xml" => "text/xml",
+            "wasm" => "application/wasm",
+            "pdf" => "application/pdf",
+            _ => return None,
+        }
+        .to_string(),
+    )
 }
 
-/// `(root / rel).resolve()` for a path that need not exist: lexical, with
-/// `..` able to climb out (which the caller then refuses).
-fn resolve_under(root: &Path, rel: &str) -> PathBuf {
+/// Only the shipped vendor notice needs the system MIME table. Preserve
+/// its absence and last mapping; unshipped extensions remain deferred.
+#[cfg(target_os = "linux")]
+fn markdown_type(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut found = None;
+    for line in text.lines() {
+        let mut fields = line.split('#').next().unwrap_or("").split_whitespace();
+        if let Some(kind) = fields.next()
+            && fields.any(|ext| ext == "md")
+        {
+            found = Some(kind.to_string());
+        }
+    }
+    found
+}
+
+/// Python's non-strict `Path.resolve()`: resolve existing ancestors even
+/// when the requested file is missing. This keeps an escaping directory
+/// link from turning a refused request into the SPA fallback.
+fn resolve_path(path: &Path, links: &mut HashSet<PathBuf>) -> std::io::Result<PathBuf> {
+    // ntpath.realpath normalizes parents before resolving Windows links.
+    #[cfg(windows)]
+    let normalized = lexical_path(path);
+    #[cfg(windows)]
+    let path = normalized.as_path();
     let mut out = PathBuf::new();
-    for comp in root.join(rel).components() {
+    for comp in path.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => {
+                out.push(other.as_os_str());
+                if let Ok(real) = std::fs::canonicalize(&out) {
+                    out = real;
+                } else if let Ok(dest) = std::fs::read_link(&out) {
+                    if !links.insert(out.clone()) {
+                        return Err(std::io::Error::other("symlink loop"));
+                    }
+                    let link = out.clone();
+                    let target = out.parent().unwrap_or(Path::new("")).join(dest);
+                    out = resolve_path(&target, links)?;
+                    links.remove(&link);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(windows)]
+fn lexical_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
         match comp {
             Component::ParentDir => {
                 out.pop();
@@ -78,22 +137,9 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
     }
-    let root = resolve_under(&std::env::current_dir()?.join(root), "");
-    let mut target = resolve_under(&root, rel);
-    if !target.starts_with(&root) {
-        return Ok(Served {
-            status: 403,
-            body: b"forbidden".to_vec(),
-            content_type: "text/plain".into(),
-            cache: "no-store",
-        });
-    }
-    // `Path.resolve()` follows symlinks: a link out of the root is refused
-    // like a `..` escape.
-    if let (Ok(real), Ok(real_root)) =
-        (std::fs::canonicalize(&target), std::fs::canonicalize(&root))
-        && !real.starts_with(&real_root)
-    {
+    let root = resolve_path(&std::env::current_dir()?.join(root), &mut HashSet::new())?;
+    let mut target = resolve_path(&root.join(rel), &mut HashSet::new())?;
+    if !target.starts_with(&root) && !crate::mutants::active("static-traversal-open") {
         return Ok(Served {
             status: 403,
             body: b"forbidden".to_vec(),
@@ -121,9 +167,10 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
             cache: "no-store",
         });
     }
-    let mut ctype = guess_type(&target)
-        .unwrap_or("application/octet-stream")
-        .to_string();
+    let mut ctype = guess_type(&target).unwrap_or_else(|| "application/octet-stream".into());
+    if crate::mutants::active("static-wrong-type") {
+        ctype = "application/octet-stream".into();
+    }
     if ctype.starts_with("text/")
         || matches!(
             ctype.as_str(),
@@ -175,6 +222,12 @@ mod tests {
         );
         let s = serve(&root, "/ui/assets/sub").unwrap();
         assert_eq!(s.body, b"sub");
+        std::fs::write(root.join("README.md"), b"vendor notice").unwrap();
+        let s = serve(&root, "/ui/README.md").unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(s.content_type, "text/markdown; charset=utf-8");
+        #[cfg(windows)]
+        assert_eq!(s.content_type, "application/octet-stream");
         let s = serve(&root, "/ui/nope/route").unwrap();
         assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
         let s = serve(&root, "/ui/../../etc/passwd").unwrap();
@@ -200,5 +253,25 @@ mod tests {
         );
         std::fs::remove_dir_all(&root).unwrap();
         std::fs::remove_file(outside).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_are_resolved_before_parent_components_and_mime_selection() {
+        let root = tree("link-resolution");
+        let outside = root.with_extension("outside-dir");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("notice.txt"), b"notice").unwrap();
+        std::os::unix::fs::symlink(root.join("notice.txt"), root.join("notice.js")).unwrap();
+        assert_eq!(
+            serve(&root, "/ui/notice.js").unwrap().content_type,
+            "text/plain; charset=utf-8"
+        );
+        std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+        for path in ["/ui/escape/missing", "/ui/escape/../index.html"] {
+            assert_eq!(serve(&root, path).unwrap().status, 403, "{path}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
     }
 }

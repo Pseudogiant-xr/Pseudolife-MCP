@@ -207,6 +207,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: Daemon static HTTP parity
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          python -m pytest -q rust/daemon/harness/test_static.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
+          cargo test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
+          $result = $LASTEXITCODE
+          Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
+          if ($result -ne 0) { exit $result }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only static-build static-paths static-missing --out (Join-Path $env:RUNNER_TEMP 'daemon-static-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only static-build static-paths static-missing --out (Join-Path $env:RUNNER_TEMP 'daemon-static-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon static parity outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-static-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-static-*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always()
         uses: actions/upload-artifact@v4

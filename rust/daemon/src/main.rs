@@ -48,6 +48,10 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
+    if std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some() {
+        println!("{}", mutants::supports_loopback_bind_fixture());
+        return;
+    }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
         std::env::var("PSEUDOLIFE_MCP_DATA_DIR")
@@ -156,7 +160,9 @@ fn main() {
     let code = runtime.block_on(async move {
         // asyncio binds every interface for an empty host (IPv4 here: the
         // IPv6 wildcard is a declared divergence).
-        let host = if env.host.is_empty() {
+        let host = if mutants::loopback_bind_fixture() {
+            "127.0.0.1".to_string()
+        } else if env.host.is_empty() {
             "0.0.0.0".to_string()
         } else {
             env.host.clone()
