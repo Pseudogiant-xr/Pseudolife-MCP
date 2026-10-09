@@ -64,6 +64,15 @@ fn json(status: u16, body: &Value) -> Response {
 }
 
 fn refusal(e: &BoardError) -> Response {
+    if let BoardError::Internal(text) = e {
+        // Python logs the exception type only; the text can carry row
+        // data, so it is printed only when a harness asks for it.
+        if std::env::var_os("PSEUDOLIFE_DAEMON_DEBUG_BOARD").is_some() {
+            eprintln!("coordination handler failed: {text}");
+        } else {
+            eprintln!("coordination handler failed (internal)");
+        }
+    }
     let r = e.public();
     json(status_for(&r.code), &rest_body(&r))
 }

@@ -594,6 +594,16 @@ pub async fn list_leases(
         append(&tx, events, now, None).await?;
         tx.commit().await?;
     }
+    lease_page(&*client, name, limit, now).await
+}
+
+/// The read half of `list_leases`: one page of held and queued leases.
+pub async fn lease_page(
+    client: &impl GenericClient,
+    name: Option<&str>,
+    limit: i64,
+    now: f64,
+) -> Result<Value> {
     let busy = "(l.holder_agent_id IS NOT NULL OR EXISTS (SELECT 1 FROM \
                 coordination_lease_waiters w WHERE w.name=l.name))";
     let page = limit + 1;

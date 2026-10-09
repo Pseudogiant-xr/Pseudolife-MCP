@@ -1292,7 +1292,34 @@ impl Store {
         limit: &Value,
         settle_leases: bool,
     ) -> Result<Value> {
-        let limit = check_limit(limit)?;
+        let page = check_limit(limit)?;
+        if let Some(v) = project {
+            check_value(v, MAX_SCOPE, "project", true)?;
+        }
+        if let Some(v) = task {
+            check_value(v, MAX_SCOPE, "task", true)?;
+        }
+        if settle_leases {
+            let now = now();
+            let tx = client.transaction().await?;
+            let mut events = Vec::new();
+            lease::settle_due(&tx, now, &mut events, None).await?;
+            append(&tx, events, now, None).await?;
+            tx.commit().await?;
+        }
+        self.roster_read(&*client, agent_id, project, task, page).await
+    }
+
+    /// The read half of `_roster`: agents, idle count, status ages and the
+    /// lease page, all through one client (a snapshot's transaction).
+    pub async fn roster_read(
+        &self,
+        client: &impl GenericClient,
+        agent_id: &str,
+        project: Option<&Value>,
+        task: Option<&Value>,
+        limit: i64,
+    ) -> Result<Value> {
         let mut clauses = vec!["agent_id<>$1".to_string(), "credential_hash IS NOT NULL".to_string()];
         let mut values: Vec<String> = vec![agent_id.to_string()];
         for (key, value) in [("project", project), ("task", task)] {
@@ -1305,16 +1332,16 @@ impl Store {
         let now = now();
         let n = values.len();
         let leased = format!(
-            "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>${})",
+            "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>${}::double precision)",
             n + 1
         );
         let recent = format!(
-            "last_activity>CASE WHEN {leased} THEN ${} ELSE ${} END",
+            "last_activity>CASE WHEN {leased} THEN ${}::double precision ELSE ${}::double precision END",
             n + 2,
             n + 3
         );
         let order_leased = format!(
-            "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>${})",
+            "(attachment_id IS NOT NULL AND coalesce(lease_until,0)>${}::double precision)",
             n + 4
         );
         let sql = format!(
@@ -1356,8 +1383,8 @@ impl Store {
                 json!(row.status_expires_at.is_some_and(|e| now > e));
             agents.push(agent);
         }
-        self.stamp_status_age(&*client, &mut agents, now).await?;
-        let leases = lease::list_leases(client, None, MAX_PAGE, settle_leases).await?;
+        self.stamp_status_age(client, &mut agents, now).await?;
+        let leases = lease::lease_page(client, None, MAX_PAGE, now).await?;
         Ok(json!({"agents": agents, "truncated": rows.len() as i64 > limit,
                   "idle_omitted": idle, "leases": leases["leases"],
                   "leases_truncated": leases["truncated"]}))

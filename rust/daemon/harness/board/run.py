@@ -239,6 +239,7 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
     if kind == "python":
         d = daemons.python_daemon(home, port, env)
     else:
+        env["PSEUDOLIFE_DAEMON_DEBUG_BOARD"] = "1"
         if os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
             env["PSEUDOLIFE_DAEMON_MUTANT"] = os.environ["PSEUDOLIFE_DAEMON_MUTANT"]
         d = daemons.rust_daemon(binary, home, port, env)

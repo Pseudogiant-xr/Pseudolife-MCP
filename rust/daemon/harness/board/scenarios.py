@@ -67,16 +67,16 @@ class Step:
         return self.method, path, headers, body
 
 
-def act(name, action, token="default", agent=None, body=None, save=None, write=True, **kw):
-    return Step(name, path=f"/api/coordination/{action}", token=token, agent=agent,
+def act(title, action, token="default", agent=None, body=None, save=None, write=True, **kw):
+    return Step(title, path=f"/api/coordination/{action}", token=token, agent=agent,
                 body={} if body is None else body, save=save, write=write, **kw)
 
 
-def reg(name, who, token="default", **fields):
+def reg(title, who, token="default", **fields):
     def save(ctx, resp):
         if "agent_id" in resp and "credential" in resp:
             ctx.agents[who] = {"agent_id": resp["agent_id"], "credential": resp["credential"]}
-    return act(name, "register", token=token, body=fields, save=save)
+    return act(title, "register", token=token, body=fields, save=save)
 
 
 def hook(name, method, path, token="default", write=True):

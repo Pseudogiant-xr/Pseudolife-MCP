@@ -293,9 +293,9 @@ impl Board {
         if let Some(g) = params.get("generation") {
             match super::canon::py_int_i64(g) {
                 Some(n) if n >= 1 => {}
-                _ if super::canon::is_py_int(g) && !g.to_string().starts_with('-') => {
-                    // An int beyond i64: Python accepts it; no column holds it.
-                    return Err(BoardError::Internal("generation out of range".into()));
+                None if super::canon::is_py_int(g) && !g.to_string().starts_with('-') => {
+                    // An int beyond i64: Python accepts it and no row ever
+                    // matches it; i64::MAX below behaves the same.
                 }
                 _ => return Err(BoardError::code("invalid_generation")),
             }
@@ -307,7 +307,7 @@ impl Board {
             match (id, gen_) {
                 (None, None) => {}
                 (Some(id), Some(g)) => {
-                    attachment = Some((id, super::canon::py_int_i64(&g).expect("checked above")))
+                    attachment = Some((id, super::canon::py_int_i64(&g).unwrap_or(i64::MAX)))
                 }
                 _ => return Err(BoardError::code("attachment_required")),
             }
@@ -381,7 +381,7 @@ impl Board {
         }
         let gen_of = |p: &Map<String, Value>| {
             p.get("generation")
-                .and_then(super::canon::py_int_i64)
+                .map(|g| super::canon::py_int_i64(g).unwrap_or(i64::MAX))
                 .unwrap_or(0)
         };
         let result = match action {
