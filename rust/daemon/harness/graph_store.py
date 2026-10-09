@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from functools import lru_cache
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -117,7 +119,10 @@ def seed(url):
             st.close()
 
 
-def operations():
+def operations(row="store"):
+    if row == "read":
+        from graph_read_profile import operations as read_operations
+        return read_operations()
     def op(operation, **kwargs):
         return {"op": operation, **kwargs}
     def edge(name="upsert_edge", src=1, dst=2, **kwargs):
@@ -262,6 +267,22 @@ def catalog_shape(state):
 def oracle_call(st, request):
     kwargs = {k: v for k, v in request.items() if k != "op"}
     try:
+        if request["op"] == "subgraph":
+            value = oracle_graph_store()(st).subgraph(request["root"],
+                depth=request.get("depth", 1), to_id=request.get("to"))
+            value["nodes"] = sorted(value["nodes"])
+            return {"value": value}
+        if request["op"] in {"degree_counts", "degrees_by_name", "shortest_path", "resolve_relation",
+                             "derive_edges", "build_subgraph"}:
+            from pseudolife_memory import graph
+            value = getattr(graph, request["op"])(**kwargs)
+            if request["op"] == "build_subgraph":
+                value["nodes"] = sorted(value["nodes"])
+            return {"value": value}
+        if request["op"] == "alias_canonical_map":
+            from pseudolife_memory.graph import alias_canonical_map
+            return {"value": alias_canonical_map(request["entities"],
+                {int(k): v for k, v in request["aliases"].items()})}
         if request["op"] == "norm_name":
             from pseudolife_memory.graph import norm_name
             return {"value": norm_name(request["raw"])}
@@ -272,7 +293,19 @@ def oracle_call(st, request):
         return {"sqlstate": error.sqlstate}
 
 
-def run(candidate, mode, mutant=None):
+@lru_cache(maxsize=1)
+def oracle_graph_store():
+    # Execute the actual checkout source without importing memory/__init__,
+    # whose unrelated eager imports require torch. This wrapper uses graph.py
+    # and the real PostgresStorage methods; no model or substitute oracle.
+    source = REPO / "pseudolife_memory/memory/graph_store.py"
+    spec = importlib.util.spec_from_file_location("graph_store_oracle", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.PostgresNetworkxGraphStore
+
+
+def run(candidate, mode, mutant=None, row="store"):
     from pseudolife_memory.storage.postgres import PostgresStorage
     import psutil
     names = [pg.PREFIX + str(os.getpid() * 10 + n) for n in range(3)]
@@ -286,8 +319,9 @@ def run(candidate, mode, mutant=None):
         clocks = [ClockState("python"), ClockState("rust")]
         for clock in clocks:
             clock.initialize(initial)
-        golden = json.loads(GOLDEN.read_text(encoding="utf-8")) if mode == "golden" else None
-        if golden and golden["operations"] != operations():
+        golden_path = GOLDEN if row == "store" else GOLDEN.with_name("graph-read.json")
+        golden = json.loads(golden_path.read_text(encoding="utf-8")) if mode == "golden" else None
+        if golden and golden["operations"] != operations(row):
             raise AssertionError("golden input inventory is stale")
         with tempfile.TemporaryDirectory(prefix="pl-w3h-") as home, ThreadPoolExecutor(max_workers=1) as reader:
             env = {"PSEUDOLIFE_MCP_DATABASE_URL": urls[1]}
@@ -308,7 +342,19 @@ def run(candidate, mode, mutant=None):
                 lifetime.callback(stop_fixture)
                 if mode != "golden":
                     oracle = PostgresStorage(urls[0])
-                for index, request in enumerate(operations()):
+                for index, request in enumerate(operations(row)):
+                    context = request
+                    if request["op"] == "subgraph":
+                        if oracle:
+                            loaded = oracle.load_graph()
+                            context = {**request, "op": "build_subgraph", "edges": [
+                                dict(src=e["src_id"], relation=e["relation"], dst=e["dst_id"],
+                                     confidence=e["confidence"], origin=e["origin"])
+                                for e in loaded["edges"]], "relations": {r["name"]: dict(
+                                    transitive=r["transitive"], inverse_of=r["inverse_of"])
+                                    for r in oracle.load_relations()}}
+                        else:
+                            context = golden["cases"][index]["comparison_context"]
                     pstart = time.time()
                     expected = oracle_call(oracle, request) if oracle else golden["cases"][index]["response"]
                     pend = time.time()
@@ -334,9 +380,15 @@ def run(candidate, mode, mutant=None):
                     else:
                         expected_hash = golden["cases"][index]["state_sha256"]
                         state_diffs = [] if digest(sstate) == expected_hash else ["golden bank-state digest differs"]
-                    diffs = response_diff(expected, actual) + state_diffs
+                    if context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
+                        from graph_read_compare import compare
+                        diffs = compare(context, expected, actual, response_diff) + state_diffs
+                    else:
+                        diffs = response_diff(expected, actual) + state_diffs
                     cases.append(dict(index=index, op=request["op"], response=expected,
                                       state_sha256=expected_hash, diffs=diffs))
+                    if request["op"] == "subgraph":
+                        cases[-1]["comparison_context"] = context
                     if diffs:
                         print(f"case {index} {request['op']}: {diffs[:3]}", flush=True)
                 proc.stdin.close()
@@ -363,13 +415,15 @@ def main():
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--row", choices=["store", "read"], default="store")
     args = parser.parse_args()
     results = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO,
                                                text=True).strip(),
                "platform": sys.platform,
+               "row": args.row,
                "candidate_sha256": hashlib.sha256(args.candidate.read_bytes()).hexdigest()}
     try:
-        control = run(args.candidate, "golden" if args.mode == "golden" else "live")
+        control = run(args.candidate, "golden" if args.mode == "golden" else "live", row=args.row)
         failed = sum(bool(c["diffs"]) for c in control)
         results["summary"] = {"cases": len(control), "diff_cases": failed}
         print(json.dumps(results["summary"]), flush=True)
@@ -378,15 +432,21 @@ def main():
         if args.record:
             if args.mode != "live":
                 parser.error("--record requires live mode")
-            GOLDEN.write_text(json.dumps(dict(operations=operations(), cases=control,
-                normalizers="ClockState in graph_store.py; operation-specific windows; JSON object order free"),
+            golden_path = GOLDEN if args.row == "store" else GOLDEN.with_name("graph-read.json")
+            golden_path.write_text(json.dumps(dict(operations=operations(args.row), cases=control,
+                normalizers="ClockState in graph_store.py; operation-specific windows; JSON object order free" +
+                    ("; graph_read_compare.py: derived multisets, inverse collision provenance, node sets, "
+                     "standalone minimum paths; subgraph selection exact" if args.row == "read" else "")),
                 indent=1, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n")
         if args.mode == "mutants":
             outcomes = {}
             failures = {}
-            for mutant in MUTANTS:
+            mutants = MUTANTS
+            if args.row == "read":
+                from graph_read_profile import MUTANTS as mutants
+            for mutant in mutants:
                 try:
-                    cases = run(args.candidate, "live", mutant)
+                    cases = run(args.candidate, "live", mutant, row=args.row)
                     outcomes[mutant] = sum(bool(c["diffs"]) for c in cases)
                 except Exception as error:
                     # Only a completed comparison can catch a source mutant.

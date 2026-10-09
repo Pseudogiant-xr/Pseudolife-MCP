@@ -121,6 +121,10 @@ def check_executable_coverage(jobs):
                         ("--candidate", "--out"), ("--record",))
     require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
     require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_read_compare.py"))
+    for mode in ("live", "golden"):
+        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
+                        ("--candidate", "--out", "--row", "read"), ("--record",))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)

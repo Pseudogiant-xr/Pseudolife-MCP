@@ -11,6 +11,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
 | `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
 | `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
+| `spec-w3h-graph-read.md` | GraphStore subgraph and pure alias, suggestion, degree, inference and path helpers |
 | `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
 | `harness/` | The differential harness, its goldens and helpers |
 
@@ -66,6 +67,11 @@ Goldens retain all-row and sequence digests; catalogs must remain unchanged
 within each arm, and live mode also compares them across arms. The fixture
 binary is available only with `graph-harness`; it has no model or HTTP server.
 These are store APIs for subsequent services, not installed graph routes.
+
+`graph_store.py` also accepts `--row read` in live, golden and mutants modes.
+It exercises the actual GraphStore oracle source and pure graph functions;
+`test_graph_read_compare.py` checks the narrow ordering/path/provenance rules.
+Subgraph path choice remains exact because it selects returned nodes and edges.
 
 `run.py embedding --rust-bin <binary> --model <existing model> --out <file>`
 runs Python torch, Python ONNX and Rust sequentially on a canonical text corpus.

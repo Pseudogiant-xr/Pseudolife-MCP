@@ -450,6 +450,15 @@ pub async fn dispatch(client: &Client, r: &Value) -> anyhow::Result<Value> {
     };
     let confidence = r.get("confidence").and_then(Value::as_f64).unwrap_or(0.8);
     match required("op")? {
+        "subgraph" => {
+            subgraph(
+                client,
+                id("root")?,
+                r["depth"].as_i64().unwrap_or(1),
+                r["to"].as_i64(),
+            )
+            .await
+        }
         "norm_name" => Ok(json!(norm_name(required("raw")?))),
         "ensure_entity" => Ok(json!(
             ensure_entity(
@@ -633,5 +642,59 @@ pub async fn load_graph(client: &Client) -> anyhow::Result<Value> {
         client,
         |client| async move { load_graph_body(client).await },
     )
+    .await
+}
+
+/// The GraphStore read boundary, with all queries under one writer guard.
+pub async fn subgraph(
+    client: &Client,
+    root: i64,
+    depth: i64,
+    to: Option<i64>,
+) -> anyhow::Result<Value> {
+    crate::txn::with_client(client, |client| async move {
+        let graph = load_graph_body(client).await?;
+        let registry = load_relations_body(client).await?;
+        let edges: Vec<crate::graph_read::Edge> = serde_json::from_value(json!(
+            graph["edges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| json!({
+                    "src": e["src_id"], "relation": e["relation"], "dst": e["dst_id"],
+                    "confidence": e["confidence"], "origin": e["origin"],
+                }))
+                .collect::<Vec<_>>()
+        ))?;
+        let relations: std::collections::BTreeMap<String, crate::graph_read::Relation> =
+            serde_json::from_value(Value::Object(
+                registry
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| {
+                        (
+                            r["name"].as_str().unwrap().to_owned(),
+                            json!({
+                                "transitive": r["transitive"], "inverse_of": r["inverse_of"],
+                            }),
+                        )
+                    })
+                    .collect(),
+            ))?;
+        let mut result = serde_json::to_value(crate::graph_read::build_subgraph(
+            &edges, &relations, root, depth, to,
+        ))?;
+        result["entities"] = Value::Object(
+            graph["entities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| (e["id"].as_i64().unwrap().to_string(), e.clone()))
+                .collect(),
+        );
+        result["aliases"] = graph["aliases"].clone();
+        Ok(result)
+    })
     .await
 }

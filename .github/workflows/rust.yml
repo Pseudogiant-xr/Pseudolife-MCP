@@ -287,6 +287,12 @@ jobs:
           python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/test_graph_read_compare.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-golden.json')
           exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
@@ -303,6 +309,8 @@ jobs:
           path: |
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
+            ${{ runner.temp }}/graph-read-live.json
+            ${{ runner.temp }}/graph-read-golden.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
