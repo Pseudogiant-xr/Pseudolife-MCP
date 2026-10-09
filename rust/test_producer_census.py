@@ -127,3 +127,12 @@ def test_cli_documented_optional_groups_are_unresolved():
 
 def test_module_import_is_not_a_config_key_reference():
     assert not census.config_calls('from pseudolife_memory.memory.dream import NoOpExtractor', "docs/demo.md", {"memory.dream": "MemoryConfig.dream"})
+
+
+def test_powershell_function_result_is_not_an_environment_literal():
+    call = census.env_calls('$env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = Get-DesktopTokenSource', "ops/demo.ps1")[0]
+    assert call["shape"]["parameters"]["value"] == {"expression": "Get-DesktopTokenSource"}
+
+
+def test_command_failure_message_is_not_a_cli_call():
+    assert not census.cli_calls('echo "WARNING: pseudolife-mcp expose tailscale exited $rc"', "ops/demo.sh")

@@ -1165,19 +1165,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/briefing_hook.rs:58",
-          "shape": {
-            "argv_source": "briefing : output failed\\n\", true);",
-            "channel": "argv",
-            "complete": false,
-            "expression": ": output failed\\n\", true);",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/briefing_hook.rs:64",
           "shape": {
             "argv_source": "briefing : daemon reply not understood\\n\",",
@@ -1668,19 +1655,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:1885",
-          "shape": {
-            "argv_source": "connect could not check this machine's existing registrations (it exited $planExit$reason). Nothing was changed; fix that, then re-run\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "could not check this machine's existing registrations (it exited $planExit$reason). Nothing was changed; fix that, then re-run\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:1888",
           "shape": {
             "argv_source": "connect points them at $($DaemonUrl):\"",
@@ -1713,19 +1687,6 @@
                 "expression": "|"
               }
             }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:1905",
-          "shape": {
-            "argv_source": "connect exited $($applyExit): $meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "exited $($applyExit): $meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run\"",
-            "omitted_optional": null,
-            "parameters": {}
           }
         },
         {
@@ -1808,19 +1769,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:1909",
-          "shape": {
-            "argv_source": "connect could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Nothing was changed; fix that, then re-run\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Nothing was changed; fix that, then re-run\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:1912",
           "shape": {
             "argv_source": "connect points them at $DAEMON_URL:\"",
@@ -1853,19 +1801,6 @@
                 "expression": "</dev/null"
               }
             }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:1923",
-          "shape": {
-            "argv_source": "connect exited $connect_rc: $connect_meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "exited $connect_rc: $connect_meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
           }
         },
         {
@@ -2821,19 +2756,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:441",
-          "shape": {
-            "argv_source": "expose tailscale exited $exposeExit (see its message above). The install itself is complete: run it again once that is fixed.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "tailscale exited $exposeExit (see its message above). The install itself is complete: run it again once that is fixed.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:453",
           "shape": {
             "argv_source": "expose tailscale",
@@ -2880,19 +2802,6 @@
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
             "expression": "tailscale || expose_rc=$?",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:482",
-          "shape": {
-            "argv_source": "expose tailscale exited $expose_rc (see its message above). The install itself is complete: run it again once that is fixed.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "tailscale exited $expose_rc (see its message above). The install itself is complete: run it again once that is fixed.\" >&2",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -3132,19 +3041,6 @@
             "channel": "argv",
             "complete": false,
             "expression": "<name>",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "docs/atlas/atlas.json:1026",
-          "shape": {
-            "argv_source": "invite / pair: token and pairing-code SHA-256 only, tier, board, the redeemed code's hash for a ten-minute retry window; excluded from logical exports) · v54 maintainer messages and Board roles (maintainer_passkeys: each WebAuthn credential with its COSE key, alg, sign count, label, enrolled_by, pending/active/revoked state, quarantine end and flagged_at; maintainer_bootstrap: host-code SHA-256, expiry, failed attempts (burned at 5) and redeeming credential; maintainer_nonces: spent challenge nonces to expiry; coordination_messages.origin/maintainer_proof/repudiated_at, added only when missing; excluded from logical exports) · v55 board session names (coordination_agents.name/name_source/name_set_at/harness_name, added only when missing, plus a partial index on episode)\",",
-            "channel": "argv",
-            "complete": false,
-            "expression": "/ pair: token and pairing-code SHA-256 only, tier, board, the redeemed code's hash for a ten-minute retry window; excluded from logical exports) · v54 maintainer messages and Board roles (maintainer_passkeys: each WebAuthn credential with its COSE key, alg, sign count, label, enrolled_by, pending/active/revoked state, quarantine end and flagged_at; maintainer_bootstrap: host-code SHA-256, expiry, failed attempts (burned at 5) and redeeming credential; maintainer_nonces: spent challenge nonces to expiry; coordination_messages.origin/maintainer_proof/repudiated_at, added only when missing; excluded from logical exports) · v55 board session names (coordination_agents.name/name_source/name_set_at/harness_name, added only when missing, plus a partial index on episode)\",",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4147,19 +4043,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:1954",
-          "shape": {
-            "argv_source": "pair exited $pairExit$(if ($pairError) { \" ($pairError)\" }): $meaning\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "exited $pairExit$(if ($pairError) { \" ($pairError)\" }): $meaning\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:413",
           "shape": {
             "argv_source": "pair <url> <code> there). The steps by hand,",
@@ -4189,19 +4072,6 @@
                 "expression": "--token-file"
               }
             }
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:1969",
-          "shape": {
-            "argv_source": "pair exited $pair_rc${pair_error:+ ($pair_error)}: $pair_meaning\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "exited $pair_rc${pair_error:+ ($pair_error)}: $pair_meaning\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
           }
         },
         {
@@ -4602,19 +4472,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:1637",
-          "shape": {
-            "argv_source": "shim from $($held -join ', ') ($what); it was not upgraded, because on Windows $tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $rerun\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "from $($held -join ', ') ($what); it was not upgraded, because on Windows $tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $rerun\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:1851",
           "shape": {
             "argv_source": "shim is unavailable (see above). One that names another daemon stays as it is.\"",
@@ -4671,19 +4528,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:2515",
-          "shape": {
-            "argv_source": "shim was not upgraded - see the warning above.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded - see the warning above.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:2520",
           "shape": {
             "argv_source": "shim from this checkout.\"",
@@ -4710,38 +4554,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:2545",
-          "shape": {
-            "argv_source": "shim upgrade failed - see the pip/pipx output above and re-run.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed - see the pip/pipx output above and re-run.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:2577",
           "shape": {
             "argv_source": "shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
             "channel": "argv",
             "complete": false,
             "expression": "- per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:2628",
-          "shape": {
-            "argv_source": "shim was not upgraded - see the warning above.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded - see the warning above.\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4775,38 +4593,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:2658",
-          "shape": {
-            "argv_source": "shim upgrade failed - see the pip/pipx output above and re-run.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed - see the pip/pipx output above and re-run.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:2693",
           "shape": {
             "argv_source": "shim - per-session identity.\"",
             "channel": "argv",
             "complete": false,
             "expression": "- per-session identity.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:2734",
-          "shape": {
-            "argv_source": "shim was not upgraded - see the warning above.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded - see the warning above.\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4840,19 +4632,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.ps1:2764",
-          "shape": {
-            "argv_source": "shim upgrade failed - see the pip/pipx output above and re-run.\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed - see the pip/pipx output above and re-run.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.ps1:2828",
           "shape": {
             "argv_source": "shim - per-session identity (required for correct episodes with concurrent sessions).\"",
@@ -4872,19 +4651,6 @@
             "channel": "argv",
             "complete": false,
             "expression": "(see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx or Python >=3.10 and re-run.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.ps1:2837",
-          "shape": {
-            "argv_source": "shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above).\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "- no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above).\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4937,19 +4703,6 @@
             "channel": "argv",
             "complete": false,
             "expression": "from $shim_held_list; it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $shim_rerun\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:1684",
-          "shape": {
-            "argv_source": "shim from $shim_held_list ($shim_what); it was not upgraded, because on Windows $shim_tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $shim_rerun\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "from $shim_held_list ($shim_what); it was not upgraded, because on Windows $shim_tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $shim_rerun\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -5017,19 +4770,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2532",
-          "shape": {
-            "argv_source": "shim was not upgraded — see the warning above.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded — see the warning above.\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:2537",
           "shape": {
             "argv_source": "shim from this checkout.\"",
@@ -5056,38 +4796,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2568",
-          "shape": {
-            "argv_source": "shim upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:2609",
           "shape": {
             "argv_source": "shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
             "channel": "argv",
             "complete": false,
             "expression": "— per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2658",
-          "shape": {
-            "argv_source": "shim was not upgraded — see the warning above.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded — see the warning above.\" >&2",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -5121,38 +4835,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2694",
-          "shape": {
-            "argv_source": "shim upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:2740",
           "shape": {
             "argv_source": "shim — per-session identity.\"",
             "channel": "argv",
             "complete": false,
             "expression": "— per-session identity.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2784",
-          "shape": {
-            "argv_source": "shim was not upgraded — see the warning above.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "was not upgraded — see the warning above.\" >&2",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -5186,19 +4874,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install.sh:2820",
-          "shape": {
-            "argv_source": "shim upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "upgrade failed — see the pip/pipx output above and re-run.\" >&2",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "ops/install.sh:2896",
           "shape": {
             "argv_source": "shim — per-session identity (required for correct episodes with concurrent sessions).\"",
@@ -5220,23 +4895,6 @@
             "expression": "is unavailable (see the pip/pipx output above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx and re-run.\" >&2",
             "omitted_optional": null,
             "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install.sh:2902",
-          "shape": {
-            "argv_source": "shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment).\" >&2",
-            "channel": "argv",
-            "complete": false,
-            "expression": "is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment).\" >&2",
-            "omitted_optional": null,
-            "parameters": {
-              "--user": {
-                "literal": true
-              }
-            }
           }
         },
         {
@@ -22567,7 +22225,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "Get-DesktopTokensSource"
+                "expression": "Get-DesktopTokensSource"
               }
             }
           },
@@ -22659,7 +22317,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "Get-DesktopTokenSource"
+                "expression": "Get-DesktopTokenSource"
               }
             }
           },
@@ -23860,7 +23518,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "auto"
+                "expression": "auto"
               }
             }
           },
@@ -23890,7 +23548,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "auto"
+                "expression": "auto"
               }
             }
           },
@@ -23920,7 +23578,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "auto"
+                "expression": "auto"
               }
             }
           },
@@ -23935,7 +23593,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "primary"
+                "expression": "primary"
               }
             }
           },
@@ -23950,7 +23608,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "auto"
+                "expression": "auto"
               }
             }
           },
@@ -23965,7 +23623,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "primary"
+                "expression": "primary"
               }
             }
           },
@@ -24313,7 +23971,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
+                "expression": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -24343,7 +24001,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
+                "expression": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -24373,7 +24031,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
+                "expression": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -24388,7 +24046,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "http://pseudolife-extractor:8081/v1"
+                "expression": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -24581,7 +24239,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -24611,7 +24269,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -24641,7 +24299,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -24656,7 +24314,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -25047,7 +24705,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -25077,7 +24735,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -25107,7 +24765,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -25122,7 +24780,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "extractor"
+                "expression": "extractor"
               }
             }
           },
@@ -25580,7 +25238,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "Get-DesktopTokenSource"
+                "expression": "Get-DesktopTokenSource"
               }
             }
           },
@@ -25610,7 +25268,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "Get-DesktopTokenSource"
+                "expression": "Get-DesktopTokenSource"
               }
             }
           },
@@ -25704,7 +25362,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "Get-DesktopTokensSource"
+                "expression": "Get-DesktopTokensSource"
               }
             }
           },
@@ -37971,7 +37629,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "codex"
+                "expression": "codex"
               }
             }
           },
@@ -37986,7 +37644,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "codex"
+                "expression": "codex"
               }
             }
           },
@@ -38001,7 +37659,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "codex"
+                "expression": "codex"
               }
             }
           },
@@ -38016,7 +37674,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "gemini"
+                "expression": "gemini"
               }
             }
           },
@@ -38031,7 +37689,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "gemini"
+                "expression": "gemini"
               }
             }
           },
@@ -38046,7 +37704,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "claude-code"
+                "expression": "claude-code"
               }
             }
           },
@@ -38061,7 +37719,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "claude-code"
+                "expression": "claude-code"
               }
             }
           },
@@ -38354,7 +38012,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "worktree"
+                "expression": "worktree"
               }
             }
           },
@@ -38369,7 +38027,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "literal": "worktree"
+                "expression": "worktree"
               }
             }
           },
@@ -55008,20 +54666,6 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install.ps1:492",
-      "name": "maintainer",
-      "shape": {
-        "argv_source": "maintainer setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed.\"",
-        "channel": "argv",
-        "complete": false,
-        "expression": "setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed.\"",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
       "location": "ops/install.sh:1642",
       "name": "fi",
       "shape": {
@@ -55301,20 +54945,6 @@
             "expression": "||"
           }
         }
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "ops/install.sh:525",
-      "name": "maintainer",
-      "shape": {
-        "argv_source": "maintainer setup exited $setup_rc (see its message above). The install itself is complete: run it again once that is fixed.\" >&2",
-        "channel": "argv",
-        "complete": false,
-        "expression": "setup exited $setup_rc (see its message above). The install itself is complete: run it again once that is fixed.\" >&2",
-        "parameters": {}
       }
     },
     {
@@ -58191,12 +57821,6 @@
       "dynamic": "unresolved",
       "location": "docs/atlas/atlas.html:288",
       "reason": "request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1026",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
@@ -70645,12 +70269,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:1637",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:1756",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
@@ -70686,12 +70304,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:1885",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:connect"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:1888",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
@@ -70706,12 +70318,6 @@
       "dynamic": "unresolved",
       "location": "ops/install.ps1:1892",
       "reason": "shell-built command"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:1905",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
@@ -70735,12 +70341,6 @@
       "location": "ops/install.ps1:1950",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:1954",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:pair"
     },
     {
       "dynamic": "unresolved",
@@ -70972,12 +70572,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:2515",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:2520",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -70985,12 +70579,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.ps1:2537",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:2545",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71008,12 +70596,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:2628",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:2633",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -71021,12 +70603,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.ps1:2650",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:2658",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71044,12 +70620,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.ps1:2734",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.ps1:2739",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -71057,12 +70627,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.ps1:2756",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:2764",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71093,12 +70657,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.ps1:2834",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:2837",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71182,12 +70740,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.ps1:434",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:expose"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.ps1:441",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
@@ -71410,12 +70962,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1684",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:1796",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
@@ -71446,12 +70992,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:1909",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:connect"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:1912",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
@@ -71459,12 +70999,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:1915",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:connect"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:1923",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
@@ -71485,12 +71019,6 @@
       "location": "ops/install.sh:1965",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:1969",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:pair"
     },
     {
       "dynamic": "unresolved",
@@ -71698,12 +71226,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2532",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:2537",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -71711,12 +71233,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2560",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2568",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71734,12 +71250,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2658",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:2663",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -71747,12 +71257,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2686",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2694",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71770,12 +71274,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install.sh:2784",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install.sh:2789",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
@@ -71783,12 +71281,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2812",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2820",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71819,12 +71311,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:2899",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:2902",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -71908,12 +71394,6 @@
     {
       "dynamic": "unresolved",
       "location": "ops/install.sh:480",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:expose"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install.sh:482",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
@@ -74128,12 +73608,6 @@
       "location": "rust/shim/src/cli/briefing_hook.rs:554",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/briefing_hook.rs:58",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:briefing"
     },
     {
       "dynamic": "unresolved",

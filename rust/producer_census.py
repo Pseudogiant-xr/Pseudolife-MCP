@@ -340,6 +340,8 @@ def cli_calls(text: str, path: str) -> list[dict]:
         if path.endswith(".md") and number not in fenced_lines and prefix.count("`") % 2 == 0:
             continue  # Ordinary prose names the executable but is not a copied command.
         tail = match[2].split("`", 1)[0].strip() if path.endswith(".md") else match[2].strip()
+        if not path.endswith(".md") and re.search(r"\bexited\b|\bcould not\b|\bfailed\b|\bwas not\b", tail):
+            continue
         mode = {"--help": "help", "--version": "version"}.get(match[1], match[1])
         complete = Path(path).suffix == ".md" and not any(x in tail for x in ("$", "...", "<", "[", "]", "|"))
         flags = {m[1]: value_shape(m[2]) if m[2] else {"literal": True}
@@ -370,7 +372,7 @@ def env_calls(text: str, path: str) -> list[dict]:
                 scalar = value_shape(token)
                 if "$" in token:
                     scalar = {"expression": token}
-                if "literal" not in scalar and not any(x in token for x in ("$", "{", "(", "+")):
+                if "literal" not in scalar and not path.endswith(".ps1") and not any(x in token for x in ("$", "{", "(", "+")):
                     scalar = {"literal": token}
                 if "literal" in scalar:
                     scalar["literal"] = str(scalar["literal"])
