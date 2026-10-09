@@ -231,6 +231,28 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 
 or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
+**Stopping processes: only ones you can prove are yours.** Every session on
+this host shares one process table, so a kill that matches more than your
+own run takes down other sessions' work.
+- Stop by the PID you recorded at launch, with its tree: the harness's task
+  stop, or `taskkill /PID <pid> /T /F`. In Git Bash, `$!` is not a Windows
+  PID; read it with `cat /proc/$!/winpid`. In PowerShell, use
+  `(Start-Process ... -PassThru).Id`.
+- Or match a command line that contains a marker unique to your run: your
+  harness home, your target directory, a run id you put in the argv.
+- Never stop by image name (`taskkill /IM`, `Stop-Process -Name`,
+  `pkill`/`killall <name>`, `Get-Process <name> | Stop-Process`).
+- Never stop by a generic pattern another session's processes could also
+  match (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
+
+Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
+Codex process on the host, the Codex app and other sessions' turns
+included. A command-line pattern meant for one session's harness could also
+match other sessions' test daemons. On the maintainer's machine an untracked
+hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
+by-name forms. The rule applies everywhere regardless, including Codex
+sessions, which do not run Claude hooks.
+
 **Dependent local tests.** Select the union of touched test files, tests
 reached through reverse imports and fixture dependencies, and tests found by
 references to changed paths, module names, commands and configuration keys.
@@ -520,12 +542,8 @@ took 143 CUDA OOMs.
   overwrite it). Use `--uncommitted` for a pre-commit pass and
   `--commit <sha>` for a single commit. Pin the model and effort on the
   command line, and check the log's header names both. To stop one early,
-  kill its own process tree while it is still running (the harness's task
-  stop, or `taskkill /PID <pid> /T /F` with the Windows PID taken at
-  launch: `cat /proc/$!/winpid` in Git Bash, since `$!` there is not a
-  Windows PID, or `(Start-Process ... -PassThru).Id` in PowerShell), never
-  by image name: `taskkill /IM codex.exe` on 2026-10-09 killed every Codex process
-  on the host, the Codex app and other sessions' turns included. Verify
+  kill its own process tree by the PID taken at launch, never by image
+  name (see "Stopping processes" under Running tests). Verify
   its findings against the code like a subagent's, and record both reviews
   in the PR (or the commit body when there is no PR yet), each finding
   labelled by source with its verdict. A missing, signed-out or failed
