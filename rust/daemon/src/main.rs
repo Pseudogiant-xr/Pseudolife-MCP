@@ -11,11 +11,13 @@ mod health;
 mod http;
 mod mutants;
 mod principals;
+mod read;
 mod routes;
 mod search;
 mod service;
 mod static_files;
 mod storage;
+mod stores;
 
 use std::path::PathBuf;
 use std::sync::Arc;
