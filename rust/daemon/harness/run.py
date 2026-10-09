@@ -1042,7 +1042,8 @@ SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, Ex
 
 def rust_env(extra: dict[str, str]) -> dict[str, str]:
     out = dict(extra)
-    for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT"):
+    for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT",
+                "PSEUDOLIFE_DAEMON_ORT_THREADS"):
         if os.environ.get(key):
             out[key] = os.environ[key]
     out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(REPO / "pseudolife_memory" / "web" / "static"))
