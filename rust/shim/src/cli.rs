@@ -6,6 +6,7 @@ use std::process::ExitCode;
 mod backup;
 pub mod board_audit;
 mod briefing_hook;
+mod doctor;
 mod doorbell_seen;
 mod episode;
 mod hook_json;
@@ -133,6 +134,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doorbell-prompt-seen" {
         return Some(doorbell_seen::run());
+    }
+    if mode == "doctor"
+        && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (

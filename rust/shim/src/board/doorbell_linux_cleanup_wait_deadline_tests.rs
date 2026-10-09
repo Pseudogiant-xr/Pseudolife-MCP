@@ -76,10 +76,14 @@ async fn wait_cutoff_control(resume_pending: bool) {
     .unwrap();
     let timer = Arc::new(AtomicBool::new(false));
     let progress = timer.clone();
+    let (progress_ready, progress_observed) = tokio::sync::oneshot::channel();
     let ticker = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(10)).await;
         progress.store(true, Ordering::Release);
+        progress_ready.send(()).unwrap();
     });
+    // Require actual timer progress even when child setup outlasted the deadline.
+    progress_observed.await.unwrap();
     tokio::time::sleep_until(tokio::time::Instant::from_std(
         deadline + Duration::from_millis(40),
     ))

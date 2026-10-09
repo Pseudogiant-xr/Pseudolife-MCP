@@ -12,6 +12,36 @@ rotation, implicit data-directory resolution and embedded ownership remain
 deferred. Backup's acceptance disposition is unchanged: Linux first-cell
 proof cannot supply the required Windows path/stdio evidence.
 
+## Stream D retained cell scope (2026-10-08)
+
+The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+binds completed doorbell cells to their exact e122/ec697 sources, per-OS
+images, actual producing receipts and immutable oracle3c. The 17 pairs,
+34 genuine arms and 72 original rejected controls are historical evidence;
+Windows symlink-parent remains capability SKIP/native RED with zero arms and
+controls. Raw artifacts remain retained by hash, with per-case file effects
+and the original control scopes projected without machine identifiers.
+
+Selected exits, empty streams and shared-file bytes remain exact. The positive
+cell checks the nonce-plus-LF receipt and ASCII-zero lock; ordinary prompt
+retains pending bytes, absent prompt-seen receipt and ASCII-zero lock; missing
+and invalid prompts retain pending bytes and create neither receipt nor lock.
+Empty-HOME preserves file/link/directory state with four controls per arm.
+No new outcome rule, substitution or diagnostic normalization is introduced.
+Hook JSON parsed-object equality, unpinned stderr diagnostic semantics and
+existing declared timing/identity bounds retain their existing scopes; these
+cells make no additional hook, wire, timing or durable-state coverage claim.
+
+Dedicated briefing payload, original hook routing, persistent-turn cursor and
+output ordering, capable-host Windows symlinks, distinct real/effective UID,
+remaining corpus/features, real-daemon evidence and measurements remain gaps.
+Observer failures/corrections, sampling limits and first-output observations
+remain distinct from runtime verdicts in the receipt. The final oracle307
+integration target is `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; these
+historical cells retain oracle3c and establish no current-target parity.
+Current acceptance and publication remain `HELD_PENDING_COORDINATOR_ORACLE307`;
+all existing deferred/retired/ported labels are unchanged.
+
 Selected master oracle target: Python 0.17.0 at `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, schema 55. The #637 squash commit is selected; fresh both-OS validation, exact-head CI and independent review remain pending; earlier receipts retain their original oracle identities. Published `95d5402d` passed all 14 checks. Frozen `5220b5ee` now has both-OS named-console and warm-protocol CLI proofs; successor hosted checks and independent review remain pending, so version stays deferred.
 Historical phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
 Historical phase 1 receipts retain Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
@@ -1576,6 +1606,44 @@ exit 0) is accepted for the unchanged episode leaf. Fresh independent review
 and hosted merge-ref CI remain pending. No parity row is
 promoted; both episode modes remain deferred. This documentation successor changes
 no runtime/instrument input and does not relabel execution as a successor run.
+
+### Recorded episode producer correspondence (2026-10-09)
+
+The completed Windows and Linux scripted cells are consolidated in the
+[episode evidence receipt](../docs/evidence/rust-stream-c-episode-20261009.json).
+Each OS records 14 of 16 prepared IDs, 16 pairs, 32 CLI arms, 52 HTTP requests
+and 104 synthetic comparator rejects; redirect sinks received zero requests.
+The two source-vote IDs remain UNRUN through the real daemon and persisted
+title path (eight arm cells). Execution of the prepared owner/controller is
+also UNRUN.
+
+The fixture source is `e9987bb3350970a37db153164c73ec28fac96833`, tree
+`a8867c79c2de1ecab07129e0f8480a399c208de2`. Actual images were built at
+`c2525de993b198f22bc0427da8e7d9fc5cbbda4b`, tree
+`2c56d25e80fc322f5a1d75cb905cadf46c024902`; 71 compiled components matched
+the fixture source. These are historical images, not fresh e998 builds or
+whole-source equivalence. The oracle source remains
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, distinct from declared pin
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`; no re-pin follows from this receipt.
+Parent interpreters were Python 3.11.9 on Windows and 3.11.17 on Linux;
+their hashes and dependency observations are retained separately from the
+unmeasured child import origins.
+
+The two earlier Windows wire REDs, Linux health preflight RED and both
+source-vote static/source-check REDs remain separately bound to their originals.
+Later scoped matches do not relabel those failures. The receipt projects only
+named evidence fields, omits identifying/raw runtime payloads, describes that
+transformation and binds every pair and failure to its exact original SHA256.
+
+The original inventory remains ten Python in-process nodes, A=2/B=0/C=0,
+eight bounded correspondences and zero original Rust executions. Historical
+closure counters and the 73-ID wire admission ledger remain unchanged. Cold
+connection attempts and real CLI negative executions are unmeasured; synthetic
+rejects mutate captured records. Scripted captures do not prove a real daemon,
+persisted titles, complete raw-wire equality or whole-mode acceptance. Final
+oracle attribution, owner bindings, final-head both-OS proof, review and hosted
+gates remain open; both episode modes remain deferred.
+
 ### Recorded hook HTTP dispositions
 
 `hook-absent-accept-wildcard` applies only when the oracle has no Accept field
