@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
@@ -56,6 +57,9 @@ class Case:
     argv: list[str]
     env: dict[str, str | None] = dataclasses.field(default_factory=dict)
     stdin: bytes = b""
+    # JSON stdin with {HOME}/{CWD} expanded in its strings, then serialized
+    # the way a host hook sends it (json.dumps defaults).
+    stdin_json: Any = None
     setup: Callable[[Arm], None] | None = None
     during: Callable[[Arm, subprocess.Popen], None] | None = None
     after: Callable[[Arm, dict], None] | None = None
@@ -65,6 +69,13 @@ class Case:
     stdout_closed: bool = False
     daemon: Callable[[], Any] | None = None
     skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
+    # Needs real oracle daemons on disposable banks: live local acceptance
+    # only, never golden replay (the candidate still needs the oracle daemon).
+    bank: bool = False
+    # The case exists to show both arms succeed (a trickle, an https daemon):
+    # an arm with empty stdout makes the case differ instead of matching
+    # vacuously when both arms fail the same quiet way.
+    expect_output: bool = False
     note: str = ""
 
     def runs_here(self) -> bool:
@@ -93,7 +104,20 @@ def rust_target(binary: Path) -> Target:
 
 
 def _expand(value: str, arm: Arm) -> str:
-    return value.replace("{HOME}", str(arm.home)).replace("{CWD}", str(arm.cwd))
+    value = value.replace("{HOME}", str(arm.home)).replace("{CWD}", str(arm.cwd))
+    if arm.daemon is not None:
+        value = value.replace("{DAEMON_PORT}", arm.daemon.url.rsplit(":", 1)[1])
+    return value
+
+
+def _expand_json(value, arm: Arm):
+    if isinstance(value, str):
+        return _expand(value, arm)
+    if isinstance(value, dict):
+        return {k: _expand_json(v, arm) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_json(v, arm) for v in value]
+    return value
 
 
 def _environment(case: Case, arm: Arm, target: Target) -> dict[str, str]:
@@ -172,13 +196,19 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
     _reset(home)
     arm = Arm(target.name, home, home / "cwd")
     arm.cwd.mkdir()
-    daemon = case.daemon() if case.daemon else None
+    daemon = None
+    if case.daemon:
+        daemon = (case.daemon(target.name) if getattr(case.daemon, "per_arm", False)
+                  else case.daemon())
     arm.daemon = daemon
     try:
         if case.setup:
             case.setup(arm)
         env = _environment(case, arm, target)
         argv = [_expand(a, arm) for a in case.argv]
+        stdin = case.stdin
+        if case.stdin_json is not None:
+            stdin = json.dumps(_expand_json(case.stdin_json, arm)).encode()
         creation = getattr(subprocess, "CREATE_NO_WINDOW", 0) if WINDOWS else 0
         stdout_target = subprocess.PIPE
         closed_reader = None
@@ -197,7 +227,7 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             worker = threading.Thread(target=case.during, args=(arm, proc), daemon=True)
             worker.start()
         try:
-            out, err = proc.communicate(case.stdin, timeout=case.timeout)
+            out, err = proc.communicate(stdin, timeout=case.timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             out, err = proc.communicate()
@@ -218,6 +248,8 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         if daemon is not None:
             observation["daemon_url"] = daemon.url
             observation["requests"] = daemon.requests()
+        if case.expect_output and not out:
+            observation["vacuous"] = "no stdout where the case requires output"
         if case.after:
             case.after(arm, observation)
         if "listener" in arm.state:

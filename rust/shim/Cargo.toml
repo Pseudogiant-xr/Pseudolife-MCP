@@ -41,6 +41,8 @@ percent-encoding.workspace = true
 regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+tokio-rustls.workspace = true
+rustls-native-certs = "=0.8.4"
 http-body-util.workspace = true
 bytes.workspace = true
 yaml-rust2.workspace = true
@@ -49,9 +51,6 @@ serde_stacker.workspace = true
 flate2.workspace = true
 tar.workspace = true
 stacker.workspace = true
-
-[dev-dependencies]
-tokio-rustls.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

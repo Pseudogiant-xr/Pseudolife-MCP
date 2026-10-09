@@ -614,43 +614,28 @@ async fn get(
     timeout: Duration,
     health: bool,
 ) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .redirect(if health {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .referer(false)
-        .connect_timeout(timeout)
-        .read_timeout(timeout)
-        .user_agent("Python-urllib/3.11")
-        .build()
-        .ok()?;
-    let mut request = client.get(format!("{origin}{target}"));
-    if let Some(token) = token.filter(|s| !s.is_empty()) {
-        // Python's http.client encodes header values as Latin-1.
-        // http-forbidden-input-refused rejects C0/DEL and folded bearer values.
-        let bytes: Option<Vec<u8>> = format!("Bearer {token}")
-            .chars()
-            .map(|c| u8::try_from(c as u32).ok())
-            .collect();
-        if bytes
-            .as_ref()?
-            .iter()
-            .any(|byte| *byte < 0x20 || *byte == 0x7f)
-        {
-            return None;
+    let authorization = match token.filter(|s| !s.is_empty()) {
+        None => None,
+        Some(token) => {
+            // Python's http.client encodes header values as Latin-1.
+            // http-forbidden-input-refused rejects C0/DEL and folded bearer values.
+            let bytes: Vec<u8> = format!("Bearer {token}")
+                .chars()
+                .map(|c| u8::try_from(c as u32).ok())
+                .collect::<Option<_>>()?;
+            if bytes.iter().any(|byte| *byte < 0x20 || *byte == 0x7f) {
+                return None;
+            }
+            Some(bytes)
         }
-        request = request.header(
-            reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_bytes(&bytes?).ok()?,
-        );
-    }
-    let response = request.send().await.ok()?;
-    if !health && !(200..300).contains(&response.status().as_u16()) {
+    };
+    // urllib's connection order, per-receive timeouts and redirect limits.
+    let reply =
+        super::hook_http::get(origin, target, authorization.as_deref(), timeout, health).await?;
+    if !health && !(200..300).contains(&reply.status) {
         return None;
     }
-    String::from_utf8(response.bytes().await.ok()?.to_vec()).ok()
+    String::from_utf8(reply.body).ok()
 }
 
 fn origin(prompt: bool) -> Result<String, u8> {
