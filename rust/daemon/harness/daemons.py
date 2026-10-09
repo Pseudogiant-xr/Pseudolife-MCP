@@ -120,13 +120,15 @@ def make_home(root: Path, name: str, config_yaml: str | None) -> Path:
 
 
 def python_daemon(home: Path, port: int, env: dict[str, str]) -> Daemon:
-    env = dict(env, PSEUDOLIFE_MCP_PORT=str(port))
+    env = dict(env)
+    env.setdefault("PSEUDOLIFE_MCP_PORT", str(port))  # a refusal case may set its own
     return Daemon("python", [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
                   dict(env, PYTHONPATH=str(REPO)), home, port, home / "daemon.log")
 
 
 def rust_daemon(binary: Path, home: Path, port: int, env: dict[str, str]) -> Daemon:
-    env = dict(env, PSEUDOLIFE_MCP_PORT=str(port))
+    env = dict(env)
+    env.setdefault("PSEUDOLIFE_MCP_PORT", str(port))  # a refusal case may set its own
     return Daemon("rust", [str(binary)], env, home, port, home / "daemon.log")
 
 

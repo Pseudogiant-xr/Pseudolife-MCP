@@ -65,10 +65,20 @@ def create(name: str, template: str | None = None) -> str:
     return dsn(name)
 
 
-def drop(name: str) -> None:
-    with _admin() as conn:
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-            sql.Identifier(_check(name))))
+def drop(name: str, attempts: int = 10) -> None:
+    """FORCE cannot end a backend this role does not own (an autovacuum
+    worker on a just-used bank): retry until it has gone."""
+    import time
+    for i in range(attempts):
+        try:
+            with _admin() as conn:
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                    sql.Identifier(_check(name))))
+            return
+        except psycopg.errors.InsufficientPrivilege:
+            if i == attempts - 1:
+                raise
+            time.sleep(2)
 
 
 def existing() -> list[str]:

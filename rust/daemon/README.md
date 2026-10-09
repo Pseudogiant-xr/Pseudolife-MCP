@@ -1,27 +1,42 @@
 # pseudolife-daemon (contract-first port)
 
 The Rust port of the Pseudolife memory daemon, built contract-first: each
-slice writes a one-page spec of the exact Python behaviour it must match
-(`spec.md`, with `file:line` sources), then proves it with a live
-differential harness against the Python daemon on a disposable bank
-(`harness/`), a mutant control, and two independent reviews.
+slice writes a short spec of the exact Python behaviour it must match, with
+`file:line` sources, then proves it with a live differential harness against
+the Python daemon on disposable banks, a mutant control, and two independent
+reviews. It is not a release artifact: nothing installs or runs it yet.
 
-This crate starts as the 2026-10-09 spike (`spike/rust-daemon-contract-first`):
-`GET /health`, the bearer gate (env tokens and stored principals), read-only
-hydration of a schema-55 bank, ONNX query embedding, and `GET /api/search`
-with the slot pool and BM25. It is not a release artifact and nothing
-installs or runs it yet. The spike's declared divergences still apply until
-the slices that close them land (see the spike report's section 7).
+| File | What it holds |
+|---|---|
+| `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
+| `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
+| `harness/` | The differential harness, its goldens and helpers |
 
-## Running it beside the Python daemon
+## Running it
 
-The daemon reads `PSEUDOLIFE_MCP_DATABASE_URL` (a disposable bank only),
-`PSEUDOLIFE_SPIKE_MODEL_DIR` (a directory holding the verified fp32 ONNX
-export: `model.onnx`, `model.onnx_data`, `tokenizer.json`), and the usual
-`PSEUDOLIFE_MCP_HOST`, `PSEUDOLIFE_MCP_PORT`, `PSEUDOLIFE_MCP_TOKEN` and
-`PSEUDOLIFE_MCP_TOKENS`. ONNX Runtime is loaded dynamically, so set
-`ORT_DYLIB_PATH` to the runtime library.
+The daemon needs `PSEUDOLIFE_MCP_DATABASE_URL` (it has no file mode) and
+reads the Python daemon's environment and `<data dir>/config.yaml`. The
+embedder loads lazily from `PSEUDOLIFE_DAEMON_ONNX_DIR` (a directory with
+`model.onnx`, `model.onnx_data` and `tokenizer.json`, the verified fp32
+Qwen3-Embedding-0.6B export) through the ONNX Runtime library named by
+`ORT_DYLIB_PATH`. `PSEUDOLIFE_DAEMON_STATIC_DIR` points at the Console build
+and `PSEUDOLIFE_PLUGIN_DIR` at the plugin tree for `hooks_digest`.
 
-`harness/compare.py <python-port> <rust-port> <tokens.env> <out.json>` runs
-the contract cases and the ranking comparison against both daemons and
-exits non-zero on any diff.
+## The harness
+
+```bash
+python rust/daemon/harness/run.py live --rust-bin <path to pseudolife-daemon> --out results.json
+```
+
+It creates `pl_cf_w1a_*` databases on the bench PostgreSQL through the test
+login (`~/.pseudolife-mcp/test-pg.env`; any other name is refused), starts
+both daemons on disposable homes per scenario, compares every response by
+value and both banks' state afterwards, and exits non-zero on any
+difference. `run.py mutants` takes a `--features mutants` build and requires
+each deliberate break to turn the harness red against a clean control.
+`run.py live --record` writes the oracle's normalized answers and bank state
+to `harness/goldens/`; `run.py golden` checks the Rust daemon against them
+without a Python daemon. `gen_schema_sql.py --check` and
+`record_routes.py --check` keep the embedded schema DDL and route table equal
+to the Python source.

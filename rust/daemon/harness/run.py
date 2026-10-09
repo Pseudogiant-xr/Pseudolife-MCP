@@ -776,6 +776,8 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     b = normalize_response(rs, c["path"], [])
     row["diffs"] = diff_values(a, b)
     row["declared_omissions"] = declared
+    if row["diffs"]:
+        row["raw"] = {"python": py, "rust": rs}
     return row
 
 
@@ -854,8 +856,10 @@ def scrub_declared_rows(state: dict, before: dict) -> dict:
         if kind == "sequence":
             prior = {r[1]: r for r in before["catalog"]["sequences"]}
             for row in state["catalog"]["sequences"]:
-                if row[1] == table and prior.get(table) is not None and row[5] != prior[table][5]:
-                    row[5] = prior[table][5]
+                # A sequence absent before the run (a fresh bank) started unused.
+                was = prior[table][5] if table in prior else None
+                if row[1] == table and row[5] != was:
+                    row[5] = was
                     declared.append(f"sequence {table}: {why}")
             continue
         t = state["rows"].get(f"public.{table}")
@@ -943,6 +947,8 @@ def main() -> int:
             bad = [c["case"] for c in r["cases"] if c["diffs"]]
             print(f"[{n}] cases {len(r['cases'])} diffs {len(bad)} db_diffs {len(r['db_diffs'])} {bad[:6]}",
                   flush=True)
+            for d in r["db_diffs"][:12]:
+                print(f"  DB DIFF {d[:400]}", flush=True)
             if args.out:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
         refusals = (run_refusals(args.rust_bin, root)
