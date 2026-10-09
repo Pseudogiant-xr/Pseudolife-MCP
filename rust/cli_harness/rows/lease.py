@@ -296,6 +296,10 @@ def _command_path(obs):
         headers["content-length"] = "<json-length>"
         if re.fullmatch(r"python-httpx/[0-9.]+", headers.get("user-agent", "")):
             del headers["user-agent"]
+        if re.fullmatch(r"gzip, deflate(?:, br)?(?:, zstd)?", headers.get("accept-encoding", "")):
+            del headers["accept-encoding"]
+        if headers.get("connection") == "keep-alive":
+            del headers["connection"]
 
 
 @normalize.rule("lease-seeded-clock")

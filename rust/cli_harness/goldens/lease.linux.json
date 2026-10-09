@@ -10,8 +10,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIFstaF0ge3J1bixob2xkLGNoZWNrLGxpc3QsYnJlYWssZGVsZWdhdGV9IC4uLgoKSG9sZCBhIG5hbWVkIGxlYXNlIG9uIGEgc2hhcmVkIHJlc291cmNlIChhIHRlc3Qgc3VpdGUsIHRoZSBHUFUsIGEgbWFpbnRlbmFuY2UKd2luZG93KSBhcm91bmQgYSBjb21tYW5kLiBUaGUgbGVhc2UgaXMgYW4gT1MgZmlsZSBsb2NrOyB0aGUgYWdlbnQgYm9hcmQsIHdoZXJlCnRoZSBkYWVtb24gaGFzIG9uZSwgbWlycm9ycyBpdCBzbyBvdGhlciBhZ2VudHMgc2VlIHRoZSBob2xkZXIsIHF1ZXVlIGluIG9yZGVyCmFuZCBzZWUgdGhlIGV4cGVjdGVkIGVuZC4KCnBvc2l0aW9uYWwgYXJndW1lbnRzOgogIHtydW4saG9sZCxjaGVjayxsaXN0LGJyZWFrLGRlbGVnYXRlfQogICAgcnVuICAgICAgICAgICAgICAgICBydW4gYSBjb21tYW5kIHdoaWxlIGhvbGRpbmcgYSBsZWFzZQogICAgaG9sZCAgICAgICAgICAgICAgICBob2xkIGEgbGVhc2UgZm9yIGFzIGxvbmcgYXMgYW5vdGhlciBwcm9jZXNzIHJ1bnMKICAgIGNoZWNrICAgICAgICAgICAgICAgZXhpdCAwIHdoZW4gYSBsZWFzZSBpcyBmcmVlLCAxIHdoZW4gaXQgaXMgaGVsZAogICAgbGlzdCAgICAgICAgICAgICAgICBzaG93IHRoZSBib2FyZCdzIGxlYXNlcyBhbmQgdGhlIGxvY2FsIGxvY2sgZmlsZXMKICAgIGJyZWFrICAgICAgICAgICAgICAgKG9wZXJhdG9yKSBmcmVlIGEgbGVhc2Ugd2hhdGV2ZXIgaXRzIGhvbGRlciBzYXlzCiAgICBkZWxlZ2F0ZSAgICAgICAgICAgIChvcGVyYXRvcikgbWFrZSBvbmUgc2Vzc2lvbiB0aGUgbWFpbnRhaW5lcidzIGRlbGVnYXRlCiAgICAgICAgICAgICAgICAgICAgICAgIGZvciBhIHByb2plY3QKCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQK",
    "stderr": "",
    "window": [
-    1791544336.5389826,
-    1791544336.6863565
+    1791546279.6905358,
+    1791546279.8365333
    ],
    "requests": [],
    "seed_offsets": {
@@ -36,8 +36,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIGNoZWNrIFstaF0gWy0tanNvbl0gTkFNRQoKVGhlIGxhdW5jaCBnYXRlOiBwcmludCB0aGUgbGVhc2UncyBob2xkZXIgKE9TIGxvY2sgYW5kIGJvYXJkKSBhbmQgaXRzIGV4cGVjdGVkCmVuZCwgYW5kIGV4aXQgMCB3aGVuIGl0IGlzIGZyZWUsIDEgd2hlbiBpdCBpcyBoZWxkLCBvciA3MCB3aGVuIHRoZSBjaGVjawppdHNlbGYgZmFpbGVkLiBUaGUgbG9jYWwgbG9jayBkZWNpZGVzIHdoZXJldmVyIGl0cyBmaWxlIGV4aXN0czsgYSBib2FyZCBob2xkZXIKYmVzaWRlIGEgZnJlZSBsb2NrIGlzIHNob3duIGFzIHN0YWxlLiBGb3IgZnVsbC1zdWl0ZSB0aGUgdGVzdCBzdWl0ZSdzIG93biBsb2NrCmlzIHByb2JlZCwgd2l0aCBpdHMgaG9sZGVyIHJlY29yZC4KCnBvc2l0aW9uYWwgYXJndW1lbnRzOgogIE5BTUUgICAgICAgIHRoZSBsZWFzZSB0byBjaGVjawoKb3B0aW9uczoKICAtaCwgLS1oZWxwICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0CiAgLS1qc29uICAgICAgcHJpbnQgb25lIEpTT04gcmVwb3J0Cg==",
    "stderr": "",
    "window": [
-    1791544336.690419,
-    1791544336.8430686
+    1791546279.8375733,
+    1791546279.9492595
    ],
    "requests": [],
    "seed_offsets": {
@@ -62,8 +62,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIGxpc3QgWy1oXSBbLS1qc29uXSBbTkFNRV0KClNob3cgdGhlIGJvYXJkJ3MgbGVhc2VzIChob2xkZXIsIHB1cnBvc2UsIGFnZSwgZXhwZWN0ZWQgZW5kLCBxdWV1ZSkgYmVzaWRlIHRoZQpsb2NhbCBsb2NrIGZpbGVzLCBlYWNoIHByb2JlZCBoZWxkIG9yIGZyZWUsIGFuZCB0aGUgdGVzdCBzdWl0ZSdzIG93biBsb2NrLgpXaXRob3V0IGEgYm9hcmQsIGxvY2FsIHN0YXRlIG9ubHkuCgpwb3NpdGlvbmFsIGFyZ3VtZW50czoKICBOQU1FICAgICAgICBzaG93IG9ubHkgdGhpcyBsZWFzZQoKb3B0aW9uczoKICAtaCwgLS1oZWxwICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0CiAgLS1qc29uICAgICAgcHJpbnQgb25lIEpTT04gcmVwb3J0Cg==",
    "stderr": "",
    "window": [
-    1791544336.8441546,
-    1791544336.9973845
+    1791546279.9502666,
+    1791546280.061573
    ],
    "requests": [],
    "seed_offsets": {
@@ -88,8 +88,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1biBOQU1FIFstLWV4cGVjdCBEVVJBVElPTl0gWy0tdHRsIFNFQ09ORFNdIFstLXB1cnBvc2UgVEVYVF0gWy0tbm8tYm9hcmRdIFstLXRpbWVvdXQgRFVSQVRJT05dIC0tIENPTU1BTkQgW0FSR1MuLi5dCgpXYWl0IGZvciB0aGUgbGVhc2UgTkFNRSwgcnVuIENPTU1BTkQgd2hpbGUgaG9sZGluZyBpdCwgcmVsZWFzZSBpdC4KCnBvc2l0aW9uYWwgYXJndW1lbnRzOgogIE5BTUUgICAgICAgICAgICAgICAgdGhlIGxlYXNlIG5hbWUsIDEgdG8gMTIwIGNoYXJhY3RlcnMKCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICBzaG93IHRoaXMgaGVscCBtZXNzYWdlIGFuZCBleGl0CiAgLS1leHBlY3QgRFVSQVRJT04gICBob3cgbG9uZyB0aGUgY29tbWFuZCBzaG91bGQgdGFrZTsgdGhlIGJvYXJkIHNob3dzIHRoZQogICAgICAgICAgICAgICAgICAgICAgZXhwZWN0ZWQgZW5kLCBhbmQgJ3N0YWxlJyBvbmNlIGl0IGhhcyBwYXNzZWQKICAtLXR0bCBTRUNPTkRTICAgICAgIGhvdyBsb25nIHRoZSBib2FyZCBrZWVwcyB0aGUgbGVhc2Ugd2l0aG91dCBhIHJlbmV3YWwsIDMwCiAgICAgICAgICAgICAgICAgICAgICB0byA4NjQwMCAoZGVmYXVsdCAxMjApOyByZW5ld2VkIGV2ZXJ5IHR0bC8zCiAgLS1wdXJwb3NlIFRFWFQgICAgICB3aGF0IGl0IGlzIGZvciwgc2hvd24gb24gdGhlIGJvYXJkIChhdCBtb3N0IDI0MAogICAgICAgICAgICAgICAgICAgICAgY2hhcmFjdGVycykKICAtLW5vLWJvYXJkICAgICAgICAgIHNraXAgdGhlIGFnZW50IGJvYXJkIGFuZCB3YWl0IG9uIHRoZSBsb2NhbCBsb2NrIGFsb25lCiAgLS10aW1lb3V0IERVUkFUSU9OICBnaXZlIHVwIHdhaXRpbmcgYWZ0ZXIgRFVSQVRJT046IGV4aXQgNzUgd2l0aG91dCBydW5uaW5nCgpEVVJBVElPTiBpcyB3aG9sZSBzZWNvbmRzLCBtaW51dGVzLCBob3VycyBvciBkYXlzOiA5MCwgOTBzLCAyMG0sIDJoLCA3ZC4KClRoZSBsZWFzZSBpcyBhbiBPUyBmaWxlIGxvY2sgaW4gfi8ucHNldWRvbGlmZS1tY3AvbG9ja3MgKFBTRVVET0xJRkVfTEVBU0VfTE9DS19ESVIKb3ZlcnJpZGVzIGl0KSwgcmVsZWFzZWQgYnkgdGhlIE9TIHdoZW4gdGhpcyBwcm9jZXNzIGV4aXRzIG9yIGRpZXMuIFdpdGggYQpiZWFyZXIgdG9rZW4gKFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpIGFuZCBhIGRhZW1vbgp3aG9zZSBib2FyZCBpcyBvbiwgdGhlIGJvYXJkIG1pcnJvcnMgaXQ6IEZJRk8gcXVldWUsIGhvbGRlciwgZXhwZWN0ZWQgZW5kLgpPdGhlcndpc2UsIG9yIHdpdGggLS1uby1ib2FyZCwgdGhlIGxvY2FsIGxvY2sgYWxvbmUgZGVjaWRlcyAobm90IEZJRk8pLiBUaGUKY29tbWFuZCBzZWVzIFBTRVVET0xJRkVfTEVBU0VTX0hFTEQ9PG5hbWVzPi4KCkEgc3RvcCAoQ3RybC1DLCBTSUdURVJNLCBTSUdIVVApIHN0b3BzIHRoZSBjb21tYW5kIGJlZm9yZSByZWxlYXNpbmc6IGl0IGdldHMKMTAgcyB0byBjbGVhbiB1cCBvbiBpdHMgb3duLCB0aGVuIGlzIGludGVycnVwdGVkLCB0ZXJtaW5hdGVkIGFuZCBraWxsZWQuCgpleGl0IGNvZGVzOiB0aGUgY29tbWFuZCdzIG93bjsgMiB1c2FnZSBlcnJvcjsgNjQgbmVzdGVkIGluc2lkZSBhIHJ1biBvZiB0aGUKc2FtZSBsZWFzZTsgNzEgbG9jayBmaWxlIHVudXNhYmxlOyA3NSAtLXRpbWVvdXQgZXhwaXJlZCAodGhlIGNvbW1hbmQgZGlkIG5vdApydW4pOyAxMjYgY2Fubm90IHN0YXJ0IHRoZSBjb21tYW5kOyAxMjcgY29tbWFuZCBub3QgZm91bmQ7IDEyOCtOIHN0b3BwZWQgYnkKc2lnbmFsIE4gKDEzMCBDdHJsLUMpLgo=",
    "stderr": "",
    "window": [
-    1791544336.998598,
-    1791544337.1357617
+    1791546280.066213,
+    1791546280.2171924
    ],
    "requests": [],
    "seed_offsets": {
@@ -114,8 +114,8 @@
    "stdout": "bGVhc2UgZml4dHVyZTogZnJlZQogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGFic2VudAogIGJvYXJkIHVuYXZhaWxhYmxlOiBubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKQo=",
    "stderr": "",
    "window": [
-    1791544337.137706,
-    1791544337.2798991
+    1791546280.219357,
+    1791546280.3508837
    ],
    "requests": [],
    "seed_offsets": {
@@ -140,8 +140,8 @@
    "stdout": "Ym9hcmQgdW5hdmFpbGFibGU6IG5vIGJlYXJlciB0b2tlbiAoc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpOyBzaG93aW5nIGxvY2FsIGxvY2tzIG9ubHkKbm8gbG9jYWwgbGVhc2UgbG9ja3MgaW4ge0hPTUV9L2xvY2tzCg==",
    "stderr": "",
    "window": [
-    1791544337.280944,
-    1791544337.5769417
+    1791546280.3518686,
+    1791546280.4700603
    ],
    "requests": [],
    "seed_offsets": {
@@ -166,8 +166,8 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICJzdGF0ZSI6IG51bGwKICB9LAogICJib2FyZCI6IHsKICAgICJhdmFpbGFibGUiOiBmYWxzZSwKICAgICJyZWFzb24iOiAibm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkiLAogICAgImhvbGRlciI6IG51bGwsCiAgICAiZXhwZWN0ZWRfZW5kIjogbnVsbCwKICAgICJzdGFsZSI6IGZhbHNlLAogICAgInF1ZXVlZCI6IDAsCiAgICAicXVldWUiOiBbXQogIH0KfQo=",
    "stderr": "",
    "window": [
-    1791544337.5780752,
-    1791544337.8319018
+    1791546280.4710221,
+    1791546280.5838366
    ],
    "requests": [],
    "seed_offsets": {
@@ -192,8 +192,8 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiBudWxsLAogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAidHJ1bmNhdGVkIjogZmFsc2UsCiAgICAibGVhc2VzIjogW10KICB9LAogICJsb2NrX2RpciI6ICJ7SE9NRX0vbG9ja3MiLAogICJsb2NhbCI6IFtdLAogICJ0ZXN0X3N1aXRlX2xvY2siOiBudWxsCn0K",
    "stderr": "",
    "window": [
-    1791544337.840467,
-    1791544338.2450795
+    1791546280.5847964,
+    1791546280.7085342
    ],
    "requests": [],
    "seed_offsets": {
@@ -218,8 +218,8 @@
    "stdout": "bGVhc2UgZml4dHVyZTogZnJlZQogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGZyZWUKICBib2FyZCB1bmF2YWlsYWJsZTogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
    "stderr": "",
    "window": [
-    1791544338.246086,
-    1791544338.4177713
+    1791546280.7095027,
+    1791546280.846472
    ],
    "requests": [],
    "seed_offsets": {
@@ -246,8 +246,8 @@
    "stdout": "Ym9hcmQgdW5hdmFpbGFibGU6IG5vIGJlYXJlciB0b2tlbiAoc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpOyBzaG93aW5nIGxvY2FsIGxvY2tzIG9ubHkKbG9jYWwgbG9jayBsZWFzZS1maXh0dXJlLmxvY2s6IGZyZWUK",
    "stderr": "",
    "window": [
-    1791544338.4203823,
-    1791544338.6003742
+    1791546280.8478682,
+    1791546280.9912415
    ],
    "requests": [],
    "seed_offsets": {
@@ -274,8 +274,8 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICJzdGF0ZSI6ICJmcmVlIgogIH0sCiAgImJvYXJkIjogewogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAiaG9sZGVyIjogbnVsbCwKICAgICJleHBlY3RlZF9lbmQiOiBudWxsLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544338.6014714,
-    1791544338.780239
+    1791546280.9932587,
+    1791546281.185395
    ],
    "requests": [],
    "seed_offsets": {
@@ -302,8 +302,8 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiBudWxsLAogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAidHJ1bmNhdGVkIjogZmFsc2UsCiAgICAibGVhc2VzIjogW10KICB9LAogICJsb2NrX2RpciI6ICJ7SE9NRX0vbG9ja3MiLAogICJsb2NhbCI6IFsKICAgIHsKICAgICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICAgInN0YXRlIjogImZyZWUiCiAgICB9CiAgXSwKICAidGVzdF9zdWl0ZV9sb2NrIjogbnVsbAp9Cg==",
    "stderr": "",
    "window": [
-    1791544338.7816472,
-    1791544338.932377
+    1791546281.1891284,
+    1791546281.3312538
    ],
    "requests": [],
    "seed_offsets": {
@@ -330,8 +330,8 @@
    "stdout": "bGVhc2UgZml4dHVyZTogaGVsZAogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGhlbGQKICBib2FyZCB1bmF2YWlsYWJsZTogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
    "stderr": "",
    "window": [
-    1791544339.1151543,
-    1791544339.2628942
+    1791546281.4842453,
+    1791546281.640992
    ],
    "requests": [],
    "seed_offsets": {
@@ -358,8 +358,8 @@
    "stdout": "Ym9hcmQgdW5hdmFpbGFibGU6IG5vIGJlYXJlciB0b2tlbiAoc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpOyBzaG93aW5nIGxvY2FsIGxvY2tzIG9ubHkKbG9jYWwgbG9jayBsZWFzZS1maXh0dXJlLmxvY2s6IGhlbGQK",
    "stderr": "",
    "window": [
-    1791544339.3793077,
-    1791544339.537121
+    1791546281.732667,
+    1791546281.865526
    ],
    "requests": [],
    "seed_offsets": {
@@ -386,8 +386,8 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogdHJ1ZSwKICAibG9jYWwiOiB7CiAgICAiZmlsZSI6ICJsZWFzZS1maXh0dXJlLmxvY2siLAogICAgInN0YXRlIjogImhlbGQiCiAgfSwKICAiYm9hcmQiOiB7CiAgICAiYXZhaWxhYmxlIjogZmFsc2UsCiAgICAicmVhc29uIjogIm5vIGJlYXJlciB0b2tlbiAoc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpIiwKICAgICJob2xkZXIiOiBudWxsLAogICAgImV4cGVjdGVkX2VuZCI6IG51bGwsCiAgICAic3RhbGUiOiBmYWxzZSwKICAgICJxdWV1ZWQiOiAwLAogICAgInF1ZXVlIjogW10KICB9Cn0K",
    "stderr": "",
    "window": [
-    1791544339.6661892,
-    1791544339.8216321
+    1791546281.9655383,
+    1791546282.0859516
    ],
    "requests": [],
    "seed_offsets": {
@@ -414,8 +414,8 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiBudWxsLAogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAidHJ1bmNhdGVkIjogZmFsc2UsCiAgICAibGVhc2VzIjogW10KICB9LAogICJsb2NrX2RpciI6ICJ7SE9NRX0vbG9ja3MiLAogICJsb2NhbCI6IFsKICAgIHsKICAgICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICAgInN0YXRlIjogImhlbGQiCiAgICB9CiAgXSwKICAidGVzdF9zdWl0ZV9sb2NrIjogbnVsbAp9Cg==",
    "stderr": "",
    "window": [
-    1791544339.9344275,
-    1791544340.0720427
+    1791546282.1720164,
+    1791546282.311021
    ],
    "requests": [],
    "seed_offsets": {
@@ -442,8 +442,8 @@
    "stdout": "bGVhc2UgZnVsbC1zdWl0ZTogZnJlZQogIGxvY2FsIGxvY2sgKGZ1bGwtc3VpdGUubG9jayk6IGFic2VudAogIGJvYXJkIHVuYXZhaWxhYmxlOiBubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKQo=",
    "stderr": "",
    "window": [
-    1791544340.0804741,
-    1791544340.2113867
+    1791546282.327947,
+    1791546282.4604852
    ],
    "requests": [],
    "seed_offsets": {
@@ -468,8 +468,8 @@
    "stdout": "ewogICJuYW1lIjogImZ1bGwtc3VpdGUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAiZnVsbC1zdWl0ZS5sb2NrIiwKICAgICJzdGF0ZSI6IG51bGwKICB9LAogICJib2FyZCI6IHsKICAgICJhdmFpbGFibGUiOiBmYWxzZSwKICAgICJyZWFzb24iOiAibm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkiLAogICAgImhvbGRlciI6IG51bGwsCiAgICAiZXhwZWN0ZWRfZW5kIjogbnVsbCwKICAgICJzdGFsZSI6IGZhbHNlLAogICAgInF1ZXVlZCI6IDAsCiAgICAicXVldWUiOiBbXQogIH0KfQo=",
    "stderr": "",
    "window": [
-    1791544340.2124116,
-    1791544340.3647242
+    1791546282.4618878,
+    1791546282.6065705
    ],
    "requests": [],
    "seed_offsets": {
@@ -494,8 +494,8 @@
    "stdout": "bGVhc2UgZnVsbC1zdWl0ZTogZnJlZQogIGxvY2FsIGxvY2sgKGZ1bGwtc3VpdGUubG9jayk6IGZyZWUKICBib2FyZCB1bmF2YWlsYWJsZTogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
    "stderr": "",
    "window": [
-    1791544340.3670068,
-    1791544340.529873
+    1791546282.6083722,
+    1791546282.783593
    ],
    "requests": [],
    "seed_offsets": {
@@ -522,8 +522,8 @@
    "stdout": "ewogICJuYW1lIjogImZ1bGwtc3VpdGUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAiZnVsbC1zdWl0ZS5sb2NrIiwKICAgICJzdGF0ZSI6ICJmcmVlIgogIH0sCiAgImJvYXJkIjogewogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAiaG9sZGVyIjogbnVsbCwKICAgICJleHBlY3RlZF9lbmQiOiBudWxsLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544340.5307126,
-    1791544340.6597993
+    1791546282.78569,
+    1791546282.9304206
    ],
    "requests": [],
    "seed_offsets": {
@@ -550,8 +550,8 @@
    "stdout": "bGVhc2UgZnVsbC1zdWl0ZTogaGVsZAogIGxvY2FsIGxvY2sgKGZ1bGwtc3VpdGUubG9jayk6IGhlbGQKICBib2FyZCB1bmF2YWlsYWJsZTogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
    "stderr": "",
    "window": [
-    1791544340.7733793,
-    1791544340.936943
+    1791546283.0207906,
+    1791546283.1665778
    ],
    "requests": [],
    "seed_offsets": {
@@ -578,8 +578,8 @@
    "stdout": "ewogICJuYW1lIjogImZ1bGwtc3VpdGUiLAogICJoZWxkIjogdHJ1ZSwKICAibG9jYWwiOiB7CiAgICAiZmlsZSI6ICJmdWxsLXN1aXRlLmxvY2siLAogICAgInN0YXRlIjogImhlbGQiCiAgfSwKICAiYm9hcmQiOiB7CiAgICAiYXZhaWxhYmxlIjogZmFsc2UsCiAgICAicmVhc29uIjogIm5vIGJlYXJlciB0b2tlbiAoc2V0IFBTRVVET0xJRkVfTUNQX1RPS0VOIG9yIFBTRVVET0xJRkVfTUNQX1RPS0VOX0ZJTEUpIiwKICAgICJob2xkZXIiOiBudWxsLAogICAgImV4cGVjdGVkX2VuZCI6IG51bGwsCiAgICAic3RhbGUiOiBmYWxzZSwKICAgICJxdWV1ZWQiOiAwLAogICAgInF1ZXVlIjogW10KICB9Cn0K",
    "stderr": "",
    "window": [
-    1791544341.0405095,
-    1791544341.164296
+    1791546283.3067622,
+    1791546283.4373991
    ],
    "requests": [],
    "seed_offsets": {
@@ -606,8 +606,8 @@
    "stdout": "bGVhc2UgZnVsbC1zdWl0ZTogaGVsZAogIGxvY2FsIGxvY2sgKGZ1bGwtc3VpdGUuNy5sb2NrKTogaGVsZAogIGJvYXJkIHVuYXZhaWxhYmxlOiBubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKQo=",
    "stderr": "",
    "window": [
-    1791544341.3050728,
-    1791544341.4811208
+    1791546283.5470495,
+    1791546283.6851556
    ],
    "requests": [],
    "seed_offsets": {
@@ -634,8 +634,8 @@
    "stdout": "ewogICJuYW1lIjogImZ1bGwtc3VpdGUiLAogICJoZWxkIjogdHJ1ZSwKICAibG9jYWwiOiB7CiAgICAiZmlsZSI6ICJmdWxsLXN1aXRlLjcubG9jayIsCiAgICAic3RhdGUiOiAiaGVsZCIKICB9LAogICJib2FyZCI6IHsKICAgICJhdmFpbGFibGUiOiBmYWxzZSwKICAgICJyZWFzb24iOiAibm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkiLAogICAgImhvbGRlciI6IG51bGwsCiAgICAiZXhwZWN0ZWRfZW5kIjogbnVsbCwKICAgICJzdGFsZSI6IGZhbHNlLAogICAgInF1ZXVlZCI6IDAsCiAgICAicXVldWUiOiBbXQogIH0KfQo=",
    "stderr": "",
    "window": [
-    1791544341.6141744,
-    1791544341.8046577
+    1791546283.7731884,
+    1791546283.9081168
    ],
    "requests": [],
    "seed_offsets": {
@@ -662,8 +662,8 @@
    "stdout": "ewogICJuYW1lIjogImZ1bGwtc3VpdGVAYm94IiwKICAiaGVsZCI6IGZhbHNlLAogICJsb2NhbCI6IHsKICAgICJmaWxlIjogImZ1bGwtc3VpdGUubG9jayIsCiAgICAic3RhdGUiOiBudWxsLAogICAgImVsc2V3aGVyZSI6ICJmdWxsLXN1aXRlIgogIH0sCiAgImJvYXJkIjogewogICAgImF2YWlsYWJsZSI6IGZhbHNlLAogICAgInJlYXNvbiI6ICJubyBiZWFyZXIgdG9rZW4gKHNldCBQU0VVRE9MSUZFX01DUF9UT0tFTiBvciBQU0VVRE9MSUZFX01DUF9UT0tFTl9GSUxFKSIsCiAgICAiaG9sZGVyIjogbnVsbCwKICAgICJleHBlY3RlZF9lbmQiOiBudWxsLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544341.9171252,
-    1791544342.0735064
+    1791546284.0019305,
+    1791546284.1385088
    ],
    "requests": [],
    "seed_offsets": {
@@ -690,15 +690,18 @@
    "stdout": "bGVhc2UgZml4dHVyZTogZnJlZQogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGFic2VudAogIGJvYXJkOiBmcmVlCg==",
    "stderr": "",
    "window": [
-    1791544342.5444758,
-    1791544342.8904836
+    1791546284.3738327,
+    1791546284.621294
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -747,15 +750,18 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICJzdGF0ZSI6IG51bGwKICB9LAogICJib2FyZCI6IHsKICAgICJhdmFpbGFibGUiOiB0cnVlLAogICAgInJlYXNvbiI6IG51bGwsCiAgICAiaG9sZGVyIjogbnVsbCwKICAgICJleHBlY3RlZF9lbmQiOiBudWxsLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544344.528457,
-    1791544344.8027914
+    1791546285.7707403,
+    1791546286.0156937
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -801,18 +807,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "bGVhc2UgZml4dHVyZTogaGVsZAogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGFic2VudAogIGJvYXJkOiBoZWxkIGJ5IGNvZGV4IChhbGljZSkgZm9yIDEwNTlkMTJoLCBwdXJwb3NlICJwZWVyIHdvcmsiLCBleHBlY3RlZCBlbmQgMjAyMy0xMS0xNSAwOToxNCAoc3RhbGU6IHBhc3QgaXQpCg==",
+   "stdout": "bGVhc2UgZml4dHVyZTogaGVsZAogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGFic2VudAogIGJvYXJkOiBoZWxkIGJ5IGNvZGV4IChhbGljZSkgZm9yIDEwNTlkMTNoLCBwdXJwb3NlICJwZWVyIHdvcmsiLCBleHBlY3RlZCBlbmQgMjAyMy0xMS0xNSAwOToxNCAoc3RhbGU6IHBhc3QgaXQpCg==",
    "stderr": "",
    "window": [
-    1791544346.6167862,
-    1791544346.8336732
+    1791546287.5200777,
+    1791546287.7726562
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -868,15 +877,18 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogdHJ1ZSwKICAibG9jYWwiOiB7CiAgICAiZmlsZSI6ICJsZWFzZS1maXh0dXJlLmxvY2siLAogICAgInN0YXRlIjogbnVsbAogIH0sCiAgImJvYXJkIjogewogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJob2xkZXIiOiB7CiAgICAgICJhZ2VudF9pZCI6ICIwMDAwMDAwMDAwMDA0MDAwODAwMDAwMDAwMDAwMDAwMSIsCiAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICJuYW1lIjogImNvZGV4IDAwMDAwMDAwIiwKICAgICAgInByaW5jaXBhbCI6ICJhbGljZSIsCiAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICJhY3F1aXJlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgIH0sCiAgICAiZXhwZWN0ZWRfZW5kIjogMTcwMDAwMDA2MC4wLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544347.6873279,
-    1791544347.8747218
+    1791546289.0851152,
+    1791546289.3416255
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -929,18 +941,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "bGVhc2UgZml4dHVyZTogaGVsZAogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGZyZWUKICBib2FyZDogaGVsZCBieSBsZWFzZS1ob2xkQDAxMjM0NTY3ODlhYiAoYWxpY2UpIGZvciAxMDU5ZDEyaCwgcHVycG9zZSAicGVlciB3b3JrIiwgZXhwZWN0ZWQgZW5kIDIwMjMtMTEtMTUgMDk6MTQgKHN0YWxlOiBwYXN0IGl0KQo=",
+   "stdout": "bGVhc2UgZml4dHVyZTogaGVsZAogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGZyZWUKICBib2FyZDogaGVsZCBieSBsZWFzZS1ob2xkQDAxMjM0NTY3ODlhYiAoYWxpY2UpIGZvciAxMDU5ZDEzaCwgcHVycG9zZSAicGVlciB3b3JrIiwgZXhwZWN0ZWQgZW5kIDIwMjMtMTEtMTUgMDk6MTQgKHN0YWxlOiBwYXN0IGl0KQo=",
    "stderr": "",
    "window": [
-    1791544349.858852,
-    1791544350.0699427
+    1791546290.6814528,
+    1791546290.9476128
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -998,15 +1013,18 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogdHJ1ZSwKICAibG9jYWwiOiB7CiAgICAiZmlsZSI6ICJsZWFzZS1maXh0dXJlLmxvY2siLAogICAgInN0YXRlIjogImZyZWUiCiAgfSwKICAiYm9hcmQiOiB7CiAgICAiYXZhaWxhYmxlIjogdHJ1ZSwKICAgICJyZWFzb24iOiBudWxsLAogICAgImhvbGRlciI6IHsKICAgICAgImFnZW50X2lkIjogIjAwMDAwMDAwMDAwMDQwMDA4MDAwMDAwMDAwMDAwMDAxIiwKICAgICAgImxhYmVsIjogImxlYXNlLWhvbGRAMDEyMzQ1Njc4OWFiIiwKICAgICAgIm5hbWUiOiAibGVhc2UtaG9sZEAwMTIzNDU2Nzg5YWIgMDAwMDAwMDAiLAogICAgICAicHJpbmNpcGFsIjogImFsaWNlIiwKICAgICAgInB1cnBvc2UiOiAicGVlciB3b3JrIiwKICAgICAgImFjcXVpcmVkX2F0IjogMTcwMDAwMDAwMC4wLAogICAgICAiZXhwaXJlc19hdCI6IDE3MDAwMDAxMjAuMCwKICAgICAgImV4cGVjdGVkX2VuZCI6IDE3MDAwMDAwNjAuMAogICAgfSwKICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAsCiAgICAic3RhbGUiOiBmYWxzZSwKICAgICJxdWV1ZWQiOiAwLAogICAgInF1ZXVlIjogW10KICB9Cn0K",
    "stderr": "",
    "window": [
-    1791544351.4576998,
-    1791544351.6609886
+    1791546292.2302814,
+    1791546292.549823
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1061,18 +1079,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGVhc2UgZml4dHVyZTogZnJlZQogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGZyZWUKICBib2FyZDogaGVsZCBieSBsZWFzZS1ob2xkQGFiY2RlZjEyMzQ1NiAoYWxpY2UpIGZvciAxMDU5ZDEyaCwgcHVycG9zZSAicGVlciB3b3JrIiwgZXhwZWN0ZWQgZW5kIDIwMjMtMTEtMTUgMDk6MTQgKHN0YWxlOiBwYXN0IGl0KTsgc3RhbGU6IHRoZSBsb2NhbCBsb2NrIGlzIGZyZWUsIHNvIHRoaXMgcmVjb3JkIG91dGxpdmVkIGl0cyBob2xkZXIgYW5kIGxhcHNlcyBhdCBpdHMgdHRsCg==",
+   "stdout": "bGVhc2UgZml4dHVyZTogZnJlZQogIGxvY2FsIGxvY2sgKGxlYXNlLWZpeHR1cmUubG9jayk6IGZyZWUKICBib2FyZDogaGVsZCBieSBsZWFzZS1ob2xkQGFiY2RlZjEyMzQ1NiAoYWxpY2UpIGZvciAxMDU5ZDEzaCwgcHVycG9zZSAicGVlciB3b3JrIiwgZXhwZWN0ZWQgZW5kIDIwMjMtMTEtMTUgMDk6MTQgKHN0YWxlOiBwYXN0IGl0KTsgc3RhbGU6IHRoZSBsb2NhbCBsb2NrIGlzIGZyZWUsIHNvIHRoaXMgcmVjb3JkIG91dGxpdmVkIGl0cyBob2xkZXIgYW5kIGxhcHNlcyBhdCBpdHMgdHRsCg==",
    "stderr": "",
    "window": [
-    1791544352.8687372,
-    1791544353.1074328
+    1791546293.991237,
+    1791546294.2766657
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1130,15 +1151,18 @@
    "stdout": "ewogICJuYW1lIjogImZpeHR1cmUiLAogICJoZWxkIjogZmFsc2UsCiAgImxvY2FsIjogewogICAgImZpbGUiOiAibGVhc2UtZml4dHVyZS5sb2NrIiwKICAgICJzdGF0ZSI6ICJmcmVlIgogIH0sCiAgImJvYXJkIjogewogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJob2xkZXIiOiB7CiAgICAgICJhZ2VudF9pZCI6ICIwMDAwMDAwMDAwMDA0MDAwODAwMDAwMDAwMDAwMDAwMSIsCiAgICAgICJsYWJlbCI6ICJsZWFzZS1ob2xkQGFiY2RlZjEyMzQ1NiIsCiAgICAgICJuYW1lIjogImxlYXNlLWhvbGRAYWJjZGVmMTIzNDU2IDAwMDAwMDAwIiwKICAgICAgInByaW5jaXBhbCI6ICJhbGljZSIsCiAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICJhY3F1aXJlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgIH0sCiAgICAiZXhwZWN0ZWRfZW5kIjogMTcwMDAwMDA2MC4wLAogICAgInN0YWxlIjogZmFsc2UsCiAgICAicXVldWVkIjogMCwKICAgICJxdWV1ZSI6IFtdCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791544354.4130237,
-    1791544354.5917368
+    1791546295.6255403,
+    1791546295.8432546
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1196,15 +1220,18 @@
    "stdout": "Ym9hcmQ6IHtEQUVNT059CiAgbm8gbGVhc2VzIG9uIHRoZSBib2FyZApsb2NhbCBsb2NrIGxlYXNlLWZpeHR1cmUubG9jazogZnJlZSAobm90IG9uIHRoZSBib2FyZCkK",
    "stderr": "",
    "window": [
-    1791544355.9767234,
-    1791544356.4199593
+    1791546297.0339408,
+    1791546297.2495482
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1255,15 +1282,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbXQogIH0sCiAgImxvY2tfZGlyIjogIntIT01FfS9sb2NrcyIsCiAgImxvY2FsIjogWwogICAgewogICAgICAiZmlsZSI6ICJsZWFzZS1maXh0dXJlLmxvY2siLAogICAgICAic3RhdGUiOiAiZnJlZSIKICAgIH0KICBdLAogICJ0ZXN0X3N1aXRlX2xvY2siOiBudWxsCn0K",
    "stderr": "",
    "window": [
-    1791544357.9575164,
-    1791544358.2460256
+    1791546298.5818503,
+    1791546298.7981436
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1314,15 +1344,18 @@
    "stdout": "Ym9hcmQ6IHtEQUVNT059CiAgbm8gbGVhc2VzIG9uIHRoZSBib2FyZApsb2NhbCBsb2NrIGxlYXNlLWZpeHR1cmUubG9jazogZnJlZSAobm90IG9uIHRoZSBib2FyZCkK",
    "stderr": "",
    "window": [
-    1791544359.6232026,
-    1791544359.9110823
+    1791546300.0060766,
+    1791546300.2615492
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1373,15 +1406,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbXQogIH0sCiAgImxvY2tfZGlyIjogIntIT01FfS9sb2NrcyIsCiAgImxvY2FsIjogWwogICAgewogICAgICAiZmlsZSI6ICJsZWFzZS1maXh0dXJlLmxvY2siLAogICAgICAic3RhdGUiOiAiZnJlZSIKICAgIH0KICBdLAogICJ0ZXN0X3N1aXRlX2xvY2siOiBudWxsCn0K",
    "stderr": "",
    "window": [
-    1791544361.2439013,
-    1791544361.4411333
+    1791546301.8643253,
+    1791546302.0697129
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1429,18 +1465,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBsb2NhbCBsb2NrOiBmcmVlCg==",
+   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBsb2NhbCBsb2NrOiBmcmVlCg==",
    "stderr": "",
    "window": [
-    1791544362.8693626,
-    1791544363.0929666
+    1791546304.0983899,
+    1791546304.3529065
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1498,15 +1537,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbCiAgICAgIHsKICAgICAgICAibmFtZSI6ICJmaXh0dXJlIiwKICAgICAgICAiaG9sZGVyIjogewogICAgICAgICAgImFnZW50X2lkIjogIjAwMDAwMDAwMDAwMDQwMDA4MDAwMDAwMDAwMDAwMDAxIiwKICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAibmFtZSI6ICJjb2RleCAwMDAwMDAwMCIsCiAgICAgICAgICAicHJpbmNpcGFsIjogImFsaWNlIiwKICAgICAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICAgICAiYWNxdWlyZWRfYXQiOiAxNzAwMDAwMDAwLjAsCiAgICAgICAgICAiZXhwaXJlc19hdCI6IDE3MDAwMDAxMjAuMCwKICAgICAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgICAgICB9LAogICAgICAgICJmZW5jZSI6IDEsCiAgICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICAgImV4cGVjdGVkX2VuZCI6IDE3MDAwMDAwNjAuMCwKICAgICAgICAic3RhbGUiOiBmYWxzZSwKICAgICAgICAicXVldWVkIjogMCwKICAgICAgICAicXVldWUiOiBbXSwKICAgICAgICAibG9jYWxfbG9jayI6ICJmcmVlIgogICAgICB9CiAgICBdCiAgfSwKICAibG9ja19kaXIiOiAie0hPTUV9L2xvY2tzIiwKICAibG9jYWwiOiBbCiAgICB7CiAgICAgICJmaWxlIjogImxlYXNlLWZpeHR1cmUubG9jayIsCiAgICAgICJzdGF0ZSI6ICJmcmVlIgogICAgfQogIF0sCiAgInRlc3Rfc3VpdGVfbG9jayI6IG51bGwKfQo=",
    "stderr": "",
    "window": [
-    1791544364.3712416,
-    1791544364.5911198
+    1791546305.7132728,
+    1791546305.9716232
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1561,18 +1603,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBsb2NhbCBsb2NrOiBmcmVlCg==",
+   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBsb2NhbCBsb2NrOiBmcmVlCg==",
    "stderr": "",
    "window": [
-    1791544365.88137,
-    1791544366.1210737
+    1791546307.2645717,
+    1791546307.4849877
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1630,15 +1675,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbCiAgICAgIHsKICAgICAgICAibmFtZSI6ICJmaXh0dXJlIiwKICAgICAgICAiaG9sZGVyIjogewogICAgICAgICAgImFnZW50X2lkIjogIjAwMDAwMDAwMDAwMDQwMDA4MDAwMDAwMDAwMDAwMDAxIiwKICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAibmFtZSI6ICJjb2RleCAwMDAwMDAwMCIsCiAgICAgICAgICAicHJpbmNpcGFsIjogImFsaWNlIiwKICAgICAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICAgICAiYWNxdWlyZWRfYXQiOiAxNzAwMDAwMDAwLjAsCiAgICAgICAgICAiZXhwaXJlc19hdCI6IDE3MDAwMDAxMjAuMCwKICAgICAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgICAgICB9LAogICAgICAgICJmZW5jZSI6IDEsCiAgICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICAgImV4cGVjdGVkX2VuZCI6IDE3MDAwMDAwNjAuMCwKICAgICAgICAic3RhbGUiOiBmYWxzZSwKICAgICAgICAicXVldWVkIjogMCwKICAgICAgICAicXVldWUiOiBbXSwKICAgICAgICAibG9jYWxfbG9jayI6ICJmcmVlIgogICAgICB9CiAgICBdCiAgfSwKICAibG9ja19kaXIiOiAie0hPTUV9L2xvY2tzIiwKICAibG9jYWwiOiBbCiAgICB7CiAgICAgICJmaWxlIjogImxlYXNlLWZpeHR1cmUubG9jayIsCiAgICAgICJzdGF0ZSI6ICJmcmVlIgogICAgfQogIF0sCiAgInRlc3Rfc3VpdGVfbG9jayI6IG51bGwKfQo=",
    "stderr": "",
    "window": [
-    1791544366.9839587,
-    1791544367.2522297
+    1791546308.8008943,
+    1791546309.0104067
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1693,18 +1741,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBxdWV1ZSAoMSk6IGNvZGV4IHNpbmNlIDIwMjMtMTEtMTUgMDk6MTMsIHB1cnBvc2UgImZpcnN0IHdhaXRlciIKICBsb2NhbCBsb2NrOiBmcmVlCg==",
+   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBxdWV1ZSAoMSk6IGNvZGV4IHNpbmNlIDIwMjMtMTEtMTUgMDk6MTMsIHB1cnBvc2UgImZpcnN0IHdhaXRlciIKICBsb2NhbCBsb2NrOiBmcmVlCg==",
    "stderr": "",
    "window": [
-    1791544368.037227,
-    1791544368.635632
+    1791546310.2982926,
+    1791546310.4922237
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1767,15 +1818,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbCiAgICAgIHsKICAgICAgICAibmFtZSI6ICJmaXh0dXJlIiwKICAgICAgICAiaG9sZGVyIjogewogICAgICAgICAgImFnZW50X2lkIjogIjAwMDAwMDAwMDAwMDQwMDA4MDAwMDAwMDAwMDAwMDAxIiwKICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAibmFtZSI6ICJjb2RleCAwMDAwMDAwMCIsCiAgICAgICAgICAicHJpbmNpcGFsIjogImFsaWNlIiwKICAgICAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICAgICAiYWNxdWlyZWRfYXQiOiAxNzAwMDAwMDAwLjAsCiAgICAgICAgICAiZXhwaXJlc19hdCI6IDE3MDAwMDAxMjAuMCwKICAgICAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgICAgICB9LAogICAgICAgICJmZW5jZSI6IDEsCiAgICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICAgImV4cGVjdGVkX2VuZCI6IDE3MDAwMDAwNjAuMCwKICAgICAgICAic3RhbGUiOiBmYWxzZSwKICAgICAgICAicXVldWVkIjogMSwKICAgICAgICAicXVldWUiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJhZ2VudF9pZCI6ICIwMDAwMDAwMDAwMDA0MDAwODAwMDAwMDAwMDAwMDAwMiIsCiAgICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAgICJlbnF1ZXVlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgICAgICAgInB1cnBvc2UiOiAiZmlyc3Qgd2FpdGVyIiwKICAgICAgICAgICAgIm5hbWUiOiAiY29kZXggMDAwMDAwMDAiCiAgICAgICAgICB9CiAgICAgICAgXSwKICAgICAgICAibG9jYWxfbG9jayI6ICJmcmVlIgogICAgICB9CiAgICBdCiAgfSwKICAibG9ja19kaXIiOiAie0hPTUV9L2xvY2tzIiwKICAibG9jYWwiOiBbCiAgICB7CiAgICAgICJmaWxlIjogImxlYXNlLWZpeHR1cmUubG9jayIsCiAgICAgICJzdGF0ZSI6ICJmcmVlIgogICAgfQogIF0sCiAgInRlc3Rfc3VpdGVfbG9jayI6IG51bGwKfQo=",
    "stderr": "",
    "window": [
-    1791544369.5760713,
-    1791544369.8843732
+    1791546311.3710797,
+    1791546311.5861254
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "12",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1835,18 +1889,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBxdWV1ZSAoMSk6IGNvZGV4IHNpbmNlIDIwMjMtMTEtMTUgMDk6MTMsIHB1cnBvc2UgImZpcnN0IHdhaXRlciIKICBsb2NhbCBsb2NrOiBmcmVlCg==",
+   "stdout": "Ym9hcmQ6IHtEQUVNT059CmxlYXNlIGZpeHR1cmU6IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKICBxdWV1ZSAoMSk6IGNvZGV4IHNpbmNlIDIwMjMtMTEtMTUgMDk6MTMsIHB1cnBvc2UgImZpcnN0IHdhaXRlciIKICBsb2NhbCBsb2NrOiBmcmVlCg==",
    "stderr": "",
    "window": [
-    1791544371.9390624,
-    1791544372.184519
+    1791546312.4028091,
+    1791546312.6217294
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1909,15 +1966,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbCiAgICAgIHsKICAgICAgICAibmFtZSI6ICJmaXh0dXJlIiwKICAgICAgICAiaG9sZGVyIjogewogICAgICAgICAgImFnZW50X2lkIjogIjAwMDAwMDAwMDAwMDQwMDA4MDAwMDAwMDAwMDAwMDAxIiwKICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAibmFtZSI6ICJjb2RleCAwMDAwMDAwMCIsCiAgICAgICAgICAicHJpbmNpcGFsIjogImFsaWNlIiwKICAgICAgICAgICJwdXJwb3NlIjogInBlZXIgd29yayIsCiAgICAgICAgICAiYWNxdWlyZWRfYXQiOiAxNzAwMDAwMDAwLjAsCiAgICAgICAgICAiZXhwaXJlc19hdCI6IDE3MDAwMDAxMjAuMCwKICAgICAgICAgICJleHBlY3RlZF9lbmQiOiAxNzAwMDAwMDYwLjAKICAgICAgICB9LAogICAgICAgICJmZW5jZSI6IDEsCiAgICAgICAgImV4cGlyZXNfYXQiOiAxNzAwMDAwMTIwLjAsCiAgICAgICAgImV4cGVjdGVkX2VuZCI6IDE3MDAwMDAwNjAuMCwKICAgICAgICAic3RhbGUiOiBmYWxzZSwKICAgICAgICAicXVldWVkIjogMSwKICAgICAgICAicXVldWUiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJhZ2VudF9pZCI6ICIwMDAwMDAwMDAwMDA0MDAwODAwMDAwMDAwMDAwMDAwMiIsCiAgICAgICAgICAgICJsYWJlbCI6ICJjb2RleCIsCiAgICAgICAgICAgICJlbnF1ZXVlZF9hdCI6IDE3MDAwMDAwMDAuMCwKICAgICAgICAgICAgInB1cnBvc2UiOiAiZmlyc3Qgd2FpdGVyIiwKICAgICAgICAgICAgIm5hbWUiOiAiY29kZXggMDAwMDAwMDAiCiAgICAgICAgICB9CiAgICAgICAgXSwKICAgICAgICAibG9jYWxfbG9jayI6ICJmcmVlIgogICAgICB9CiAgICBdCiAgfSwKICAibG9ja19kaXIiOiAie0hPTUV9L2xvY2tzIiwKICAibG9jYWwiOiBbCiAgICB7CiAgICAgICJmaWxlIjogImxlYXNlLWZpeHR1cmUubG9jayIsCiAgICAgICJzdGF0ZSI6ICJmcmVlIgogICAgfQogIF0sCiAgInRlc3Rfc3VpdGVfbG9jayI6IG51bGwKfQo=",
    "stderr": "",
    "window": [
-    1791544373.029054,
-    1791544373.2252388
+    1791546313.488775,
+    1791546313.7390215
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -1980,15 +2040,18 @@
    "stdout": "ewogICJib2FyZCI6IHsKICAgICJ1cmwiOiAie0RBRU1PTn0iLAogICAgImF2YWlsYWJsZSI6IHRydWUsCiAgICAicmVhc29uIjogbnVsbCwKICAgICJ0cnVuY2F0ZWQiOiBmYWxzZSwKICAgICJsZWFzZXMiOiBbXQogIH0sCiAgImxvY2tfZGlyIjogIntIT01FfS9sb2NrcyIsCiAgImxvY2FsIjogW10sCiAgInRlc3Rfc3VpdGVfbG9jayI6IG51bGwKfQo=",
    "stderr": "",
    "window": [
-    1791544374.4965072,
-    1791544374.7203133
+    1791546315.8356233,
+    1791546316.0755634
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/leases",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2046,8 +2109,8 @@
    "stdout": "b3V0AP8=",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/g==",
    "window": [
-    1791544375.6809776,
-    1791544375.8219218
+    1791546317.0693963,
+    1791546317.2216945
    ],
    "requests": [],
    "seed_offsets": {
@@ -2076,8 +2139,8 @@
    "stdout": "b3V0AP8=",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnY2xhaW06YS9iJyBhbG9uZSAobm90IEZJRk8pCmVycgD+",
    "window": [
-    1791544375.8236663,
-    1791544375.9627845
+    1791546317.2225828,
+    1791546317.3716416
    ],
    "requests": [],
    "seed_offsets": {
@@ -2106,8 +2169,8 @@
    "stdout": "",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQpsZWFzZTogY29tbWFuZCBub3QgZm91bmQ6IGZpeHR1cmUtbm8tc3VjaC1wcm9ncmFtCg==",
    "window": [
-    1791544375.9637294,
-    1791544376.0781715
+    1791546317.3725092,
+    1791546317.481097
    ],
    "requests": [],
    "seed_offsets": {
@@ -2134,8 +2197,8 @@
    "stdout": "",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQpsZWFzZTogd2FpdGluZyBmb3IgdGhlIGxvY2FsIGxvY2sgb24gJ2ZpeHR1cmUnICh7SE9NRX0vbG9ja3MvbGVhc2UtZml4dHVyZS5sb2NrKSwgd2hpY2ggYW5vdGhlciBwcm9jZXNzIGhvbGRzCmxlYXNlOiBnYXZlIHVwIHdhaXRpbmcgZm9yICdmaXh0dXJlJyBhZnRlciAwcyAoLS10aW1lb3V0KTsgdGhlIGNvbW1hbmQgZGlkIG5vdCBydW4K",
    "window": [
-    1791544376.1659925,
-    1791544376.2704058
+    1791546317.5575984,
+    1791546317.6714218
    ],
    "requests": [],
    "seed_offsets": {
@@ -2162,8 +2225,8 @@
    "stdout": "b3V0AP8=",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQpsZWFzZTogd2FpdGluZyBmb3IgdGhlIGxvY2FsIGxvY2sgb24gJ2ZpeHR1cmUnICh7SE9NRX0vbG9ja3MvbGVhc2UtZml4dHVyZS5sb2NrKSwgd2hpY2ggYW5vdGhlciBwcm9jZXNzIGhvbGRzCmVycgD+",
    "window": [
-    1791544376.3508985,
-    1791544378.5537944
+    1791546317.7578194,
+    1791546319.8783987
    ],
    "requests": [],
    "seed_offsets": {
@@ -2195,8 +2258,8 @@
    "stdout": "",
    "stderr": "bGVhc2U6ICdmaXh0dXJlJyBpcyBoZWxkIGJ5IGFuIGVuY2xvc2luZyBsZWFzZSBydW4gKFBTRVVET0xJRkVfTEVBU0VTX0hFTEQ9Zml4dHVyZSk7IGEgbmVzdGVkIHJ1biBvZiB0aGUgc2FtZSBsZWFzZSB3b3VsZCB3YWl0IGZvciBpdHNlbGYgZm9yZXZlci4gUnVuIHRoZSBjb21tYW5kIGRpcmVjdGx5LCBvciB1c2UgYW5vdGhlciBuYW1lLiBJZiB0aGlzIHByb2Nlc3Mgd2FzIG5vdCBzdGFydGVkIGJ5IHRoYXQgcnVuLCB1bnNldCBQU0VVRE9MSUZFX0xFQVNFU19IRUxELgo=",
    "window": [
-    1791544378.6407795,
-    1791544378.756272
+    1791546319.9419262,
+    1791546320.0339496
    ],
    "requests": [],
    "seed_offsets": {
@@ -2223,8 +2286,8 @@
    "stdout": "",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IC0tbm8tYm9hcmQgd2FzIGdpdmVuOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/kV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
    "window": [
-    1791544378.76481,
-    1791544378.8923976
+    1791546320.0422165,
+    1791546320.1595495
    ],
    "requests": [],
    "seed_offsets": {
@@ -2253,8 +2316,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4KQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCg==",
    "window": [
-    1791544378.8937495,
-    1791544379.0061784
+    1791546320.1608486,
+    1791546320.2635868
    ],
    "requests": [],
    "seed_offsets": {
@@ -2279,8 +2342,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4KQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCg==",
    "window": [
-    1791544379.0070534,
-    1791544379.1163642
+    1791546320.2646434,
+    1791546320.3699975
    ],
    "requests": [],
    "seed_offsets": {
@@ -2305,8 +2368,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4KQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCg==",
    "window": [
-    1791544379.1174238,
-    1791544379.2147892
+    1791546320.3718734,
+    1791546320.464452
    ],
    "requests": [],
    "seed_offsets": {
@@ -2331,15 +2394,18 @@
    "stdout": "b3V0AP8=",
    "stderr": "ZXJyAP4=",
    "window": [
-    1791544379.4181,
-    1791544379.828886
+    1791546320.6596153,
+    1791546321.037902
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2351,7 +2417,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "58",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2365,7 +2434,10 @@
      "method": "POST",
      "target": "/api/coordination/release",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2502,15 +2574,18 @@
    "stdout": "b3V0AP8=",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IHRoZSBkYWVtb24gcmVmdXNlZCB0aGUgYmVhcmVyIHRva2VuIChIVFRQIDQwMyBmb3JiaWRkZW4pOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/g==",
    "window": [
-    1791544380.7738242,
-    1791544380.9794786
+    1791546321.8082707,
+    1791546322.0366743
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2563,15 +2638,18 @@
    "stdout": "b3V0AP8=",
    "stderr": "bGVhc2U6IGJvYXJkIHNraXBwZWQ6IHRoZSBkYWVtb24ncyByZWdpc3RyYXRpb24gcmVwbHkgY2FycmllZCBubyBhZGRyZXNzOyB3YWl0aW5nIG9uIHRoZSBsb2NhbCBsb2NrIGZvciAnZml4dHVyZScgYWxvbmUgKG5vdCBGSUZPKQplcnIA/g==",
    "window": [
-    1791544381.7614853,
-    1791544382.025803
+    1791546322.7990866,
+    1791546323.0055277
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2622,17 +2700,20 @@
    "utc_offset": 39600,
    "exit": 3,
    "stdout": "b3V0AP8=",
-   "stderr": "bGVhc2U6IHdhaXRpbmcgZm9yICdmaXh0dXJlJyBvbiB0aGUgYm9hcmQgKHBvc2l0aW9uIDIgb2YgMik7IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKZXJyAP4=",
+   "stderr": "bGVhc2U6IHdhaXRpbmcgZm9yICdmaXh0dXJlJyBvbiB0aGUgYm9hcmQgKHBvc2l0aW9uIDIgb2YgMik7IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKZXJyAP4=",
    "window": [
-    1791544382.9041924,
-    1791544388.5045574
+    1791546323.851691,
+    1791546329.6885042
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2644,7 +2725,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "58",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2658,7 +2742,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "58",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2672,7 +2759,10 @@
      "method": "POST",
      "target": "/api/coordination/release",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2953,15 +3043,18 @@
    "stdout": "b3V0AP8=",
    "stderr": "ZXJyAP4=",
    "window": [
-    1791544389.9698021,
-    1791544395.325457
+    1791546330.669159,
+    1791546336.0630972
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2973,7 +3066,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "58",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -2987,7 +3083,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "58",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -3001,7 +3100,10 @@
      "method": "POST",
      "target": "/api/coordination/release",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -3136,17 +3238,20 @@
    "utc_offset": 39600,
    "exit": 75,
    "stdout": "",
-   "stderr": "bGVhc2U6IHdhaXRpbmcgZm9yICdmaXh0dXJlJyBvbiB0aGUgYm9hcmQgKHBvc2l0aW9uIDEgb2YgMSk7IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxMmgsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKbGVhc2U6IGdhdmUgdXAgd2FpdGluZyBmb3IgJ2ZpeHR1cmUnIGFmdGVyIDBzICgtLXRpbWVvdXQpOyB0aGUgY29tbWFuZCBkaWQgbm90IHJ1bgo=",
+   "stderr": "bGVhc2U6IHdhaXRpbmcgZm9yICdmaXh0dXJlJyBvbiB0aGUgYm9hcmQgKHBvc2l0aW9uIDEgb2YgMSk7IGhlbGQgYnkgY29kZXggKGFsaWNlKSBmb3IgMTA1OWQxM2gsIHB1cnBvc2UgInBlZXIgd29yayIsIGV4cGVjdGVkIGVuZCAyMDIzLTExLTE1IDA5OjE0IChzdGFsZTogcGFzdCBpdCkKbGVhc2U6IGdhdmUgdXAgd2FpdGluZyBmb3IgJ2ZpeHR1cmUnIGFmdGVyIDBzICgtLXRpbWVvdXQpOyB0aGUgY29tbWFuZCBkaWQgbm90IHJ1bgo=",
    "window": [
-    1791544396.0796413,
-    1791544396.4489555
+    1791546337.1421802,
+    1791546337.5137446
    ],
    "requests": [
     {
      "method": "POST",
      "target": "/api/coordination/register",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "128",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -3158,7 +3263,10 @@
      "method": "POST",
      "target": "/api/coordination/lease",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "28",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -3172,7 +3280,10 @@
      "method": "POST",
      "target": "/api/coordination/release",
      "headers": {
+      "accept": "*/*",
+      "accept-encoding": "gzip, deflate",
       "authorization": "Bearer lease-fixture-bearer",
+      "connection": "keep-alive",
       "content-length": "18",
       "content-type": "application/json",
       "host": "{DAEMON}",
@@ -3321,8 +3432,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1biBOQU1FIFstLWV4cGVjdCBEVVJBVElPTl0gWy0tdHRsIFNFQ09ORFNdIFstLXB1cnBvc2UgVEVYVF0gWy0tbm8tYm9hcmRdIFstLXRpbWVvdXQgRFVSQVRJT05dIC0tIENPTU1BTkQgW0FSR1MuLi5dCnBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1bjogZXJyb3I6IGFyZ3VtZW50IC0tZXhwZWN0OiAnOGQnIGlzIG91dCBvZiByYW5nZTogZnJvbSAxIHRvIDYwNDgwMCBzZWNvbmRzCg==",
    "window": [
-    1791544397.7460961,
-    1791544397.8501608
+    1791546338.3610709,
+    1791546338.4577086
    ],
    "requests": [],
    "seed_offsets": {
@@ -3347,8 +3458,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1biBOQU1FIFstLWV4cGVjdCBEVVJBVElPTl0gWy0tdHRsIFNFQ09ORFNdIFstLXB1cnBvc2UgVEVYVF0gWy0tbm8tYm9hcmRdIFstLXRpbWVvdXQgRFVSQVRJT05dIC0tIENPTU1BTkQgW0FSR1MuLi5dCnBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1bjogZXJyb3I6IGFyZ3VtZW50IC0tZXhwZWN0OiAnMCcgaXMgb3V0IG9mIHJhbmdlOiBmcm9tIDEgdG8gNjA0ODAwIHNlY29uZHMK",
    "window": [
-    1791544397.8510425,
-    1791544397.9613514
+    1791546338.4585097,
+    1791546338.5503578
    ],
    "requests": [],
    "seed_offsets": {
@@ -3373,8 +3484,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1biBOQU1FIFstLWV4cGVjdCBEVVJBVElPTl0gWy0tdHRsIFNFQ09ORFNdIFstLXB1cnBvc2UgVEVYVF0gWy0tbm8tYm9hcmRdIFstLXRpbWVvdXQgRFVSQVRJT05dIC0tIENPTU1BTkQgW0FSR1MuLi5dCnBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1bjogZXJyb3I6IGFyZ3VtZW50IC0tdHRsOiAnMjknIGlzIG91dCBvZiByYW5nZTogZnJvbSAzMCB0byA4NjQwMCBzZWNvbmRzCg==",
    "window": [
-    1791544397.9623253,
-    1791544398.060154
+    1791546338.551153,
+    1791546338.6472197
    ],
    "requests": [],
    "seed_offsets": {
@@ -3399,8 +3510,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1biBOQU1FIFstLWV4cGVjdCBEVVJBVElPTl0gWy0tdHRsIFNFQ09ORFNdIFstLXB1cnBvc2UgVEVYVF0gWy0tbm8tYm9hcmRdIFstLXRpbWVvdXQgRFVSQVRJT05dIC0tIENPTU1BTkQgW0FSR1MuLi5dCnBzZXVkb2xpZmUtbWNwIGxlYXNlIHJ1bjogZXJyb3I6IGFyZ3VtZW50IC0tdGltZW91dDogbm90IGEgZHVyYXRpb246ICctMScgKHVzZSA5MCwgOTBzLCAyMG0sIDJoIG9yIDdkKQo=",
    "window": [
-    1791544398.061471,
-    1791544398.157883
+    1791546338.6481915,
+    1791546338.75755
    ],
    "requests": [],
    "seed_offsets": {

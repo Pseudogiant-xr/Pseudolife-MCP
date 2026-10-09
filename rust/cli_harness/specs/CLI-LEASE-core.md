@@ -38,6 +38,10 @@ The named comparison rules are narrow:
   are not application fields. All JSON values and other admitted wire
   headers remain exact. Python's `python-httpx/<numeric-version>` User-Agent
   is omitted; the native lease client does not send a library User-Agent.
+  The stock HTTPX compression-negotiation list (`gzip, deflate`, with optional
+  `br`/`zstd`) and `Connection: keep-alive` are transport defaults omitted by
+  the native client. Only these exact values are associated; Accept and all
+  other request fields remain compared.
 - `lease-seeded-clock` validates displayed holder age against the arm's own
   invocation window and the fixed producer timestamp, and displays of the
   two fixed timestamps against their own captured historical UTC offsets. Surrounding

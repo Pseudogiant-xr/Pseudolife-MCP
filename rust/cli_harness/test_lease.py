@@ -72,3 +72,17 @@ def test_capture_handshake_retains_already_written_stderr_tail(tmp_path):
     obs = run_arm(Case("prefetched-stderr", [], before_capture=ready),
                   Target("python", [sys.executable, "-c", code]), tmp_path / "home")
     assert base64.b64decode(obs["stderr"]) == b"READY\nTAIL\x00\xff\n"
+
+
+def test_http_defaults_are_narrow_and_custom_headers_stay_visible():
+    from .rows.lease import _command_path
+    obs = {"requests": [{"body": "{}", "headers": {"content-length": "2", "accept": "*/*",
+                       "accept-encoding": "gzip, deflate", "connection": "keep-alive", "origin": "fixture"}}]}
+    _command_path(obs)
+    headers = obs["requests"][0]["headers"]
+    assert headers == {"content-length": "<json-length>", "accept": "*/*", "origin": "fixture"}
+    obs = {"requests": [{"body": "{}", "headers": {"content-length": "2",
+                       "accept-encoding": "identity", "connection": "close"}}]}
+    _command_path(obs)
+    assert obs["requests"][0]["headers"]["accept-encoding"] == "identity"
+    assert obs["requests"][0]["headers"]["connection"] == "close"
