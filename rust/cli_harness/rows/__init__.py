@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib
 
-ROWS = {"mail": "CLI-MAIL", "audit": "CLI-AUDIT", "backup": "CLI-BACKUP-DSN"}
+ROWS = {"mail": "CLI-MAIL", "audit": "CLI-AUDIT", "backup": "CLI-BACKUP-DSN",
+        "move": "CLI-MOVE-REFUSALS"}
 
 
 def load(row: str):

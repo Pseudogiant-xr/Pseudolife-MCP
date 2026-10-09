@@ -11,6 +11,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_json;
 pub mod lease;
+mod move_cli;
 mod version;
 pub mod wait_mail;
 
@@ -139,6 +140,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
+    }
+    if mode == "move"
+        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
