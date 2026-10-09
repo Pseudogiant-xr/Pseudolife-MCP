@@ -80,3 +80,53 @@ The spike runs the ONNX export that the prerequisite receipt verified
 - JSON key order and whitespace.
 - The `version` value and the contents of the `memory` object.
 - `access_count` values: Python increments them on every served hit, while the spike is read-only.
+
+# Write path (slice W2-E)
+
+Added 2026-10-09 by slice W2-E. This part lists what the Rust daemon must
+reproduce exactly from the Python daemon when it writes: `memory_store` first,
+then the cortex, outcomes, episodes and autosave as their pull requests land.
+References are to `pseudolife_memory/` at master `35b8f5d2`. The contract is
+the response by value plus the full database state after every write; the
+harness (`harness/w2e.py`) diffs both. Declared divergences are in
+`divergences.md` under "Write path (W2-E)".
+
+## W0. Tool bodies and their callers
+
+| # | Exact item | Source |
+|---|---|---|
+| W0.1 | Each MCP tool body returns the dict the Python `def` returns after binding, including its MCP-layer post-processing (`_store_noted`, `_noted`). Argument binding, the error envelope and the success envelope belong to the MCP surface (W2-G). A service `ValueError` is returned as `ToolError::Invalid(text)`; any other failure is internal. | `mcp_server.py:243-302, 664-695` |
+| W0.2 | Until the MCP surface lands, the harness reaches a tool body through `POST /api/_harness/tool/<name>`, compiled only under the cargo feature `harness`. A default build's route table equals Python's (unit test). | delegate ruling 2026-10-09 |
+| W0.3 | Caller identity: the session is the `X-PL-Session` header when non-empty, else the active-session pointer (`meta.active_session_pointer`, ignored when older than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`, default 21600; `<= 0` never stale), else `mcp-session-id` only when `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` is `1/true/yes/on`, else none. Header values are not trimmed; an empty value falls through. | `service.py:970-1011`, `writer_context.py:107-211` |
+
+## W1. memory_store
+
+| # | Exact item | Source |
+|---|---|---|
+| W1.1 | Labels resolve before anything else (so an invalid explicit label wins over empty text). `"auto"` (exact, case-sensitive) runs the heuristic: text stripped, `None` when empty or over 400 code points; distortion: `None` on a first-person habit, `"constraint"` on `_STRONG`, `_FRAMING` or an imperative opener with a bare verb; authority: `"quoted"` on `_REPORTED`, else `"directive"` on `_ADDRESSED`, `_FRAMING` or the opener. An unresolved auto stores NULL. Any other value is `str(v).strip().casefold()` checked against the vocabulary, else `ValueError("<name> must be one of [...] (or None), got <repr>")`. | `memory/labels.py:60-251`, `service.py:1712-1715` |
+| W1.2 | Text is `str.strip()`ped (Unicode whitespace and U+001C..U+001F). Empty: `{"stored": false, "surprise": 0.0, "reason": "empty", "cortex_promoted": 0}` plus the `empty` note; nothing else happens (no episode, no label keys). | `service.py:1719-1722` |
+| W1.3 | Order of effects: embed the stripped text (document side, no prefix); resolve the session (W0.3); resolve the `episode` handle (W2.3); if no handle resolved, ensure the session's root episode (W2.2). These episode writes happen even when the store is later dropped. | `service.py:1723-1737` |
+| W1.4 | Meta filter (only when `memory.meta_filter.enabled`; the daemon overlay sets it false unless the YAML leaf is set): `source != "user"` and any of the 16 case-insensitive patterns searches the stripped text: `(False, 0.0)` before any other CMS effect. | `memory/cms.py:498`, `memory/meta_filter.py:17-72`, `service.py:1108` |
+| W1.5 | Surprise per band: `1.0` for an empty band, else `max(0, min(1, 1 - max_j cos))` over every resident entry of the band (superseded and digest entries included), each row and the query L2-normalized. Overall surprise is the minimum over bands. | `memory/miras/band.py:92-109`, `cms.py:502-503` |
+| W1.6 | Slots: `extract_slots(text, last_entity_context)` runs before the contradiction scan and is stamped on the stored entry as `[[entity, attribute, value, "+"], ...]`. The coreference anchor (`_last_entity_seen`) starts empty, is resident only, and after a real store becomes the entity of the first slot whose attribute is `name` or `type`. | `memory/slots.py`, `cms.py:519-525, 578, 589-594` |
+| W1.7 | Contradiction scan over every band's entries, skipping superseded ones; the first path that hits per entry wins: (0) slot identity, normalized as the cortex normalizes keys and values; (1) cosine >= 0.70 and negation asymmetry; (2) cosine >= 0.80 and `_looks_like_replacement`; (3) gain/loss asymmetry with an anchor tier (slot 0.15, content 0.35, pronoun 0.35). No NLI (never constructed). No side effect on any entry. | `memory/contradiction.py:84-601`, `service.py:1502` |
+| W1.8 | Gate: drop with `(False, surprise)` when no contradiction was found and `surprise < memory.surprise_threshold` (default 0.0, so the gate is inert and the scan unobservable at defaults). | `cms.py:540-542` |
+| W1.9 | A stored entry goes to `bands[0]` (eviction first, W1.10), stamped with: the session's open leaf episode (or, with no session, the global current episode if open); a resolved handle overrides `episode_id` and `episode_title` with its root's; tags normalized (strip, lowercase, drop empties, dedupe in order); slots; labels. Then one `INSERT INTO entries` with `band, text, embedding, surprise (float4), ts (time.time()), access_count 0, source (raw), superseded_at/superseded_by_text/last_logical_turn NULL, episode_id, episode_title, tags, slots, authority, distortion_tolerance, dream_state 'pending'`, `RETURNING id`. | `cms.py:545-601`, `memory/episodes.py:41-61, 281-299`, `storage/sync.py:57-79`, `storage/postgres.py:916-933` |
+| W1.10 | Capacity: when `bands[0]` already holds `max_entries` (flat 5250), evict before appending the entry with the lowest `((balanced + 1) * source_weight + retention_boost * log1p(reinforcements)) * (0.05 if superseded)`, `balanced = access_count / max(now - ts, 1) + 0.1 * surprise`, first index on ties; source weights `user_msg`/`user` 1.5, `system` 10.0, `tool_call` 0.5, `llm_thinking` 0.2, others 1.0; `retention_boost` 1.0 under the daemon overlay. On the last band a true drop: one transaction deleting the row and upserting `meta.capacity_true_drops` (`count` incremented, `last_at`, `last_entry_id`, `last_source`, `last_superseded`). | `memory/miras/band.py:130-151`, `protocols.py:84-103`, `retention.py:37-47`, `cms.py:2709-2772`, `storage/postgres.py:1380-1422` |
+| W1.11 | Response keys: `stored`, `surprise` (`round(x, 4)`), `reason` (`null` when stored; `"filtered_meta"` when dropped at surprise exactly 0.0; `"below_surprise_threshold"` when below the threshold; `"rejected"` otherwise), `cortex_promoted` (0 unless auto-promotion is on), then `authority` and `distortion_tolerance` when set, `episode_hint` when the landing root's title matches `^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$` (text: `session episode is untitled — call memory_session_title('<project> - <topic>'` + `, episode='<root id[:12]>'` when a handle resolved + `)`), `episode_warning: "unknown or closed episode handle"` when a handle was given and did not resolve, and `note` per `_STORE_NOTES` (a `filtered_meta` drop that is not a meta statement, with the threshold above 0, gets the exact-duplicate note). | `service.py:1749-1797`, `mcp_server.py:671-695`, `session_title.py:23` |
+
+## W2. Episodes on the store path
+
+| # | Exact item | Source |
+|---|---|---|
+| W2.1 | The episode log hydrates from `episodes ORDER BY started_at`; the current episode is the last open one. `meta.active_session_pointer` (`{session_id, ts}`), `meta.episode_tombstones` (`{id: {session_key, ended_at, title}}`, keyed rows only) and `meta.deferred_empty_roots` hydrate at init. | `storage/sync.py:146-155`, `service.py:1308-1330` |
+| W2.2 | Ensure a session episode (key non-empty): an open leaf for the key wins (no write); else the newest closed root for the key within `PSEUDOLIFE_SESSION_RESUME_SECONDS` (default 21600; `<= 0` disables) reopens (`ended_at` null, `closed_by_new_start` false, current = it, then the full upsert sweep and `UPDATE client_sessions SET ended_at = NULL, end_reason = NULL WHERE session_key = ? AND ended_at IS NOT NULL`); else a new root: id `uuid4().hex`, title `session - %Y-%m-%d %H:%M` in local time, `started_at` now, current = it, then the sweep. | `service.py:6850-6917` |
+| W2.3 | Handle (non-empty, at least 8 chars): exactly one open keyed root whose id starts with it resolves (a keyless or ambiguous match does not); else, within `PSEUDOLIFE_HANDLE_RESUME_SECONDS` (default 2592000; `<= 0` disables), exactly one closed keyed root reopens (not made current), or exactly one tombstone recreates its root under the same id (`started_at` now, its title or the generic one), deleting the tombstone (`meta` write). Each is followed by the sweep and the `client_sessions` reopen. | `service.py:6768-6848` |
+| W2.4 | The sweep upserts every episode in log order, one transaction each (`INSERT ... ON CONFLICT (id) DO UPDATE` over all eight columns); a failure is logged and stops the sweep, never the call. | `service.py:6735-6745`, `storage/postgres.py:1648-1667` |
+| W2.5 | With a resolved handle and no `X-PL-Session` header, the effective session becomes the handle root's key; with a header, the header stays the identity while the entry still attributes to the handle's root. | `service.py:1727-1737` |
+
+Free for W1 and W2: log lines; the exact float bits of `entries.embedding`
+and `entries.surprise` within the measured tolerance (but never a different
+admission decision or reason); wall-clock values (`ts`, `started_at`,
+`capacity_true_drops.last_at`) and episode ids, which the harness normalizes
+by rule.

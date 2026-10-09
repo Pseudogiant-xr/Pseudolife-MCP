@@ -6,14 +6,18 @@
 mod auth;
 mod bank;
 mod config;
+mod contradiction;
 mod embed;
 mod health;
+mod labels;
+mod meta_filter;
 mod http;
 mod mutants;
 mod principals;
 mod routes;
 mod search;
 mod service;
+mod slots;
 mod static_files;
 mod storage;
 
