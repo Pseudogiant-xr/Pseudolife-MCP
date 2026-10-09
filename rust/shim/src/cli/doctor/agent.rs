@@ -184,6 +184,43 @@ fn decode(body: &[u8]) -> Decoded {
     }
 }
 
+/// One `decompressobj` pass over `data`: what decodes before the stream
+/// ends or is cut short (zlib returns a truncated stream's output without
+/// an error), or `Err` for data that is not that format.
+fn inflate(mut reader: impl Read) -> Result<Vec<u8>, ()> {
+    let mut out = Vec::new();
+    match reader.read_to_end(&mut out) {
+        Ok(_) => Ok(out),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(out),
+        Err(_) => Err(()),
+    }
+}
+
+/// httpx's `Content-Encoding` decoders with neither brotli nor zstandard
+/// installed (the oracle environments have neither): comma-separated,
+/// stripped, lower-cased codings; `gzip` and `deflate` decoded in reverse
+/// order of listing, `identity` and unknown codings left as they are.
+/// `deflate` tries a zlib stream first and falls back to raw deflate, as
+/// httpx's `DeflateDecoder` does on its first chunk.
+fn content_decode(values: &[String], raw: &[u8]) -> Result<Vec<u8>, ()> {
+    let codings: Vec<String> = values
+        .iter()
+        .flat_map(|value| value.split(','))
+        .map(|coding| coding.trim().to_ascii_lowercase())
+        .filter(|coding| coding == "gzip" || coding == "deflate")
+        .collect();
+    let mut data = raw.to_vec();
+    for coding in codings.iter().rev() {
+        data = if coding == "gzip" {
+            inflate(flate2::read::GzDecoder::new(data.as_slice()))?
+        } else {
+            inflate(flate2::read::ZlibDecoder::new(data.as_slice()))
+                .or_else(|()| inflate(flate2::read::DeflateDecoder::new(data.as_slice())))?
+        };
+    }
+    Ok(data)
+}
+
 /// The registration state `probe_registration` returns for a readable
 /// saved instance. `token` is the credential snapshot taken afresh, as
 /// `CredentialProvider.from_environment().snapshot()` is at :650; its
@@ -240,7 +277,19 @@ pub(super) async fn probe(
         return "unavailable";
     };
     let status = response.status().as_u16();
-    let Ok(body) = response.bytes().await else {
+    let encodings: Vec<String> = response
+        .headers()
+        .get_all(reqwest::header::CONTENT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok().map(str::to_owned))
+        .collect();
+    let Ok(raw) = response.bytes().await else {
+        return "unavailable";
+    };
+    // httpx decodes the body as it reads it inside client.post; a
+    // DecodingError is no TransportError and reaches the doctor's
+    // `except`, which reports `unavailable`.
+    let Ok(body) = content_decode(&encodings, &raw) else {
         return "unavailable";
     };
     match status {
@@ -313,6 +362,52 @@ pub(super) async fn probe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_codings_decode_as_httpx_does() {
+        use flate2::{Compression, write};
+        use std::io::Write;
+        let plain = br#"{"bank_id": "b"}"#.to_vec();
+        let gzip = {
+            let mut encoder = write::GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&plain).unwrap();
+            encoder.finish().unwrap()
+        };
+        let zlib = {
+            let mut encoder = write::ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&plain).unwrap();
+            encoder.finish().unwrap()
+        };
+        let raw_deflate = {
+            let mut encoder = write::DeflateEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&plain).unwrap();
+            encoder.finish().unwrap()
+        };
+        let both = {
+            let mut encoder = write::ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&gzip).unwrap();
+            encoder.finish().unwrap()
+        };
+        let decode = |values: &[&str], raw: &[u8]| {
+            content_decode(
+                &values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>(),
+                raw,
+            )
+        };
+        assert_eq!(decode(&[], &plain), Ok(plain.clone()));
+        assert_eq!(decode(&[" GZIP "], &gzip), Ok(plain.clone()));
+        assert_eq!(decode(&["deflate"], &zlib), Ok(plain.clone()));
+        assert_eq!(decode(&["deflate"], &raw_deflate), Ok(plain.clone()));
+        assert_eq!(decode(&["gzip, deflate"], &both), Ok(plain.clone()));
+        assert_eq!(decode(&["gzip", "deflate"], &both), Ok(plain.clone()));
+        // Unknown codings (br without brotli) and identity pass through.
+        assert_eq!(decode(&["br", "identity"], &plain), Ok(plain.clone()));
+        // Not gzip at all: zlib.error, httpx's DecodingError.
+        assert_eq!(decode(&["gzip"], &plain), Err(()));
+        // A truncated stream yields what decoded, as decompressobj does.
+        let cut = decode(&["gzip"], &gzip[..gzip.len() - 8]).unwrap();
+        assert!(plain.starts_with(&cut));
+    }
 
     #[test]
     fn proof_message_is_python_ascii_compact_json() {

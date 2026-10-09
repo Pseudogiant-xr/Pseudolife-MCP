@@ -21,6 +21,13 @@ pub(super) struct Reply {
     pub(super) body: Vec<u8>,
     /// The final response's header fields.
     pub(super) headers: http::HeaderMap,
+    /// [`get_bounded`] only: the status arrived but reading the body failed
+    /// (a timeout, a reset, a cut-short body read to its end). [`get`]
+    /// answers `None` there instead.
+    pub(super) body_failed: bool,
+    /// [`get_bounded`] only: a redirect this port does not follow where
+    /// urllib would (an `ftp:` target, a target that is not text).
+    pub(super) unsupported: bool,
 }
 
 /// How much body a caller's `read(n)` takes: on a 2xx reply, and on any
@@ -57,10 +64,21 @@ pub(super) async fn get(
     get_with(origin, target, authorization, timeout, follow, None).await
 }
 
-/// [`get`] with the caller's body bounds: `response.read(n)` stops after
-/// `n` bytes, and an HTTP error status's body is read only as far as the
-/// caller's `exc.read(n)`. Used by `doctor`; [`get`] keeps its own bounds
-/// (the whole body, and none for an unfollowed non-2xx reply).
+/// [`get`] with the caller's body bounds and urllib's error replies, for
+/// `doctor`:
+/// - `response.read(n)` stops after `n` bytes, and an HTTP error status's
+///   body is read only as far as the caller's `exc.read(n)`; a bounded read
+///   whose length-delimited body ends early returns what arrived, as
+///   `HTTPResponse.read(amt)` does (http/client.py 3.11), where reading to
+///   the end fails as `_safe_read`'s `IncompleteRead` does;
+/// - a body that fails to read comes back as `body_failed`, not `None`;
+/// - redirects follow `Location`, else `URI`; where `HTTPRedirectHandler`
+///   raises `HTTPError` instead (neither header, a scheme it refuses, the
+///   repeat limits) the 3xx reply itself comes back, its body read, as the
+///   error's `fp` is.
+///
+/// [`get`] keeps its own behaviour: the whole body, none for an unfollowed
+/// non-2xx reply, `Location` only, and `None` for every failure.
 pub(super) async fn get_bounded(
     origin: &str,
     target: &str,
@@ -69,7 +87,17 @@ pub(super) async fn get_bounded(
     follow: bool,
     limits: Limits,
 ) -> Option<Reply> {
-    request(origin, target, authorization, timeout, follow, limits, None).await
+    request(
+        origin,
+        target,
+        authorization,
+        timeout,
+        follow,
+        limits,
+        None,
+        true,
+    )
+    .await
 }
 
 async fn get_with(
@@ -81,9 +109,21 @@ async fn get_with(
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<Reply> {
     let limits = (None, if follow { None } else { Some(0) });
-    request(origin, target, authorization, timeout, follow, limits, tls).await
+    request(
+        origin,
+        target,
+        authorization,
+        timeout,
+        follow,
+        limits,
+        tls,
+        false,
+    )
+    .await
+    .filter(|reply| !reply.body_failed)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request(
     origin: &str,
     target: &str,
@@ -92,26 +132,76 @@ async fn request(
     follow: bool,
     limits: Limits,
     tls: Option<Arc<rustls::ClientConfig>>,
+    urllib_errors: bool,
 ) -> Option<Reply> {
     let mut url = format!("{origin}{target}");
     let mut visited: HashMap<String, u32> = HashMap::new();
     loop {
-        let (reply, location) = once(&url, authorization, timeout, limits, tls.clone()).await?;
-        if !(follow && matches!(reply.status, 301 | 302 | 303 | 307 | 308)) {
+        let mut reply = once(
+            &url,
+            authorization,
+            timeout,
+            limits,
+            urllib_errors,
+            tls.clone(),
+        )
+        .await?;
+        if !(follow && matches!(reply.status, 301 | 302 | 303 | 307 | 308)) || reply.body_failed {
             return Some(reply);
         }
-        let next: String = reqwest::Url::parse(&url)
-            .ok()?
-            .join(location.as_deref()?)
+        // urllib raises HTTPError carrying this reply where it stops; `get`
+        // has always answered None there.
+        let stop = |mut reply: Reply, unsupported: bool| {
+            reply.unsupported = unsupported;
+            urllib_errors.then_some(reply)
+        };
+        let named = reply
+            .headers
+            .get(http::header::LOCATION)
+            .or(if urllib_errors {
+                reply.headers.get("URI")
+            } else {
+                None
+            });
+        let Some(named) = named else {
+            return stop(reply, false);
+        };
+        let Ok(named) = named.to_str().map(str::to_owned) else {
+            return stop(reply, true);
+        };
+        let Some(next) = reqwest::Url::parse(&url)
             .ok()
-            .filter(|next| matches!(next.scheme(), "http" | "https"))?
-            .into();
+            .and_then(|base| base.join(&named).ok())
+        else {
+            return stop(reply, true);
+        };
+        match next.scheme() {
+            "http" | "https" => {}
+            "ftp" => return stop(reply, true),
+            _ => return stop(reply, false),
+        }
+        let next: String = next.into();
         if visited.get(&next).copied().unwrap_or(0) >= 4 || visited.len() >= 10 {
-            return None;
+            return stop(reply, false);
         }
         *visited.entry(next.clone()).or_insert(0) += 1;
+        reply.body.clear();
         url = next;
     }
+}
+
+/// A body cut short of its length: hyper's length decoder fails with an
+/// `UnexpectedEof` I/O error, which `HTTPResponse.read(amt)` treats as the
+/// end of the body.
+fn ended_early(error: &hyper::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(io) = current.downcast_ref::<io::Error>() {
+            return io.kind() == io::ErrorKind::UnexpectedEof;
+        }
+        source = current.source();
+    }
+    false
 }
 
 trait Stream: AsyncRead + AsyncWrite + Send + Unpin {}
@@ -122,8 +212,9 @@ async fn once(
     authorization: Option<&[u8]>,
     timeout: Duration,
     limits: Limits,
+    short_reads: bool,
     tls: Option<Arc<rustls::ClientConfig>>,
-) -> Option<(Reply, Option<String>)> {
+) -> Option<Reply> {
     let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
     } else {
@@ -191,40 +282,42 @@ async fn once(
     let reply = async {
         let response = sender.send_request(request).await.ok()?;
         let status = response.status().as_u16();
-        let location = response
-            .headers()
-            .get(http::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
         let headers = response.headers().clone();
         let limit = if (200..300).contains(&status) {
             limits.0
         } else {
             limits.1
         };
+        // read(amt) on a chunked body raises IncompleteRead when cut short.
+        let chunked = headers.contains_key(http::header::TRANSFER_ENCODING);
         let mut body = Vec::new();
+        let mut body_failed = false;
         let mut incoming = response.into_body();
         while limit.is_none_or(|limit| body.len() < limit) {
             match incoming.frame().await {
                 None => break,
-                Some(frame) => {
-                    if let Ok(data) = frame.ok()?.into_data() {
+                Some(Ok(frame)) => {
+                    if let Ok(data) = frame.into_data() {
                         body.extend_from_slice(&data);
                     }
+                }
+                Some(Err(error)) => {
+                    body_failed =
+                        !(short_reads && limit.is_some() && !chunked && ended_early(&error));
+                    break;
                 }
             }
         }
         if let Some(limit) = limit {
             body.truncate(limit);
         }
-        Some((
-            Reply {
-                status,
-                body,
-                headers,
-            },
-            location,
-        ))
+        Some(Reply {
+            status,
+            body,
+            headers,
+            body_failed,
+            unsupported: false,
+        })
     }
     .await;
     driver.abort();
@@ -600,7 +693,8 @@ mod tests {
         assert!(
             get_bounded(&origin, "/a", None, timeout, false, (None, None))
                 .await
-                .is_none()
+                .unwrap()
+                .body_failed
         );
         task.abort();
         // An unfollowed error status's body is read as far as exc.read(n).
@@ -618,6 +712,99 @@ mod tests {
         let plain = get(&origin, "/a", None, timeout, false).await.unwrap();
         assert_eq!((plain.status, plain.body.len()), (409, 0));
         task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_bounded_read_of_a_body_cut_short_returns_what_arrived() {
+        // Content-Length 100, then 50 bytes (or none) and a clean close:
+        // HTTPResponse.read(amt) returns what arrived; reading to the end
+        // fails as _safe_read's IncompleteRead does, and `get` stays None.
+        let timeout = Duration::from_millis(500);
+        for sent in [50usize, 0] {
+            let head = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n";
+            let mut reply = head.to_vec();
+            reply.extend(std::iter::repeat_n(b'y', sent));
+            let (port, task) = server(reply, 4096, Duration::ZERO, None).await;
+            let origin = format!("http://127.0.0.1:{port}");
+            let bounded = get_bounded(&origin, "/a", None, timeout, false, (Some(1024), Some(0)))
+                .await
+                .unwrap();
+            assert_eq!((bounded.body.len(), bounded.body_failed), (sent, false));
+            let whole = get_bounded(&origin, "/a", None, timeout, false, (None, None))
+                .await
+                .unwrap();
+            assert!(whole.body_failed);
+            assert!(get(&origin, "/a", None, timeout, true).await.is_none());
+            task.abort();
+        }
+        // A chunked body cut short raises IncompleteRead even under read(amt).
+        let chunked =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n10\r\nshort";
+        let (port, task) = server(chunked.to_vec(), 4096, Duration::ZERO, None).await;
+        let reply = get_bounded(
+            &format!("http://127.0.0.1:{port}"),
+            "/a",
+            None,
+            timeout,
+            false,
+            (Some(1024), Some(0)),
+        )
+        .await
+        .unwrap();
+        assert!(reply.body_failed);
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn bounded_redirects_follow_uri_and_return_where_urllib_raises() {
+        let timeout = Duration::from_millis(500);
+        let ok = |status: &str, extra: &str, body: &str| {
+            format!(
+                "HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .into_bytes()
+        };
+        // URI only: get_bounded follows it to the 200; get keeps None.
+        let target = ok("200 OK", "", "moved");
+        let (target_port, target_task) = server(target, 4096, Duration::ZERO, None).await;
+        let uri = ok(
+            "302 Found",
+            &format!("URI: http://127.0.0.1:{target_port}/b\r\n"),
+            "",
+        );
+        let (port, task) = server(uri, 4096, Duration::ZERO, None).await;
+        let origin = format!("http://127.0.0.1:{port}");
+        let followed = get_bounded(&origin, "/a", None, timeout, true, (None, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            (followed.status, followed.body.as_slice()),
+            (200, b"moved".as_slice())
+        );
+        assert!(get(&origin, "/a", None, timeout, true).await.is_none());
+        task.abort();
+        target_task.abort();
+        // No target, a refused scheme, the repeat limit: the 3xx itself.
+        for (extra, unsupported) in [
+            ("", false),
+            ("Location: gopher://x/y\r\n", false),
+            ("Location: /a\r\n", false),
+            ("Location: ftp://x/y\r\n", true),
+        ] {
+            let (port, task) =
+                server(ok("307 Again", extra, "kept"), 4096, Duration::ZERO, None).await;
+            let origin = format!("http://127.0.0.1:{port}");
+            let stopped = get_bounded(&origin, "/a", None, timeout, true, (None, None))
+                .await
+                .unwrap();
+            assert_eq!(
+                (stopped.status, stopped.body.as_slice(), stopped.unsupported),
+                (307, b"kept".as_slice(), unsupported)
+            );
+            assert!(get(&origin, "/a", None, timeout, true).await.is_none());
+            task.abort();
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

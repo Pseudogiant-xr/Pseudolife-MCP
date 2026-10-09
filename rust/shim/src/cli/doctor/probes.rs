@@ -9,6 +9,10 @@ pub(super) struct Answer {
     status: u16,
     board: Vec<Vec<u8>>,
     body: Vec<u8>,
+    /// The status arrived; reading the body failed.
+    body_failed: bool,
+    /// A redirect urllib follows and this port does not.
+    unsupported: bool,
 }
 
 /// One GET the way urllib sends it (`cli::hook_http`: urllib's request
@@ -58,6 +62,8 @@ async fn get(
         status: reply.status,
         board,
         body: reply.body,
+        body_failed: reply.body_failed,
+        unsupported: reply.unsupported,
     })
 }
 
@@ -93,6 +99,10 @@ pub(super) async fn board(
     else {
         return Ok(line("unreachable", "off - daemon unreachable".into()));
     };
+    // read(65536) failing inside the `with`: the probe's `except Exception`.
+    if answer.body_failed {
+        return Ok(line("unreachable", "off - daemon unreachable".into()));
+    }
     if !success(answer.status) {
         let state = match answer.status {
             401 => "unauthorized",
@@ -196,11 +206,18 @@ pub(super) async fn maintainer(
 ) -> Res<Map<String, Value>> {
     let mut out = Map::new();
     let limits = (Some(1 << 20), Some(65536));
-    let Some(answer) = get(url, "/api/maintainer", Some(token), timeout, false, limits).await
-    else {
-        out.insert("state".into(), json!("not_checked"));
-        out.insert("line".into(), json!("not checked - daemon unreachable"));
-        return Ok(out);
+    let answer = get(url, "/api/maintainer", Some(token), timeout, false, limits).await;
+    let answer = match answer {
+        // exc.read(65536) runs inside `except HTTPError`: its failure escapes
+        // maintainer_probe and doctor ends in a traceback. Defer instead.
+        Some(answer) if answer.body_failed && !success(answer.status) => return Err(Defer),
+        Some(answer) if !answer.body_failed => answer,
+        // A failed read(1 << 20), or no answer: the `except Exception`.
+        _ => {
+            out.insert("state".into(), json!("not_checked"));
+            out.insert("line".into(), json!("not checked - daemon unreachable"));
+            return Ok(out);
+        }
     };
     let parsed = loads_bytes(&answer.body)?;
     let body = match parsed {
@@ -265,14 +282,19 @@ pub(super) async fn maintainer(
 }
 
 /// `shim.probe_health(url)`: the parsed body of any answer, `None` when
-/// there is none or it is not JSON.
+/// there is none, its body fails to read or it is not JSON. A 3xx reply here
+/// is where urllib's redirect handler raised HTTPError (no target, a refused
+/// scheme, the repeat limits): `e.read()` parses its body like any other.
 pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
     let Some(answer) = get(url, "/health", None, timeout, true, (None, None)).await else {
         return Ok(None);
     };
-    if (300..400).contains(&answer.status) {
-        // A redirect urllib would not follow (limit, scheme, status).
+    if answer.unsupported {
+        // An ftp: or non-text redirect target urllib would still follow.
         return Err(Defer);
+    }
+    if answer.body_failed {
+        return Ok(None);
     }
     match std::str::from_utf8(&answer.body) {
         Ok(text) => json_loads(text),
