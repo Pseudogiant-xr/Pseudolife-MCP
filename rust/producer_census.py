@@ -372,7 +372,9 @@ def env_calls(text: str, path: str) -> list[dict]:
                 scalar = value_shape(token)
                 if "$" in token:
                     scalar = {"expression": token}
-                if "literal" not in scalar and not path.endswith(".ps1") and not any(x in token for x in ("$", "{", "(", "+")):
+                printed = bool(re.search(r"Write-(?:Host|Output)\b", content))
+                powershell = path.endswith(".ps1") or bool(re.search(r"\$env:" + re.escape(name), content))
+                if "literal" not in scalar and (not powershell or printed) and not any(x in token for x in ("$", "{", "(", "+")):
                     scalar = {"literal": token}
                 if "literal" in scalar:
                     scalar["literal"] = str(scalar["literal"])
@@ -381,6 +383,9 @@ def env_calls(text: str, path: str) -> list[dict]:
                 call.pop("dynamic", None)
                 call["shape"].pop("expression", None)
                 call["usage"] = "assignment"
+                if printed:
+                    call["usage"] = "assignment-example"
+                    call["evidence"] = "documented"
             result.append(call)
     return result
 

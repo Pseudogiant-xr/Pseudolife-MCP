@@ -20682,6 +20682,21 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/migrate-pg18.ps1:103",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$NewVolume"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:23",
           "shape": {
@@ -20714,21 +20729,6 @@
         {
           "evidence": "static",
           "location": "ops/migrate-pg18.ps1:101",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "$NewVolume"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/migrate-pg18.ps1:103",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -23123,7 +23123,7 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "documented",
@@ -23156,6 +23156,36 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/install-codex-shim-autostart.ps1:155",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "http://host.docker.internal:$Port/v1"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/install-shim-autostart.ps1:284",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "http://host.docker.internal:$Port/v1"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:107",
           "shape": {
@@ -23172,21 +23202,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.ps1:155",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$Port/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:131",
           "shape": {
             "channel": "environment",
@@ -23195,21 +23210,6 @@
             "parameters": {
               "value": {
                 "expression": "http://host.docker.internal:$PORT/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.ps1:284",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://host.docker.internal:$Port/v1"
               }
             }
           },
@@ -23462,7 +23462,7 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "documented",
@@ -23495,6 +23495,36 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/install-codex-shim-autostart.ps1:159",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "auto"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/install-shim-autostart.ps1:288",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "auto"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:119",
           "shape": {
@@ -23511,21 +23541,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.ps1:159",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "auto"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:135",
           "shape": {
             "channel": "environment",
@@ -23534,21 +23549,6 @@
             "parameters": {
               "value": {
                 "literal": "auto"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.ps1:288",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "auto"
               }
             }
           },
@@ -23915,7 +23915,7 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "documented",
@@ -23948,6 +23948,36 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/install-codex-shim-autostart.ps1:157",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "http://pseudolife-extractor:8081/v1"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/install-shim-autostart.ps1:286",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "http://pseudolife-extractor:8081/v1"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:117",
           "shape": {
@@ -23964,21 +23994,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.ps1:157",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://pseudolife-extractor:8081/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:133",
           "shape": {
             "channel": "environment",
@@ -23987,21 +24002,6 @@
             "parameters": {
               "value": {
                 "literal": "http://pseudolife-extractor:8081/v1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.ps1:286",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "http://pseudolife-extractor:8081/v1"
               }
             }
           },
@@ -24183,7 +24183,7 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "documented",
@@ -24216,6 +24216,36 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/install-codex-shim-autostart.ps1:158",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/install-shim-autostart.ps1:287",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:118",
           "shape": {
@@ -24232,21 +24262,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.ps1:158",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:134",
           "shape": {
             "channel": "environment",
@@ -24255,21 +24270,6 @@
             "parameters": {
               "value": {
                 "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.ps1:287",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "extractor"
               }
             }
           },
@@ -24649,7 +24649,7 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "documented",
@@ -24682,6 +24682,36 @@
           "usage": "assignment"
         },
         {
+          "evidence": "documented",
+          "location": "ops/install-codex-shim-autostart.ps1:156",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
+          "evidence": "documented",
+          "location": "ops/install-shim-autostart.ps1:285",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "extractor"
+              }
+            }
+          },
+          "usage": "assignment-example"
+        },
+        {
           "evidence": "static",
           "location": "ops/.env.example:108",
           "shape": {
@@ -24698,21 +24728,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-codex-shim-autostart.ps1:156",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-codex-shim-autostart.sh:132",
           "shape": {
             "channel": "environment",
@@ -24721,21 +24736,6 @@
             "parameters": {
               "value": {
                 "literal": "extractor"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-shim-autostart.ps1:285",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "extractor"
               }
             }
           },
@@ -28930,8 +28930,8 @@
           "usage": "assignment"
         },
         {
-          "evidence": "static",
-          "location": "docs/atlas/atlas.json:1437",
+          "evidence": "documented",
+          "location": "ops/install.ps1:1766",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -28942,11 +28942,11 @@
               }
             }
           },
-          "usage": "assignment"
+          "usage": "assignment-example"
         },
         {
           "evidence": "static",
-          "location": "ops/install.ps1:1766",
+          "location": "docs/atlas/atlas.json:1437",
           "shape": {
             "channel": "environment",
             "complete": true,
