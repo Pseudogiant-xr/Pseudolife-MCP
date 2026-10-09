@@ -111,10 +111,14 @@ def test_coverage_guard_rejects_a_removed_check(monkeypatch):
         test_original_checks_remain_gated_on_the_expected_shards()
 
 
-def test_coverage_contract_allows_added_timing_output(monkeypatch):
+@pytest.mark.parametrize("name, old, new", [
+    ("Run every eval harness test", "--junitxml", "--durations=10 --junitxml"),
+    ("CLI differential harness", "--row episode", "--row episode --row doctor"),
+])
+def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())
     step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
-                if s.get("name") == "Run every eval harness test")
-    step["run"] = step["run"].replace("--junitxml", "--durations=10 --junitxml")
+                if s.get("name") == name)
+    step["run"] = step["run"].replace(old, new)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     test_original_checks_remain_gated_on_the_expected_shards()
