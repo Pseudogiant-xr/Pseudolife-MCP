@@ -16,7 +16,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
-| Stored callers' POST `/api/config` and `/api/daemon-notice` gate | source-aware resolution and the exact restricted-route policy are implemented; HTTP must invoke that policy before dispatch to answer 403 `operator_principal_required` | HTTP-SECURITY |
+| Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
 
 ## Startup and configuration
 

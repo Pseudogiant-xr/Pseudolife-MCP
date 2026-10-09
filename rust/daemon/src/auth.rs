@@ -211,7 +211,7 @@ impl PrincipalStore {
     /// Replace the snapshot from `(principal, token_hash, revoked)` rows (no
     /// tier, board admitted): the spike's entry point, now used by the unit
     /// tests only. Same rules as [`Self::refresh`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn load(
         &self,
         rows: Vec<(String, Option<String>, bool)>,
@@ -240,6 +240,7 @@ impl PrincipalStore {
     /// Python dict update does). Only rows with a non-empty token hash that
     /// are not revoked authenticate. The snapshot is as old as the read's
     /// start, so a slow read cannot renew a stale snapshot.
+    #[cfg(test)]
     pub fn refresh(
         &self,
         rows: Vec<StoredPrincipal>,
@@ -377,8 +378,8 @@ pub fn operator_route(path: &str) -> bool {
 }
 
 #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
-pub fn operator_allowed(source: Option<PrincipalSource>, path: &str) -> bool {
-    source != Some(PrincipalSource::Store) || !operator_route(path)
+pub fn operator_allowed(source: Option<PrincipalSource>, method: &str, path: &str) -> bool {
+    method != "POST" || source != Some(PrincipalSource::Store) || !operator_route(path)
 }
 
 #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
@@ -541,11 +542,24 @@ mod tests {
     #[test]
     fn operator_policy_uses_resolution_source() {
         for path in ["/api/config", "/api/daemon-notice"] {
-            assert!(!operator_allowed(Some(PrincipalSource::Store), path));
-            assert!(operator_allowed(Some(PrincipalSource::Environment), path));
-            assert!(operator_allowed(Some(PrincipalSource::Open), path));
+            assert!(!operator_allowed(
+                Some(PrincipalSource::Store),
+                "POST",
+                path
+            ));
+            assert!(operator_allowed(Some(PrincipalSource::Store), "GET", path));
+            assert!(operator_allowed(
+                Some(PrincipalSource::Environment),
+                "POST",
+                path
+            ));
+            assert!(operator_allowed(Some(PrincipalSource::Open), "POST", path));
         }
-        assert!(operator_allowed(Some(PrincipalSource::Store), "/api/stats"));
+        assert!(operator_allowed(
+            Some(PrincipalSource::Store),
+            "POST",
+            "/api/stats"
+        ));
     }
 
     #[test]

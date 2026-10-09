@@ -77,10 +77,13 @@ fn inspect(v: &Value, env: &EnvTokens, store: &PrincipalStore) -> Value {
                 Some(PrincipalSource::Store) => Some("store"),
                 None => None,
             };
+            let policy: Vec<_> = v["operator_requests"].as_array().into_iter().flatten()
+                .map(|request| json!({"method": request["method"], "path": request["path"],
+                    "allowed": auth::operator_allowed(source, request["method"].as_str().unwrap_or(""),
+                        request["path"].as_str().unwrap_or(""))}))
+                .collect();
             json!({"status": status, "principal": principal, "source": source_name,
-            "config_allowed": auth::operator_allowed(source, "/api/config"),
-            "notice_allowed": auth::operator_allowed(source, "/api/daemon-notice"),
-            "stats_allowed": auth::operator_allowed(source, "/api/stats")})
+                "operator_policy": policy})
         })
         .collect();
     let (shadowed, invalid) = store.skipped_rows();

@@ -8,6 +8,7 @@ become event labels; unchanged timestamps keep their original event labels.
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import asdict
 import hashlib
 import json
@@ -32,6 +33,29 @@ import pgdisposable as pg
 from pseudolife_memory import principal_store as oracle
 from pseudolife_memory import principals as identities
 from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL, SCHEMA_SQL
+
+
+def operator_post_paths():
+    tree = ast.parse((REPO / "pseudolife_memory/web/api.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "_OPERATOR_POST_PATHS"
+                for target in node.targets):
+            value = node.value
+            if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name) \
+                    or value.func.id != "frozenset" or len(value.args) != 1:
+                raise AssertionError("oracle operator route declaration changed")
+            paths = ast.literal_eval(value.args[0])
+            if not isinstance(paths, set) or not all(isinstance(path, str) for path in paths):
+                raise AssertionError("oracle operator routes are not strings")
+            return paths
+    raise AssertionError("oracle operator routes missing")
+
+
+OPERATOR_POST_PATHS = operator_post_paths()
+OPERATOR_REQUESTS = [{"method": method, "path": path}
+                     for path in sorted(OPERATOR_POST_PATHS) + ["/api/stats"]
+                     for method in ("GET", "POST")]
 
 GOLDEN = HERE / "goldens" / "principals.json"
 MUTANTS = ["principal-shadow", "principal-unavailable", "principal-add-race",
@@ -147,13 +171,14 @@ def normalizer_controls():
 def prefix_admission_controls(check=pg._check):
     if check("pl_cf_prn_1") != "pl_cf_prn_1":
         raise AssertionError("principal fixture prefix refused")
-    for name in ("pl_cf_prn2_1", "pl_cf_pr_1", "pl_cf_principal_1"):
+    for name in ("pl_cf_prn2_1", "pl_cf_pr_1", "pl_cf_principal_1",
+                 "pl_cf_prn_", "pl_cf_prn_A", "pl_cf_prn_x-y"):
         try:
             check(name)
         except ValueError:
             continue
         raise AssertionError("near-miss disposable prefix admitted")
-    return 3
+    return 6
 
 
 def prefix_mutant_control():
@@ -162,16 +187,18 @@ def prefix_mutant_control():
     original = "if not DISPOSABLE_NAME.fullmatch(name):"
     if source.count(original) != 1:
         raise AssertionError("disposable admission mutant anchor changed")
-    mutant = source.replace(original, "if not name.startswith(PREFIX[:-2]):")
-    namespace = {}
-    exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
-    try:
-        prefix_admission_controls(namespace["_check"])
-    except AssertionError as exc:
-        if str(exc) != "near-miss disposable prefix admitted":
-            raise
-        return {"near_miss_refusals": refused, "mutant_caught": True}
-    raise AssertionError("disposable admission source mutant survived")
+    for predicate in ("name.startswith(PREFIX[:-2])", "name.startswith(PREFIX)"):
+        mutant = source.replace(original, "if not " + predicate + ":")
+        namespace = {}
+        exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
+        try:
+            prefix_admission_controls(namespace["_check"])
+        except AssertionError as exc:
+            if str(exc) != "near-miss disposable prefix admitted":
+                raise
+            continue
+        raise AssertionError("disposable admission source mutant survived")
+    return {"near_miss_refusals": refused, "mutant_caught": True, "mutants_caught": 2}
 
 
 class PythonArm:
@@ -298,10 +325,12 @@ class PythonArm:
                 except identities.PrincipalsUnavailable:
                     principal = source = None
                     status = "unavailable"
+                policy = [{**request, "allowed": not (
+                    source == identities.SOURCE_STORE and request["method"] == "POST"
+                    and request["path"] in OPERATOR_POST_PATHS)}
+                    for request in v.get("operator_requests", [])]
                 resolved.append({"status": status, "principal": principal, "source": source,
-                                 "config_allowed": source != identities.SOURCE_STORE,
-                                 "notice_allowed": source != identities.SOURCE_STORE,
-                                 "stats_allowed": True})
+                                 "operator_policy": policy})
             return {"available": self.snapshot.available(), "len": len(self.snapshot),
                     "bank": self.snapshot.bank, "shadowed": self.snapshot.shadowed_rows,
                     "invalid": self.snapshot.invalid_rows, "excluded": sorted(self.snapshot.excluded_names),
@@ -510,6 +539,7 @@ def scenarios(p):
     def inspect(label, names=(), tokens=(), headers=(), allowed=()):
         p.step(label, {"op": "inspect", "names": list(names),
                        "headers": ["Bearer " + token for token in tokens] + list(headers),
+                       "operator_requests": OPERATOR_REQUESTS,
                        "allowed": list(allowed)})
     reset = {"op": "reset", "env_map": env_token + ":desk", "single": single}
     p.step("configured", reset)
@@ -574,6 +604,14 @@ def scenarios(p):
     p.adversarial("unpaired-row", "INSERT INTO principals(principal,created_at) VALUES('unpaired',1000)",
                   {("unpaired", "created_at"): None})
     p.step("revoke-pending", {"op": "revoke", "name": "gone"}, offsets={("gone", "revoked_at"): 0})
+    revoked_token = p.secret("revoked-live-code")
+    p.adversarial("revoked-with-live-codes",
+                  "UPDATE principals SET code_hash=%s, code_expires_at="
+                  "EXTRACT(EPOCH FROM clock_timestamp())::double precision+600, "
+                  "paired_code_hash=%s, token_hash=%s, paired_at="
+                  "EXTRACT(EPOCH FROM clock_timestamp())::double precision WHERE principal='gone'",
+                  {("gone", "code_expires_at"): 600, ("gone", "paired_at"): 0},
+                  (p.codes["gone"], p.codes["gone"], h(revoked_token)))
     p.step("list-pending-expired-revoked-unpaired", {"op": "list"})
     p.step("load-pending-states", {"op": "load"})
     def redeem(label, name, token, **kw):
@@ -581,6 +619,8 @@ def scenarios(p):
                offsets={(name, "paired_at"): 0})
     redeem("expired-code-refused", "expired", a)
     redeem("revoked-code-refused", "gone", a)
+    redeem("revoked-live-code-refused", "gone", p.secret("revoked-replacement"))
+    redeem("revoked-live-retry-refused", "gone", revoked_token)
     redeem("shadowed-code-unspent", "desk", a)
     for name in ("default", "daemon", "maintainer"):
         redeem("reserved-code-unspent-" + name, name, a)

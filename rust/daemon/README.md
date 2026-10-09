@@ -69,7 +69,7 @@ and post-state, never bearer tokens, pairing codes or connection strings.
 Only a preinstalled vector extension's verified initial version is fixture
 metadata: extension names and namespaces remain exact, and changing its
 version during an arm fails. The principal store never uses that extension.
-The disposable admission control refuses three near-miss prefixes before
-connection setup and kills a permissive-prefix source mutant in an isolated
+The disposable admission control refuses six near-miss names before
+connection setup and kills two permissive-prefix source mutants in isolated
 module namespace, leaving the actual database guard unchanged.
 The `principal-harness` feature is absent from the serving release build.

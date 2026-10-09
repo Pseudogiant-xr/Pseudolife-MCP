@@ -425,73 +425,334 @@
       "status": "unavailable",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "desk",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -602,17 +863,75 @@
       "status": "unavailable",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unavailable",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -696,41 +1015,186 @@
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "quiet",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "desk",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -772,9 +1236,38 @@
       "status": "principal",
       "principal": "desk",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -808,41 +1301,186 @@
       "status": "principal",
       "principal": "encoded",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "nbsp",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "encoded",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "encoded",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "nbsp",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -946,25 +1584,112 @@
       "status": "unavailable",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "desk",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1005,9 +1730,38 @@
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1062,9 +1816,38 @@
       "status": "principal",
       "principal": "race",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1097,17 +1880,75 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "race",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1148,9 +1989,38 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1189,25 +2059,112 @@
       "status": "principal",
       "principal": "default",
       "source": "open",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "open",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "open",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -1247,9 +2204,38 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -10247,6 +11233,627 @@
    }
   },
   {
+   "case": "adversarial-revoked-with-live-codes",
+   "output": {
+    "adversarial_fixture": true
+   },
+   "state": {
+    "catalog": {
+     "extensions": [
+      [
+       "plpgsql",
+       "1.0",
+       "pg_catalog"
+      ],
+      [
+       "vector",
+       "<fixture-vector-version>",
+       "public"
+      ]
+     ],
+     "schemas": [
+      [
+       "public"
+      ]
+     ],
+     "columns": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ],
+     "constraints": [
+      [
+       "public",
+       "meta",
+       "meta_key_not_null",
+       "n",
+       "NOT NULL key"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "p",
+       "PRIMARY KEY (key)"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_value_not_null",
+       "n",
+       "NOT NULL value"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_board_not_null",
+       "n",
+       "NOT NULL board"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "u",
+       "UNIQUE (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ]
+     ],
+     "indexes": [
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "CREATE UNIQUE INDEX principals_pkey ON public.principals USING btree (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ]
+     ],
+     "sequences": [],
+     "functions": [],
+     "triggers": [],
+     "views": [],
+     "column_types": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ]
+     ],
+     "sequence_bounds": [],
+     "owners_and_comments": [
+      [
+       "public",
+       "meta",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "meta_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_code_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_token_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "coordination_bank_id",
+        ""
+       ]
+      ]
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at"
+      ],
+      "rows": [
+       [
+        "daemon",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<adversarial-invite-daemon:code_expires_at+900>",
+        null,
+        "<adversarial-invite-daemon:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "default",
+        null,
+        null,
+        true,
+        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "<adversarial-invite-default:code_expires_at+900>",
+        null,
+        "<adversarial-invite-default:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "desk",
+        null,
+        null,
+        true,
+        "6a7e7d07d17711e0aecb2855a89b2a3fac1f50533d35af54fa835d2ed1996675",
+        "<invite-desk:code_expires_at+900>",
+        null,
+        "<invite-desk:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "expired",
+        null,
+        null,
+        true,
+        "b66b98cc7e921e146a28f512870c1c2d05b0febe3d89c43f01d2b6f02d421f44",
+        1000.0,
+        null,
+        "<invite-expired:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "gone",
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:created_at+0>",
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
+        "<revoke-pending:revoked_at+0>"
+       ],
+       [
+        "laptop",
+        null,
+        "core",
+        true,
+        "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
+        "<invite-laptop:code_expires_at+900>",
+        null,
+        "<invite-laptop:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "maintainer",
+        null,
+        null,
+        true,
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "<adversarial-invite-maintainer:code_expires_at+900>",
+        null,
+        "<adversarial-invite-maintainer:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "pending",
+        null,
+        "minimal",
+        true,
+        "6294b5f6171cbfafe68a6340db974723cae6bb40ff4d3749001e4f083f545725",
+        "<invite-pending:code_expires_at+900>",
+        null,
+        "<invite-pending:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "quiet",
+        null,
+        "full",
+        false,
+        "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
+        "<invite-quiet:code_expires_at+900>",
+        null,
+        "<invite-quiet:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "unpaired",
+        null,
+        null,
+        true,
+        null,
+        null,
+        null,
+        1000.0,
+        null,
+        null
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
    "case": "list-pending-expired-revoked-unpaired",
    "output": {
     "rows": [
@@ -10297,12 +11904,12 @@
      {
       "principal": "gone",
       "state": "revoked",
-      "paired": false,
+      "paired": true,
       "tier": null,
       "board": true,
-      "code_expires_at": null,
+      "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
-      "paired_at": null,
+      "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>"
      },
      {
@@ -10917,14 +12524,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -11538,14 +13145,1256 @@
        ],
        [
         "gone",
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:created_at+0>",
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
+        "<revoke-pending:revoked_at+0>"
+       ],
+       [
+        "laptop",
+        null,
+        "core",
+        true,
+        "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
+        "<invite-laptop:code_expires_at+900>",
+        null,
+        "<invite-laptop:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "maintainer",
+        null,
+        null,
+        true,
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "<adversarial-invite-maintainer:code_expires_at+900>",
+        null,
+        "<adversarial-invite-maintainer:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "pending",
+        null,
+        "minimal",
+        true,
+        "6294b5f6171cbfafe68a6340db974723cae6bb40ff4d3749001e4f083f545725",
+        "<invite-pending:code_expires_at+900>",
+        null,
+        "<invite-pending:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "quiet",
+        null,
+        "full",
+        false,
+        "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
+        "<invite-quiet:code_expires_at+900>",
+        null,
+        "<invite-quiet:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "unpaired",
         null,
         null,
         true,
         null,
         null,
         null,
-        "<invite-gone:created_at+0>",
+        1000.0,
         null,
+        null
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "case": "revoked-live-code-refused",
+   "output": {
+    "row": null
+   },
+   "state": {
+    "catalog": {
+     "extensions": [
+      [
+       "plpgsql",
+       "1.0",
+       "pg_catalog"
+      ],
+      [
+       "vector",
+       "<fixture-vector-version>",
+       "public"
+      ]
+     ],
+     "schemas": [
+      [
+       "public"
+      ]
+     ],
+     "columns": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ],
+     "constraints": [
+      [
+       "public",
+       "meta",
+       "meta_key_not_null",
+       "n",
+       "NOT NULL key"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "p",
+       "PRIMARY KEY (key)"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_value_not_null",
+       "n",
+       "NOT NULL value"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_board_not_null",
+       "n",
+       "NOT NULL board"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "u",
+       "UNIQUE (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ]
+     ],
+     "indexes": [
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "CREATE UNIQUE INDEX principals_pkey ON public.principals USING btree (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ]
+     ],
+     "sequences": [],
+     "functions": [],
+     "triggers": [],
+     "views": [],
+     "column_types": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ]
+     ],
+     "sequence_bounds": [],
+     "owners_and_comments": [
+      [
+       "public",
+       "meta",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "meta_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_code_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_token_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "coordination_bank_id",
+        ""
+       ]
+      ]
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at"
+      ],
+      "rows": [
+       [
+        "daemon",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<adversarial-invite-daemon:code_expires_at+900>",
+        null,
+        "<adversarial-invite-daemon:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "default",
+        null,
+        null,
+        true,
+        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "<adversarial-invite-default:code_expires_at+900>",
+        null,
+        "<adversarial-invite-default:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "desk",
+        null,
+        null,
+        true,
+        "6a7e7d07d17711e0aecb2855a89b2a3fac1f50533d35af54fa835d2ed1996675",
+        "<invite-desk:code_expires_at+900>",
+        null,
+        "<invite-desk:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "expired",
+        null,
+        null,
+        true,
+        "b66b98cc7e921e146a28f512870c1c2d05b0febe3d89c43f01d2b6f02d421f44",
+        1000.0,
+        null,
+        "<invite-expired:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "gone",
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:created_at+0>",
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
+        "<revoke-pending:revoked_at+0>"
+       ],
+       [
+        "laptop",
+        null,
+        "core",
+        true,
+        "6d0d469eb943381c992442c239d3b7eaf595f93e7a8b1a2848e094b36c8a351e",
+        "<invite-laptop:code_expires_at+900>",
+        null,
+        "<invite-laptop:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "maintainer",
+        null,
+        null,
+        true,
+        "1be573bd4fd741a17ead23102a77d1ea623e447d5b2b7d47ef30c40aa986ea16",
+        "<adversarial-invite-maintainer:code_expires_at+900>",
+        null,
+        "<adversarial-invite-maintainer:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "pending",
+        null,
+        "minimal",
+        true,
+        "6294b5f6171cbfafe68a6340db974723cae6bb40ff4d3749001e4f083f545725",
+        "<invite-pending:code_expires_at+900>",
+        null,
+        "<invite-pending:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "quiet",
+        null,
+        "full",
+        false,
+        "d688ae5b56a2edf43467fc811e428efc3fe43a04e0dffbf206fe1e12cde9a2d6",
+        "<invite-quiet:code_expires_at+900>",
+        null,
+        "<invite-quiet:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "unpaired",
+        null,
+        null,
+        true,
+        null,
+        null,
+        null,
+        1000.0,
+        null,
+        null
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "case": "revoked-live-retry-refused",
+   "output": {
+    "row": null
+   },
+   "state": {
+    "catalog": {
+     "extensions": [
+      [
+       "plpgsql",
+       "1.0",
+       "pg_catalog"
+      ],
+      [
+       "vector",
+       "<fixture-vector-version>",
+       "public"
+      ]
+     ],
+     "schemas": [
+      [
+       "public"
+      ]
+     ],
+     "columns": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ],
+     "constraints": [
+      [
+       "public",
+       "meta",
+       "meta_key_not_null",
+       "n",
+       "NOT NULL key"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "p",
+       "PRIMARY KEY (key)"
+      ],
+      [
+       "public",
+       "meta",
+       "meta_value_not_null",
+       "n",
+       "NOT NULL value"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_board_not_null",
+       "n",
+       "NOT NULL board"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "u",
+       "UNIQUE (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ]
+     ],
+     "indexes": [
+      [
+       "public",
+       "meta",
+       "meta_pkey",
+       "CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_code_hash_key",
+       "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_pkey",
+       "CREATE UNIQUE INDEX principals_pkey ON public.principals USING btree (principal)"
+      ],
+      [
+       "public",
+       "principals",
+       "principals_token_hash_key",
+       "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ]
+     ],
+     "sequences": [],
+     "functions": [],
+     "triggers": [],
+     "views": [],
+     "column_types": [
+      [
+       "public",
+       "meta",
+       1,
+       "key",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "meta",
+       2,
+       "value",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       2,
+       "token_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       3,
+       "tier",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       4,
+       "board",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       5,
+       "code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       6,
+       "code_expires_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       7,
+       "paired_code_hash",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       9,
+       "paired_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       10,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ]
+     ],
+     "sequence_bounds": [],
+     "owners_and_comments": [
+      [
+       "public",
+       "meta",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "meta_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       "r",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_code_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_pkey",
+       "i",
+       "<test-role>",
+       null
+      ],
+      [
+       "public",
+       "principals_token_hash_key",
+       "i",
+       "<test-role>",
+       null
+      ]
+     ]
+    },
+    "rows": {
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "coordination_bank_id",
+        ""
+       ]
+      ]
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at"
+      ],
+      "rows": [
+       [
+        "daemon",
+        null,
+        null,
+        true,
+        "7d1545ece43106c2f0b3aeb51b7bcecc8bcac0f121a55fa93bc2dc1391b5c681",
+        "<adversarial-invite-daemon:code_expires_at+900>",
+        null,
+        "<adversarial-invite-daemon:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "default",
+        null,
+        null,
+        true,
+        "9b2b22951354e1791788d131cbda13e17bca5d419342754f8d52a430eb412718",
+        "<adversarial-invite-default:code_expires_at+900>",
+        null,
+        "<adversarial-invite-default:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "desk",
+        null,
+        null,
+        true,
+        "6a7e7d07d17711e0aecb2855a89b2a3fac1f50533d35af54fa835d2ed1996675",
+        "<invite-desk:code_expires_at+900>",
+        null,
+        "<invite-desk:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "expired",
+        null,
+        null,
+        true,
+        "b66b98cc7e921e146a28f512870c1c2d05b0febe3d89c43f01d2b6f02d421f44",
+        1000.0,
+        null,
+        "<invite-expired:created_at+0>",
+        null,
+        null
+       ],
+       [
+        "gone",
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
+        null,
+        true,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<invite-gone:created_at+0>",
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -12159,14 +15008,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -12780,14 +15629,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -13401,14 +16250,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -14022,14 +16871,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -14649,14 +17498,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -14757,25 +17606,112 @@
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "desk",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "default",
       "source": "environment",
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -15333,14 +18269,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -15960,14 +18896,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -16581,14 +19517,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -17202,14 +20138,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -17829,14 +20765,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -17955,12 +20891,12 @@
      {
       "principal": "gone",
       "state": "revoked",
-      "paired": false,
+      "paired": true,
       "tier": null,
       "board": true,
-      "code_expires_at": null,
+      "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
-      "paired_at": null,
+      "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>"
      },
      {
@@ -18570,14 +21506,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -18677,9 +21613,38 @@
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -19237,14 +22202,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -19345,17 +22310,75 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -19907,14 +22930,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -20528,14 +23551,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -21149,14 +24172,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -21770,14 +24793,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -22391,14 +25414,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -22491,9 +25514,38 @@
       "status": "principal",
       "principal": "quiet",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -22539,9 +25591,38 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -22598,12 +25679,12 @@
      {
       "principal": "gone",
       "state": "revoked",
-      "paired": false,
+      "paired": true,
       "tier": null,
       "board": true,
-      "code_expires_at": null,
+      "code_expires_at": "<adversarial-revoked-with-live-codes:code_expires_at+600>",
       "created_at": "<invite-gone:created_at+0>",
-      "paired_at": null,
+      "paired_at": "<adversarial-revoked-with-live-codes:paired_at+0>",
       "revoked_at": "<revoke-pending:revoked_at+0>"
      },
      {
@@ -23213,14 +26294,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -23848,14 +26929,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -24481,14 +27562,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -24616,17 +27697,75 @@
       "status": "principal",
       "principal": "laptop",
       "source": "store",
-      "config_allowed": false,
-      "notice_allowed": false,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": false
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      },
      {
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },
@@ -25178,14 +28317,14 @@
        ],
        [
         "gone",
-        null,
+        "2170e408976d9fd657b11f81508bff5321a7490b74eb2ae9f14835eb079b31fa",
         null,
         true,
-        null,
-        null,
-        null,
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
+        "<adversarial-revoked-with-live-codes:code_expires_at+600>",
+        "44fb61a65fba7e3e4d581da7548ea52d583381475b6057cce178c76d39556346",
         "<invite-gone:created_at+0>",
-        null,
+        "<adversarial-revoked-with-live-codes:paired_at+0>",
         "<revoke-pending:revoked_at+0>"
        ],
        [
@@ -25454,9 +28593,38 @@
       "status": "unauthorized",
       "principal": null,
       "source": null,
-      "config_allowed": true,
-      "notice_allowed": true,
-      "stats_allowed": true
+      "operator_policy": [
+       {
+        "method": "GET",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/config",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/daemon-notice",
+        "allowed": true
+       },
+       {
+        "method": "GET",
+        "path": "/api/stats",
+        "allowed": true
+       },
+       {
+        "method": "POST",
+        "path": "/api/stats",
+        "allowed": true
+       }
+      ]
      }
     ]
    },

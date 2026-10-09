@@ -218,7 +218,7 @@ jobs:
         timeout-minutes: 10
         shell: pwsh
         run: |
-          cargo build --locked --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness,mutants -j 4
+          cargo build --locked --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness -j 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
