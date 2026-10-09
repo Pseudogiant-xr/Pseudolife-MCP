@@ -8,11 +8,22 @@ import os
 import re
 from pathlib import Path
 import sys
+import tempfile
+from urllib.parse import quote
 
 
 def diagnostic(exc, dsn=""):
-    from tests.pg_defaults import redacted_error_text
-    text = redacted_error_text(exc, dsn)
+    from psycopg.conninfo import conninfo_to_dict
+    text = str(exc) or type(exc).__name__
+    if dsn:
+        text = text.replace(dsn, "<redacted dsn>")
+        try:
+            options = conninfo_to_dict(dsn)
+        except Exception:
+            options = {}
+        for field in ("password", "passfile"):
+            if options.get(field):
+                text = text.replace(options[field], "***").replace(quote(options[field], safe=""), "***")
     text = re.sub(r"(postgres(?:ql)?://)[^\s/@]+@", r"\1***@", text, flags=re.I)
     text = re.sub(r"(?i)(password|passfile|token|api[_-]?key)(?:\s*[=:]\s*|\s+)"
                   r"(?:'[^']*'|\"[^\"]*\"|[^\s,)]+)", r"\1=***", text)
@@ -26,7 +37,9 @@ def main() -> int:
     from pseudolife_memory.test_login_cli import main as test_login_main
 
     runner_temp = Path(os.environ["RUNNER_TEMP"])
-    data_dir = runner_temp / "pl-cli-lease-postgres"
+    # The runner staging root's group ACL can deny initdb's chmod. Use the
+    # user profile like the existing lite CI lane; leave test TEMP unchanged.
+    data_dir = Path(tempfile.mkdtemp(prefix="pl-cli-lease-postgres-", dir=Path.home()))
     login_file = runner_temp / "test-pg.env"
     dsn = ""
 

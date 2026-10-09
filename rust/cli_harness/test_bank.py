@@ -64,3 +64,22 @@ def test_fixture_diagnostic_redacts_connection_credentials():
     assert "initdb failed" in detail
     assert "synthetic-password" not in detail
     assert "synthetic-token" not in detail
+
+
+def test_fixture_diagnostic_runs_without_tests_package(monkeypatch):
+    import builtins
+    from .lease_ci import diagnostic
+
+    original_import = builtins.__import__
+
+    def standalone_import(name, *args, **kwargs):
+        if name == "tests" or name.startswith("tests."):
+            raise ModuleNotFoundError(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", standalone_import)
+    dsn = "host=127.0.0.1 password='synthetic secret' passfile='synthetic-file'"
+    detail = diagnostic(RuntimeError("initdb failed: synthetic secret synthetic-file"), dsn)
+    assert "initdb failed" in detail
+    assert "synthetic secret" not in detail
+    assert "synthetic-file" not in detail
