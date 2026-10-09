@@ -938,7 +938,8 @@ mod tests {
         let mut p = params("", 6);
         p.count_access = false;
         rank(&bank, &unit(1.0), &p, None);
-        assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 2);
+        // The warmup-style call serves entry 1 again without counting it.
+        assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
