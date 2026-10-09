@@ -55,7 +55,18 @@ _CATALOG = {
                 "FROM information_schema.triggers ORDER BY 1, 2, 3, 5",
     "views": "SELECT table_schema, table_name, md5(view_definition) FROM information_schema.views "
              "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY 1, 2",
+    "column_types": "SELECT n.nspname, c.relname, a.attnum, a.attname, "
+                    "format_type(a.atttypid, a.atttypmod), a.attnotnull, a.attidentity::text "
+                    "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE a.attnum > 0 AND NOT a.attisdropped AND c.relkind IN ('r', 'p') "
+                    "AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') "
+                    "ORDER BY 1, 2, 3",
+    "sequence_bounds": "SELECT schemaname, sequencename, min_value, max_value, cache_size, cycle "
+                       "FROM pg_sequences WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
+                       "ORDER BY 1, 2",
     "owners_and_comments": "SELECT n.nspname, c.relname, c.relkind::text, "
+                           "pg_get_userbyid(c.relowner), "
                            "obj_description(c.oid, 'pg_class') FROM pg_class c "
                            "JOIN pg_namespace n ON n.oid = c.relnamespace "
                            "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') "
@@ -125,12 +136,22 @@ def dump(dsn: str) -> dict:
     return out
 
 
-def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None) -> dict:
-    """Replace every declared nondeterministic value with a shape token."""
+def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None,
+              before: dict | None = None) -> dict:
+    """Replace every declared nondeterministic value with a shape token.
+
+    With ``before`` (the bank's state before the run), a row that already
+    existed keeps its exact values: a clock column may change only on rows
+    the run created, so a rewritten existing timestamp still diffs. A new
+    clock value must be a finite number, or it is left raw and diffs."""
     rules = NONDETERMINISTIC if rules is None else rules
     state = json.loads(json.dumps(state))
     for qualified, table in state["rows"].items():
         name = qualified.split(".", 1)[1]
+        prior = set()
+        if before is not None:
+            prior = {json.dumps(r[0], sort_keys=True)
+                     for r in before["rows"].get(qualified, {}).get("rows", [])}
         for idx, col in enumerate(table["columns"]):
             if (name, col) not in rules:
                 continue
@@ -141,7 +162,11 @@ def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None) -> d
                 if value is None:
                     continue
                 if clock:
-                    row[idx] = f"<{col}>"
+                    if json.dumps(row[0], sort_keys=True) in prior:
+                        continue  # an existing row: compared exactly
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                            and value == value and abs(value) != float("inf"):
+                        row[idx] = f"<{col}>"
                     continue
                 key = json.dumps(value, sort_keys=True)
                 row[idx] = seen.setdefault(key, f"<{col}#{len(seen)}>")
@@ -168,6 +193,6 @@ def diff(a: dict, b: dict, path: str = "") -> list[str]:
             out.append(f"{path}: row only in rust: {r[:300]}")
         if not out and a != b:
             out.append(f"{path}: same rows in a different order")
-    elif a != b:
+    elif type(a) is not type(b) or a != b:
         out.append(f"{path}: python {json.dumps(a)[:300]} vs rust {json.dumps(b)[:300]}")
     return out

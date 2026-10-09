@@ -146,39 +146,100 @@ fn last_header(h: &HeaderMap, name: &str) -> Option<String> {
     h.get_all(name).iter().next_back().map(latin1)
 }
 
-fn host_part(value: &str) -> String {
-    let mut v = value;
-    if let Some((_, rest)) = v.split_once("://") {
-        // urlsplit().netloc keeps any userinfo, so "user@localhost" is not loopback.
-        v = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+/// `urllib.parse.urlsplit(value).netloc` (Python 3.11): leading C0 and
+/// space stripped, tab/CR/LF removed anywhere, a scheme only when it is
+/// `[A-Za-z][A-Za-z0-9+.-]*` before the first colon, a netloc only after
+/// `//`. Bracket errors raise `ValueError` (Err), which escapes the ASGI
+/// app as uvicorn's 500.
+fn urlsplit_netloc(value: &str) -> Result<String, ()> {
+    let url: String = value
+        .trim_start_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\r' | '\n'))
+        .collect();
+    let mut rest = url.as_str();
+    if let Some(i) = rest.find(':')
+        && i > 0
+        && rest.as_bytes()[0].is_ascii_alphabetic()
+        && rest[..i]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    {
+        rest = &rest[i + 1..];
     }
-    let v = v.trim().to_lowercase();
+    let Some(after) = rest.strip_prefix("//") else {
+        return Ok(String::new());
+    };
+    let netloc = after.split(['/', '?', '#']).next().unwrap_or(after);
+    let (open, close) = (netloc.contains('['), netloc.contains(']'));
+    if open != close {
+        return Err(()); // "Invalid IPv6 URL"
+    }
+    if open {
+        let host = netloc.split_once('[').map_or("", |x| x.1);
+        let host = host.split_once(']').map_or(host, |x| x.0);
+        let valid = if let Some(v) = host.strip_prefix('v') {
+            // `\Av[a-fA-F0-9]+\..+\Z`
+            v.split_once('.').is_some_and(|(hex, tail)| {
+                !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) && !tail.is_empty()
+            })
+        } else {
+            // ipaddress.ip_address: IPv6 (scope id allowed); IPv4 in brackets refuses.
+            host.split('%')
+                .next()
+                .unwrap_or("")
+                .parse::<std::net::Ipv6Addr>()
+                .is_ok()
+        };
+        if !valid {
+            return Err(());
+        }
+    }
+    Ok(netloc.to_string())
+}
+
+/// `_host_part`: lower-cased host of a Host header or an Origin URL.
+fn host_part(value: &str) -> Result<String, ()> {
+    let mut v = value.to_string();
+    if value.contains("://") {
+        let netloc = urlsplit_netloc(value)?;
+        if !netloc.is_empty() {
+            v = netloc; // urlsplit().netloc keeps any userinfo
+        }
+    }
+    let v = crate::storage::py_strip(&v).to_lowercase();
     if let Some(rest) = v.strip_prefix('[') {
-        return rest.split(']').next().unwrap_or("").to_string();
+        return Ok(rest.split(']').next().unwrap_or("").to_string());
     }
     if v.matches(':').count() == 1 {
-        return v.rsplit_once(':').map(|(h, _)| h.to_string()).unwrap_or(v);
+        return Ok(v.rsplit_once(':').map(|(h, _)| h.to_string()).unwrap_or(v));
     }
-    v
+    Ok(v)
 }
 
 /// `_browser_gate`: tokenless installs serve loopback browsers only.
-fn browser_gate(app: &App, h: &HeaderMap) -> Option<&'static str> {
+/// Err: the header made `urlsplit` raise (answered as uvicorn's 500).
+fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static str>, ()> {
     if app.auth_configured() {
-        return None;
+        return Ok(None);
     }
-    let loopback = |v: String| matches!(host_part(&v).as_str(), "127.0.0.1" | "::1" | "localhost");
+    let loopback = |v: &str| -> Result<bool, ()> {
+        Ok(matches!(
+            host_part(v)?.as_str(),
+            "127.0.0.1" | "::1" | "localhost"
+        ))
+    };
     if let Some(o) = first_header(h, "origin")
-        && !loopback(o)
+        && !loopback(&o)?
     {
-        return Some("forbidden_origin");
+        return Ok(Some("forbidden_origin"));
     }
     if let Some(host) = first_header(h, "host")
-        && !loopback(host)
+        && !loopback(&host)?
     {
-        return Some("forbidden_host");
+        return Ok(Some("forbidden_host"));
     }
-    None
+    Ok(None)
 }
 
 fn resolve(app: &App, h: &HeaderMap) -> Resolved {
@@ -297,8 +358,10 @@ async fn pair(app: &App, method: &str, h: &HeaderMap, body: Body) -> Response {
 
 /// `/api/hook/*`, routed before the bearer gate (`web/api.py:464-697`).
 async fn hook(app: &App, path: &str, method: &str, h: &HeaderMap, body: Body) -> Response {
-    if let Some(denied) = browser_gate(app, h) {
-        return json_response(403, &json!({"error": denied}));
+    match browser_gate(app, h) {
+        Err(()) => return uvicorn_500(),
+        Ok(Some(denied)) => return json_response(403, &json!({"error": denied})),
+        Ok(None) => {}
     }
     let want = match path {
         "/api/hook/session-end" | "/api/hook/woke" | "/api/hook/subagent" => "POST",
@@ -360,8 +423,12 @@ async fn api(
     raw_query: Option<&str>,
     body: Body,
 ) -> Response {
-    if let Some(denied) = browser_gate(app, h) {
-        return json_response(403, &json!({"error": denied, "hint": BROWSER_HINT}));
+    match browser_gate(app, h) {
+        Err(()) => return uvicorn_500(),
+        Ok(Some(denied)) => {
+            return json_response(403, &json!({"error": denied, "hint": BROWSER_HINT}));
+        }
+        Ok(None) => {}
     }
     let stored = match resolve(app, h) {
         Resolved::Unavailable => return principals_unavailable(),
@@ -481,7 +548,13 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                     .ok()
                     .and_then(Result::ok)
             }
-            None => None,
+            // No Console build: what Python answers with no index.html.
+            None => Some(static_files::Served {
+                status: 404,
+                body: b"not found".to_vec(),
+                content_type: "text/plain".into(),
+                cache: "no-store",
+            }),
         };
         let mut r = match served {
             Some(s) => text_response(s.status, s.body, &s.content_type, Some(s.cache)),
@@ -579,7 +652,7 @@ fn list(q: &HashMap<String, String>, key: &str) -> Option<Vec<String>> {
     let items: Vec<String> = q
         .get(key)?
         .split(',')
-        .map(|s| s.trim().to_string())
+        .map(|s| py_strip(s).to_string())
         .filter(|s| !s.is_empty())
         .collect();
     (!items.is_empty()).then_some(items)
@@ -683,12 +756,23 @@ mod tests {
 
     #[test]
     fn host_part_matches_python() {
-        assert_eq!(host_part("http://localhost:5173"), "localhost");
-        assert_eq!(host_part("http://user@localhost"), "user@localhost");
-        assert_eq!(host_part("[::1]:8765"), "::1");
-        assert_eq!(host_part("127.0.0.1:8765"), "127.0.0.1");
-        assert_eq!(host_part("::1"), "::1");
-        assert_eq!(host_part(" LocalHost "), "localhost");
+        let ok = |v: &str| host_part(v).unwrap();
+        assert_eq!(ok("http://localhost:5173"), "localhost");
+        assert_eq!(ok("http://user@localhost"), "user@localhost");
+        assert_eq!(ok("[::1]:8765"), "::1");
+        assert_eq!(ok("127.0.0.1:8765"), "127.0.0.1");
+        assert_eq!(ok("::1"), "::1");
+        assert_eq!(ok(" LocalHost "), "localhost");
+        // Python 3.11 urlsplit, probed 2026-10-09.
+        assert_eq!(ok("x y://localhost"), "x y");
+        assert_eq!(ok("http://local\thost"), "localhost");
+        assert_eq!(ok("  http://localhost"), "localhost");
+        assert_eq!(ok("1http://localhost"), "1http");
+        assert_eq!(ok("http://[::1%eth0]:5"), "::1%eth0");
+        assert_eq!(ok("http://[v1.x]"), "v1.x");
+        assert!(host_part("http://[::1").is_err());
+        assert!(host_part("http://[localhost]").is_err());
+        assert!(host_part("http://[127.0.0.1]").is_err());
     }
 
     #[test]
