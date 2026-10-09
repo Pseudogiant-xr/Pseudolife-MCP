@@ -89,6 +89,17 @@ class SchemaGeneration(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported"):
             gen.render(ast.unparse(tree).encode())
 
+    def test_unsupported_module_binding_forms_are_refused(self):
+        for binding in ("SCHEMA_SQL: str = SCHEMA_SQL + '\\nCREATE TABLE hidden(id INTEGER);'",
+                        "SCHEMA_SQL *= 2", "SCHEMA_META_VERSION += 1", "holder.sql += SCHEMA_SQL"):
+            with self.subTest(binding=binding):
+                tree = ast.parse(gen.SOURCE.read_bytes())
+                index = next(i for i, node in enumerate(tree.body) if isinstance(node, ast.Assign)
+                             and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "SCHEMA_SQL")
+                tree.body.insert(index + 1, ast.parse(binding).body[0])
+                with self.assertRaisesRegex(ValueError, "unsupported"):
+                    gen.render(ast.unparse(tree).encode())
+
     def test_every_branch_matches_oracle_statement_order_and_parameters(self):
         oracle = types.ModuleType("schema_oracle")
         exec(compile(gen.SOURCE.read_bytes(), "schema.py", "exec"), oracle.__dict__)

@@ -153,6 +153,8 @@ def render(source: bytes) -> dict[str, bytes]:
     tree = ast.parse(source)
     env = {}
     for n in tree.body:
+        if isinstance(n, ast.AnnAssign):
+            unsupported(n)
         if isinstance(n, ast.Assign) and (len(n.targets) != 1 or not isinstance(n.targets[0], ast.Name)):
             unsupported(n)
         if isinstance(n, ast.Assign) and len(n.targets) == 1 \
@@ -163,6 +165,8 @@ def render(source: bytes) -> dict[str, bytes]:
         elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name) \
                 and n.target.id == "SCHEMA_SQL" and isinstance(n.op, ast.Add):
             env["SCHEMA_SQL"] += value(n.value, env)
+        elif isinstance(n, ast.AugAssign):
+            unsupported(n)
     functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     guard = functions["_refuse_on_embedding_dim_mismatch"]
     body = guard.body
