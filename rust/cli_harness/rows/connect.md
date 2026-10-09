@@ -1,0 +1,161 @@
+# CLI-CONNECT spec (`pseudolife-mcp connect`, JSON-file clients)
+
+Oracle: `pseudolife_memory/connect_cli.py` with `client_config.py`,
+`codex_connection.py` (URL validation, credential check), `runtimes.py`
+(client discovery, layout, process table), `credentials.py`,
+`daemon_url.py`, `board_status.py`, `shim.py` (`probe_health`) and
+`doctor_cli.py` (`_handshake`). `client_updates.py` is not reached by
+connect: the shim only runs it after a first frame with
+`updates.unattended_clients`, which the handshake never sees.
+
+## Canonical argv (producers)
+
+| Shape | Producer |
+|---|---|
+| `connect URL --token-file TF --client NAMES --dry-run --json` | `ops/install.sh` 1886, `ops/install.ps1` 1857 (plan) |
+| `connect URL --token-file TF --client NAMES --yes` | `ops/install.sh` 1915, `ops/install.ps1` 1892 (apply) |
+| `connect URL --dry-run`, `connect URL` | `docs/guide/remote-bank.md` 510-511 |
+| `connect URL --client C --token-file ~/... [--read-token]` | `docs/guide/remote-bank.md` 536-541 |
+| `connect URL --yes [--json]` | `move_cli.py` 1642, 1635, 948 |
+| `connect URL --token-file F` | `move_cli.py` 1708 |
+| `connect URL --code CODE` / `--read-code` | `remote-bank.md` 221 (deferred: pairing) |
+
+Native: the URL first, then `--token-file V`, `--client V`, `--read-token`,
+`--dry-run`, `--yes`, `--json`, each at most once, a value never empty and
+never starting with `-`. Everything else defers before any effect.
+
+## Exact contract items
+
+- Usage refusals, in order (`connect_cli.py` 1024-1046): URL validation by
+  `codex_connection._validated_daemon_url` (`codex_connection.py` 104-117)
+  with `_shown_url` (292-304) in the message; `--client` list (918-924,
+  1030-1032, Python `repr`); `--read-token` without `--token-file`
+  (1039-1040); `--read-token` onto an existing path (1041-1046,
+  `abspath(expanduser())`). Exit 2.
+- Health (1058-1074): `shim.probe_health` (`shim.py` 436-449: any HTTP
+  answer's JSON body, redirects followed); not a dict or status not `"ok"`
+  exits 4 with `(status: str(value))` for a dict; a remote target with
+  `auth: false` exits 4; `daemon` = `{version, auth}`; plain-HTTP warning
+  for a remote `http://` target (stderr, `warnings`).
+- Remote = not `_is_loopback_url` (`daemon_url.py` 58-71).
+- Discovery (667-677): Claude Code user scope (460-494) with the settings
+  copy inserted after a writable registration (497-518), project scopes in
+  `projects[...]` and `./.mcp.json` as manual rows; Claude Desktop config
+  files in `runtimes.desktop_config_files` order (`runtimes.py` 1253-1271:
+  MSIX `Packages/Claude_*` sorted, then `APPDATA`), the legacy
+  `pseudolife-memory` entry as manual (521-546); Gemini (549-560); Codex
+  absent without a `config.toml`; the process `PSEUDOLIFE_MCP_DAEMON_URL`
+  row (628-635).
+- Rows (282-285): key order `client, place, file, key, state, changes,
+  detail, notes, backup, created`; `changes` sorted by key with
+  `<literal token>` and `_shown_url` masking (314-325); edits per
+  `_registration_edits` (347-358, NO_SPAWN for remote unless truthy) and
+  `_settings_edits` (361-377); notes (380-395) including the launcher
+  comparison by `_path_forms` (`runtimes.py` 1034-1043, 1355-1356);
+  register commands (412-428) with the launcher when it is a file.
+- JSON reading/writing: `client_config._load_json` (`client_config.py`
+  73-84: utf-8-sig, whitespace-only is `{}`, messages by file name);
+  `_write_json` (87-89: indent 2, `ensure_ascii=False`, trailing newline);
+  `_write_private` (37-60: realpath, owner-only temporary, atomic
+  replace); `_backup` (63-70: `<name>.bak-pseudolife-<UTC
+  %Y%m%d-%H%M%S-%f>`).
+- Plan text and exits (963-975, 1083-1115): exit 3 messages with
+  `_places`; dry-run note; nothing-to-write notes.
+- Confirmation (1118-1123): non-interactive without `--yes` exits 2.
+- `--read-token` (1125-1133, `client_config.write_token_file` 186-230):
+  HelperError messages, class names for OSError/CredentialError.
+- Verify (691-736): distinct credentials in row order; the
+  no-credential refusal; `check_token_file` recovery text; literal
+  well-formedness; `installer_credential_valid` (`codex_connection.py`
+  137-148: `/api/episodes?limit=1`, bearer, no redirects, 200 only); MCP
+  handshake (146-184: child env, initialize + tools/list, `the handshake
+  exited N` / `the daemon listed no tools`); `board_status` line
+  (`board_status.py` 40-71); board warning with the hint. Refusal exits 4
+  after removing a `--read-token` file.
+- Apply (755-786, 861-879) and rollback (822-858): per-file record,
+  backup, created flag, read-back; outcomes `unchanged`/`left`/`restored`/
+  `removed`/`failed` with their key orders and the rollback lines
+  (1166-1172); exit 1.
+- Report (1174-1201): backups, verified lines, `_restart` (1000-1014) over
+  `runtimes.list_processes` / `processes_inside` (`runtimes.py` 920-1064),
+  the Desktop and board notes, post-apply re-discovery and health (exit 5).
+- `--json` (931-961): one `json.dumps(indent=2, default=str)` document,
+  ASCII-escaped, key order `url, remote, dry_run, daemon, rows,
+  verification, warnings, notes, restart, rollback, error, exit`.
+
+## Free items
+
+- Timeouts are budgets, not observed values (urllib's per-operation 2/3 s
+  versus a whole-request bound); the handshake child's own transport
+  details (its MCP request order and count, its own `/health` and episode
+  posts) belong to the shim's rows: the harness compares connect's own
+  requests in order and, of the child, the credentials its MCP posts carry.
+
+## Shared-file fix: the handshake cache bytes
+
+The shim the handshake starts writes `~/.pseudolife-mcp/handshake-cache/
+<digest>.json`. `shim.py` 708-717 writes `json.dumps({"url": url,
+**cached})` (default separators, ASCII escapes, `url` first);
+`rust/shim/src/cache.rs` wrote compact JSON with `url` last. `store` now
+writes the oracle's bytes (top-level order and formatting; numbers keep
+their lexemes; the tool objects stay the daemon's wire objects, which the
+Python daemon emits from the same MCP models `model_dump` reads). Pinned by
+`the_handshake_cache_is_written_as_the_oracle_writes_it` (watched red first,
+bytes captured from the oracle's own writer) and compared byte for byte by
+every apply case of this row.
+- The temporary file name beside a written file (removed before exit).
+- Proxy discovery: reqwest reads the proxy environment variables; urllib
+  additionally reads the Windows registry proxy. Neither is set in any
+  supported install path; a registry-only proxy is a declared divergence.
+
+## Deferred before any effect
+
+Pairing (`--code`, `--read-code`); a readable Codex `config.toml` with
+`codex` selected (its app-server owns Codex's config); a question or token
+prompt on a terminal (Python's `isatty`, so a Windows character device such
+as `NUL` too); a Windows User-scope `PSEUDOLIFE_MCP_DAEMON_URL`
+(`reg query`); an unattended-update schedule (`schtasks /Query` on Windows,
+the systemd user unit on Linux) when every client is selected; any input
+outside the reproduced domain: non-ASCII or control characters in a URL,
+IPvFuture or zoned IPv6 hosts, userinfo in the target, environment base
+directories not already in `str(pathlib.Path(...))` form, JSON the Python
+reader accepts and serde_json refuses (NaN/Infinity, lone surrogates,
+nesting past 100), integers past 4300 digits, non-finite floats, container
+values where the oracle prints `str()`, a literal token ending in a newline,
+non-ASCII tokens, a `--client` value outside printable ASCII.
+
+## Declared divergences
+
+- The handshake child is the candidate's own shim (`current_exe()`), as
+  the oracle's is its own interpreter's shim (`sys.executable -m
+  pseudolife_memory.cli`); every failure inside it reads `the handshake
+  exited 1`, which is what the oracle prints for any exception in its
+  child; a child that cannot be started reads `OSError` (the oracle names
+  the subclass).
+- OS error class names follow CPython's errno/Windows error maps for the
+  codes a config write meets; others read `OSError`.
+- Windows `normcase` uses Unicode simple lowercase (U+0130 to `i`), not
+  the NLS table of the running Windows version.
+- The non-strict `realpath` resolves the longest existing prefix with the
+  OS and appends the rest; a dangling symlink inside the path is not
+  followed by hand as `ntpath._readlink_deep` would.
+- A post-apply re-read that meets an input outside the native domain (only
+  possible if a file changes during the run) reports as a failed post-apply
+  check instead of deferring, since the writes already happened; a second
+  `/health` body outside the reproduced JSON domain reads as not ok.
+
+## Harness notes
+
+- Each arm gets `TEMP`/`TMP`/`TMPDIR` = `<home>/tmp` (under the default
+  temp root, same ACLs). The oracle runs its handshake child and the shim
+  under it from `tempfile.gettempdir()` with that directory first on
+  `sys.path`; on the shared Windows host the default TEMP held ~115,000
+  entries churned by other sessions, and 6 of 46 oracle apply cases missed
+  the child's 20 s budget (standalone: 1 of 6 runs failed from TEMP, 0 of 6
+  from a small directory). This is an oracle fragility on busy hosts, not
+  candidate behaviour.
+- Requests are attributed to the process holding the client end of each
+  connection (`psutil`), so connect's own requests are compared exactly.
+- A remote target is `http://localhost.:<port>`: not loopback to
+  `_is_loopback_url`, resolved to `::1`/`127.0.0.1` where the fixture
+  listens.
