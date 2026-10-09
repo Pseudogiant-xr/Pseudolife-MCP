@@ -11,6 +11,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_json;
 pub mod lease;
+mod test_login;
 mod version;
 pub mod wait_mail;
 
@@ -137,6 +138,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doctor"
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "test-login"
+        && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
