@@ -511,11 +511,15 @@ took 143 CUDA OOMs.
   scratchpad, named by the reviewed short sha so a rerun does not
   overwrite it). Use `--uncommitted` for a pre-commit pass and
   `--commit <sha>` for a single commit. Pin the model and effort on the
-  command line, and check the log's header names both. Verify its findings
-  against the code like a subagent's, and record both reviews in the PR
-  (or the commit body when there is no PR yet), each finding labelled by
-  source with its verdict. A missing, signed-out or failed Codex run is
-  recorded as a single-reviewer pass, never skipped silently.
+  command line, and check the log's header names both. To stop one early,
+  kill its own process tree (the harness's task stop, or
+  `taskkill /PID <pid> /T /F` with the PID taken at launch), never by image
+  name: `taskkill /IM codex.exe` on 2026-10-09 killed every Codex process
+  on the host, the Codex app and other sessions' turns included. Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR (or the commit body when there is no PR yet), each finding
+  labelled by source with its verdict. A missing, signed-out or failed
+  Codex run is recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
