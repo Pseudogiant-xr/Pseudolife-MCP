@@ -192,7 +192,11 @@ fn respond(
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    // Read through a borrow, never a `try_clone`: on Windows the clone is an
+    // inheritable handle, so a child spawned by a concurrent test keeps this
+    // connection open past our close and resets it when it exits (measured
+    // 2026-10-10, Rust 1.94: clients saw ConnectionReset after a full reply).
+    let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
