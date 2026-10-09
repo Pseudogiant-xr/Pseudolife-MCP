@@ -5,8 +5,19 @@ from __future__ import annotations
 import io
 import ipaddress
 import os
+import re
 from pathlib import Path
 import sys
+
+
+def diagnostic(exc, dsn=""):
+    from tests.pg_defaults import redacted_error_text
+    text = redacted_error_text(exc, dsn)
+    text = re.sub(r"(postgres(?:ql)?://)[^\s/@]+@", r"\1***@", text, flags=re.I)
+    text = re.sub(r"(?i)(password|passfile|token|api[_-]?key)(?:\s*[=:]\s*|\s+)"
+                  r"(?:'[^']*'|\"[^\"]*\"|[^\s,)]+)", r"\1=***", text)
+    text = text.replace(str(Path.home()), "{HOME}")
+    return text[-2000:]
 
 
 def main() -> int:
@@ -17,6 +28,7 @@ def main() -> int:
     runner_temp = Path(os.environ["RUNNER_TEMP"])
     data_dir = runner_temp / "pl-cli-lease-postgres"
     login_file = runner_temp / "test-pg.env"
+    dsn = ""
 
     try:
         dsn, owned = attach_or_start(data_dir)
@@ -69,6 +81,7 @@ def main() -> int:
             env_file.write(f"PSEUDOLIFE_TEST_PG_LOGIN_FILE={login_file}\n")
     except Exception as exc:  # noqa: BLE001 - never expose a connection string
         print(f"lease PostgreSQL fixture setup failed ({type(exc).__name__})", file=sys.stderr)
+        print(diagnostic(exc, dsn), file=sys.stderr)
         return 1
 
     print("Disposable PostgreSQL and isolated test login are ready for the lease row.")

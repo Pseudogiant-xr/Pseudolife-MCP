@@ -245,23 +245,41 @@ def _suite(state="absent", slot=0):
     return setup
 
 
+def coordination_state(state):
+    return {"tables": {key: value for key, value in state["tables"].items() if key.startswith("coordination_")},
+            "sequences": {key: value for key, value in state["sequences"].items() if key.startswith("coordination_")}}
+
+
 def _after(arm, obs):
     # Every write, rather than only the final released state.
     if arm.daemon.name:
-        obs["db"] = {"writes": arm.daemon.states, "final": _bank.dump(arm.daemon.name)}
+        obs["db"] = {"writes": [{"action": item["action"], "state": coordination_state(item["state"])}
+                                 for item in arm.daemon.states],
+                     "final": coordination_state(_bank.dump(arm.daemon.name))}
+    obs["seed_offsets"] = {str(stamp): time.localtime(stamp).tm_gmtoff for stamp in (T0, T0 + 60)}
     for holder in arm.daemon.locals:
         holder.stop()
-    if arm.state.get("waited"):
-        assert b"waiting for the local lock" in base64.b64decode(obs["stderr"])
+    if "waited" in arm.state:
+        obs["listener"] = {"wait_observed": arm.state["waited"]}
+        if arm.name == "python":
+            assert arm.state["waited"]
 
 
 def _release_local(arm, proc):
-    # Keep the fixture lock held across wrapper startup; --timeout 10
-    # exceeds the five-second production poll. The captured notice proves
-    # whether this arm actually waited.
-    time.sleep(1)
+    # Release only after this wrapper's actual busy-lock notice. Its stderr
+    # prefix is handed back to the shared collector without losing bytes.
+    prefix = b""
+    arm.state["waited"] = False
+    while True:
+        line = proc.stderr.readline()
+        prefix += line
+        if line.startswith(b"lease: waiting for the local lock on "):
+            break
+        if not line:
+            return prefix
     arm.state["holder"].release()
     arm.state["waited"] = True
+    return prefix
 
 
 @normalize.rule("lease-http-json")
@@ -292,7 +310,8 @@ def _seeded_clock(obs):
             age = _span(seconds - T0).encode()
             raw = raw.replace(b" for " + age + b", purpose", b" for <held-age>, purpose")
         for stamp in (T0, T0 + 60):
-            display = time.strftime("%Y-%m-%d %H:%M", time.gmtime(stamp + obs["utc_offset"])).encode()
+            offset = obs["seed_offsets"][str(stamp)]
+            display = time.strftime("%Y-%m-%d %H:%M", time.gmtime(stamp + offset)).encode()
             raw = raw.replace(display, f"<seed-clock:{stamp:.0f}>".encode())
         obs[field] = base64.b64encode(raw).decode()
 
@@ -357,7 +376,7 @@ def cases():
     add("run-missing-executable", ["run", NAME, "--no-board", "--", "fixture-no-such-program"])
     add("run-timeout", ["run", NAME, "--no-board", "--timeout", "0", *command], local="held")
     add("run-local-wait", ["run", NAME, "--no-board", "--timeout", "10", *command],
-        local="held", during=_release_local)
+        local="held", before_capture=_release_local)
     add("run-nested", ["run", NAME, "--no-board", *command], local="held",
         env={"PSEUDOLIFE_LEASES_HELD": NAME})
     add("run-child-closed-stdout", ["run", NAME, "--no-board", *command], stdout_closed=True)
