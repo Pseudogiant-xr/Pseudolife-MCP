@@ -1,6 +1,6 @@
 # Porting dossiers
 
-These dossiers map unfinished, unowned parity rows to their Python contracts,
+These dossiers map unfinished parity rows selected for preparation to their Python contracts,
 shipped inputs and oracle tests. They are preparation for a port, not evidence
 that Rust implements the row. Proposed harness cases and mutants have not run.
 
@@ -42,6 +42,8 @@ Selection uses `rust/PARITY.md:231` at
 `3b4de2c515bee07e97cd35b6e1473ea48511ec77`, the contract-first plan's slice
 assignments and the live/paused coordination board checked on 2026-10-10.
 Rows remain deferred; this directory changes no parity status or ownership.
+PG-HYDRATE's startup seam is now owned by the PG schema/startup slice; its
+existing source map is an input to that owner, rather than an unassigned task.
 
 The first two rows cover bank opening and configuration: all later service
 slices depend on their effective state. Subsequent batches cover compatibility,
@@ -51,7 +53,7 @@ maps were removed from this public batch and handed to those owners.
 
 | Priority | Row | Dossier | Preparation state |
 |---|---|---|---|
-| 1 | PG-HYDRATE | [PG-HYDRATE.md](PG-HYDRATE.md) | Source map; current schema/catalog/recovery |
+| 1 | PG-HYDRATE | [PG-HYDRATE.md](PG-HYDRATE.md) | Source map; startup seam owned by PG schema/startup |
 | 1 | CONFIG-LOAD | [CONFIG-LOAD.md](CONFIG-LOAD.md) | Source map; peripheral reader census incomplete |
 
 Excluded owned scopes: Wave 2 retrieval/read service, writes (including

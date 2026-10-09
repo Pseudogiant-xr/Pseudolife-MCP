@@ -10,6 +10,14 @@ Opening a bank must establish the exact Python catalog and a single writer befor
 
 There is no dedicated hydration HTTP route. Ordinary service operations reach `_ensure_init`; `/health` observes readiness and database liveness without requesting full model initialization (`pseudolife_memory/daemon.py:231`, `:586`). Route/tool admission belongs to its existing HTTP/MCP rows, rather than becoming part of a schema migration.
 
+Port interface: the PG schema/startup slice owns `StartupState`, containing
+episodes, cortex/world/lesson rows and metadata plus the durable HLC high-water.
+The snapshot attaches to `Ready` only after every required load succeeds;
+W2-D/E adopt that snapshot. Python's incremental resident publication followed
+by abandon-on-error is the observable behavior to test, rather than a structure
+to copy. This post-source ownership/design ruling is recorded in the
+[delegate gate](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/682#issuecomment-6087046602).
+
 | Python entry | Role and next call |
 |---|---|
 | `pseudolife_memory/service.py:796` `MemoryService.__init__` | Retains DSN/config and initializes resident-state/readiness sentinels; no Postgres connection here. |
@@ -23,7 +31,7 @@ There is no dedicated hydration HTTP route. Ordinary service operations reach `_
 | `pseudolife_memory/service.py:1638` `_reseed_hlc` | Reseed from resident canonical stamps and durable coordination highwater; clocks remain ordered across restart. |
 | `pseudolife_memory/storage/postgres.py:391` `PostgresStorage.__init__` | `_open_session` -> `ensure_schema` -> `register_vector` -> relation seeds -> writer epoch. Close session on any constructor failure. |
 | `pseudolife_memory/storage/postgres.py:434` `_open_session`, `:603` `_connect` | Connect with autocommit, timeout and public search path; acquire lease on that same session. |
-| `pseudolife_memory/storage/postgres.py:92` `connect_retrying_local_ports`, `:77` `_local_port_error_code`, `:369` `_application_name` | Bounded Windows local-port retry and credential-free application name. |
+| `pseudolife_memory/storage/postgres.py:81` `connect_retrying_local_ports`, `:69` `_local_port_error_code`, `:369` `_application_name` | Bounded Windows local-port retry and credential-free application name. |
 | `pseudolife_memory/storage/postgres.py:447` `_acquire_writer_lease`, `:482` `_bump_lease_epoch`, `:501` `_read_lease_epoch` | Session advisory lock and durable handover counter. |
 | `pseudolife_memory/storage/postgres.py:510` `verify_writer_session`, `:548` `_probe_session`, `:551` `_pinned`, `:627` `conn` | Probe/reconnect, retain transaction-pinned sessions, re-register vector adapter, detect handover and fail closed. |
 | `pseudolife_memory/storage/postgres.py:556` `acknowledge_rehydration`, `:562` `_lease_holders`, `:584` `_describe_lease_holder` | Owner acknowledgement plus holder discovery/refusal. |
@@ -39,7 +47,7 @@ The initialization branches into `pseudolife_memory/storage/migrate.py:109` `mig
 
 ## 3. State touched, SQL and transaction boundaries
 
-The schema authority is `pseudolife_memory/storage/schema.py:22` `SCHEMA_SQL`, composed with coordination (`:488`), principals (`:806`) and maintainer (`:832`) DDL; the additive migration tail starts at `:1191` and ends with the `schema_version` JSONB upsert at `:1656`. Preserve table/column/default/nullability/constraint/index/sequence definitions from those statements, including the v54/v55 guarded additions, rather than reconstructing a v53 approximation. The complete table-name inventory is `:895` `BENCH_RESET_TABLES`:
+The schema authority is `pseudolife_memory/storage/schema.py:22` `SCHEMA_SQL`, composed with coordination (`:488`), principals (`:806`) and maintainer (`:832`) DDL; the additive migration tail starts at `:1191` and ends with the `schema_version` JSONB upsert at `:1657`. Preserve table/column/default/nullability/constraint/index/sequence definitions from those statements, including the v54/v55 guarded additions, rather than reconstructing a v53 approximation. The complete table-name inventory is `:895` `BENCH_RESET_TABLES`:
 
 `meta`, `episodes`, `entries`, `entities`, `entity_aliases`, `relations`, `edges`, `edge_evidence`, `edge_proposals`, `entity_proposals`, `entity_kinds`, `dismissed_pairs`, `facts`, `world_facts`, `lessons`, `outcome_signals`, `lesson_search_events`, `communities`, `entity_communities`, `memory_traces`, `memory_trace_invalidations`, `entry_reinstatement_decisions`, `entity_sources`, `client_sessions`, `merge_decisions`, `dream_runs`, `dream_run_slots`, `chronicle_events`, `retrieval_events`, `retrieval_uses`, `slot_reads`, `curation_judgments`, `store_decisions`, `coordination_agents`, `coordination_messages`, `coordination_events`, `coordination_leases`, `coordination_lease_waiters`, `coordination_wakes`, `principals`, `maintainer_passkeys`, `maintainer_bootstrap`, `maintainer_nonces`.
 
@@ -49,7 +57,7 @@ DDL observes/creates all those tables. Record hydration directly reads `entries`
 |---|---|
 | `pseudolife_memory/storage/schema.py:39` entries and `pseudolife_memory/storage/postgres.py:104` `_ENTRY_COLS` | `id` BIGSERIAL, band/text, required `vector(1024)`, surprise REAL, ts DOUBLE PRECISION, counters/source, supersession, turn, episode/title, JSONB tags/slots, nullable authority/tolerance, dream state; loaders also read reinforcement counters. Entry IDs remain stable. |
 | `pseudolife_memory/storage/schema.py:185`, `:245`, `:283`; `pseudolife_memory/storage/postgres.py:122`, `:144`, `:157` column tuples | Full canonical slot/history records and nullable vector(1024); facts include kind/value_norm/stance/labels and personal evergreen freshness, world has citations and volatile freshness, lessons carry about/outcome. Shared `:117` stamp tuple is tx/valid times, HLC physical/logical, writer/session and version. |
-| `pseudolife_memory/storage/schema.py:28`; `pseudolife_memory/storage/postgres.py:1669` | Episode IDs/title/hint/times/closed-by-new-start/session-key/parent. Only `ORDER BY started_at`, with no added tie key; last open episode in that observed order becomes current (`pseudolife_memory/storage/sync.py:151`). |
+| `pseudolife_memory/storage/schema.py:28`; `pseudolife_memory/storage/postgres.py:1669` | Episode IDs/title/hint/times/closed-by-new-start/session-key/parent. Only `ORDER BY started_at`, with no added tie key; last open episode in that observed order becomes current (`pseudolife_memory/storage/sync.py:159`). |
 | `pseudolife_memory/storage/schema.py:1091` | Read `public.entries.embedding` typmod through `pg_attribute`; positive mismatch against 1024 refuses before any DDL. Unconstrained typmod is a separate case, not automatically a mismatch. |
 | `pseudolife_memory/storage/schema.py:1160` | One `conn.transaction()` contains all DDL, healing, backfill and schema meta update; `SET LOCAL` lock/statement timeouts do not leak. Vector extension is required. |
 | `pseudolife_memory/storage/schema.py:1072`, `:1184` | Trace invalidation backfill runs only when its table was absent before creation. Repeated startup must not manufacture new invalidations. |
@@ -58,12 +66,27 @@ DDL observes/creates all those tables. Record hydration directly reads `entries`
 | `pseudolife_memory/storage/schema.py:601`, BIGSERIAL declarations | Explicit `coordination_lease_fence` plus serial sequences, their bounds and positions are catalog/post-state observations; schema opening must not reset them. |
 | `pseudolife_memory/storage/postgres.py:459`, `:482`, `:754` | Session keepalives; writer lock `pg_advisory_lock(hashtextextended('pseudolife-bank-writer',0))`; epoch upsert; transactional relation seeds in inverse-FK order (`:191`). These are separate commits from schema DDL; startup as a whole is not one transaction. |
 | `pseudolife_memory/storage/postgres.py:1427`, `:1921`, `:1969`, `:1990` | Full records ordered by id; embedding values decoded to float32 and optional vectors preserve None. |
-| `pseudolife_memory/storage/sync.py:112` | Band entry lists, dirty matrix/slot index, capacity seating, entry bank stamps, episode map/current ID. Stamp repair invokes `update_entry`, each in its own transaction; repair failure logs but does not fail boot. `pseudolife_memory/memory/cms.py:2022` `rebalance_bands` moves objects, writes band changes, and preserves even the deepest-band overflow without deleting entries. |
-| `pseudolife_memory/storage/sync.py:273`, `:372`, `:474` | Replace resident canonical lists/indexes. Personal scalar healing marks dirty slots (`pseudolife_memory/memory/cortex.py:1810`); cursor/log use `cortex_dream_cursor` and `cortex_supersession_log`. |
+| `pseudolife_memory/storage/sync.py:112` | Band entry lists, dirty matrix/slot index, capacity seating, entry bank stamps, episode map/current ID. Stamp repair invokes `update_entry`, each in its own transaction; repair failure logs but does not fail boot. Rebalance captures one clock at `pseudolife_memory/memory/cms.py:2048` and uses stable `heapq.nsmallest` on retention score (`:2057`): tie order before the spill cap is contract. PG loading begins in id ASC (`pseudolife_memory/storage/postgres.py:1424`); first-band ties retain that order, and subsequent-band destination append order is also observable. Rebalance preserves deepest-band overflow without deleting entries. |
+| `pseudolife_memory/storage/sync.py:273`, `:372`, `:474` | Replace resident canonical lists/indexes. Personal scalar healing marks dirty slots (`pseudolife_memory/memory/cortex.py:1817`); cursor/log use `cortex_dream_cursor` and `cortex_supersession_log`. |
 | `pseudolife_memory/service.py:1309`, `:1383`, `:1638` | Active session pointer, tombstones, deferred empty roots, recovery records, saved fingerprint, HLC and epoch-associated readiness. Handover discards meta-backed cache values before reload, including a value another writer cleared. |
 | `pseudolife_memory/storage/postgres.py:775`, `:798` | Explicit mutation transaction and savepoint nesting; unsuccessful COMMIT raises rather than claiming durability. A pinned multi-method transaction cannot reconnect midway. |
 
 Required-store failure abandons CMS/cortex/world/lessons (`pseudolife_memory/service.py:1435`); autosave/exit must not flush partial resident state. Migration partiality, weights, optional reference bank, dream tracking and file-mode loaders are deliberately tolerant (`:1469`), with their own health/reset flags. Connection loss without a reachable competing writer may continue resident reads, while storage calls fail (`pseudolife_memory/storage/postgres.py:510`; behavioral test below); do not replace this with universal outage refusal.
+
+Future-version disposition: Python unconditionally rewrites `meta.schema_version`
+to 55 even when the bank was stamped higher (`pseudolife_memory/storage/schema.py:1657–1662`). The
+[constructor specification](../daemon/spec-w1a-foundation.md#p-postgresstorage-constructor-database-writes)
+P1–P7 records that source contract; its P6 “matched, not fixed” is superseded
+by the delegate's accepted declared divergence in the gate above. Native
+opening must refuse a future-version bank before DDL, relation seeds or writer
+epoch changes. This is a named port divergence, not Python equivalence, and
+does not authorize changing the Python oracle.
+
+Current-episode tie disposition: capture Python's observed choice for equal
+`started_at` and compare the resulting current episode, rather than calling
+it free. A proposed native `(started_at,id)` order would choose the greatest
+id among equally timed open episodes; that deterministic substitution remains
+pending an explicit owner/delegate disposition and a tied-episode fixture.
 
 ## 4. Shipped producers
 
@@ -72,14 +95,14 @@ Own source census, pending `rust/producer-census.json`; no claim that prep-censu
 | Producer | Canonical shape |
 |---|---|
 | Daemon import (`pseudolife_memory/daemon.py:522`, `pseudolife_memory/mcp_server.py:109`) | `MemoryService(data_dir=os.environ.get('PSEUDOLIFE_MCP_DATA_DIR'), config_path=os.environ.get('PSEUDOLIFE_MCP_CONFIG'))`; DSN comes from service constructor's explicit argument or `PSEUDOLIFE_MCP_DATABASE_URL` (`pseudolife_memory/service.py:810`). |
-| Ordinary initialized service operations (`pseudolife_memory/service.py:1268`; HTTP registration `pseudolife_memory/web/routes.py:109`, MCP wrappers `pseudolife_memory/mcp_server.py:282`) | No client sends hydration arguments: the first ordinary operation triggers configured startup, later calls verify writer continuity. Full route-by-route producer census is shared with the route dossiers and remains incomplete here. |
+| Ordinary initialized service operations (`pseudolife_memory/service.py:1268`; HTTP registration `pseudolife_memory/web/routes.py:109`, MCP wrappers `pseudolife_memory/mcp_server.py:771`, `:1038`) | No client sends hydration arguments: the first ordinary operation triggers configured startup, later calls verify writer continuity. Full route-by-route producer census is shared with the route dossiers and remains incomplete here. |
 | Internal startup (`pseudolife_memory/service.py:1235`, `:1541`, `:1573`, `:1594`, `:1607`) | `PostgresStorage(self._db_url)` with default writer lease on; each `hydrate_*(resident, self._storage)`. `writer_lease=False` is a deliberate secondary probe, not daemon startup. |
 | CMS/canonical persistence (`pseudolife_memory/storage/sync.py:57`, `:170`, `:320`, `:409`) | Entry row dictionary uses `_ENTRY_COLS`; canonical row dictionaries use their declared tuple plus stamp fields. JSONB arrays, None and exact IDs must survive reload; these serializers define the in-process producer shapes. |
 | `/health` (`pseudolife_memory/daemon.py:231`; `pseudolife_memory/storage/postgres.py:702`, `:721`) | Cheap dedicated liveness/bank-ID probes; no full hydration request and no DDL on the bank-ID read. |
 
 ## 5. Python incidentals to defer
 
-Apply `rust/SEMANTICS-CHECKLIST.md:1` canonical-shape rules. Defer arbitrary objects accepted by duck-typed embedding conversion, exact numpy/torch object classes, psycopg exception class spelling and log wording where no consumer reads it. Preserve vector values/dimensions, refusal category/readiness, default/null distinctions, ordering, rollback and writer ownership; none of those is a Python incidental. Fake storage objects missing `update_entry` are supplemental unit producers, not authority to omit real stamp write-through (`pseudolife_memory/storage/sync.py:131`). Embedded pg0 startup remains the named embedded-Postgres deferral; documentation does not authorize its port.
+Port the parameter shapes shipped producers actually send; defer unreached Python mechanics by name. Defer arbitrary objects accepted by duck-typed embedding conversion, exact numpy/torch object classes, psycopg exception class spelling and log wording where no consumer reads it. Preserve vector values/dimensions, refusal category/readiness, default/null distinctions, ordering, rollback and writer ownership; none of those is a Python incidental. Fake storage objects missing `update_entry` are supplemental unit producers, not authority to omit real stamp write-through (`pseudolife_memory/storage/sync.py:131`). Embedded pg0 startup remains the named embedded-Postgres deferral; documentation does not authorize its port.
 
 ## 6. Oracle tests
 
@@ -105,8 +128,10 @@ Extend `rust/daemon/harness/run.py:1` and its catalog/row observer `rust/daemon/
 3. Inject one loader failure at a time after entries/cortex/world/lessons starts; call a read, write, save and health. Verify refusal, unchanged durable histories, all resident stores abandoned, retained model, then successful retry with the same connection when valid.
 4. With two owned sessions, close A's storage session, acquire/write with B and keep B open; operating A must refuse while B holds the writer lease. Then close B: A's raw flush must refuse until an ordinary read/write detects handover and rehydrates; after that, compare A's served/saved state to B's committed state (`tests/test_writer_lease.py:315`, `:335`). Repeat without B and with an unreachable server; compare their different resident-read behavior.
 5. A wrong constrained vector column must refuse before any schema/seed/epoch mutation. An unconstrained vector and a missing table are separate controls. Force constructor failure and verify lease is released before retry.
+6. On identical current-schema fixture banks, stamp `meta.schema_version` to `SCHEMA_META_VERSION+1`. Record Python's downgrade separately; native must answer the named future-version refusal and leave every table, catalog object, sequence, relation seed and writer epoch unchanged. This exercises the declared divergence, not a normalized parity pass.
+7. Seed tied retention scores around the spill cap with an injected fixed clock and explicit durable ids; compare moved ids and destination append order. Seed two open episodes with equal started_at; record Python's current-id choice and gate any native id tie-break as the separately declared pending disposition.
 
-Six source mutants, each expected to make a named case fail:
+Eight source mutants, each expected to make a named case fail:
 
 | Mutant | Rejecting case |
 |---|---|
@@ -116,12 +141,19 @@ Six source mutants, each expected to make a named case fail:
 | Apply duplicate healing to member rows | Case 1/2 loses current set members. |
 | Skip stale band stamp persistence | Case 2 DB/API bank names differ or second boot repeats the repair. |
 | Move dimension check after DDL / omit an additive column | Case 5 changes refused-bank state / case 1 catalog differs. |
+| Perform schema/seed/epoch writes before future-version refusal | Case 6's complete no-mutation snapshot differs despite refusal. |
+| Break stable equal-score spill order before the cap | Case 7 moves the wrong ids or changes destination order. |
 
 No cases or mutants have been implemented or run by this documentation task.
 
 ## 8. Dependencies and risks
 
 CONFIG-LOAD chooses the preset/paths/backend; STORAGE-COMPAT owns legacy migration and tolerant file branches; EMBEDDING/ONNX-PREREQUISITE owns model artifacts/dimension readiness; write, dream, graph and coordination rows supply recovery/HLC integrations. Existing W1-A foundation already contains schema-opening harness work; coordinate a remaining row boundary rather than duplicate it (`rust/daemon/harness/run.py:50`).
+
+The PG schema/startup slice owns this seam and its all-loads-then-Ready
+`StartupState` interface; W2-D/E consume it. Future-schema refusal is the
+accepted declared divergence above, while equal-start episode id tie-breaking
+remains pending. These post-source dispositions do not modify Python's oracle.
 
 Single synchronous writer session plus service lock is the Python concurrency model (`pseudolife_memory/storage/postgres.py:1`); the native async equivalent must preserve pinned transaction ownership and session lock lifetime. Reconnect is not a schema rerun, timeouts are scoped, row ordering is observable, and per-entry hydration repairs are not a single global snapshot. Catalog extension versions/collation/owner differences need explicitly recorded fixture policy. Full enumeration of recovery helpers and all startup meta mutations is incomplete here; review those paths before treating this as a closed row.
 
