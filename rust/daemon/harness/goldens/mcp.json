@@ -299,6 +299,18 @@
    "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Input should be 'expand', 'collapse' or 'status'\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Input should be 'expand', 'collapse' or 'status'\",\"param\":\"action\"}}"
   },
   {
+   "args": {
+    "iain": "status"
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'iain' for memory_toolset; did you mean 'action'? Accepted: action\\\",\\n  \\\"param\\\": \\\"iain\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'iain' for memory_toolset; did you mean 'action'? Accepted: action\",\"param\":\"iain\",\"accepted\":[\"action\"]}}"
+  },
+  {
+   "args": {
+    "cint": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'cint' for memory_toolset. Accepted: action\\\",\\n  \\\"param\\\": \\\"cint\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'cint' for memory_toolset. Accepted: action\",\"param\":\"cint\",\"accepted\":[\"action\"]}}"
+  },
+  {
    "args": null,
    "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Field required\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Field required\",\"param\":\"action\"}}"
   }
