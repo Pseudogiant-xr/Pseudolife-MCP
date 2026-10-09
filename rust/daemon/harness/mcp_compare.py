@@ -226,6 +226,31 @@ def list_changed_stream(port):
     return [norm(head) | {"body": {"sse": sse_data(head)}}, norm(second)]
 
 
+def stream_reconnect(port):
+    """A client that drops its GET stream can open a new one at once
+    (review finding, 2026-10-09: the Rust stream held the slot until its next
+    15 s keep-alive, so the reconnect answered 409)."""
+    import http.client
+    import time
+    s = Session(port, TOK["carol"])
+    hdrs = [("Accept", "text/event-stream"), ("Authorization", f"Bearer {TOK['carol']}"),
+            ("mcp-session-id", s.sid or ""), ("mcp-protocol-version", PROTOCOL)]
+    out = []
+    for _ in range(3):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.putrequest("GET", "/mcp", skip_accept_encoding=True)
+        for k, v in hdrs:
+            c.putheader(k, v)
+        c.endheaders()
+        g = c.getresponse()
+        out.append({"status": g.status, "content-type": g.getheader("content-type")})
+        c.sock.close()
+        c.close()
+        time.sleep(1.0)
+    s.close()
+    return out
+
+
 def transport(port):
     auth = [("Authorization", f"Bearer {TOK['carol']}")]
     out = []
@@ -345,7 +370,7 @@ def open_lists(port):
 
 
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
-         transport, paths]
+         stream_reconnect, transport, paths]
 if "--tokenless" in sys.argv:
     CASES = [rebinding, open_lists]
 
