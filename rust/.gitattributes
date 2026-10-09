@@ -2,5 +2,7 @@
 shim/src/cli_help.txt text eol=lf
 # The wait-mail formatter compares its LF template before stream translation.
 shim/src/cli/wait_mail_help.txt text eol=lf
+# The briefing help asset is translated to platform newlines by its formatter.
+shim/src/cli/briefing_help.txt text eol=lf
 shim/src/cli/lease/assets/*.txt text eol=lf
 shim/src/cli/backup_help.txt text eol=lf

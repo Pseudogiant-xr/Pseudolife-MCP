@@ -218,7 +218,8 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
 | CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | [CLI differential harness](cli_harness/README.md) `--row mail` ([spec](cli_harness/specs/CLI-MAIL.md)): every canonical case exact on Windows (40) and Linux (42) apart from three named rules, 8/8 mutants caught, per-OS goldens, run live by both Parity jobs; see [CLI-MAIL closure](#cli-mail-closure-2026-10-09). The wait-mail producer substitutions stand | ported-with-substitution |
-| CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
+| CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note and cursor, doorbell prompt-arrival receipt. `briefing_cli.py`, `codex_doorbell_state.py` | [CLI differential harness](cli_harness/README.md) `--row hook` ([spec](cli_harness/specs/CLI-HOOK.md)) against a fixture daemon: every canonical case exact on Windows and Linux apart from named rules, requests compared on the wire; see [CLI-HOOK closure](#cli-hook-closure-2026-10-09). The hook and doorbell substitutions stand | ported-with-substitution |
+| CLI-EPISODE | 2 | Episode start/end CLI exit/output and the POSTed body (session key, cwd, title). `episode_cli.py`, `session_title.py` | `test_episode_cli.py` I; split from CLI-HOOK on 2026-10-09; source-vote pairs out of scope until their producer lands on master | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
 | CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
 | CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
@@ -592,8 +593,8 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | channel | 1/2 | deferred | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
 | coordination-recovery | 2 | deferred | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
 | board-audit | 2 | deferred | Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
-| briefing | 2 | deferred | A HTTP/filesystem in `briefing_cli.py`; `test_briefing.py::test_briefing_no_daemon_prints_nothing`, `test_hook_json_serves_the_session_start_core_not_the_bare_briefing`; internal fakes need process equivalents |
-| prompt-hook | 2 | deferred | A HTTP/private watermark in `briefing_cli.py`; `test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor`, `test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor`; internal fakes need process equivalents |
+| briefing | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
+| prompt-hook | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
 | doctor | 2 | deferred | A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
 | connect | 2 | deferred | B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
 | tunnel | 2 | deferred | B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
@@ -604,7 +605,7 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |
 | episode-end | 2 | deferred | A HTTP POST `/api/episode/end` in `episode_cli.py`; same `test_episode_cli.py` nodes as episode-start; action-specific process fixtures pending |
 | wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
-| doorbell-prompt-seen | 1/2 | deferred | A receipt correlation/private filesystem lock (`codex_doorbell_state.py`); internal `test_codex_doorbell.py::test_prompt_hook_arrival_racing_queue_acceptance_does_not_restore_pending`, `test_a_linked_prompt_receipt_cannot_release_the_queue`; process equivalents pending |
+| doorbell-prompt-seen | 1/2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
 | lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
 | invite | 2 | deferred | B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error`; direct-bank effect deferred Phase 4, process seam pending |
 | pair | 2 | deferred | B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it`; stdin and retry process fixtures pending |
@@ -630,6 +631,31 @@ and exit code match, except pinned lines. Timing within bounds, identities,
 entropy and clock fields are semantic. Exit codes, consumed stdout, shared files,
 help at COLUMNS=80 and argv acceptance remain contract surfaces; this additive
 note does not rewrite historical comparisons or discard failed receipts.
+
+## CLI-HOOK closure (2026-10-09)
+
+The [CLI differential harness](cli_harness/README.md) closes CLI-HOOK for
+`briefing`, `prompt-hook` and `doorbell-prompt-seen`; episode start/end moved
+to the separate deferred CLI-EPISODE row. Each canonical case (the
+[spec](cli_harness/specs/CLI-HOOK.md)) runs both CLIs against a fixture
+daemon serving the real routes' shapes, with identical reply bytes per arm,
+and compares exit, streams, files and each request on the wire: method,
+target, Authorization, User-Agent and Host exact, field names associated
+case-insensitively, repeated names failing; Accept, Accept-Encoding and
+Connection keep their recorded dispositions. Doorbell pending records are
+written by `PendingNotice.reserve`. All 52 cases match on Windows and Linux.
+Named rules: `doorbell-legacy-first-seen` (a migrated legacy record's clock
+inside the arm's window, expiry exactly a day later) and
+`python-shutdown-flush-silent` (CPython's shutdown trailer and exit 120 after
+prompt-hook stayed silent on an unwritable stdout). The harness found one
+native defect, fixed here: `briefing_help.txt` lacked the LF pin its sibling
+assets have, so a CRLF checkout (Windows CI's default) printed `
+` in
+`briefing --help`. Six source mutants (cap order, hook event name, dropped
+bearer, unsaved cursor, dropped `since`, inverted receipt match) are each
+caught. Not covered: response-head inactivity timing, Windows symlink parents,
+POSIX distinct real/effective UID and empty HOME, briefing's own output
+failure (a declared substitution) and non-canonical argv.
 
 ## CLI-MAIL closure (2026-10-09)
 

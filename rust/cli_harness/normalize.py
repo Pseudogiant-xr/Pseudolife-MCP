@@ -95,8 +95,45 @@ def mail_stdout_error_text(obs: dict) -> None:
     _put(obs, "stderr", _WRITE_FAILED.sub(rb"\1<os-error>\2", _get(obs, "stderr")))
 
 
+_LEGACY = re.compile(rb'"legacy_first_seen":([0-9.eE+-]+)|"expires_at":([0-9.eE+-]+)')
+
+
+@rule("doorbell-legacy-first-seen")
+def doorbell_legacy_first_seen(obs: dict) -> None:
+    """A legacy pending record's migration stamps ``legacy_first_seen`` with
+    the reader's clock and ``expires_at`` 86400 s later
+    (codex_doorbell_state.py:150-158). Both values are validated (first seen
+    inside the arm's window, expiry exactly first seen + 86400) before being
+    tokenized; key order and every other byte stay exact."""
+    start, end = obs["window"]
+    for rel in list(obs["files"]):
+        if not rel.endswith(".bell-pending"):
+            continue
+        data = _file(obs, rel) or b""
+        values = {m.group(0).split(b":")[0]: m.group(1) or m.group(2)
+                  for m in _LEGACY.finditer(data)}
+        seen, expiry = values.get(b'"legacy_first_seen"'), values.get(b'"expires_at"')
+        try:
+            ok = (seen is not None and expiry is not None
+                  and start - 1 <= float(seen) <= end + 1
+                  and float(expiry) == float(seen) + 86400)
+        except ValueError:
+            ok = False
+        if ok:
+            data = data.replace(b'"legacy_first_seen":' + seen, b'"legacy_first_seen":<t>')
+            data = data.replace(b'"expires_at":' + expiry, b'"expires_at":<t+86400>')
+            _set_file(obs, rel, data)
+
+
 _SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
                              rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+def _shutdown_flush(obs: dict, intended: int) -> None:
+    stderr = _get(obs, "stderr")
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
+        obs["exit"] = intended
 
 
 @rule("python-shutdown-flush")
@@ -106,16 +143,24 @@ def python_shutdown_flush(obs: dict) -> None:
     fails to flush the same stdout, prints an ignored-exception trailer and
     turns the exit into 120. The native CLI keeps the documented exit 2 and
     emits no synthetic trailer. Only that exact trailer with exit 120 maps."""
-    stderr = _get(obs, "stderr")
-    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
-        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
-        obs["exit"] = 2
+    _shutdown_flush(obs, 2)
+
+
+@rule("python-shutdown-flush-silent")
+def python_shutdown_flush_silent(obs: dict) -> None:
+    """Declared substitution ``hook-native-output-failure``: prompt-hook
+    swallows its own write failure to stay silent with exit 0
+    (briefing_cli.py:248-251), then CPython's shutdown flush prints the
+    trailer and exits 120. The native hook stays silent with exit 0."""
+    _shutdown_flush(obs, 0)
 
 
 def home_tokens(obs: dict, home: str) -> None:
     """Replace the disposable home path with {HOME} everywhere, so goldens
     recorded under one home compare against a run under another."""
-    forms = {home.encode(), json.dumps(home)[1:-1].encode()}
+    from urllib.parse import quote  # noqa: PLC0415
+    # Raw, JSON-escaped and URL-quoted (a launcher query carries the path).
+    forms = {home.encode(), json.dumps(home)[1:-1].encode(), quote(home, safe="").encode()}
 
     def swap(data: bytes) -> bytes:
         for form in sorted(forms, key=len, reverse=True):
@@ -129,6 +174,9 @@ def home_tokens(obs: dict, home: str) -> None:
             _set_file(obs, rel, swap(base64.b64decode(value[5:])))
         elif value.startswith("link:"):
             obs["files"][rel] = "link:" + swap(value[5:].encode()).decode()
+    for request in obs.get("requests", []):
+        request["target"] = swap(request["target"].encode()).decode()
+        request["body"] = swap(request["body"].encode()).decode()
 
 
 # Request header fields compared on the wire. Accept, Accept-Encoding and
