@@ -39,6 +39,8 @@ INF = "pl_cf_w1c_transfer_inf"
 DEEP = "pl_cf_w1c_transfer_deep"
 NYC = "pl_cf_w1c_transfer_nyc"
 NYC_EMPTY = "pl_cf_w1c_transfer_nyc_empty"
+OLD54 = "pl_cf_w1c_transfer_old54"
+FUTURE = "pl_cf_w1c_transfer_future"
 _CREATED: set[str] = set()
 _ARCHIVES: dict[str, bytes] = {}
 _EOL = "\r\n" if core.WINDOWS else "\n"
@@ -170,6 +172,19 @@ def _sources() -> None:
                      "action, record, decided_at) VALUES ('lesson', 'e', 'a', 'retire', "
                      "%s::jsonb, 1.0)", ("[" * 250 + "]" * 250,))
         conn.commit()
+    # Banks this build's roster cannot speak for: another schema version, and
+    # a table no roster classifies (what a newer schema adds).
+    _create(OLD54)
+    _seed(OLD54)
+    with _bank.connect(OLD54) as conn:
+        _schema_54(conn)
+        conn.commit()
+    _create(FUTURE)
+    _seed(FUTURE)
+    with _bank.connect(FUTURE) as conn:
+        conn.execute("CREATE TABLE future_rows (id TEXT PRIMARY KEY, body TEXT)")
+        conn.execute("INSERT INTO future_rows VALUES ('a', 'left out by this roster')")
+        conn.commit()
     with _bank._admin() as conn:  # noqa: SLF001
         for name in (NYC, NYC_EMPTY):
             conn.execute(f'ALTER DATABASE "{name}" SET timezone = \'America/New_York\'')
@@ -180,7 +195,7 @@ def _sources() -> None:
             _ARCHIVES[key] = path.read_bytes()
     for key, mutate in _VARIANTS.items():
         _ARCHIVES[key] = _rewrite(_ARCHIVES["current"], mutate)
-    for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY):
+    for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY, OLD54, FUTURE):
         _wait_idle(name)
 
 
@@ -651,6 +666,15 @@ def cases() -> list[core.Case]:
                 note="a non-UTC session with a non-null timestamptz"),
         _export("export-non-utc-empty", ["--out", "x.zip"], bank=NYC_EMPTY,
                 note="a non-UTC session without timestamptz values is answered"),
+        # Roster guard (2026-10-09, schema v56 adds a table): Python exports
+        # what its own roster names; the native build defers instead of
+        # dropping a table it does not know.
+        _export("export-other-schema-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
+                bank=OLD54, rules=("expect-export-deferred-any",),
+                note="a bank not at this build's schema: deferred before any effect"),
+        _export("export-unknown-table-defers", ["--out", _SEP.join(["{CWD}", "n", "x.zip"])],
+                bank=FUTURE, rules=("expect-export-deferred-any",),
+                note="a public table no roster classifies: deferred before any effect"),
         _import("import-null-stamps-defers", "current", seed=_seed_null_stamps,
                 rules=("expect-import-deferred",),
                 note="ensure_schema would backfill daemon-written stamps before refusing"),
@@ -668,6 +692,13 @@ def cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    Mutant("transfer-roster-guard", ROW, "shim/src/cli/transfer/export.rs",
+           "if !EXPORTED_TABLES.contains(&name.as_str()) && !EXCLUDED_TABLES.contains(&name.as_str()) {",
+           "if false && !EXCLUDED_TABLES.contains(&name.as_str()) {",
+           ("export-unknown-table-defers",)),
+    Mutant("transfer-schema-guard", ROW, "shim/src/cli/transfer/export.rs",
+           "if text == BUILD_SCHEMA)", "if !text.is_empty())",
+           ("export-other-schema-defers",)),
     Mutant("transfer-float-window", ROW, "shim/src/cli/transfer/json.rs",
            "if !(-4..16).contains(&power) {", "if !(-4..15).contains(&power) {",
            ("export-tricky",)),

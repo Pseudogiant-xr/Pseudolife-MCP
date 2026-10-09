@@ -220,7 +220,25 @@ fn cell(out: &mut String, kind: Kind, text: Option<&str>, rendering: &Rendering)
     Some(())
 }
 
+/// `meta.schema_version` as this build's `ensure_schema` writes it.
+const BUILD_SCHEMA: &str = "55";
+
 async fn tables(client: &Client) -> Result<Option<Vec<Table>>, ()> {
+    // Every public table must be classified, as transfer_cli's roster test
+    // demands of BENCH_RESET_TABLES; an unknown one would be dropped silently.
+    let present = sql::rows(
+        client,
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
+    )
+    .await?;
+    for row in &present {
+        let Some(Some(name)) = row.first() else {
+            return Ok(None);
+        };
+        if !EXPORTED_TABLES.contains(&name.as_str()) && !EXCLUDED_TABLES.contains(&name.as_str()) {
+            return Ok(None);
+        }
+    }
     let mut found = Vec::new();
     for name in EXPORTED_TABLES {
         let exists = sql::scalar(
@@ -447,6 +465,12 @@ async fn snapshot(
     )
     .await
     .map_err(|_| Stop::Defer)?;
+    // The roster is this build's: a bank at another schema version may hold
+    // tables this build would leave out without a word, so it defers.
+    if !matches!(version.first().and_then(|row| row.first()), Some(Some(text)) if text == BUILD_SCHEMA)
+    {
+        return Err(Stop::Defer);
+    }
     let version = match version.first().and_then(|row| row.first()) {
         None => Value::Null,
         Some(None) => Value::Null,

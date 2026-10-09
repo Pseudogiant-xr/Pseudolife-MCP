@@ -130,6 +130,14 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
 
 ## Deferrals and named substitutions
 
+- Roster guard: export defers before any effect when `meta.schema_version`
+  is not this build's (55), or when any public table is in neither
+  `EXPORTED_TABLES` nor `EXCLUDED_TABLES`. Python exports whatever its own
+  build's roster names, so a native build paired with a newer bank (schema
+  v56 adds `reference_chunks`) would otherwise drop a table without a word.
+  Cases `export-other-schema-defers`, `export-unknown-table-defers` (watched
+  RED on the unguarded binary); mutants `transfer-schema-guard`,
+  `transfer-roster-guard`.
 - Generic deferral (dispatcher line, exit 1, nothing changed): non-canonical
   argv/paths; unreadable, encrypted or duplicate-member archives, or members
   neither stored nor deflated; manifest that is not a UTF-8 JSON object;
