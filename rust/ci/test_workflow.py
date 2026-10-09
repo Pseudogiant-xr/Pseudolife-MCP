@@ -28,6 +28,7 @@ PARITY_CHECKS = {
     "Bind the event-selected Python oracle": None,
     "Check CI coverage contract": "eval",
     "Run every eval harness test": "eval",
+    "Offline embedding golden and mutant row": "eval",
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
@@ -104,6 +105,15 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    embedding = parity["Offline embedding golden and mutant row"]
+    invocations = commands(embedding["run"])
+    require_command(invocations, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_embedding.py",), PYTEST_FILTERS)
+    require_command(invocations, ("python", "rust/daemon/harness/run.py", "embedding"),
+                    ("--fixture", "--golden", "rust/daemon/harness/goldens/embedding-fixture.json", "--rust-bin", "--out"),
+                    ("--record", "--model", "--mutant"))
+    assert "rust/target/release" in embedding["run"]
+    assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
     graph = commands(parity["Graph store differential and recorded oracle"]["run"])
     for mode in ("live", "golden"):
@@ -182,7 +192,14 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     permission = next(s for s in job["steps"] if s.get("name") == "Restore executable permission")
     assert permission["if"] == "runner.os == 'Linux'"
-    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio"
+    assert shlex.split(permission["run"]) == ["chmod", "+x",
+        "rust/target/release/pseudolife-stdio", "rust/target/release/pseudolife-daemon"]
+    candidate = workflow()["jobs"]["candidate"]
+    build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
+    require_command(commands(build["run"]), ("cargo", "build"),
+                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bins", "--features"))
+    upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
 
 
 def test_daemon_artifact_is_built_once_and_shared_with_graph():
@@ -196,14 +213,14 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
     assert {"--locked", "--release", "--bins"} <= set(words)
     assert {"graph-harness", "mutants"} <= set(words[words.index("--features") + 1].split(","))
     upload = next(s for s in jobs["candidate"]["steps"]
-                  if s.get("with", {}).get("name") == "rust-daemon-${{ runner.os }}")
+                  if s.get("with", {}).get("name") == "rust-shim-${{ runner.os }}")
     for binary in ("pseudolife-daemon", "graph-contract"):
         for suffix in ("", ".exe"):
             assert f"rust/target/release/{binary}{suffix}" in upload["with"]["path"].splitlines()
     steps = jobs["parity-checks"]["steps"]
     download = next(s for s in steps if s.get("uses") == "actions/download-artifact@v4"
                     and s.get("with", {}).get("name") == upload["with"]["name"])
-    assert download["if"] == "matrix.suite == 'cli'"
+    assert "if" not in download
     assert download["with"]["path"] == "rust/target/release"
     permission = next(s for s in steps if s.get("name") == "Restore graph store executable permission")
     assert permission["if"] == "matrix.suite == 'cli' && runner.os == 'Linux'"
@@ -259,6 +276,9 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
+    ("Offline embedding golden and mutant row", "--fixture", ""),
+    ("Offline embedding golden and mutant row", "--golden", "--record"),
+    ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())

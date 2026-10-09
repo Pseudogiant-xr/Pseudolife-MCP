@@ -141,23 +141,18 @@ jobs:
           shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
-      - name: Build daemon candidates
-        run: cargo build --locked --release -p pseudolife-daemon --bins --features graph-harness,mutants -j 3
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-daemon-${{ runner.os }}
-          path: |
-            rust/target/release/pseudolife-daemon
-            rust/target/release/pseudolife-daemon.exe
-            rust/target/release/graph-contract
-            rust/target/release/graph-contract.exe
-          if-no-files-found: error
+      - name: Build embedding candidate
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
           path: |
             rust/target/release/pseudolife-stdio
             rust/target/release/pseudolife-stdio.exe
+            rust/target/release/pseudolife-daemon
+            rust/target/release/pseudolife-daemon.exe
+            rust/target/release/graph-contract
+            rust/target/release/graph-contract.exe
           if-no-files-found: error
 
   parity-checks:
@@ -200,7 +195,7 @@ jobs:
           path: rust/target/release
       - name: Restore executable permission
         if: runner.os == 'Linux'
-        run: chmod +x rust/target/release/pseudolife-stdio
+        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -220,6 +215,19 @@ jobs:
           $env:PSEUDOLIFE_PORT_EPISODE_JSON = ConvertTo-Json -InputObject @($episodeCandidate) -Compress
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
+          exit $LASTEXITCODE
+      # This fixture creates a small graph locally; no model is downloaded.
+      - name: Offline embedding golden and mutant row
+        if: matrix.suite == 'eval'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          python -m pytest -q rust/daemon/harness/test_embedding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/release' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
           exit $LASTEXITCODE
       - name: CLI differential harness
         if: matrix.suite == 'cli'
@@ -252,11 +260,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
-      - uses: actions/download-artifact@v4
-        if: matrix.suite == 'cli'
-        with:
-          name: rust-daemon-${{ runner.os }}
-          path: rust/target/release
       - name: Restore graph store executable permission
         if: matrix.suite == 'cli' && runner.os == 'Linux'
         run: chmod +x rust/target/release/graph-contract

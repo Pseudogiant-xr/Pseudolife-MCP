@@ -76,6 +76,10 @@ pub struct EmbeddingConfig {
     pub backend: String,
     pub query_prefix: String,
     pub max_seq_length: i64,
+    pub onnx_file_name: String,
+    pub batch_size: i64,
+    pub cache_size: i64,
+    pub cpu_dtype: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,7 +137,7 @@ impl Config {
             &self.updates,
             &self.dream,
         );
-        serde_json::json!({
+        let mut dump = serde_json::json!({
             "memory.top_k": m.top_k,
             "memory.hide_superseded": m.hide_superseded,
             "memory.search_confidence_floor": m.search_confidence_floor,
@@ -172,7 +176,20 @@ impl Config {
             "memory.dream.fallback_base_url": d.fallback_base_url,
             "memory.dream.fallback_model": d.fallback_model,
             "memory.dream.extractor_model_override": d.extractor_model_override,
-        })
+        });
+        dump.as_object_mut().expect("configuration object").extend(
+            serde_json::json!({
+                "embedding.backend": e.backend,
+                "embedding.onnx_file_name": e.onnx_file_name,
+                "embedding.batch_size": e.batch_size,
+                "embedding.cache_size": e.cache_size,
+                "embedding.cpu_dtype": e.cpu_dtype,
+            })
+            .as_object()
+            .expect("embedding object")
+            .clone(),
+        );
+        dump
     }
 }
 
@@ -301,6 +318,10 @@ impl Default for EmbeddingConfig {
             backend: "torch".to_string(),
             query_prefix: DEFAULT_QUERY_PREFIX.to_string(),
             max_seq_length: 512,
+            onnx_file_name: "onnx/model.onnx".to_string(),
+            batch_size: 16, // MemoryService MCP overlay, service.py:1106-1107
+            cache_size: 1024,
+            cpu_dtype: "auto".to_string(),
         }
     }
 }
@@ -1092,6 +1113,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             backend: want_str(e, "backend", p, &d.backend)?,
             query_prefix: want_str(e, "query_prefix", p, &d.query_prefix)?,
             max_seq_length: want_int(e, "max_seq_length", p, d.max_seq_length)?,
+            onnx_file_name: want_str(e, "onnx_file_name", p, &d.onnx_file_name)?,
+            batch_size: want_int(e, "batch_size", p, d.batch_size)?,
+            cache_size: want_int(e, "cache_size", p, d.cache_size)?,
+            cpu_dtype: want_str(e, "cpu_dtype", p, &d.cpu_dtype)?,
         };
     }
 
@@ -1798,6 +1823,7 @@ mod tests {
                 backend: "onnx".into(),
                 query_prefix: String::new(),
                 max_seq_length: 256,
+                ..EmbeddingConfig::default()
             }
         );
     }
