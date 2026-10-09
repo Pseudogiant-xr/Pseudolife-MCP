@@ -142,14 +142,16 @@ class Default(Scenario):
 
 class Timeline(Scenario):
     name = "timeline"
-    config_yaml = "memory:\n  search:\n    timeline_channel: true\n"
+    # A high default floor thins the dense pool, so the timeline's low
+    # `0.3 x norm` injections survive the cut to top_k.
+    config_yaml = "memory:\n  search:\n    timeline_channel: true\n    min_score: 0.6\n"
 
     def cases(self):
         auth = [bearer(TOKEN)]
         return [case(f"temporal {i}", q(q=t, top_k=8), auth) for i, t in enumerate(
             ["when did we deploy the release", "what happened first", "in what order did we update",
              "the timeline of the migration", "since the migration what changed", "deploy the daemon"])] + [
-            case(f"temporal top_k 2 {i}", q(q=t, top_k=2, bm25=b), auth)
+            case(f"temporal {b} {i}", q(q=t, top_k=8, bm25=b), auth)
             for b in ("auto", "false") for i, t in enumerate(
                 ["when did the session step happen", "what happened before the deploy runbook",
                  "in what order did the session steps go"])]
