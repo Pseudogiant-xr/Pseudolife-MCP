@@ -112,7 +112,11 @@ Guards, every arm:
 - The caller's real `~/.pseudolife-mcp` is compared before and after the arm
   by `lstat` metadata only: names, size, mtime_ns, mode, inode, link count
   and Windows attributes. Directories are listed; no file is opened or
-  read; links and junctions are recorded, never followed. Subtrees other
-  live sessions write during any run (`digests`, `locks`, `suite-results`,
-  `handshake-cache`, `agent-state`, `overnight`, `ledgers`) are not
-  compared; everything else, `tunnel/` included, is.
+  read; links and junctions are recorded, never followed. Excluded
+  subtrees: `digests`, `locks`, `suite-results`, `handshake-cache`,
+  `agent-state`, `overnight` and `ledgers`. Reason: other live sessions on
+  the host (board digests, lease and suite locks, suite results, handshake
+  cache, agent state, overnight ledgers) write there during any run, so a
+  change cannot be attributed to an arm and would fail the guard falsely.
+  Everything else is compared strictly: `tunnel/` and its contents, every
+  top-level file, and the root directory itself.

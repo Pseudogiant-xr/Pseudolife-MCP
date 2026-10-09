@@ -743,13 +743,19 @@ MUTANTS = [
            "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(REDIRECT)),",
            "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(UNSAFE_PATH)),",
            ("status-profile-junction", "status-profile-symlink")),
-    Mutant("tunnel-dangling-junction-answered", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
-           "        Ok(_) => Err(Fail::Defer),",
-           "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
-           "        Ok(_) => Err(Fail::Tunnel(REDIRECT)),",
-           ("defer-profile-dangling-junction",)),
+
     Mutant("tunnel-reserved-number-key-admitted", "tunnel", "shim/src/cli/tunnel/syntax.rs",
            "    if reserved_number_key(text) {\n", "    if false && reserved_number_key(text) {\n",
            ("defer-status-refresh-reserved-id", "defer-status-result-reserved-id")),
 ]
+
+if core.WINDOWS:
+    # Only Windows reaches this branch: on Unix every redirect leaf, dangling
+    # symlinks included, is refused by the arm before it.
+    MUTANTS.append(
+        Mutant("tunnel-dangling-junction-answered", "tunnel", "shim/src/cli/tunnel/store.rs",
+               "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
+               "        Ok(_) => Err(Fail::Defer),",
+               "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
+               "        Ok(_) => Err(Fail::Tunnel(REDIRECT)),",
+               ("defer-profile-dangling-junction",)))
