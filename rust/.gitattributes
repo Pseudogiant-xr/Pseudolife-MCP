@@ -6,3 +6,7 @@ shim/src/cli/wait_mail_help.txt text eol=lf
 shim/src/cli/briefing_help.txt text eol=lf
 shim/src/cli/lease/assets/*.txt text eol=lf
 shim/src/cli/backup_help.txt text eol=lf
+# The daemon embeds the Python schema DDL byte for byte (harness/gen_schema_sql.py).
+daemon/src/storage/schema.sql text eol=lf
+# The gate embeds this Python constant byte for byte (harness/record_routes.py).
+daemon/harness/goldens/checkin.txt text eol=lf
