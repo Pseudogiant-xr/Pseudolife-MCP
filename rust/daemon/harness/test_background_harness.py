@@ -12,7 +12,7 @@ from background_sessions import normalize_closes, validate_restart_clocks, grace
 def test_live_only_background_cases_remain_in_the_registered_corpus():
     import run as harness
     expected = {"session-reap", "session-sweep", "session-restart",
-                "session-tombstone-restart", "sweep-recovery"}
+                "session-tombstone-restart", "session-resume-refusal", "sweep-recovery"}
     assert expected <= harness.SCENARIOS.keys()
     for name in expected:
         case = harness.SCENARIOS[name]()

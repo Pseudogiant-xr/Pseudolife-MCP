@@ -22,6 +22,8 @@ pub struct Ready {
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<Bank>,
+    /// Lock order: Service.inner, then sessions, then the storage writer.
+    /// A holder of a later lock must never acquire an earlier one.
     pub sessions: tokio::sync::Mutex<crate::background_sessions::Sessions>,
 }
 
@@ -375,22 +377,28 @@ impl crate::background::Duties for Service {
                         .map(|id| (id.clone(), e.ts, e.source.clone()))
                 })
                 .collect();
-            let seconds = |key: &str, default: f64| {
-                std::env::var(key)
-                    .ok()
-                    .and_then(|v| v.trim().parse::<f64>().ok())
-                    .unwrap_or(default)
-            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| e.to_string())?
                 .as_secs_f64();
-            let result = sessions.reap_with_clock(
+            let result = sessions.reap_with_settings(
                 idle_seconds,
                 now,
-                seconds("PSEUDOLIFE_SESSION_RESUME_SECONDS", 21600.0),
-                seconds("PSEUDOLIFE_HANDLE_RESUME_SECONDS", 2592000.0),
                 &entries,
+                || {
+                    let resume = crate::background::seconds(
+                        std::env::var("PSEUDOLIFE_SESSION_RESUME_SECONDS").ok().as_deref(),
+                        21600.0,
+                    )?;
+                    let handles = crate::background::seconds(
+                        std::env::var("PSEUDOLIFE_HANDLE_RESUME_SECONDS").ok().as_deref(),
+                        2592000.0,
+                    ).unwrap_or_else(|_| {
+                        eprintln!("PSEUDOLIFE_HANDLE_RESUME_SECONDS is not a number; using the 30-day default");
+                        2592000.0
+                    });
+                    Ok((resume, handles))
+                },
                 || {
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -401,15 +409,14 @@ impl crate::background::Duties for Service {
             sessions.persist_reap(ready.storage.client(), &result).await;
             drop(sessions);
             drop(_service_lock);
+            if let Some(error) = result.failure {
+                return Err(error);
+            }
             if result.fire_dream {
                 self.session_dream.fire();
             }
             if !result.session_keys.is_empty() || result.swept > 0 {
-                eprintln!(
-                    "session reaper: closed={} swept={}",
-                    result.session_keys.len(),
-                    result.swept
-                );
+                eprintln!("session reaper: idle sessions closed or swept");
             }
             Ok(())
         })

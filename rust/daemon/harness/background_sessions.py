@@ -28,6 +28,8 @@ def register(harness):
                "PSEUDOLIFE_SESSION_RESUME_SECONDS": "3600", "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"}
         sweep = False
         restart = False
+        expected_triggers = 1
+        resume_refusal = False
 
         def configure_daemons(self, procs):
             if "python" not in procs: return
@@ -98,7 +100,11 @@ svc._storage.close()
                     reached = bool(work and all(ep["ended_at"] is not None for ep in work))
                     reached &= not empty if self.sweep else bool(empty and empty[0]["ended_at"] is not None)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
-                    reached &= triggers == 1
+                    reached &= triggers == self.expected_triggers
+                    if self.resume_refusal:
+                        # Observe a second failing tick: the first tick's
+                        # durable closes survive and neither tick dreams.
+                        reached &= daemon.log.read_text(errors="replace").count("session reaper error:") >= 2
                     if reached: break
                     if time.monotonic() > deadline:
                         raise RuntimeError(f"{side} did not reach {self.name} milestone; log {daemon.log}")
@@ -149,6 +155,12 @@ svc._storage.close()
         env = dict(SessionReap.env, PSEUDOLIFE_SESSION_RESUME_SECONDS="0")
         sweep = True
 
+    class ResumeRefusal(SessionReap):
+        name = "session-resume-refusal"
+        env = dict(SessionReap.env, PSEUDOLIFE_SESSION_RESUME_SECONDS="bad")
+        expected_triggers = 0
+        resume_refusal = True
+
     class SessionRestart(SessionReap):
         name = "session-restart"
         restart = True
@@ -157,7 +169,7 @@ svc._storage.close()
         name = "session-tombstone-restart"
         restart = True
 
-    return {s.name: s for s in (SessionReap, SessionSweep, SessionRestart, TombstoneRestart)}
+    return {s.name: s for s in (SessionReap, SessionSweep, SessionRestart, TombstoneRestart, ResumeRefusal)}
 
 
 def validate_restart_clocks(state, closed):

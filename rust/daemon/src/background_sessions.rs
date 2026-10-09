@@ -40,6 +40,7 @@ pub struct Sessions {
 
 #[derive(Default, Debug)]
 pub struct Reaped {
+    pub failure: Option<String>,
     pub session_keys: Vec<String>,
     pub swept: usize,
     pub fire_dream: bool,
@@ -139,27 +140,24 @@ impl Sessions {
     async fn persist_meta(client: &Client, key: &str, value: Value) {
         if let Err(e) = client.execute("INSERT INTO meta(key,value) VALUES ($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", &[&key,&value]).await { eprintln!("{key} write-through failed: {e}"); }
     }
-    fn subtree(&self, root: &str) -> HashSet<String> {
-        self.episodes
-            .iter()
-            .filter(|e| {
-                let mut current = Some(*e);
+    fn subtree(parents: &HashMap<String, Option<String>>, root: &str) -> HashSet<String> {
+        parents
+            .keys()
+            .filter(|id| {
+                let mut current = Some(id.as_str());
                 let mut seen = HashSet::new();
-                while let Some(ep) = current {
-                    if ep.id == root {
+                while let Some(id) = current {
+                    if id == root {
                         return true;
                     }
-                    if !seen.insert(ep.id.as_str()) {
+                    if !seen.insert(id) {
                         break;
                     }
-                    current = ep
-                        .parent_id
-                        .as_ref()
-                        .and_then(|id| self.episodes.iter().find(|e| &e.id == id));
+                    current = parents.get(id).and_then(|parent| parent.as_deref());
                 }
                 false
             })
-            .map(|e| e.id.clone())
+            .cloned()
             .collect()
     }
 
@@ -176,6 +174,7 @@ impl Sessions {
         self.reap_with_clock(idle, now, resume, handle_resume, entries, || close_at)
     }
 
+    #[cfg(test)]
     pub fn reap_with_clock(
         &mut self,
         idle: f64,
@@ -183,9 +182,31 @@ impl Sessions {
         resume: f64,
         handle_resume: f64,
         entries: &[(String, f64, String)],
+        close_clock: impl FnMut() -> f64,
+    ) -> Reaped {
+        self.reap_with_settings(
+            idle,
+            now,
+            entries,
+            || Ok((resume, handle_resume)),
+            close_clock,
+        )
+    }
+
+    pub fn reap_with_settings(
+        &mut self,
+        idle: f64,
+        now: f64,
+        entries: &[(String, f64, String)],
+        settings: impl FnOnce() -> Result<(f64, f64), String>,
         mut close_clock: impl FnMut() -> f64,
     ) -> Reaped {
         let mut out = Reaped::default();
+        let parents: HashMap<_, _> = self
+            .episodes
+            .iter()
+            .map(|episode| (episode.id.clone(), episode.parent_id.clone()))
+            .collect();
         let targets: Vec<_> = self
             .episodes
             .iter()
@@ -196,7 +217,7 @@ impl Sessions {
                 {
                     return false;
                 }
-                let subtree = self.subtree(&root.id);
+                let subtree = Self::subtree(&parents, &root.id);
                 let root_ts = entries
                     .iter()
                     .filter(|(id, _, _)| id == &root.id)
@@ -210,7 +231,11 @@ impl Sessions {
                         activity = activity.max(*ts);
                     }
                 }
-                now - activity >= idle
+                if crate::mutants::active("session-idle-exclusive") {
+                    now - activity > idle
+                } else {
+                    now - activity >= idle
+                }
             })
             .map(|root| root.session_key.clone().expect("key checked"))
             .collect();
@@ -231,7 +256,7 @@ impl Sessions {
                 continue;
             };
             let close_at = close_clock();
-            let subtree = self.subtree(&root_id);
+            let subtree = Self::subtree(&parents, &root_id);
             out.ended_sessions
                 .push((key.clone(), root_id.clone(), close_at));
             for ep in &mut self.episodes {
@@ -251,6 +276,17 @@ impl Sessions {
             }
             out.session_keys.push(key);
         }
+        // Python parses the resume window after closing and persisting roots.
+        // A malformed value must leave those closes intact but skip the sweep
+        // and the batch dream trigger.
+        let (resume, handle_resume) = match settings() {
+            Ok(settings) => settings,
+            Err(error) => {
+                out.failure = Some(error);
+                out.fire_dream = false;
+                return out;
+            }
+        };
         let deferred: Vec<_> = self.deferred.keys().cloned().collect();
         for id in deferred {
             let Some(root) = self.episodes.iter().find(|e| e.id == id) else {
@@ -266,7 +302,7 @@ impl Sessions {
             if now - ended <= resume {
                 continue;
             }
-            let subtree = self.subtree(&id);
+            let subtree = Self::subtree(&parents, &id);
             if entries
                 .iter()
                 .any(|(id, _, source)| subtree.contains(id) && source != "digest")
@@ -292,8 +328,12 @@ impl Sessions {
             out.swept += 1;
         }
         if out.swept > 0 {
-            self.tombstones
-                .retain(|_, (_, ended, _)| handle_resume > 0.0 && now - *ended <= handle_resume);
+            self.tombstones.retain(|_, (_, ended, _)| {
+                !(handle_resume <= 0.0
+                    || now - *ended > handle_resume
+                    || (crate::mutants::active("session-handle-exclusive")
+                        && now - *ended == handle_resume))
+            });
             if self.tombstones.len() > 200 {
                 let mut newest: Vec<_> = self
                     .tombstones
@@ -313,6 +353,76 @@ impl Sessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn malformed_resume_keeps_closes_but_skips_sweep_and_dream() {
+        let mut s = Sessions {
+            episodes: vec![
+                ep("empty", "a", None, None),
+                ep("populated", "b", None, None),
+            ],
+            ..Default::default()
+        };
+        let r = s.reap_with_settings(
+            0.0,
+            100.0,
+            &[("populated".into(), 20.0, "project".into())],
+            || crate::background::seconds(Some("bad"), 21600.0).map(|v| (v, 1000.0)),
+            || 100.0,
+        );
+        assert!(r.failure.is_some());
+        assert_eq!(r.session_keys, ["a", "b"]);
+        assert_eq!(r.ended_sessions.len(), 2);
+        assert!(r.deferred_changed);
+        assert_eq!(s.deferred["empty"], 100.0);
+        assert!(s.episodes.iter().all(|e| e.ended_at == Some(100.0)));
+        assert_eq!(r.swept, 0);
+        assert!(!r.fire_dream);
+    }
+
+    #[test]
+    fn idle_and_handle_expiry_include_exact_threshold() {
+        let mut s = Sessions {
+            episodes: vec![ep("root", "a", None, None)],
+            ..Default::default()
+        };
+        assert!(
+            s.reap(30.0, 39.0, 39.0, 60.0, 1000.0, &[])
+                .session_keys
+                .is_empty()
+        );
+        assert_eq!(
+            s.reap(30.0, 40.0, 40.0, 60.0, 1000.0, &[]).session_keys,
+            ["a"]
+        );
+        s.tombstones
+            .insert("old".into(), ("old-key".into(), 11.0, "old-title".into()));
+        assert_eq!(s.reap(30.0, 101.0, 101.0, 60.0, 90.0, &[]).swept, 1);
+        assert!(s.tombstones.contains_key("old"));
+        s.episodes.push(ep("new", "b", None, Some(41.0)));
+        s.deferred.insert("new".into(), 41.0);
+        assert_eq!(s.reap(30.0, 102.0, 102.0, 60.0, 90.0, &[]).swept, 1);
+        assert!(!s.tombstones.contains_key("old"));
+    }
+
+    #[test]
+    fn resume_settings_accept_numeric_underscores_and_nan() {
+        assert_eq!(
+            crate::background::seconds(Some(" 1_0 "), 0.0).unwrap(),
+            10.0
+        );
+        let nan = crate::background::seconds(Some("nan"), 0.0).unwrap();
+        assert!(nan.is_nan());
+        let mut s = Sessions {
+            episodes: vec![ep("root", "a", None, Some(10.0))],
+            ..Default::default()
+        };
+        s.deferred.insert("root".into(), 10.0);
+        s.tombstones
+            .insert("old".into(), ("key".into(), 0.0, "title".into()));
+        assert_eq!(s.reap(30.0, 100.0, 100.0, nan, nan, &[]).swept, 1);
+        assert!(s.tombstones.contains_key("old"));
+    }
+
     #[test]
     fn cap_retains_newest_closes_in_one_large_tick() {
         let mut s = Sessions {

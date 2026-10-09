@@ -12,6 +12,7 @@ configuration and session episodes written by the shipped hook/API producers.
 | Empty idle closes remain resumable; only deferred roots may be swept | `service.py:6612-6671` |
 | Sweep records tombstones, expires them by handle window, retains newest 200 | `service.py:6673-6702` |
 | Deferred roots and tombstones hydrate across restart | `service.py:1315-1330` |
+| Bad session-resume settings fail after durable closes, before sweep and dream; bad handle settings use the default | `service.py:6608-6610,6633-6634,6714-6732` |
 
 Intervals and clock-dependent decisions are injectable. Lifecycle evidence
 compares ordered events and database state after each milestone; close clocks
@@ -32,3 +33,6 @@ normal-return shutdown installs a returning prior signal handler because
 uvicorn rethrows captured signals after stopping; this exercises atexit
 and daemon restart, not the ordinary CLI's uninstrumented signal exit code.
 Cascade children must share the root's close time before clock projection.
+The malformed-resume subprocess case observes two failing ticks, retained
+episode/client/deferred closes, and no dream trigger. Exact idle and handle
+retention boundaries also have native tests and compiled source mutants.

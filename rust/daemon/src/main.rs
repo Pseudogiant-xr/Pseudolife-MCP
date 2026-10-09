@@ -139,9 +139,7 @@ fn main() {
     let seconds = |name: &str, default: f64| -> f64 {
         match std::env::var(name) {
             Err(_) => default,
-            Ok(raw) => crate::storage::py_strip(&raw)
-                .replace('_', "")
-                .parse::<f64>()
+            Ok(raw) => crate::background::seconds(Some(&raw), default)
                 .unwrap_or_else(|_| fail(1, &format!("{name}={raw:?} is not a number"))),
         }
     };

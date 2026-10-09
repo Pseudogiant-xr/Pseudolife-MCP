@@ -10,6 +10,17 @@ use tokio::task::JoinHandle;
 
 pub type Duty<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
 
+/// Parse the background settings at their Python lifecycle boundary.
+pub fn seconds(raw: Option<&str>, default: f64) -> Result<f64, String> {
+    match raw {
+        None => Ok(default),
+        Some(raw) => crate::storage::py_strip(raw)
+            .replace('_', "")
+            .parse::<f64>()
+            .map_err(|_| "background interval is not a number".into()),
+    }
+}
+
 /// The writer and dream slices provide the work; this module owns when
 /// it runs. Callbacks finish before shutdown joins their tasks, so a
 /// durable write is never abandoned half way through an await.
