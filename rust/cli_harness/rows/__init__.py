@@ -9,6 +9,8 @@ ROWS = {
     "audit": "CLI-AUDIT",
     "backup": "CLI-BACKUP-DSN",
     "hook": "CLI-HOOK",
+    "episode": "CLI-EPISODE",
+    "lease": "CLI-LEASE-core",
     "transfer": "CLI-TRANSFER-DSN",
     "test_login": "CLI-TEST-LOGIN",
     "doctor": "CLI-DOCTOR",

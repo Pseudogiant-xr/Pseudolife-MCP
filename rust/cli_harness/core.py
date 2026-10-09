@@ -62,6 +62,7 @@ class Case:
     stdin_json: Any = None
     setup: Callable[[Arm], None] | None = None
     during: Callable[[Arm, subprocess.Popen], None] | None = None
+    before_capture: Callable[[Arm, subprocess.Popen], bytes] | None = None
     after: Callable[[Arm, dict], None] | None = None
     timeout: float = 30.0
     rules: tuple[str, ...] = ()
@@ -104,7 +105,10 @@ def rust_target(binary: Path) -> Target:
 
 
 def _expand(value: str, arm: Arm) -> str:
-    value = value.replace("{HOME}", str(arm.home)).replace("{CWD}", str(arm.cwd))
+    home = str(arm.home)
+    # A host reporting the same home with a lowercase drive letter.
+    value = value.replace("{HOME_LOWER_DRIVE}", home[:1].lower() + home[1:])
+    value = value.replace("{HOME}", home).replace("{CWD}", str(arm.cwd))
     if arm.daemon is not None:
         value = value.replace("{DAEMON_PORT}", arm.daemon.url.rsplit(":", 1)[1])
     return value
@@ -219,21 +223,49 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         arm.started = time.time()
         proc = subprocess.Popen(target.command + argv, cwd=arm.cwd, env=env,
                                 stdin=subprocess.PIPE, stdout=stdout_target,
-                                stderr=subprocess.PIPE, creationflags=creation)
+                                stderr=subprocess.PIPE, creationflags=creation,
+                                bufsize=0 if case.before_capture else -1)
         if case.stdout_closed:
             os.close(stdout_target)
+        deadline = time.monotonic() + case.timeout
+        stderr_prefix = b""
+        if case.before_capture:
+            ready = threading.Event()
+            handshake = {}
+            def before_capture():
+                try:
+                    handshake["prefix"] = case.before_capture(arm, proc)
+                except Exception as error:
+                    handshake["error"] = error
+                finally:
+                    ready.set()
+            thread = threading.Thread(target=before_capture, daemon=True)
+            thread.start()
+            if not ready.wait(max(0, deadline - time.monotonic())):
+                if proc.poll() is None:
+                    proc.kill()
+                thread.join(5)
+                proc.communicate()
+                raise RuntimeError(f"{case.id}/{target.name}: no capture handshake within {case.timeout}s")
+            if "error" in handshake:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.communicate()
+                raise handshake["error"]
+            stderr_prefix = handshake["prefix"]
         worker = None
         if case.during:
             worker = threading.Thread(target=case.during, args=(arm, proc), daemon=True)
             worker.start()
         try:
-            out, err = proc.communicate(stdin, timeout=case.timeout)
+            out, err = proc.communicate(stdin, timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             proc.kill()
             out, err = proc.communicate()
             raise RuntimeError(f"{case.id}/{target.name}: no exit within {case.timeout}s; "
                                f"stderr={err[-400:]!r}") from None
         ended = time.time()
+        err = stderr_prefix + err
         if worker:
             worker.join(10)
         observation = {

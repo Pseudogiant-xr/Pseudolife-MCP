@@ -11,7 +11,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::time::{Instant, Sleep};
 
@@ -64,6 +64,32 @@ pub(super) async fn get(
     get_with(origin, target, authorization, timeout, follow, None).await
 }
 
+/// One POST of a JSON body as `urlopen(Request(url, data, method="POST"))`
+/// through a no-redirect opener sends it: the same connection, timeouts and
+/// fields as [`get`] plus `Content-Type: application/json` and the body's
+/// length; a 3xx comes back as the reply, never followed.
+pub(super) async fn post_json(
+    origin: &str,
+    target: &str,
+    authorization: Option<&[u8]>,
+    body: &[u8],
+    timeout: Duration,
+) -> Option<Reply> {
+    request(
+        origin,
+        target,
+        authorization,
+        Some(body),
+        timeout,
+        false,
+        (None, Some(0)),
+        None,
+        false,
+    )
+    .await
+    .filter(|reply| !reply.body_failed)
+}
+
 /// [`get`] with the caller's body bounds and urllib's error replies, for
 /// `doctor`:
 /// - `response.read(n)` stops after `n` bytes, and an HTTP error status's
@@ -91,6 +117,7 @@ pub(super) async fn get_bounded(
         origin,
         target,
         authorization,
+        None,
         timeout,
         follow,
         limits,
@@ -113,6 +140,7 @@ async fn get_with(
         origin,
         target,
         authorization,
+        None,
         timeout,
         follow,
         limits,
@@ -128,18 +156,23 @@ async fn request(
     origin: &str,
     target: &str,
     authorization: Option<&[u8]>,
+    body: Option<&[u8]>,
     timeout: Duration,
     follow: bool,
     limits: Limits,
     tls: Option<Arc<rustls::ClientConfig>>,
     urllib_errors: bool,
 ) -> Option<Reply> {
+    // urllib turns a followed 301/302/303 into a body-less GET; no caller
+    // follows redirects with a body, and this path would re-POST it.
+    debug_assert!(!(follow && body.is_some()));
     let mut url = format!("{origin}{target}");
     let mut visited: HashMap<String, u32> = HashMap::new();
     loop {
         let mut reply = once(
             &url,
             authorization,
+            body,
             timeout,
             limits,
             urllib_errors,
@@ -210,6 +243,7 @@ impl<T: AsyncRead + AsyncWrite + Send + Unpin> Stream for T {}
 async fn once(
     url: &str,
     authorization: Option<&[u8]>,
+    body: Option<&[u8]>,
     timeout: Duration,
     limits: Limits,
     short_reads: bool,
@@ -268,17 +302,28 @@ async fn once(
             .await
             .ok()?;
     let driver = tokio::spawn(connection);
-    let mut request = http::Request::get(target)
+    let method = if body.is_some() {
+        http::Method::POST
+    } else {
+        http::Method::GET
+    };
+    let mut request = http::Request::builder()
+        .method(method)
+        .uri(target)
         .header("Accept-Encoding", "identity")
         .header("Host", authority)
         .header("User-Agent", "Python-urllib/3.11");
     if let Some(value) = authorization {
         request = request.header("Authorization", http::HeaderValue::from_bytes(value).ok()?);
     }
-    let request = request
-        .header("Connection", "close")
-        .body(Empty::<Bytes>::new())
-        .ok()?;
+    let payload: BoxBody<Bytes, std::convert::Infallible> = match body {
+        Some(data) => {
+            request = request.header("Content-Type", "application/json");
+            Full::new(Bytes::copy_from_slice(data)).boxed()
+        }
+        None => Empty::<Bytes>::new().boxed(),
+    };
+    let request = request.header("Connection", "close").body(payload).ok()?;
     let reply = async {
         let response = sender.send_request(request).await.ok()?;
         let status = response.status().as_u16();

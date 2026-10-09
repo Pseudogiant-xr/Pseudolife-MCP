@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 
 from . import _bank
+from ..core import PLATFORM
 
 ORACLE: dict = {"python": None, "source": None}
 _POOL: dict[str, "RealDaemon"] = {}
@@ -63,10 +64,21 @@ class RealDaemon:
                 env=env, cwd=str(ORACLE["source"]), stdout=self._log,
                 stderr=subprocess.STDOUT, creationflags=creation)
             self._await_health()
+            self._await_warmup()
         except BaseException:
             # Not yet in the pool, so nothing else would stop it or drop its bank.
             self.shutdown()
             raise
+
+    def _await_warmup(self) -> None:
+        """The daemon's startup warmup holds the service lock (episode writes
+        wait on it) and loads the model; until it logs ``pipeline ready`` a
+        CLI's 0.25 s health probe can miss in either arm."""
+        deadline = time.time() + 240
+        while "warmup: pipeline ready" not in self.tail(200_000):
+            if self.proc.poll() is not None or time.time() > deadline:
+                raise RuntimeError("daemon warmup never finished:\n" + self.tail())
+            time.sleep(0.25)
 
     def _await_health(self) -> None:
         deadline = time.time() + 180
@@ -101,8 +113,8 @@ class RealDaemon:
                 run = 0
             time.sleep(0.05)
 
-    def tail(self) -> str:
-        return (self.data / "daemon.log").read_text(errors="replace")[-3000:]
+    def tail(self, size: int = 3000) -> str:
+        return (self.data / "daemon.log").read_text(errors="replace")[-size:]
 
     # The fixture-daemon interface core.run_arm uses.
     def requests(self) -> list:
@@ -124,12 +136,40 @@ class RealDaemon:
         shutil.rmtree(self.data, ignore_errors=True)
 
 
+def _sweep_dead_runs() -> None:
+    """Drop banks this platform's earlier harness runs left behind when they
+    were killed before their exit hook ran (names end in the run's pid)."""
+    import re  # noqa: PLC0415
+    try:
+        import psutil  # noqa: PLC0415
+    except ImportError:
+        return
+    prefix = PLATFORM[:3]
+    with _bank._admin() as conn:
+        names = [r[0] for r in conn.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'pl\\_cf\\_w1b\\_%'")]
+    for name in names:
+        match = re.fullmatch(rf"pl_cf_w1b_[a-z0-9_]+_{prefix}(\d+)", name)
+        if match and int(match.group(1)) != os.getpid() and not psutil.pid_exists(
+                int(match.group(1))):
+            _bank.drop(name)
+
+
+_SWEPT = False
+
+
 def shared(row: str):
     """A per-arm factory: ``core.run_arm`` calls it with the arm's name."""
     def factory(arm: str) -> RealDaemon:
+        global _SWEPT
         key = f"{row}_{arm}"
+        if not _SWEPT:
+            _SWEPT = True
+            _sweep_dead_runs()
         if key not in _POOL:
-            _POOL[key] = RealDaemon(f"pl_cf_w1b_{key}")
+            # Per host and process: two harness runs (say Windows and WSL)
+            # share the bench server and must never drop each other's banks.
+            _POOL[key] = RealDaemon(f"pl_cf_w1b_{key}_{PLATFORM[:3]}{os.getpid()}")
         _POOL[key].settle()
         return _POOL[key]
     factory.per_arm = True
