@@ -591,6 +591,9 @@ def tag_arm(arm, observation: dict) -> None:
     observation["arm"] = arm.name
 
 
+DEPTH_CASES = ("agent-state-deep-parsed", "agent-state-too-deep", "agent-state-too-deep-refusal")
+
+
 def cases() -> list[Case]:
     c: list[Case] = []
     add = c.append
@@ -944,6 +947,13 @@ def cases() -> list[Case]:
                  daemon=False))
         add(case("git-bash-env-not-bash", env={"CLAUDE_CODE_GIT_BASH_PATH": "{HOME}\\git\\git.exe"},
                  steps=[write("git/git.exe", b"")], daemon=False))
+    # The JSON depth where CPython's parser raises depends on the interpreter's
+    # call depth at that point: 978 was measured on Windows; Linux CPython
+    # parses 978. The threshold cases run where it was measured (declared
+    # in doctor.md).
+    for item in c:
+        if item.id in DEPTH_CASES:
+            item.platforms = ("windows",)
     return c
 
 
@@ -1003,9 +1013,6 @@ MUTANTS = [
     Mutant("doctor-unhashable-error-refused", "doctor", "shim/src/cli/doctor/agent.rs",
            'Some(Value::Array(_) | Value::Object(_)) => "unsupported_capability",', "",
            ("agent-state-error-list", "agent-state-error-object")),
-    Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
-           "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",
-           ("agent-state-too-deep", "agent-state-deep-parsed")),
     Mutant("doctor-int-digits-at-limit", "doctor", "shim/src/cli/doctor/pyenv.rs",
            "len() > INT_MAX_STR_DIGITS", "len() >= INT_MAX_STR_DIGITS",
            ("health-integer-at-limit", "agent-state-integer-at-limit")),
@@ -1027,3 +1034,8 @@ MUTANTS = [
     Mutant("doctor-drop-final-newline", "doctor", "shim/src/cli/doctor/mod.rs",
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]
+if core.WINDOWS:
+    # Its cases run only where the depth threshold was measured.
+    MUTANTS.append(Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
+                          "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",
+                          ("agent-state-too-deep", "agent-state-deep-parsed")))

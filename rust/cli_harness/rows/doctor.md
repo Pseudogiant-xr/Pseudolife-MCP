@@ -110,8 +110,12 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   978 before its first error is answered by the error, not RecursionError.
   The daemon's `_send_json` never produces one.
 - The nesting threshold 978 is the oracle's recursion limit (1000) less the
-  frames above the decode in doctor's call path, measured on CPython 3.11.9;
-  another interpreter build can move it by a few levels.
+  frames above the decode in doctor's call path, measured on CPython 3.11.9
+  on Windows; another interpreter build can move it by a few levels. On
+  Linux (CPython 3.11.15 under WSL, 2026-10-09) the oracle parses depth 978,
+  so the threshold differs there and is not measured: the three threshold
+  cases and their mutant run on Windows only. No daemon answer nests this
+  deep.
 - `python-httpx/0.28.1` is the oracle environment's httpx; another httpx
   version sends another agent string.
 - Missing Git for Windows (`GitBashMissing`) is not reachable through the
