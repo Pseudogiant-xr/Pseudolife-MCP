@@ -507,8 +507,12 @@ you can prove are yours.
   Bash, MSYS rewrites `/PID` into a path, so write `taskkill //PID <pid>
   //T //F` (or prefix `MSYS_NO_PATHCONV=1`). In Git Bash `$!` is not a
   Windows PID; read it with `cat /proc/$!/winpid`. In PowerShell use
-  `(Start-Process ... -PassThru).Id`. A recorded PID can be reused once its
-  process exits, so if time has passed, recheck its command line first.
+  `(Start-Process ... -PassThru).Id`. A PID can be reused once its process
+  exits, and an identical command line is not proof either: another session
+  may run the same command in a shared worktree. So record the process's
+  start time with its PID (PowerShell: `(Get-Process -Id <pid>).StartTime`),
+  verify both just before stopping, and do not stop it if either no longer
+  matches or cannot be read.
 - **By a marker unique to your run** when the process has left your tree (a
   daemon that detached or outlived its launcher). Put a run id in the argv
   or use your own harness home. The worktree path is not unique: reviewers
@@ -516,7 +520,8 @@ you can prove are yours.
   list the matches, check them, then stop them by PID.
 - A server started by a tool you do not control is stopped through that
   tool, or by asking its owner on the board.
-- **Never select by name, filter or generic pattern.** That means
+- **Never stop processes selected only by image name, shared attributes or a
+  command-line pattern that does not prove ownership.** That means
   `taskkill /IM` or `/FI "IMAGENAME eq ..."`, `Stop-Process -Name`,
   `Get-Process <name> | Stop-Process`, `wmic process where name=... delete`,
   `Get-CimInstance Win32_Process -Filter "Name=..." | Invoke-CimMethod
