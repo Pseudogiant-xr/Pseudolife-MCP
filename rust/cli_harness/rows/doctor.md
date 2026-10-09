@@ -10,14 +10,16 @@ Producers: README "pseudolife-mcp doctor", docs/guide/configuration.md
 `--agent-state <file>`, `--disposable-proof`), docs/guide/providers.md,
 ops/install.* ("run doctor from that command's environment").
 
-Answered: `doctor`, with `--host codex|claude-code|claude-desktop|generic`
-and `--timeout N` (plain positive decimal), each at most once, any order
-(:548-552). `--disposable-proof` without a nonempty
-`PSEUDOLIFE_TEST_DATABASE_URL` keeps the existing refusal (:562-566, exit 2).
+Answered: `doctor`, with `--host codex|claude-code|claude-desktop|generic`,
+`--timeout N` (plain positive decimal) and `--agent-state FILE` (not
+starting with `-`), each at most once, any order (:548-554).
+`--disposable-proof` without a nonempty `PSEUDOLIFE_TEST_DATABASE_URL`
+keeps the existing refusal (:562-566, exit 2).
 
-Deferred before any effect: `--agent-state` (saved-instance proof,
-:446-503, :648-653); `--disposable-proof` with a nonempty DSN (it runs the
-Python daemon's ASGI app in process, coordination_proof.py); every other
+Deferred before any effect: `--disposable-proof` with a nonempty DSN (it
+creates a fixture bank and drives the Python daemon's ASGI app and adapters
+in process, coordination_proof.py: there is no native daemon to drive);
+`--disposable-proof` with `--agent-state` (an argparse error); every other
 argv shape (abbreviations, `=` forms, repeats, help, bad values).
 
 ## Exact contract items
@@ -34,7 +36,8 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | `daemon_version` (`or "unknown"`), `codex_hooks` (`bundle-present`, `not-configured`, `unknown` without digest, `unknown (UnicodeDecodeError)`) | :615-617, client_updates.py:1528-1592 |
 | Handshake: own shim with `PSEUDOLIFE_MCP_NO_SPAWN=1`, `PSEUDOLIFE_AGENT_COORDINATION=0`, the overridden environment; SDK initialize, `tools/list` (one page); `instructions_present`, `tool_count`, `tools_missing_annotations`, `coordination_tools_present`; `ok` rule and recovery; version mismatch rule and recovery text; `TimeoutError` (whole handshake incl. shutdown under `--timeout`) and `ExceptionGroup` (anything raised inside the client) with their recovery text | :104-125, :618-646 |
 | Wake report: Claude Code Stop hook (registration substring, installed_plugins, settings env block over process env, enabledPlugins false), Codex doorbell (TOML env table, `env_vars` forwarding, writer, bearer, CLI lookup), `_wake_state` texts, caps filter (known keys, JSON integers >= 0, daemon order) | :197-324, codex_doorbell.py:125-172 |
-| Coordination snapshot fields, order and `next` texts | :505-541, :654-657 |
+| `--agent-state`: probed only when the host is not claude-desktop and the board is on; `exists()`, `read_legacy` (no symlinked ancestor, `open_private` owner-only regular file, 16384-character text read, object with `bank_url` == daemon URL and non-empty `agent_id`/`credential`), missing bearer; `POST /api/coordination/context` `{agent_id, nonce, read_only: true}` with the bearer, no redirects, no proxies; 200 field check, version-2 binding mismatch, version not None/2, HMAC-SHA256 nonce proof over Python's ASCII compact JSON, non-ASCII proof; 401, 404/405, 400/403 error-code map, >=500, other statuses; transport errors; `ok` false unless authenticated | :446-503, :648-653, :658-659, coordination_identity.py:95-118, private_state.py:36-75 |
+| Coordination snapshot fields, order and `next` texts (registration-dependent branches included) | :505-541, :654-657 |
 | GitBashMissing and MaintainerPasskeysInvalid finalization | :660-674 |
 | `path_resolution`: CPython 3.11 `shutil.which("pseudolife-mcp")` (cwd first and PATHEXT on Windows), launcher from `PSEUDOLIFE_SHIM_RUNTIMES`/`_LAUNCHER` or the default layout, realpath/normcase comparison, warning text | :690-707, runtimes.py:127-154 |
 | No incidental mutation: doctor writes nothing; the only file a run leaves is the handshake shim's own `~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json` (CLI-SHIM's file, written by the Python shim too) | shim.py:708-725 |
@@ -64,16 +67,24 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   separators, ASCII escapes, `url` first); the native shim's `cache.rs`
   writes compact UTF-8 with `url` last. Compared as parsed JSON, that path
   only.
-- Proxies: urllib honours `*_proxy` variables and, on Windows without them,
-  the WinINet registry proxy. The native probes connect directly; any
-  `*_proxy` variable defers, the registry is not consulted.
+- Proxies: urllib honours `http_proxy`/`https_proxy` and, on Windows
+  without them, the WinINet registry proxy. The native probes connect
+  directly; either variable defers, the registry is not consulted.
+- https daemons: TLS trust is the native shim's reqwest/rustls
+  configuration, not CPython's default `ssl` context.
 - Closed stdout: the oracle's print raises and CPython exits 120 after a
   shutdown flush trailer; the native doctor exits 1.
+- Context answers after the handshake cannot defer: a 200 or 400/403
+  `/api/coordination/context` body that only Python's decoder admits (a
+  UTF-8 BOM, UTF-16/32, NaN or Infinity) is answered as a JSON failure
+  (`unsupported_capability`). The daemon's `_send_json` never produces one.
 
 ## Deferral domain (before the first request unless noted)
 
-`--agent-state`; nonempty-DSN `--disposable-proof`; noncanonical argv; any
-`*_proxy` variable; an invalid daemon URL; a credential provider error
+nonempty-DSN `--disposable-proof`; noncanonical argv; an `--agent-state`
+path with a `..` component, a symlinked or junction ancestor, or a
+stat error pathlib would raise; a nonempty `http_proxy` or `https_proxy`
+(any case); an invalid daemon URL; a credential provider error
 (missing, unsafe or malformed token file, invalid static token); a bearer
 outside Latin-1 or with control characters; saved tunnels present
 (`~/.pseudolife-mcp/tunnel`); JSON files only Python may read (NaN,

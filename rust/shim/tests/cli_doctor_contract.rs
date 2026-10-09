@@ -52,22 +52,22 @@ fn original_absent_and_empty_disposable_dsn_cells() {
 }
 
 #[test]
-fn canonical_saved_state_requests_stay_deferred_without_mutation() {
+fn saved_state_proof_requests_stay_deferred_without_mutation() {
     let home = Home::new();
     let path = home.0.join("owned-state.json");
     let sentinel = b"owned state sentinel\n";
     std::fs::write(&path, sentinel).unwrap();
     for dsn in ["", "postgresql://fixture.invalid/disposable"] {
-        for proof_first in [None, Some(false), Some(true)] {
+        for proof_first in [false, true] {
             let mut command = command(&home);
             command
                 .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
                 .arg("doctor");
-            if proof_first == Some(true) {
+            if proof_first {
                 command.arg("--disposable-proof");
             }
             command.arg("--agent-state").arg(&path);
-            if proof_first == Some(false) {
+            if !proof_first {
                 command.arg("--disposable-proof");
             }
             deferred(command.output().unwrap());
@@ -368,6 +368,30 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
     }
 }
 
+#[test]
+fn a_saved_instance_is_not_checked_while_the_board_is_off() {
+    for host in ["generic", "claude-desktop"] {
+        let home = Home::new();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .args(["--host", host, "--agent-state"])
+            .arg(home.0.join("absent.json"))
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let map = report(&output);
+        assert_eq!(map["ok"], json!(false));
+        assert_eq!(
+            map["coordination"]["registration"],
+            json!(if host == "generic" {
+                "not_checked"
+            } else {
+                "unsupported_host"
+            })
+        );
+        assert!(tree(&home.0).is_empty());
+    }
+}
+
 fn annotated(name: &str) -> Value {
     json!({"name": name, "inputSchema": {"type": "object"},
            "annotations": {"readOnlyHint": true}})
@@ -441,9 +465,12 @@ type Prepare = fn(&Home, &mut Command);
 #[test]
 fn shapes_beyond_the_port_defer_before_any_request() {
     let cases: [(&str, Prepare); 9] = [
-        ("saved instance", |home, command| {
+        ("saved instance path through ..", |home, command| {
+            std::fs::create_dir_all(home.0.join("x")).unwrap();
             std::fs::write(home.0.join("state.json"), b"{}").unwrap();
-            command.arg("--agent-state").arg(home.0.join("state.json"));
+            command
+                .arg("--agent-state")
+                .arg(home.0.join("x").join("..").join("state.json"));
         }),
         ("saved tunnels", |home, _| {
             std::fs::create_dir_all(home.0.join(".pseudolife-mcp").join("tunnel")).unwrap();

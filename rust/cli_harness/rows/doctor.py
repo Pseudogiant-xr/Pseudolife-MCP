@@ -3,8 +3,8 @@
 Canonical argv (README, docs/guide/configuration.md "Coordination
 diagnostic quickstart", docs/guide/providers.md, ops/install.*): ``doctor``
 and ``doctor --host codex|claude-code|claude-desktop|generic``, with
-``--timeout SECONDS``. ``--agent-state`` and a nonempty
-``--disposable-proof`` database defer (Rust tests cover deferrals).
+``--timeout SECONDS`` and ``--agent-state FILE``. A nonempty
+``--disposable-proof`` database defers (Rust tests cover deferrals).
 
 Each case runs against the stdlib fixture daemon below, bound to
 one loopback port for both arms, so the daemon URL, the shim's handshake
@@ -196,6 +196,23 @@ class FixtureDaemon:
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
                 path = self.path.split("?", 1)[0]
+                if path == "/api/coordination/context":
+                    # Doctor's own saved-instance proof: the request's fields
+                    # except its random nonce are recorded.
+                    try:
+                        request = json.loads(raw)
+                    except ValueError:
+                        request = None
+                    fields = (sorted(request) if isinstance(request, dict) else None)
+                    self._record({"method": "POST", "path": path,
+                                  "authorization": self.headers.get("Authorization"),
+                                  "fields": fields,
+                                  "agent_id": (request or {}).get("agent_id"),
+                                  "read_only": (request or {}).get("read_only")})
+                    route = daemon.routes.get("POST " + path)
+                    self._answer(route(daemon, request) if route
+                                 else Route(404, {"error": "not_found"}))
+                    return
                 if path != "/mcp":
                     self._record({"method": "POST", "path": path, "via": "shim"})
                     self._answer(Route(200, {"ok": True}))
@@ -235,6 +252,8 @@ class FixtureDaemon:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.server.daemon_threads = True
+        # A client closing a kept-alive connection is not a fixture failure.
+        self.server.handle_error = lambda request, address: None
         self.port = self.server.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -422,6 +441,52 @@ def token_file(rel: str, token: str = "fixture-token"):
     return step
 
 
+AGENT = "a" * 32
+CREDENTIAL = "fixture-instance-credential"
+BANK = "00000000-0000-4000-8000-000000000001"
+PRINCIPAL = "default"
+STATE = "state/instance.json"
+
+
+def saved_instance(private: bool = True, raw: str | None = None, **fields):
+    """A saved instance file in the adapter's legacy-state shape, written by
+    the adapter's own private writer (or plainly, for a non-private file)."""
+    def step(arm):
+        url = arm.daemon.url if arm.daemon else core.DEAD_DAEMON_URL
+        value = {"bank_url": url, "agent_id": AGENT, "credential": CREDENTIAL, "version": 2,
+                 "bank_id": BANK, "principal": PRINCIPAL}
+        for key, item in fields.items():
+            if item is None:
+                value.pop(key, None)
+            else:
+                value[key] = item
+        text = raw if raw is not None else json.dumps(value)
+        path = arm.home / STATE
+        if private:
+            producers.write_private(path, text)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+    return step
+
+
+def context_proof(bank: str = BANK, principal: str = PRINCIPAL, proof: str | None = None):
+    """``/api/coordination/context``'s read-only answer: the daemon's nonce
+    proof over the request's agent and nonce (``web/coordination``)."""
+    import hashlib
+    import hmac
+
+    def answer(_daemon, request):
+        message = json.dumps(["pseudolife-context-v1", bank, principal, request["agent_id"],
+                              request["nonce"]], separators=(",", ":"),
+                             ensure_ascii=True).encode("ascii")
+        good = hmac.new(hashlib.sha256(CREDENTIAL.encode()).digest(), message,
+                        hashlib.sha256).hexdigest()
+        body = {"bank_id": bank, "principal": principal, "proof": proof or good}
+        return Route(200, body)
+    return answer
+
+
 def registration(env: dict) -> dict:
     return {"mcpServers": {"pseudolife-memory": {"command": "pseudolife-mcp", "args": [],
                                                  "env": env}}}
@@ -533,6 +598,57 @@ def cases() -> list[Case]:
              steps=[token_file("secrets/token")], routes={
                  "/health": healthy(), board: lambda _: BOARD_ON,
                  "/api/maintainer": lambda _: MAINTAINER_UNSET}))
+
+    # A saved instance verified by nonce proof (--agent-state).
+    state_arg = ["--agent-state", "{HOME}/" + STATE]
+    context = "POST /api/coordination/context"
+
+    def agent(id, *, answer=None, steps=None, argv=(), env=TOKEN, daemon=True):
+        routes = {"/health": healthy(), board: lambda _: BOARD_ON,
+                  "/api/maintainer": lambda _: MAINTAINER_UNSET}
+        if answer is not None:
+            routes[context] = answer
+        add(case(f"agent-state-{id}", [*state_arg, *argv], env=env, routes=routes,
+                 steps=steps if steps is not None else [saved_instance()], daemon=daemon))
+
+    agent("authenticated", answer=context_proof())
+    agent("authenticated-host-codex", answer=context_proof(), argv=["--host", "codex"])
+    agent("legacy-unversioned", answer=context_proof(),
+          steps=[saved_instance(version=None, bank_id=None, principal=None)])
+    agent("version-float", answer=context_proof(), steps=[saved_instance(version=2.0)])
+    agent("version-3", answer=context_proof(), steps=[saved_instance(version=3)])
+    agent("bank-mismatch", answer=context_proof(bank="00000000-0000-4000-8000-000000000002"))
+    agent("principal-mismatch", answer=context_proof(principal="other"))
+    agent("bad-proof", answer=context_proof(proof="0" * 64))
+    agent("proof-missing", answer=lambda _d, _r: Route(200, {"bank_id": BANK,
+                                                             "principal": PRINCIPAL}))
+    agent("not-json", answer=lambda _d, _r: Route(200, raw=b"<html>"))
+    for status, payload, name in [
+        (401, {"error": "unauthorized"}, "unauthorized"),
+        (404, {"error": "not_found"}, "not-found"),
+        (405, {"error": "method_not_allowed"}, "method-not-allowed"),
+        (400, {"error": "instance_not_found"}, "instance-not-found"),
+        (403, {"error": "invalid_credential"}, "invalid-credential"),
+        (403, {"error": "principal_not_allowed"}, "principal-not-allowed"),
+        (400, {"error": "unexpected_parameter"}, "unexpected-parameter"),
+        (400, {"error": "something_else"}, "other-refusal"),
+        (400, ["not", "a", "dict"], "refusal-not-dict"),
+        (503, {"error": "coordination_unavailable"}, "unavailable"),
+        (418, {"error": "teapot"}, "other-status"),
+    ]:
+        agent(name, answer=(lambda s, p: lambda _d, _r: Route(s, p))(status, payload))
+    agent("refusal-not-json", answer=lambda _d, _r: Route(400, raw=b"oops"))
+    agent("redirect", answer=lambda _d, _r: Route(302, {}, headers={"Location": "/elsewhere"}))
+    agent("missing-file", answer=context_proof(), steps=[])
+    agent("invalid-json", answer=context_proof(), steps=[saved_instance(raw="{oops")])
+    agent("not-an-object", answer=context_proof(), steps=[saved_instance(raw="[1]")])
+    agent("wrong-url", answer=context_proof(),
+          steps=[saved_instance(bank_url="http://127.0.0.1:1")])
+    agent("empty-credential", answer=context_proof(), steps=[saved_instance(credential="")])
+    agent("not-private", answer=context_proof(), steps=[saved_instance(private=False)])
+    agent("board-off", answer=context_proof(), env={})
+    agent("claude-desktop", answer=context_proof(), argv=["--host", "claude-desktop"])
+    agent("unreachable-daemon", daemon=False)
 
     # Client registrations lend the credential a plain shell lacks.
     reg_routes = {"/health": healthy(auth=True), board: lambda _: BOARD_ON,
@@ -704,6 +820,9 @@ MUTANTS = [
            ("claude-wake-hook-invalid",)),
     Mutant("doctor-tool-count", "doctor", "shim/src/cli/doctor/handshake.rs",
            "tool_count: tools.len(),", "tool_count: tools.len() + 1,", ("healthy",)),
+    Mutant("doctor-agent-proof-inverted", "doctor", "shim/src/cli/doctor/agent.rs",
+           "if answer == expected {", "if answer != expected {",
+           ("agent-state-authenticated", "agent-state-bad-proof")),
     Mutant("doctor-drop-final-newline", "doctor", "shim/src/cli/doctor/mod.rs",
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]

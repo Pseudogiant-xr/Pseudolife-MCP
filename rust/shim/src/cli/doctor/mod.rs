@@ -2,6 +2,7 @@
 //! canonical `--disposable-proof` refusal. Every input outside the
 //! reproduced domain defers before the first request to the daemon, or,
 //! for an answer only the daemon can give, before the handshake starts.
+mod agent;
 mod clients;
 mod handshake;
 mod probes;
@@ -25,7 +26,7 @@ struct Args {
     proof: bool,
     timeout: f64,
     host: &'static str,
-    agent_state: bool,
+    agent_state: Option<String>,
 }
 
 fn positive_decimal(raw: &str) -> Option<f64> {
@@ -45,7 +46,7 @@ fn parse(values: &[OsString]) -> Option<Args> {
         proof: false,
         timeout: 20.0,
         host: "generic",
-        agent_state: false,
+        agent_state: None,
     };
     let mut values = values.iter();
     while let Some(raw) = values.next() {
@@ -66,12 +67,11 @@ fn parse(values: &[OsString]) -> Option<Args> {
                 1 => args.timeout = positive_decimal(value)?,
                 2 => args.host = HOSTS.iter().find(|host| **host == value)?,
                 _ if value.is_empty() || value.starts_with('-') => return None,
-                _ => {}
+                _ => args.agent_state = Some(value.to_owned()),
             }
         }
     }
     args.proof = seen[0];
-    args.agent_state = seen[3];
     Some(args)
 }
 
@@ -92,16 +92,12 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     if args.proof {
         // A nonempty fixture database runs the Python daemon's ASGI app in
         // process; saved-state proofs are refused there too. Both defer.
-        if args.agent_state
+        if args.agent_state.is_some()
             || std::env::var_os("PSEUDOLIFE_TEST_DATABASE_URL").is_some_and(|dsn| !dsn.is_empty())
         {
             return None;
         }
         return Some(emit(REFUSAL, 2));
-    }
-    // A saved-instance registration check (--agent-state) stays deferred.
-    if args.agent_state {
-        return None;
     }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -126,12 +122,13 @@ pub(super) fn truthy(value: &Value) -> bool {
     }
 }
 
-/// urllib reads `*_proxy` variables (and, on Windows without them, the
+/// urllib proxies `http_proxy`/`https_proxy` (and, on Windows without them,
 /// registry); the native probes connect directly, so a proxy defers.
 fn no_proxy_environment() -> Res<()> {
     for (name, value) in std::env::vars_os() {
+        // urllib's ProxyHandler uses the scheme entries only.
         let name = name.to_string_lossy().to_ascii_lowercase();
-        if name.ends_with("_proxy") && !value.is_empty() {
+        if matches!(name.as_str(), "http_proxy" | "https_proxy") && !value.is_empty() {
             return Err(Defer);
         }
     }
@@ -206,6 +203,7 @@ fn coordination_snapshot(
     board_state: &str,
     wake: &Map<String, Value>,
     host: &str,
+    registration: Option<&str>,
     tools_present: Option<bool>,
 ) -> Value {
     const REACHABLE: [&str; 9] = [
@@ -252,9 +250,14 @@ fn coordination_snapshot(
         next.push("Start the intended daemon and retry; HTTP health does not prove mail delivery.");
     } else if auth != "admitted" {
         next.push("Check the board reason and credential source; repair authentication or daemon coordination settings.");
-    } else if tools_present == Some(false) {
+    } else if matches!(
+        registration,
+        Some("invalid_state" | "invalid_credential" | "bank_identity_mismatch")
+    ) {
+        next.push("Preserve the saved instance file; verify its bank and principal and the client's credentials before explicit recovery.");
+    } else if registration == Some("unsupported_capability") || tools_present == Some(false) {
         next.push("Update the daemon and shim together; this diagnostic requires coordination tools and read-only context support.");
-    } else if host != "claude-desktop" {
+    } else if registration != Some("authenticated") && host != "claude-desktop" {
         next.push("Start or reconnect the client, make a memory call, then use --agent-state with its private saved instance file to check registration.");
     }
     if host == "claude-desktop" {
@@ -268,14 +271,22 @@ fn coordination_snapshot(
         "daemon": if reachable { "reachable" } else { "offline" },
         "health": if health_ok { "ok" } else { "not_verified" },
         "authentication": auth,
-        "registration": if host == "claude-desktop" { "unsupported_host" } else { "not_checked" },
+        "registration": if host == "claude-desktop" {
+            "unsupported_host"
+        } else {
+            registration.unwrap_or("not_checked")
+        },
         "transport": {
             "coordination_tools": match tools_present {
                 Some(true) => "advertised",
                 Some(false) => "unsupported_capability",
                 None => "not_checked",
             },
-            "mailbox_pull": "not_verified",
+            "mailbox_pull": if registration == Some("authenticated") {
+                "authenticated"
+            } else {
+                "not_verified"
+            },
         },
         "host": host,
         "wake": {"state": wake_state, "evidence": "configuration_only"},
@@ -325,6 +336,12 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         return Err(Defer);
     }
     let identity = identity()?;
+    // A saved instance is read now; its context request runs after the
+    // handshake, as in Python. Claude Desktop is never checked.
+    let saved = match &args.agent_state {
+        Some(path) if args.host != "claude-desktop" => Some(agent::read(path, &url)?),
+        _ => None,
+    };
 
     let short = Duration::from_secs_f64(args.timeout.min(2.0));
     let mut report = Map::new();
@@ -505,15 +522,30 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
     wake.insert("claude_code".into(), claude_wake.report(enabled));
     wake.insert("codex".into(), codex_wake.report(enabled));
     wake.insert("caps".into(), caps(health.as_ref()));
+    let registration = match (&saved, &token) {
+        (Some(_), _) if board_state != "on" => None,
+        (Some(agent::Saved::Missing), _) => Some("missing_registration"),
+        (Some(agent::Saved::Invalid), _) => Some("invalid_state"),
+        (Some(agent::Saved::State(_)), None) => Some("missing_bearer"),
+        (Some(agent::Saved::State(state)), Some(token)) => {
+            Some(agent::probe(&url, token, state, short).await)
+        }
+        (None, _) => None,
+    };
     let snapshot = coordination_snapshot(
         health.as_ref(),
         &board_state,
         &wake,
         args.host,
+        registration,
         tools_present,
     );
+    let registered = snapshot.get("registration") == Some(&json!("authenticated"));
     put(&mut report, "wake", Value::Object(wake));
     put(&mut report, "coordination", snapshot);
+    if args.agent_state.is_some() && !registered {
+        put(&mut report, "ok", json!(false));
+    }
     // No Git Bash fails the report; an earlier error keeps its name.
     if report.get("git_bash") == Some(&Value::Null) {
         put(&mut report, "ok", json!(false));
