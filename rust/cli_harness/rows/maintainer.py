@@ -28,6 +28,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 import types
@@ -420,7 +421,7 @@ WRITES = ("maintainer-host-write",)
 
 
 def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
-         stdout_closed=False, note=""):
+         stdout_closed=False, skip_if=None, note=""):
     """``maintainer <argv>`` on this arm's own copy of a seeded bank."""
 
     def setup(arm):
@@ -439,7 +440,12 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
     environment.update(env or {})
     return core.Case(case_id, ["maintainer", *argv], env=environment, setup=setup,
                      during=during, after=after, rules=rules, timeout=60,
-                     stdout_closed=stdout_closed, note=note)
+                     stdout_closed=stdout_closed, skip_if=skip_if, note=note)
+
+
+def _tz_set() -> bool:
+    """The native listing defers its local times while TZ is set."""
+    return "TZ" in os.environ
 
 
 def defer(case_id, kind, argv, **kwargs):
@@ -451,8 +457,8 @@ def cases() -> list[core.Case]:
     return [
         # list
         case("list-empty", "empty", ["list"]),
-        case("list-pending", "pending", ["list"]),
-        case("list-rich", "rich", ["list"]),
+        case("list-pending", "pending", ["list"], skip_if=_tz_set),
+        case("list-rich", "rich", ["list"], skip_if=_tz_set),
         # the bank has no maintainer tables (schema before v54)
         case("no-tables-list", "notables", ["list"]),
         case("no-tables-enrol-code", "notables", ["enrol-code", "--no-wait"]),
@@ -495,6 +501,7 @@ def cases() -> list[core.Case]:
              rules=WRITES + ("maintainer-stdout-closed-trailer",)),
         # deferred before any effect (the oracle arm writes; the candidate must not)
         defer("defer-list-stdout-closed", "rich", ["list"], stdout_closed=True),
+        defer("defer-list-tz-set", "rich", ["list"], env={"TZ": "UTC"}),
         defer("defer-help", "rich", ["--help"]),
         defer("defer-list-help", "rich", ["list", "--help"]),
         defer("defer-enrol-poll", "fresh", ["enrol-code", "--poll", "0.01", "--no-wait"]),
