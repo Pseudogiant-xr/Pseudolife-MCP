@@ -18,6 +18,7 @@ mod move_cli;
 mod pairing;
 mod test_login;
 mod transfer;
+mod tunnel;
 mod version;
 pub mod wait_mail;
 
@@ -171,6 +172,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
         && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
     {
         return Some(ExitCode::from(code));
+    }
+    if mode == "tunnel"
+        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
