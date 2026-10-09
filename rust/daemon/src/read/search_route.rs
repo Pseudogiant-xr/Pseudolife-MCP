@@ -83,7 +83,9 @@ struct LazyReranker {
 impl LazyReranker {
     fn get() -> &'static LazyReranker {
         static SLOT: OnceLock<LazyReranker> = OnceLock::new();
-        SLOT.get_or_init(|| LazyReranker { state: Mutex::new(None) })
+        SLOT.get_or_init(|| LazyReranker {
+            state: Mutex::new(None),
+        })
     }
 
     fn model(&self) -> Option<Arc<rerank::Reranker>> {
@@ -172,8 +174,13 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     let params = Params {
         query: req.query.clone(),
         k,
-        sources: req.sources.as_ref().map(|v| v.iter().cloned().collect::<HashSet<_>>()),
-        tags: tags_norm.as_ref().map(|v| v.iter().cloned().collect::<HashSet<_>>()),
+        sources: req
+            .sources
+            .as_ref()
+            .map(|v| v.iter().cloned().collect::<HashSet<_>>()),
+        tags: tags_norm
+            .as_ref()
+            .map(|v| v.iter().cloned().collect::<HashSet<_>>()),
         episodes: None,
         min_score: req.min_score,
         default_floor: s.min_score,
@@ -212,7 +219,11 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
             "min_logical_turn": null,
         }),
     };
-    let n_ctg = s.contiguity_neighbors.max(0) as usize;
+    let n_ctg = if crate::mutants::active("search-no-contiguity") {
+        0
+    } else {
+        s.contiguity_neighbors.max(0) as usize
+    };
     let hide_superseded = cfg.hide_superseded;
     let floor = cfg.search_confidence_floor;
     let r2 = ready.clone();
@@ -230,17 +241,31 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
                 .iter()
                 .map(|h| {
                     let text = &bank.entries[h.idx].text;
-                    (h.idx, h.score, h.via, ranked.comps.get(text).cloned().map(Value::Object))
+                    (
+                        h.idx,
+                        h.score,
+                        h.via,
+                        ranked.comps.get(text).cloned().map(Value::Object),
+                    )
                 })
                 .collect();
             if n_ctg > 0 && !rows.is_empty() {
-                let mut seen: HashSet<&str> =
-                    rows.iter().map(|r| bank.entries[r.0].text.as_str()).collect();
+                let mut seen: HashSet<&str> = rows
+                    .iter()
+                    .map(|r| bank.entries[r.0].text.as_str())
+                    .collect();
                 let mut expanded = Vec::new();
                 for row in rows {
                     let (before, after) =
                         search::temporal_neighbors(bank, row.0, n_ctg, hide_superseded);
-                    let neighbour = |i: usize| (i, 0.0, Some("contiguity"), Some(json!({"channel": "contiguity"})));
+                    let neighbour = |i: usize| {
+                        (
+                            i,
+                            0.0,
+                            Some("contiguity"),
+                            Some(json!({"channel": "contiguity"})),
+                        )
+                    };
                     for nb in before {
                         if seen.insert(bank.entries[nb].text.as_str()) {
                             expanded.push(neighbour(nb));
@@ -280,7 +305,10 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     let mut body = Map::new();
     body.insert("query".into(), json!(req.query));
     body.insert("count".into(), json!(entries_out.len()));
-    let best = direct_scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let best = direct_scores
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
     let low = direct_scores.is_empty() || (floor > 0.0 && best < floor);
     body.insert("low_confidence".into(), json!(low));
     match chronicle::events_for(db, &req.query).await {
@@ -295,7 +323,7 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     }
     let mut params_json = params_json;
     params_json["contiguity_neighbors"] = json!(n_ctg);
-    let event_id = if cfg.retrieval_log_enabled {
+    let event_id = if cfg.retrieval_log_enabled && !crate::mutants::active("search-skip-event") {
         log_event(db, &req, &entries_out, &served_comps, &params_json).await
     } else {
         None
@@ -369,7 +397,10 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
             return json_response(400, &json!({"error": msg}));
         }
     }
-    let query = q.get("q").map(|s| py_strip(s).to_string()).unwrap_or_default();
+    let query = q
+        .get("q")
+        .map(|s| py_strip(s).to_string())
+        .unwrap_or_default();
     if query.is_empty() {
         return json_response(
             200,
@@ -391,7 +422,10 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         sources: list(&q, "source"),
         bands,
         tags: list(&q, "tag"),
-        min_score: q.get("min_score").filter(|s| !s.is_empty()).and_then(|s| py_float(s)),
+        min_score: q
+            .get("min_score")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| py_float(s)),
         disable_recency_boost: tribool(&q, "disable_recency_boost") == Some(true),
         rerank: tribool(&q, "rerank"),
         bm25: tribool(&q, "bm25"),
@@ -403,7 +437,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         Err(e) => return json_response(500, &json!({"error": e.to_string()})),
     };
     let cc = &cfg.cortex;
-    if cc.enabled && cc.search_first {
+    if cc.enabled && cc.search_first && !crate::mutants::active("search-no-cortex") {
         let knobs = cortex_search::CortexKnobs::from_config(&app.service.config);
         let r2 = ready.clone();
         let cache_size = app.service.config.embedding.cache_size;
@@ -475,10 +509,19 @@ mod tests {
         assert_eq!(py_int(" 1_0 "), Some(10));
         assert_eq!(py_int("1__0"), None);
         assert_eq!(py_float("_0.5"), None);
-        let q: HashMap<String, String> =
-            [("tag".to_string(), " A, ,b ".to_string()), ("bm25".into(), "auto".into())].into();
-        assert_eq!(list(&q, "tag"), Some(vec!["A".to_string(), "b".to_string()]));
+        let q: HashMap<String, String> = [
+            ("tag".to_string(), " A, ,b ".to_string()),
+            ("bm25".into(), "auto".into()),
+        ]
+        .into();
+        assert_eq!(
+            list(&q, "tag"),
+            Some(vec!["A".to_string(), "b".to_string()])
+        );
         assert_eq!(tribool(&q, "bm25"), None);
-        assert_eq!(normalize_tags(&["A".into(), "a".into(), " b".into()]), vec!["a", "b"]);
+        assert_eq!(
+            normalize_tags(&["A".into(), "a".into(), " b".into()]),
+            vec!["a", "b"]
+        );
     }
 }

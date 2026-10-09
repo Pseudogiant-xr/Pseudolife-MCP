@@ -16,9 +16,6 @@
 //! type id 0, attention 0) and runs the batch in one session call. Padding
 //! under an attention mask changes a logit only by float noise.
 
-// Wired into the search route by the W2-D integration.
-#![allow(dead_code)]
-
 use anyhow::{Result, anyhow};
 use ndarray::Array2;
 use ort::session::Session;

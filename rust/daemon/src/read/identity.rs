@@ -23,7 +23,11 @@ pub async fn session_id(db: &Client, header: Option<&str>, now: f64) -> Option<S
         .ok()??;
     let v: Option<Value> = row.get(0);
     let v = v?;
-    let sid = v.get("session_id")?.as_str().filter(|s| !s.is_empty())?.to_string();
+    let sid = v
+        .get("session_id")?
+        .as_str()
+        .filter(|s| !s.is_empty())?
+        .to_string();
     let ts = v.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
     let ttl = std::env::var("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS")
         .ok()
@@ -46,14 +50,18 @@ pub async fn open_leaf_episode(db: &Client, session: &str) -> Option<String> {
         )
         .await
         .ok()?;
-    let open: Vec<(String, Option<String>, f64)> =
-        rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect();
+    let open: Vec<(String, Option<String>, f64)> = rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect();
     if open.is_empty() {
         return None;
     }
     let parents: Vec<&str> = open.iter().filter_map(|e| e.1.as_deref()).collect();
-    let leaves: Vec<&(String, Option<String>, f64)> =
-        open.iter().filter(|e| !parents.contains(&e.0.as_str())).collect();
+    let leaves: Vec<&(String, Option<String>, f64)> = open
+        .iter()
+        .filter(|e| !parents.contains(&e.0.as_str()))
+        .collect();
     let pool: Vec<&(String, Option<String>, f64)> = if leaves.is_empty() {
         open.iter().collect()
     } else {

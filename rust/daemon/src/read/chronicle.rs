@@ -38,7 +38,13 @@ pub async fn events_for(db: &Client, query: &str) -> anyhow::Result<Option<Event
     if !(agg || has_temporal_cue(query) || has_date_cue(query)) {
         return Ok(None);
     }
-    let limit: i64 = if agg { 30 } else { 6 };
+    let limit: i64 = if crate::mutants::active("search-chronicle-limit") {
+        3
+    } else if agg {
+        30
+    } else {
+        6
+    };
     let lex: Option<String> = db
         .query_one("SELECT plainto_tsquery('english', $1)::text", &[&query])
         .await?

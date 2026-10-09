@@ -1145,8 +1145,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             };
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
-            memory.retrieval_log_enabled =
-                want_bool(r, "enabled", "memory.retrieval_log", true)?;
+            memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;

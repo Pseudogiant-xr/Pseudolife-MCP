@@ -130,7 +130,8 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     let rerank_before_cut = pool_mult > 1 && p.rerank_enabled;
     let n = p.band_order.len();
 
-    let keep = |e: &Entry| not_superseded_digest(e) && !(p.hide_superseded && e.superseded_at.is_some());
+    let keep =
+        |e: &Entry| not_superseded_digest(e) && !(p.hide_superseded && e.superseded_at.is_some());
     let meta_ok = |e: &Entry| {
         p.sources.as_ref().is_none_or(|s| s.contains(&e.source))
             && p.episodes
@@ -170,16 +171,15 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         if !band_ok(name) {
             continue;
         }
-        let (boost, half_life) =
-            if n == 1 || p.disable_recency_boost || !p.recency_boost_enabled {
-                (0.0, f64::INFINITY)
-            } else {
-                let frac = depth as f64 / (n - 1) as f64;
-                (
-                    0.4 * (1.0 - frac),
-                    p.recency_base_half_life_s * 2f64.powi(depth as i32),
-                )
-            };
+        let (boost, half_life) = if n == 1 || p.disable_recency_boost || !p.recency_boost_enabled {
+            (0.0, f64::INFINITY)
+        } else {
+            let frac = depth as f64 / (n - 1) as f64;
+            (
+                0.4 * (1.0 - frac),
+                p.recency_base_half_life_s * 2f64.powi(depth as i32),
+            )
+        };
         let cand: Vec<(usize, f32)> = members
             .iter()
             .copied()
@@ -194,8 +194,16 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                 continue;
             }
             let score = cos as f64;
-            let src = if e.source == "assistant" { ASSISTANT_MULT } else { 1.0 };
-            let sup = if e.superseded_at.is_some() { SUPERSEDED_MULT } else { 1.0 };
+            let src = if e.source == "assistant" {
+                ASSISTANT_MULT
+            } else {
+                1.0
+            };
+            let sup = if e.superseded_at.is_some() {
+                SUPERSEDED_MULT
+            } else {
+                1.0
+            };
             let (recency, relevance) = if boost > 0.0 {
                 let r = recency_weight(p.now, e.ts, half_life);
                 (r, score * (1.0 + boost * r))
@@ -273,12 +281,24 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             if !band_ok(&p.band_order[depth]) {
                 continue;
             }
-            candidates.extend(members.iter().copied().filter(|&i| dense_eligible(&bank.entries[i])));
+            candidates.extend(
+                members
+                    .iter()
+                    .copied()
+                    .filter(|&i| dense_eligible(&bank.entries[i])),
+            );
         }
     }
     if p.bm25_enabled && !p.query.is_empty() && !candidates.is_empty() {
         let knobs = p.bm25;
-        let norm = normalize_scores(bm25_score(bank, &candidates, &p.query, knobs.k1, knobs.b, knobs.top_n));
+        let norm = normalize_scores(bm25_score(
+            bank,
+            &candidates,
+            &p.query,
+            knobs.k1,
+            knobs.b,
+            knobs.top_n,
+        ));
         let mut lookup: HashMap<&str, f64> = HashMap::new();
         for &(i, s) in &norm {
             if s >= knobs.min_norm {
@@ -315,7 +335,12 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     }
     if timeline_fired && !candidates.is_empty() {
         let norm = normalize_scores(bm25_score(
-            bank, &candidates, &p.query, p.bm25.k1, p.bm25.b, TIMELINE_TOP_N,
+            bank,
+            &candidates,
+            &p.query,
+            p.bm25.k1,
+            p.bm25.b,
+            TIMELINE_TOP_N,
         ));
         for (i, s) in norm {
             let e = &bank.entries[i];
@@ -337,7 +362,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         }
     }
 
-    if p.fusion_rrf {
+    if p.fusion_rrf && !crate::mutants::active("search-rrf-off") {
         // Stable sort of the dense list by relevance, then 1/(60 + rank).
         let mut dense_sorted = dense_rank_src.clone();
         dense_sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -350,8 +375,16 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         }
         for (idx, score) in neural.iter_mut() {
             let e = &bank.entries[*idx];
-            let src = if e.source == "assistant" { ASSISTANT_MULT } else { 1.0 };
-            let sup = if e.superseded_at.is_some() { SUPERSEDED_MULT } else { 1.0 };
+            let src = if e.source == "assistant" {
+                ASSISTANT_MULT
+            } else {
+                1.0
+            };
+            let sup = if e.superseded_at.is_some() {
+                SUPERSEDED_MULT
+            } else {
+                1.0
+            };
             *score = fused.get(e.text.as_str()).copied().unwrap_or(0.0) * src * sup;
         }
     }
@@ -378,7 +411,10 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         && !combined.is_empty()
         && combined.len() as i64 <= top_n
     {
-        let texts: Vec<&str> = combined.iter().map(|(i, _)| bank.entries[*i].text.as_str()).collect();
+        let texts: Vec<&str> = combined
+            .iter()
+            .map(|(i, _)| bank.entries[*i].text.as_str())
+            .collect();
         let orig: Vec<f64> = combined.iter().map(|(_, s)| *s).collect();
         rerank_log.insert("top_n".into(), json!(top_n));
         rerank_log.insert("skip_margin".into(), json!(p.rerank.skip_margin));
@@ -388,11 +424,19 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         if p.rerank.skip_margin > 0.0 {
             let mut sorted = orig.clone();
             sorted.sort_by(|a, b| b.total_cmp(a));
-            let margin = if sorted.len() >= 2 { sorted[0] - sorted[1] } else { f64::INFINITY };
+            let margin = if sorted.len() >= 2 {
+                sorted[0] - sorted[1]
+            } else {
+                f64::INFINITY
+            };
             skip_for_margin = margin >= p.rerank.skip_margin;
             rerank_log.insert(
                 "margin".into(),
-                if margin.is_finite() { json!(margin) } else { Value::Null },
+                if margin.is_finite() {
+                    json!(margin)
+                } else {
+                    Value::Null
+                },
             );
         }
         let scores = if skip_for_margin {
@@ -409,7 +453,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         if !scores.is_empty() {
             rerank_log.insert("fired".into(), json!(true));
             rerank_log.insert("scored_candidates".into(), json!(scores.len()));
-            let w = p.rerank.fusion_weight;
+            let w = if crate::mutants::active("search-rerank-unfused") {
+                1.0
+            } else {
+                p.rerank.fusion_weight
+            };
             let mut reranked: Vec<(usize, f64)> = combined
                 .iter()
                 .zip(&scores)
@@ -422,7 +470,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         }
     } else if p.rerank_enabled {
         let over_budget = ce.is_some() && !p.query.is_empty() && combined.len() as i64 > top_n;
-        let reason = if over_budget { "candidate_budget_exceeded" } else { "unavailable" };
+        let reason = if over_budget {
+            "candidate_budget_exceeded"
+        } else {
+            "unavailable"
+        };
         rerank_log.insert("skip_reason".into(), json!(reason));
     }
     if rerank_before_cut {
@@ -460,7 +512,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     });
 
     // Timeline presentation: the memory part in stream order (timestamp, seq).
-    if timeline_fired {
+    if timeline_fired && !crate::mutants::active("search-timeline-unsorted") {
         combined.sort_by(|a, b| {
             bank.entries[a.0]
                 .ts
@@ -468,9 +520,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                 .then(a.0.cmp(&b.0))
         });
     }
-    if p.count_access {
+    if p.count_access && !crate::mutants::active("search-no-access-bump") {
         for (i, _) in &combined {
-            bank.entries[*i].access_count.fetch_add(1, Ordering::Relaxed);
+            bank.entries[*i]
+                .access_count
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
     let hits = combined
@@ -481,7 +535,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             via: via_map.get(bank.entries[idx].text.as_str()).copied(),
         })
         .collect();
-    Ranked { hits, comps, params }
+    Ranked {
+        hits,
+        comps,
+        params,
+    }
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -492,9 +550,18 @@ fn obj(v: Value) -> Map<String, Value> {
 }
 
 /// `BM25Index(candidates).score(query, top_k)` (`memory/bm25.py:110-204`).
-fn bm25_score(bank: &Bank, cand: &[usize], query: &str, k1: f64, b: f64, top_n: usize) -> Vec<(usize, f64)> {
-    let docs: Vec<(usize, Vec<String>)> =
-        cand.iter().map(|&i| (i, bm25_tokens(&bank.entries[i].text))).collect();
+fn bm25_score(
+    bank: &Bank,
+    cand: &[usize],
+    query: &str,
+    k1: f64,
+    b: f64,
+    top_n: usize,
+) -> Vec<(usize, f64)> {
+    let docs: Vec<(usize, Vec<String>)> = cand
+        .iter()
+        .map(|&i| (i, bm25_tokens(&bank.entries[i].text)))
+        .collect();
     let n = docs.len() as f64;
     if docs.is_empty() {
         return Vec::new();
@@ -521,7 +588,12 @@ fn bm25_score(bank: &Bank, cand: &[usize], query: &str, k1: f64, b: f64, top_n: 
         for t in toks {
             *tf.entry(t.as_str()).or_default() += 1;
         }
-        let norm = 1.0 - b + b * (if avg != 0.0 { toks.len() as f64 / avg } else { 0.0 });
+        let norm = 1.0 - b
+            + b * (if avg != 0.0 {
+                toks.len() as f64 / avg
+            } else {
+                0.0
+            });
         let mut s = 0.0;
         for qt in &q {
             let f = *tf.get(qt.as_str()).unwrap_or(&0) as f64;
@@ -636,7 +708,10 @@ pub fn entry_json(e: &Entry, score: f64) -> Value {
     m.insert("source".into(), json!(e.source));
     m.insert("bank".into(), json!(e.band));
     m.insert("timestamp".into(), json!(e.ts));
-    m.insert("access_count".into(), json!(e.access_count.load(Ordering::Relaxed)));
+    m.insert(
+        "access_count".into(),
+        json!(e.access_count.load(Ordering::Relaxed)),
+    );
     m.insert("surprise_score".into(), json!(round4(e.surprise as f64)));
     m.insert("superseded".into(), json!(e.superseded_at.is_some()));
     m.insert("superseded_at".into(), json!(e.superseded_at));
@@ -685,7 +760,11 @@ pub fn annotate_supersession_in(bank: &Bank, served: &mut [(usize, Value)]) {
         if found.len() > 1 {
             found.retain(|(_, r)| r.superseded_at.is_none());
         }
-        let one = if found.len() == 1 { Some(found[0].1) } else { None };
+        let one = if found.len() == 1 {
+            Some(found[0].1)
+        } else {
+            None
+        };
         if let Value::Object(m) = d {
             m.insert("superseded_by_id".into(), json!(one.map(|r| r.id)));
             m.insert(
@@ -729,7 +808,9 @@ pub fn temporal_neighbors(
                 }
             }
             _ => {
-                if e.episode_id.as_deref().is_some_and(|x| !x.is_empty()) || e.source != anchor.source {
+                if e.episode_id.as_deref().is_some_and(|x| !x.is_empty())
+                    || e.source != anchor.source
+                {
                     continue;
                 }
             }
@@ -792,7 +873,13 @@ mod tests {
             episodes: None,
             min_score: None,
             default_floor: 0.25,
-            bm25: Bm25Knobs { k1: 1.5, b: 0.75, weight: 0.3, top_n: 20, min_norm: 0.1 },
+            bm25: Bm25Knobs {
+                k1: 1.5,
+                b: 0.75,
+                weight: 0.3,
+                top_n: 20,
+                min_norm: 0.1,
+            },
             bm25_enabled: false,
             hide_superseded: false,
             bands: None,
@@ -857,11 +944,21 @@ mod tests {
     #[test]
     fn slot_pool_injects_by_token_overlap() {
         let mut e = entry(7, "slotted", "x", false);
-        e.slots = vec![serde_json::json!(["new removed", "status", "membership analogue", "+"])];
-        let bank = Bank { entries: vec![e], matrix: unit(0.0) };
+        e.slots = vec![serde_json::json!([
+            "new removed",
+            "status",
+            "membership analogue",
+            "+"
+        ])];
+        let bank = Bank {
+            entries: vec![e],
+            matrix: unit(0.0),
+        };
         assert_eq!(
             content_tokens("How do I deploy a NEW version? it's"),
-            ["deploy", "new", "version", "it's"].map(String::from).into()
+            ["deploy", "new", "version", "it's"]
+                .map(String::from)
+                .into()
         );
         let r = rank(&bank, &unit(1.0), &params("deploy a new version", 8), None);
         // slot tokens {new, removed, membership, analogue}: overlap 1/4 -> 0.55 + 0.35 * 0.25
@@ -906,7 +1003,11 @@ mod tests {
         let mut p = params("zeta_token", 8);
         p.bm25_enabled = true;
         let r = rank(&bank, &unit(1.0), &p, None);
-        let got: Vec<(i64, f64)> = r.hits.iter().map(|h| (bank.entries[h.idx].id, h.score)).collect();
+        let got: Vec<(i64, f64)> = r
+            .hits
+            .iter()
+            .map(|h| (bank.entries[h.idx].id, h.score))
+            .collect();
         // entry 1 dense 0.9 (no lexical match); entry 2 injected at 0.3 * 1.0
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].0, 1);
@@ -979,7 +1080,10 @@ mod tests {
         assert_eq!(r.comps["a"]["ce"], 0.0);
         p.rerank.top_n = 1;
         let r = rank(&bank, &unit(1.0), &p, Some(&ce));
-        assert_eq!(r.params["reranker"]["skip_reason"], "candidate_budget_exceeded");
+        assert_eq!(
+            r.params["reranker"]["skip_reason"],
+            "candidate_budget_exceeded"
+        );
         assert_eq!(ids(&bank, &r), vec![1, 2]);
     }
 
@@ -992,7 +1096,10 @@ mod tests {
             entry(4, "d", "other", false),
         ];
         entries[3].ts = 2.5;
-        let bank = Bank { entries, matrix: vec![0.0; 4 * DIM] };
+        let bank = Bank {
+            entries,
+            matrix: vec![0.0; 4 * DIM],
+        };
         let (before, after) = temporal_neighbors(&bank, 1, 1, false);
         assert_eq!(before, vec![0]);
         assert_eq!(after, vec![2]);
