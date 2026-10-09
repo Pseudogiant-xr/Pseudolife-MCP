@@ -199,7 +199,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Check CI coverage contract
         if: matrix.suite == 'eval'
-        run: python -m pytest -q rust/ci/test_workflow.py
+        run: python -m pytest -q rust/ci
       - name: Run every eval harness test
         if: matrix.suite == 'eval'
         shell: pwsh
