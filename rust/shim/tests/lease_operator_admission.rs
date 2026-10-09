@@ -90,6 +90,48 @@ fn lease_home_blocks_container_even_when_an_executable_is_available() {
 }
 
 #[test]
+fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
+    let home = Home::new();
+    let data_dir = home.0.join("data");
+    let pgdata = data_dir.join("embedded_pg");
+    std::fs::create_dir_all(&pgdata).unwrap();
+    std::fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
+    let fake = docker_fixture(&home);
+    let calls = home.0.join("calls");
+    let arguments = home.0.join("arguments");
+
+    for (action, invocation) in [
+        ("break", vec!["lease", "break", "resource"]),
+        (
+            "delegate",
+            vec!["lease", "delegate", "project", "fixture-agent"],
+        ),
+    ] {
+        let mut command = home.command();
+        command
+            .env_remove("PSEUDOLIFE_DAEMON_EXEC")
+            .env_remove("PSEUDOLIFE_MCP_DATABASE_URL")
+            .env("PSEUDOLIFE_MCP_DATA_DIR", &data_dir)
+            .env("PSEUDOLIFE_DOCKER", &fake)
+            .env("LEASE_DOCKER_CALLS", &calls)
+            .env("LEASE_DOCKER_ARGUMENTS", &arguments)
+            .args(invocation);
+        let output = command.output().unwrap();
+        assert_eq!(
+            output.stderr,
+            native_text(&format!(
+                "lease: {action} refused: phase4-embedded-pg-deferred\n"
+            ))
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+    }
+
+    assert!(!calls.exists());
+    assert!(!arguments.exists());
+}
+
+#[test]
 fn designate_container_receives_delegate_and_emits_one_deprecation() {
     let home = Home::new();
     let fake = docker_fixture(&home);
