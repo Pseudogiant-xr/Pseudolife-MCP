@@ -17,7 +17,7 @@ from psycopg import sql
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-DISPOSABLE_NAME = re.compile(r"pl_cf_w1a_[a-z0-9_]{1,40}")
+DISPOSABLE_NAME = re.compile(r"pl_cf_(?:w1a|w2f)_[a-z0-9_]{1,40}")
 
 
 def _login() -> tuple[str, str]:

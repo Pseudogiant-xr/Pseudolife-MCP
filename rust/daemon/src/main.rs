@@ -5,6 +5,7 @@
 
 mod auth;
 mod bank;
+mod board;
 mod config;
 mod embed;
 mod health;
@@ -122,6 +123,7 @@ fn main() {
         let store = Arc::new(auth::PrincipalStore::new());
         let env_principals = tokens.map.iter().map(|(_, p)| p.clone()).collect();
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
+        let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(
             config,
             env,
@@ -130,7 +132,13 @@ fn main() {
             auth_configured,
         ));
         tokio::spawn(service.clone().warmup());
-        let app = Arc::new(http::App::new(service, tokens, store, static_dir));
+        let board = Arc::new(board::Board::new(
+            service.config.coordination.clone(),
+            service_dsn,
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(http::App::new(service, tokens, store, static_dir, board));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,

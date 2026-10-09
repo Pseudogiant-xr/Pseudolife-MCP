@@ -1660,7 +1660,9 @@ dependencies = [
  "axum",
  "chrono",
  "form_urlencoded",
+ "getrandom 0.3.4",
  "hex",
+ "hmac 0.12.1",
  "ndarray",
  "ort",
  "percent-encoding",
@@ -1670,6 +1672,9 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "unicode-casefold",
+ "unicode-normalization",
+ "uuid",
  "yaml-rust2",
 ]
 

@@ -24,6 +24,12 @@ sha2.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true
 yaml-rust2.workspace = true
+# W2-F board: ids, credential salts, context proofs and the Unicode name checks.
+uuid.workspace = true
+hmac.workspace = true
+unicode-normalization.workspace = true
+unicode-casefold.workspace = true
+getrandom = "=0.3.4"
 # Crate-local pins: the versions the 2026-10-09 contract-first spike was proven with.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"

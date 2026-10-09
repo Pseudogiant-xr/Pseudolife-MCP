@@ -79,6 +79,13 @@ pub struct EmbeddingConfig {
 pub struct CoordinationConfig {
     pub enabled: bool,
     pub wake: WakeConfig,
+    // W2-F: the board's admission lists, audit window and maintainer cap.
+    pub awareness_limit: i64,
+    pub allowed_principals: Vec<String>,
+    pub daemon_notice_principals: Vec<String>,
+    pub maintainer_principals: Vec<String>,
+    pub audit_retention_days: i64,
+    pub maintainer_per_recipient_per_hour: i64,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -258,6 +265,12 @@ impl Default for CoordinationConfig {
         CoordinationConfig {
             enabled: true,
             wake: WakeConfig::default(),
+            awareness_limit: 5,
+            allowed_principals: vec![DEFAULT_PRINCIPAL.to_string()],
+            daemon_notice_principals: Vec::new(),
+            maintainer_principals: Vec::new(),
+            audit_retention_days: 90,
+            maintainer_per_recipient_per_hour: 30,
         }
     }
 }
@@ -1268,8 +1281,8 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             "coordination.audit_retention_days must be a whole number of days, 0 or more",
         ));
     }
-    principal_list(c, "allowed_principals")?;
-    principal_list(c, "daemon_notice_principals")?;
+    let allowed = principal_list(c, "allowed_principals")?;
+    let notice = principal_list(c, "daemon_notice_principals")?;
     let maintainers = principal_list(c, "maintainer_principals")?;
     let mut shared: Vec<&str> = [DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL]
         .into_iter()
@@ -1282,7 +1295,41 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             shared.join(", ")
         )));
     }
-    Ok(CoordinationConfig { enabled, wake })
+    let defaults = CoordinationConfig::default();
+    let present = |key: &str| lookup(c, key).is_some();
+    let dedupe = |names: Vec<String>| {
+        let mut out: Vec<String> = Vec::new();
+        for n in names {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+        out
+    };
+    Ok(CoordinationConfig {
+        enabled,
+        wake,
+        awareness_limit: match lookup(c, "awareness_limit") {
+            Some(Node::Int(i)) => *i,
+            _ => defaults.awareness_limit,
+        },
+        allowed_principals: if present("allowed_principals") {
+            dedupe(allowed)
+        } else {
+            defaults.allowed_principals
+        },
+        daemon_notice_principals: dedupe(notice),
+        maintainer_principals: dedupe(maintainers),
+        audit_retention_days: lookup(c, "audit_retention_days")
+            .and_then(|n| exact_int_at_least(n, 0))
+            .unwrap_or(defaults.audit_retention_days),
+        maintainer_per_recipient_per_hour: match lookup(c, "maintainer") {
+            Some(Node::Map(m)) => lookup(m, "maintainer_per_recipient_per_hour")
+                .and_then(|n| exact_int_at_least(n, 0))
+                .unwrap_or(defaults.maintainer_per_recipient_per_hour),
+            _ => defaults.maintainer_per_recipient_per_hour,
+        },
+    })
 }
 
 /// `MaintainerConfig(**mapping)`: unknown or non-string keys are a

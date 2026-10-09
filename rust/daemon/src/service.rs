@@ -154,6 +154,13 @@ impl Service {
         Ok(storage)
     }
 
+    /// `_ensure_tier(full=False)` for the board: the storage tier only,
+    /// under the service lock, without the embedder or hydration.
+    pub async fn storage_tier(&self) -> Result<Arc<Storage>, String> {
+        let mut inner = self.inner.lock().await;
+        self.ensure_storage(&mut inner).await
+    }
+
     /// `_ensure_init`, cold and fast paths.
     pub async fn ensure_init(&self) -> Result<Arc<Ready>, String> {
         let mut inner = self.inner.lock().await;
