@@ -5,7 +5,7 @@
 //! boundaries, and `_key_change`'s audit append.
 use super::{
     Action, STDOUT_REFUSED, Written, display, print, refused, sqlstate, stdout_error_class,
-    write_unbuffered,
+    write_report,
 };
 use crate::{
     board::identity::hex_hash,
@@ -524,12 +524,14 @@ async fn list(session: &mut pg::Session) -> Option<u8> {
         text.push_str(&display::line(&key, &clock)?);
         text.push('\n');
     }
-    listing_exit(write_unbuffered, &super::super::text_bytes(&text))
+    listing_exit(write_report, &super::super::text_bytes(&text))
 }
 
 /// The listing's exit once written: CPython holds it all until its exit
-/// flush, which a refused stdout fails (exit 120). Deferred when it is too
-/// long for that buffer, or when stdout refused it before any byte left.
+/// flush, which a refused stdout fails (exit 120). Deferred, before any
+/// byte is written, whenever it is too long for that buffer (8192 encoded
+/// bytes or more, whatever stdout is: a healthy one too), and when stdout
+/// refused it before any byte left.
 fn listing_exit(write: impl FnOnce(&[u8]) -> Written, bytes: &[u8]) -> Option<u8> {
     if bytes.len() >= LISTING_BUFFER {
         return None;

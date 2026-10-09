@@ -33,28 +33,40 @@ from typing import Any
 from .. import core, normalize, producers
 from ..core import Case
 from ..mutants import Mutant
+from . import _handshake_cache  # noqa: F401 (registers shim-handshake-cache-name)
 
 HERE = Path(__file__).resolve().parent
 RUST = HERE.parents[1]
 CARGO_VERSION = re.search(r'(?m)^version = "([^"]+)"',
                           (RUST / "shim" / "Cargo.toml").read_text(encoding="utf-8")).group(1)
-RULES = ("doctor-runtime-identity", "shim-handshake-cache-semantic", "doctor-context-nonce")
+RULES = ("doctor-runtime-identity", "doctor-context-nonce", "shim-handshake-cache-name")
+
+
+def oracle_python() -> str:
+    """The oracle interpreter the runner launches (``--oracle-python``)."""
+    from . import _daemon  # noqa: PLC0415
+    return _daemon.ORACLE.get("python") or sys.executable
+
+
+def oracle_source() -> Path:
+    """The oracle checkout the runner puts on the oracle's PYTHONPATH."""
+    return producers._SOURCE or RUST.parent
 
 
 @functools.lru_cache(maxsize=None)
-def oracle_version() -> str:
+def oracle_version(python: str | None = None) -> str:
     """``importlib.metadata.version("pseudolife-mcp")`` as the oracle arm
-    sees it: the default oracle (this interpreter, ``--oracle-python``'s
-    default) under the harness's isolated home."""
-    source = producers._SOURCE or RUST.parent
-    target = core.python_target(sys.executable, source)
+    sees it: ``python`` (default: the oracle interpreter) with the oracle
+    source on its path, under the harness's isolated home."""
+    python = python or oracle_python()
+    target = core.python_target(python, oracle_source())
     scratch = core._home_root().with_name(core._home_root().name + "-version")
     core._reset(scratch)
     try:
         arm = core.Arm("python", scratch, scratch)
         env = core._environment(Case("version", []), arm, target)
         result = subprocess.run(
-            [sys.executable, "-P", "-c",
+            [python, "-P", "-c",
              "import importlib.metadata as m; print(m.version('pseudolife-mcp'))"],
             env=env, cwd=scratch, capture_output=True, text=True, timeout=60)
     finally:
@@ -316,6 +328,12 @@ class FixtureDaemon:
 
 
 # --- the identity substitution ------------------------------------------------
+#
+# Declared substitution ``doctor-runtime-identity`` (maintainer decision
+# 2026-10-09). It is applied when the observation is taken (the row's
+# ``after`` hook, :func:`bind_identity`), not at comparison: only then are
+# the launched target and the arm's filesystem known, and a golden must not
+# carry the recording host's interpreter or checkout paths.
 
 _TOP = re.compile(rb'(\n  "(interpreter|source|pseudolife-mcp|mcp|daemon_version)": )'
                   rb'"((?:[^"\\\r\n]|\\.)*)"')
@@ -325,58 +343,72 @@ _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*([.+-][0-9A-Za-z.+-]*)?$")
 _MCP_LINE = re.compile(rb'\r?\n  "mcp": "((?:[^"\\\r\n]|\\.)*)",')
 
 
-def _arm_of(fields: dict) -> str | None:
-    interpreter = fields.get("interpreter", "")
-    source = fields.get("source", "")
-    own = fields.get("pseudolife-mcp", "")
+def _fields(out: bytes) -> dict:
+    return {m.group(2).decode(): json.loads(b'"' + m.group(3) + b'"')
+            for m in _TOP.finditer(out)}
+
+
+def _resolves_to(reported: str, expected: str, *, directory: bool = False) -> bool:
+    """``reported`` names an existing file (or directory) that resolves to
+    the same path as ``expected``."""
+    exists = os.path.isdir(reported) if directory else os.path.isfile(reported)
+    return exists and (os.path.normcase(os.path.realpath(reported))
+                       == os.path.normcase(os.path.realpath(expected)))
+
+
+def expected_identity(arm: str, launched: str) -> dict:
+    """What the process the harness launched must report: the candidate its
+    own executable (``launched``, resolved), the directory that resolves
+    into and its Cargo version; the oracle the interpreter it was launched
+    with, the package directory of the oracle checkout on its PYTHONPATH and
+    that interpreter's installed package version."""
+    if arm == "rust":
+        executable = os.path.realpath(launched)
+        return {"interpreter": executable, "source": os.path.dirname(executable),
+                "pseudolife-mcp": CARGO_VERSION}
+    return {"interpreter": launched, "source": str(oracle_source() / "pseudolife_memory"),
+            "pseudolife-mcp": oracle_version(launched)}
+
+
+def identity_problems(arm: str, launched: str | None, fields: dict) -> list[str]:
+    """Why ``fields`` (a report's top-level identity values) are not the
+    identity of the process launched as ``launched``; empty when they are."""
+    if arm not in ("python", "rust") or not launched:
+        return [f"no launched target recorded for arm {arm!r}"]
+    want = expected_identity(arm, launched)
+    problems = []
+    if not _resolves_to(fields.get("interpreter", ""), want["interpreter"]):
+        problems.append("interpreter is not the launched executable")
+    if not _resolves_to(fields.get("source", ""), want["source"], directory=True):
+        problems.append("source is not the launched runtime's directory")
+    if fields.get("pseudolife-mcp") != want["pseudolife-mcp"]:
+        problems.append("pseudolife-mcp is not the launched runtime's version")
     mcp = fields.get("mcp")
-    name = os.path.basename(interpreter).lower()
-    if name in ("pseudolife-stdio", "pseudolife-stdio.exe"):
-        # The candidate: its own executable, the directory it resolves
-        # into, the Cargo version, and no Python MCP SDK.
-        resolved = os.path.dirname(os.path.realpath(interpreter))
+    if arm == "rust" and mcp is not None:
         # Maintainer decision 2026-10-09: the native report has no `mcp`.
-        if (os.path.normcase(resolved) == os.path.normcase(source) and own == CARGO_VERSION
-                and mcp is None):
-            return "rust"
-        return None
-    if re.match(r"^python[0-9.]*(\.exe)?$", name) and os.path.isfile(interpreter):
-        if (os.path.basename(source) == "pseudolife_memory" and os.path.isdir(source)
-                and _VERSION.match(own) and mcp is not None and _VERSION.match(mcp)):
-            return "python"
-    return None
+        problems.append("the native report carries mcp")
+    if arm == "python" and not (isinstance(mcp, str) and _VERSION.match(mcp)):
+        problems.append("the oracle's mcp is not a version")
+    return problems
 
 
-@normalize.rule("doctor-runtime-identity")
-def runtime_identity(obs: dict) -> None:
-    """Declared substitution (maintainer decision 2026-10-09): the oracle
-    reports its Python interpreter, package directory, installed package and
-    MCP SDK versions; the native doctor reports its own executable, the
-    directory it resolves into and its Cargo version, and no ``mcp`` key.
-    Each arm's values are validated against what that arm must report
-    (the oracle's ``mcp`` must be a real version string; the native report
-    must not carry the key). The oracle's ``mcp`` line is then deleted, so
-    the native report must equal the rest of Python's byte for byte, and
-    the three shared fields are tokenized, together with that arm's own
-    version where the report or the shim's stderr repeats it
+def tokenize_identity(arm: str, fields: dict, out: bytes, err: bytes) -> tuple[bytes, bytes] | None:
+    """The validated identity replaced by tokens: the three shared fields,
+    that arm's own version where the report or the shim's stderr repeats it
     (``daemon_version`` when the fixture echoes it, the version-mismatch
-    recovery and the shim's mismatch warning)."""
-    out = normalize._get(obs, "stdout")
-    fields = {m.group(2).decode(): json.loads(b'"' + m.group(3) + b'"')
-              for m in _TOP.finditer(out)}
-    # Each arm must carry its OWN identity; another arm's is a difference.
-    if obs.get("arm") not in ("python", "rust") or _arm_of(fields) != obs["arm"]:
-        return
+    recovery and the shim's mismatch warning), and the oracle's ``mcp`` line
+    deleted, so the native report must equal the rest of Python's byte for
+    byte. None when the oracle's ``mcp`` line is not exactly the one field."""
     own = fields["pseudolife-mcp"]
-    if obs["arm"] == "python":
+    if arm == "python":
         lines = _MCP_LINE.findall(out)
         if len(lines) != 1 or json.loads(b'"' + lines[0] + b'"') != fields["mcp"]:
-            return
+            return None
         out = _MCP_LINE.sub(b"", out)
 
     def swap(match: re.Match) -> bytes:
         key = match.group(2).decode()
-        if key == "daemon_version" and fields[key] != own:
+        if key == "daemon_version" and fields.get(key) != own:
             return match.group(0)
         token = "pseudolife-mcp" if key == "daemon_version" else key
         return match.group(1) + b'"<runtime:' + token.encode() + b'>"'
@@ -386,40 +418,55 @@ def runtime_identity(obs: dict) -> None:
     out = out.replace(b"The shim is pseudolife-mcp " + mine + b" but",
                       b"The shim is pseudolife-mcp <runtime:pseudolife-mcp> but")
     out = out.replace(b"--tag " + mine + b" ", b"--tag <runtime:pseudolife-mcp> ")
-    normalize._put(obs, "stdout", out)
-    err = normalize._get(obs, "stderr")
     err = err.replace(b"this shim is pseudolife-mcp " + mine + b" but",
                       b"this shim is pseudolife-mcp <runtime:pseudolife-mcp> but")
-    normalize._put(obs, "stderr", err)
+    return out, err
 
 
-_CACHE = re.compile(r"^\.pseudolife-mcp/handshake-cache/[0-9a-f]{16}\.json$")
+def record_launch(arm, proc) -> None:
+    """The executable the harness launched for this arm (``Case.during``)."""
+    arm.state["launched"] = proc.args[0]
 
 
-@normalize.rule("shim-handshake-cache-semantic")
-def handshake_cache_semantic(obs: dict) -> None:
-    """Inherited from CLI-SHIM, not doctor's own output: the handshake's
-    shim writes ``~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json``.
-    The Python shim writes ``json.dumps({"url": url, **cached})`` (spaced
-    separators, ASCII escapes, ``url`` first); the native shim
-    (``cache.rs``) writes compact UTF-8 with ``url`` last. Its only reader
-    parses it. Only that path, only when the content is a JSON object
-    whose ``url`` is the fixture origin (already ``{DAEMON}``) and whose
-    other keys are ``instructions``/``tools``, is re-serialized with sorted
-    keys; any value difference still shows. Temporary: the connect leaf's
-    cache.rs fix writes Python's bytes, and this rule goes once it merges."""
-    for rel in list(obs["files"]):
-        if not _CACHE.match(rel):
-            continue
-        raw = normalize._file(obs, rel)
-        try:
-            value = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if (not isinstance(value, dict) or value.get("url") != "{DAEMON}"
-                or not set(value) <= {"url", "instructions", "tools"}):
-            continue
-        normalize._set_file(obs, rel, json.dumps(value, sort_keys=True).encode())
+def bind_identity(arm, obs: dict) -> None:
+    """The ``after`` hook: name the arm, and apply ``doctor-runtime-identity``
+    to its report. Each arm's identity is checked against the target the
+    harness launched for it (:func:`identity_problems`), and only then
+    tokenized. A candidate whose report names another executable, directory
+    or version keeps its raw values, so the comparison shows them; an oracle
+    report that fails is a harness fault and stops the run (its raw paths
+    must never reach a golden)."""
+    obs["arm"] = arm.name
+    if arm.daemon is not None:
+        obs["fixture_url"] = arm.daemon.url
+    out = normalize._get(obs, "stdout")
+    fields = _fields(out)
+    if "interpreter" not in fields:
+        obs["identity"] = "no report"
+        return
+    problems = identity_problems(arm.name, arm.state.get("launched"), fields)
+    tokenized = None if problems else tokenize_identity(
+        arm.name, fields, out, normalize._get(obs, "stderr"))
+    if tokenized is None:
+        problems = problems or ["the oracle's mcp line is not exactly one field"]
+        if arm.name == "python":
+            raise RuntimeError(f"doctor: the oracle's identity did not bind: {problems}")
+        obs["identity"] = "unbound: " + "; ".join(problems)
+        return
+    normalize._put(obs, "stdout", tokenized[0])
+    normalize._put(obs, "stderr", tokenized[1])
+    obs["identity"] = "bound:" + arm.name
+
+
+@normalize.rule("doctor-runtime-identity")
+def runtime_identity(obs: dict) -> None:
+    """The comparison side of the substitution :func:`bind_identity` applied
+    when the observation was taken: an arm whose identity did not bind gets
+    the reason appended to its stdout, so the difference names it."""
+    identity = obs.get("identity", "")
+    if identity.startswith("unbound"):
+        normalize._put(obs, "stdout", normalize._get(obs, "stdout")
+                       + b"\n<" + identity.encode() + b">")
 
 
 _NONCE = re.compile(r'"nonce":"([0-9a-f]{32})"')
@@ -632,14 +679,9 @@ def case(id: str, argv=(), *, routes=None, steps=(), env=None, rules=RULES, daem
          timeout=60.0, **options) -> Case:
     return Case(id, ["doctor", *argv], env={"PATH": NO_BIN, **(env or {})},
                 programs=PROGRAMS,
-                setup=setup(*steps), rules=rules, timeout=timeout, after=tag_arm,
+                setup=setup(*steps), rules=rules, timeout=timeout,
+                during=record_launch, after=bind_identity,
                 daemon=fixture(routes, **options) if daemon else None)
-
-
-def tag_arm(arm, observation: dict) -> None:
-    """Which arm produced the observation, for the identity rule only (the
-    comparison never reads this key)."""
-    observation["arm"] = arm.name
 
 
 DEPTH_CASES = ("agent-state-deep-parsed", "agent-state-too-deep", "agent-state-too-deep-refusal")
@@ -709,6 +751,10 @@ def cases() -> list[Case]:
                                   "nudge_interval_seconds": 9, "fan_out_stagger_seconds": 0,
                                   "nightly_total_extra": 1}})}))
     add(case("healthy-no-instructions", routes=ok, instructions=None))
+    # Non-ASCII instructions: the shim's handshake cache spells them with
+    # json.dumps's ASCII escapes (a surrogate pair past the BMP).
+    add(case("healthy-non-ascii-instructions", routes=ok,
+             instructions="Mémoire partagée ☎ \U0001F600"))
     add(case("healthy-missing-annotations", routes=ok,
              tools=[tool("memory_search", READ_ONLY), tool("memory_store"),
                     tool("memory_agents", READ_ONLY), tool("memory_message")]))
@@ -1065,6 +1111,31 @@ def _python_identity_mutant() -> Mutant:
 
 MUTANTS = [
     _python_identity_mutant(),
+    # The native report naming a same-basename executable that does not
+    # exist, in another directory, with a source consistent with it and the
+    # right version: only binding to the launched binary rejects it.
+    Mutant("doctor-identity-wrong-path", "doctor", "shim/src/cli/doctor/mod.rs",
+           "    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();\n"
+           "    let resolved = std::fs::canonicalize(&executable).map_err(|_| Defer)?;\n",
+           "    let executable = executable.parent().ok_or(Defer)?.join(\"elsewhere\")"
+           ".join(executable.file_name().ok_or(Defer)?);\n"
+           "    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();\n"
+           "    let resolved = executable.clone();\n",
+           ("unreachable",)),
+    # The handshake cache's bytes (review of #678): compared byte for byte,
+    # so a native cache that parses alike but is spelled differently is a
+    # difference. Compact separators, `url` last, raw UTF-8 for escapes.
+    Mutant("doctor-cache-compact-separator", "doctor", "shim/src/cache.rs",
+           'out.push_str(": ");', 'out.push_str(":");', ("healthy",)),
+    Mutant("doctor-cache-url-last", "doctor", "shim/src/cache.rs",
+           'let mut data = Map::from_iter([("url".to_owned(), Value::String(self.url.clone()))]);\n'
+           "            data.extend(cached);",
+           "let mut data = cached;\n"
+           '            data.insert("url".to_owned(), Value::String(self.url.clone()));',
+           ("healthy",)),
+    Mutant("doctor-cache-raw-utf8", "doctor", "shim/src/cache.rs",
+           "' '..='~' => out.push(c),", "' '..='~' | '\\u{80}'..=char::MAX => out.push(c),",
+           ("healthy-non-ascii-instructions",)),
     Mutant("doctor-version-mismatch-ok", "doctor", "shim/src/cli/doctor/mod.rs",
            'put(&mut report, "ok", json!(false));\n                    put(&mut report, "version_mismatch"',
            'put(&mut report, "ok", json!(true));\n                    put(&mut report, "version_mismatch"',

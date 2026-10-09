@@ -13,13 +13,16 @@ those deferrals. This row compares answered cases only.
 Contract per arm: exit code, both streams byte-exact, every file under the
 home (written configs, backups, created token files), and the requests the
 stand-in daemon received: connect's own requests (attributed by the client
-process holding each connection) in order with the credential each carried,
-and of its handshake child, whose transport is the shim's own row, the
-credentials its MCP posts carried. Named rules:
+process holding each connection) raw and in order, every header field and
+the body, and of its handshake child, whose transport is the shim's own
+row, the ``Authorization`` values its MCP posts carried. The fixture
+credentials are generated per process and replaced by placeholders in
+each arm's observation (``redact_credentials``). Named rules:
 ``connect-backup-stamp`` (the UTC stamp in a backup's name, validated
-against the arm's own clock window) and ``connect-restart-pid`` (the pid of
-the process a case starts inside the runtimes root). The handshake shim's
-cache file is compared byte for byte.
+against the arm's own clock window), ``connect-restart-pid`` (the pid of
+the process a case starts inside the runtimes root) and
+``shim-handshake-cache-name`` (the cache file's per-port name). The
+handshake shim's cache content is compared byte for byte.
 
 Safety: every client-locating variable is set to the disposable home or
 removed (HOME, USERPROFILE, APPDATA, LOCALAPPDATA by the harness; CODEX_HOME,
@@ -43,6 +46,7 @@ import datetime
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -55,10 +59,15 @@ import psutil  # attributes each request to connect or to its handshake child
 from .. import normalize
 from ..core import WINDOWS, Case
 from ..mutants import Mutant
+from . import _handshake_cache  # noqa: F401 (registers shim-handshake-cache-name)
 
-GOOD = "good-" + "g" * 32
-OTHER = "other-" + "o" * 32
-_LABELS = {GOOD: "good", OTHER: "other"}
+# Fixture credentials, generated per harness process so that neither the
+# source nor a golden ever holds one. Each observation replaces exactly
+# these values by their placeholders before it is compared or recorded
+# (redact_credentials); any other credential stays as sent.
+GOOD = "good-" + secrets.token_hex(16)
+OTHER = "other-" + secrets.token_hex(16)
+CREDENTIALS = {GOOD: "<credential:good>", OTHER: "<credential:other>"}
 SERVER = "pseudolife-memory"
 DESKTOP = "pseudolife-desktop"
 URL_KEY = "PSEUDOLIFE_MCP_DAEMON_URL"
@@ -120,19 +129,19 @@ class Daemon:
             def _token(self) -> str:
                 return (self.headers.get("Authorization") or "").removeprefix("Bearer ")
 
-            def _label(self) -> str:
-                if not self.headers.get("Authorization"):
-                    return "none"
-                return _LABELS.get(self._token(), "unknown")
-
             def _allowed(self) -> bool:
                 return not daemon.auth or self._token() in daemon.accept
 
-            def _record(self) -> None:
+            def _record(self, body: bytes = b"") -> None:
+                """The request as it arrived, in the harness's wire shape:
+                every header field in order (values as http.server decodes
+                them, Latin-1) and the body."""
                 owner = daemon._owner(self.client_address[1])
+                entry = {"method": self.command, "target": self.path,
+                         "headers": [[name, value] for name, value in self.headers.items()],
+                         "body": body.decode("utf-8", "backslashreplace")}
                 with daemon._lock:
-                    daemon._seen.append((owner, {"method": self.command, "path": self.path,
-                                                 "auth": self._label()}))
+                    daemon._seen.append((owner, entry))
 
             def _send(self, status, body=b"", headers=()):
                 self.send_response(status)
@@ -179,7 +188,7 @@ class Daemon:
 
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                self._record()
+                self._record(body)
                 if self.path.startswith("/api/episode"):
                     self._json(200, {"ok": True})
                     return
@@ -246,28 +255,33 @@ class Daemon:
         return None
 
     def requests(self) -> list:
-        """Connect's own requests in order; of the handshake child (the shim,
-        whose transport is its own row) only the credentials its MCP
-        requests carried. Entries are already projected (dict headers), so
-        the harness's wire projection passes them through unchanged."""
+        """Connect's own requests in order, each raw: method, target, every
+        header field in order and the body (the harness's wire projection
+        compares every field). Of the handshake child (the shim, whose
+        transport is its own row) only the ``Authorization`` values its MCP
+        posts carried, as one summary entry whose headers are already
+        projected. Credentials are tokenized later, per arm, by
+        redact_credentials."""
         with self._lock:
             seen = list(self._seen)
 
         def mcp(entry: dict) -> bool:
-            return entry["path"].startswith("/mcp")
+            return entry["target"].startswith("/mcp")
+
+        def authorization(entry: dict) -> str:
+            values = [v for k, v in entry["headers"] if k.lower() == "authorization"]
+            return "|".join(values) if values else "none"
 
         # Connect never calls /mcp (connect_cli.py, codex_connection.py), so
         # an unattributed /mcp request is the handshake child's: on Linux
         # psutil can miss the child's short-lived sockets. A /mcp request
         # traced to connect's own pid stays in `own` and fails the comparison.
-        own = [{"method": entry["method"], "target": entry["path"],
-                "headers": {"authorization-label": entry["auth"]}, "body": ""}
-               for owner, entry in seen
+        own = [entry for owner, entry in seen
                if owner == self.arm_pid or (owner is None and not mcp(entry))]
-        child = sorted({entry["auth"] for owner, entry in seen
+        child = sorted({authorization(entry) for owner, entry in seen
                         if owner != self.arm_pid and mcp(entry) and entry["method"] == "POST"})
         return own + [{"method": "handshake-credentials", "target": "/mcp",
-                       "headers": {"authorization-labels": ",".join(child)}, "body": ""}]
+                       "headers": {"authorization": ",".join(child)}, "body": ""}]
 
     def close(self) -> None:
         for server in self.servers:
@@ -434,6 +448,24 @@ def backup_stamp(obs: dict) -> None:
             record.update(renamed)
 
 
+@normalize.rule("connect-target-url")
+def target_url(obs: dict) -> None:
+    """The case's own target URL (``fixture_url``, a loopback port the
+    harness picked) as ``{DAEMON}`` in the streams and files, where no
+    fixture daemon answered it (``health-unreachable``): the harness's
+    daemon token then never ran, and a golden recorded on one free port
+    replays on another. Only that exact URL is replaced."""
+    url = obs.get("fixture_url")
+    if not url or obs.get("daemon_url"):
+        return
+    raw = url.encode()
+    for field in ("stdout", "stderr"):
+        normalize._put(obs, field, normalize._get(obs, field).replace(raw, b"{DAEMON}"))
+    for rel, value in list(obs["files"].items()):
+        if value.startswith("file:"):
+            normalize._set_file(obs, rel, base64.b64decode(value[5:]).replace(raw, b"{DAEMON}"))
+
+
 @normalize.rule("connect-restart-pid")
 def restart_pid(obs: dict) -> None:
     """The pid of the process this case started inside the runtimes root."""
@@ -443,6 +475,56 @@ def restart_pid(obs: dict) -> None:
     pattern = re.compile(rb"(?<![0-9])" + str(pid).encode() + rb"(?![0-9])")
     for field in ("stdout",):
         normalize._put(obs, field, pattern.sub(b"<pid>", normalize._get(obs, field)))
+
+
+# ── the fixture credentials ─────────────────────────────────────────────────
+
+def _redact(data: bytes) -> bytes:
+    for value, token in CREDENTIALS.items():
+        data = data.replace(value.encode(), token.encode())
+    return data
+
+
+def _redact_text(text: str) -> str:
+    for value, token in CREDENTIALS.items():
+        text = text.replace(value, token)
+    return text
+
+
+def redact_credentials(arm, obs: dict) -> None:
+    """Each generated fixture credential replaced by its placeholder in
+    everything this arm's observation holds: both streams, every request
+    field (``Authorization`` included, so a different credential, or the
+    same one encoded differently, still shows around the placeholder) and
+    every file under the home, rewritten in place before the harness
+    snapshots it (same file, same mode and ACL). Only these exact values
+    are replaced: they are this process's, so a match identifies them, and
+    nothing else is touched. Run last, after the checks that read the raw
+    observation."""
+    for field in ("stdout", "stderr"):
+        normalize._put(obs, field, _redact(normalize._get(obs, field)))
+    for request in obs.get("requests", []):
+        headers = request["headers"]
+        if isinstance(headers, dict):
+            request["headers"] = {k: _redact_text(v) for k, v in headers.items()}
+        else:
+            request["headers"] = [[k, _redact_text(v)] for k, v in headers]
+        request["target"] = _redact_text(request["target"])
+        request["body"] = _redact_text(request["body"])
+    for dirpath, _dirnames, filenames in os.walk(arm.home, followlinks=False):
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue  # the snapshot records it as unreadable
+            redacted = _redact(data)
+            if redacted != data:
+                with open(path, "r+b") as stream:
+                    stream.write(redacted)
+                    stream.truncate()
 
 
 # ── the real-configuration guard ────────────────────────────────────────────
@@ -563,6 +645,7 @@ def _after(url: str, extra=None):
                 obs["db"] = {"windows_acl": _windows_acl(arm.home)}
             _check_reported_paths(arm, obs)
             _check_real_configuration(arm, url)
+            redact_credentials(arm, obs)
     return after
 
 
@@ -589,7 +672,8 @@ def _env(**extra) -> dict:
     return env
 
 
-RULES = ("connect-backup-stamp", "connect-restart-pid")
+RULES = ("connect-backup-stamp", "connect-restart-pid", "shim-handshake-cache-name",
+         "connect-target-url")
 
 
 def _arm_pid(arm, proc) -> None:
@@ -1098,4 +1182,25 @@ MUTANTS = [
            'if !matches!(current.as_str(), "1" | "true" | "yes" | "on") {',
            'if !matches!(current.as_str(), "1" | "true" | "yes" | "on" | "") {',
            ("dry-run-remote",)),
+    # Same-outcome controls (review of #670): each request is still refused
+    # or answered exactly as before, so only the raw request fields show it.
+    # A Latin-1 credential sent as UTF-8: still rejected with the same 401,
+    # refusal and files, but a different credential on the wire.
+    Mutant("connect-latin-1-credential-as-utf8", "connect", "shim/src/cli/connect/net.rs",
+           "    for c in token.chars() {\n"
+           "        value.push(u8::try_from(u32::from(c)).ok()?);\n"
+           "    }\n",
+           "    for c in token.chars() {\n"
+           "        let byte = u8::try_from(u32::from(c)).ok()?;\n"
+           "        if byte < 0x80 {\n"
+           "            value.push(byte);\n"
+           "        } else {\n"
+           "            value.extend(c.to_string().as_bytes());\n"
+           "        }\n"
+           "    }\n",
+           ("literal-latin-1",)),
+    # A changed request field the daemon ignores.
+    Mutant("connect-user-agent-changed", "connect", "shim/src/cli/hook_http.rs",
+           '.header("User-Agent", "Python-urllib/3.11");',
+           '.header("User-Agent", "Python-urllib/3.12");', ("health-degraded",)),
 ]

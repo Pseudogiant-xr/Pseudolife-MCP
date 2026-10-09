@@ -103,19 +103,31 @@ never starting with `-`. Everything else defers before any effect.
 - `--json` (931-961): one `json.dumps(indent=2, default=str)` document,
   ASCII-escaped, key order `url, remote, dry_run, daemon, rows,
   verification, warnings, notes, restart, rollback, error, exit`.
+- Connect's own requests on the wire, every header field and the body
+  compared (the harness's wire projection): the health probe
+  (`shim.probe_health`, `urlopen`, 2 s), the credential check
+  (`installer_credential_valid`, no-redirect opener, 3 s, `read(1)`) and
+  the board probe (`board_status.board_probe`, no-redirect opener, 2 s,
+  `read(65536)`) are GETs as urllib sends them, through `cli::hook_http`:
+  `Host` as written, `User-Agent: Python-urllib/3.11`,
+  `Accept-Encoding: identity`, `Connection: close`, the optional
+  `Authorization` as Latin-1 bytes, no `Accept`; per-receive timeouts; the
+  health probe follows redirects under `HTTPRedirectHandler`'s limits and
+  parses a 3xx where urllib raised `HTTPError` with it, the other two never
+  follow.
 
 ## Free items
 
-- Timeouts are budgets, not observed values (urllib's per-operation 2/3 s
-  versus a whole-request bound).
+- Timeouts are budgets, not observed values.
 - The handshake child's own transport (its MCP request order and count,
-  its own `/health` and episode posts, how it encodes a non-ASCII bearer)
-  belongs to the shim's rows: the harness compares connect's own requests
-  in order and, of the child, the credentials its MCP posts carry.
+  its own `/health` and episode posts, its request fields, how it encodes a
+  non-ASCII bearer) belongs to the shim's rows: the harness compares
+  connect's own requests raw and in order and, of the child, only the
+  `Authorization` values its MCP posts carry.
 - The temporary file name beside a written file (removed before exit).
-- Proxy discovery: reqwest reads the proxy environment variables; urllib
-  additionally reads the Windows registry proxy. Neither is set in any
-  supported install path.
+- Proxy discovery: urllib reads the proxy environment variables and the
+  Windows registry proxy; connect's native requests connect directly.
+  Neither is set in any supported install path.
 
 ## Shared-file fix: the handshake cache bytes
 
@@ -150,8 +162,8 @@ Every deferral below happens before any request, except the last item.
   FileNotFoundError on a file the plan would write.
 - JSON the Python reader holds but this one cannot: a lone surrogate,
   nesting past 100, an integer past 4300 digits (CPython raises ValueError).
-- A real run whose credentials hold DEL (urllib sends it; reqwest's header
-  type refuses it).
+- A real run whose credentials hold DEL (urllib sends it; the `http`
+  crate's header type refuses it).
 - After the unauthenticated `GET /health` only: a health body with one of
   the JSON inputs above.
 
@@ -178,7 +190,8 @@ Every deferral below happens before any request, except the last item.
   re-read that meets an input outside the native domain reports as a failed
   post-apply check; a second `/health` body outside the reproduced JSON
   domain reads as not ok.
-- A `--read-token` token holding DEL is refused (reqwest cannot send it);
+- A `--read-token` token holding DEL is refused (the `http` crate cannot
+  send it);
   the oracle would send it. Its stdin is read only after confirmation, so it
   cannot be checked before the plan.
 
@@ -193,7 +206,29 @@ Every deferral below happens before any request, except the last item.
   from a small directory). This is an oracle fragility on busy hosts, not
   candidate behaviour.
 - Requests are attributed to the process holding the client end of each
-  connection (`psutil`), so connect's own requests are compared exactly.
+  connection (`psutil`), so connect's own requests are compared exactly:
+  method, target, every header field and the body, as received (review of
+  #670: the earlier capture kept only a credential label, so a different
+  rejected credential or a changed field was invisible). Same-outcome
+  controls: mutants `connect-latin-1-credential-as-utf8` (a Latin-1
+  credential sent as UTF-8, still refused alike) and
+  `connect-user-agent-changed`.
+- Fixture credentials are generated per harness process and appear in no
+  source or golden. After every check that reads the raw observation, the
+  row's `after` hook replaces exactly those values, wherever this arm's
+  observation holds them (streams, request fields, every file under the
+  home, rewritten in place before the snapshot), by `<credential:good>` /
+  `<credential:other>`; anything around them, a suffix or another encoding
+  included, stays as sent.
+- `shim-handshake-cache-name` (`rows/_handshake_cache.py`): the handshake
+  shim's cache file is named `sha256(url)[:16]` of the fixture URL, whose
+  port differs per run; only that name, validated against this case's own
+  fixture URL, becomes `<fixture-url-hash>.json`, so goldens replay.
+- `connect-target-url`: where no fixture daemon answers the target
+  (`health-unreachable`), the harness's daemon token never runs; the case's
+  own target URL (a free loopback port the harness picked, recorded as
+  `fixture_url`) becomes `{DAEMON}` in the streams and files, that exact
+  URL only.
 - A remote target is `http://localhost.:<port>`: not loopback to
   `_is_loopback_url`, resolved to `::1`/`127.0.0.1` where the fixture
   listens.

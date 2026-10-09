@@ -59,12 +59,27 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   :601, before it starts the shim). That traffic is CLI-SHIM's contract and is
   summarized as one entry naming the JSON-RPC methods it proxied; any other
   request a doctor makes is compared request by request.
-- `doctor-runtime-identity`: see below. Each observation carries the arm
-  that produced it (`after` hook), and the rule tokenizes only when that
-  arm's own identity is the one reported.
+- `doctor-runtime-identity`: see below. Applied when the observation is
+  taken (the row's `after` hook), where the launched target and the arm's
+  files are known; a golden therefore carries tokens, never the recording
+  host's interpreter or checkout paths.
 - `doctor-context-nonce`: the context request's `uuid4().hex` nonce, only
   that span of that body.
-- `shim-handshake-cache-semantic`: temporary, below.
+- The handshake shim's cache file is compared byte for byte (the
+  connect leaf's `cache.rs` writes `json.dumps`'s bytes: spaced separators,
+  ASCII escapes, `url` first). Its content differs between runs only in the
+  fixture URL, which the harness's daemon token replaces (exact URL forms).
+  The earlier `shim-handshake-cache-semantic` rewrite, which compared it as
+  parsed JSON, is gone (review of #678): mutants
+  `doctor-cache-compact-separator`, `doctor-cache-url-last` and
+  `doctor-cache-raw-utf8` (case `healthy-non-ascii-instructions`) escaped
+  it and are caught now.
+- `shim-handshake-cache-name` (`rows/_handshake_cache.py`): the handshake
+  shim names its cache `sha256(daemon url)[:16]`, and the fixture's port
+  differs per run, so a golden and its replay name the same file apart.
+  Only a cache file named by that hash of the observation's own fixture URL
+  (recorded by the `after` hook) is renamed `<fixture-url-hash>.json`; the
+  rule touches the name only, never the content.
 
 ## Declared substitutions and divergences
 
@@ -76,24 +91,30 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   version. Python's `mcp` key (its MCP SDK version) has no native
   counterpart and the native report omits it entirely, by the same decision:
   after cutover a placeholder such as `not installed` would read as a broken
-  install. The rule checks that each arm reports its OWN identity (the
-  native arm its executable, resolved directory, Cargo version and no `mcp`
-  key; the oracle arm an existing Python interpreter, its package directory
-  and a real version string in `mcp`), deletes the oracle's `mcp` line (its
-  line break and trailing comma, exactly once), then tokenizes the three
-  shared fields and that arm's own version where the report or the shim's
-  mismatch warning repeats it. Every other byte, key order included, must
-  equal Python's. A native report carrying Python's identity stays a
-  difference (mutant `doctor-identity-claims-python`).
+  install. The rule binds each arm's report to the target the harness
+  launched for it (`Case.during` records the executable): the candidate's
+  `interpreter` must be an existing file resolving to the launched binary,
+  its `source` the existing directory that binary resolves into, its
+  version the Cargo version, and it must carry no `mcp` key; the oracle's
+  `interpreter` must be an existing file resolving to the launched
+  interpreter, its `source` the existing package directory of the oracle
+  checkout on its PYTHONPATH, its version that interpreter's installed
+  `pseudolife-mcp` version, and its `mcp` a real version string. Only
+  then is the oracle's `mcp` line deleted (its line break and trailing
+  comma, exactly once) and the three shared fields tokenized, with that
+  arm's own version where the report or the shim's mismatch warning
+  repeats it. Every other byte, key order included, must equal Python's.
+  A candidate report that does not bind keeps its raw values and the
+  comparison appends the reason; an oracle report that does not bind stops
+  the run. A native report carrying Python's identity (mutant
+  `doctor-identity-claims-python`) or naming a nonexistent same-basename
+  executable in another directory with a consistent source and the right
+  version (mutant `doctor-identity-wrong-path`, which the earlier
+  basename-and-consistency check accepted, review of #669) stays a
+  difference.
   `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
   asserts `interpreter == sys.executable` and can never hold for a native
   runtime.
-- `shim-handshake-cache-semantic` (harness rule, inherited from CLI-SHIM,
-  temporary): the Python shim writes the handshake cache with `json.dumps`
-  (spaced separators, ASCII escapes, `url` first); the native shim's
-  `cache.rs` writes compact UTF-8 with `url` last. Compared as parsed JSON,
-  that path only. The connect leaf's cache.rs fix writes Python's bytes; the
-  rule goes once it merges.
 - Timeouts are observable: a small `--timeout` (or the 2-second probe cap)
   races startup and response speed differently in each runtime, and the
   native doctor bounds connect and each read the way sockets do, not
