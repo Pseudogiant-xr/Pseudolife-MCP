@@ -90,8 +90,12 @@ class Daemon:
 
     def __init__(self, port: int, *, url: str, auth=True, accept=(GOOD,), board="on",
                  health=None, health_after_board=None, tools=None,
-                 instructions="Fixture daemon instructions."):
+                 instructions="Fixture daemon instructions.", health_status=200,
+                 health_redirect=False, board_body=None):
         self.url = url
+        self.health_status = health_status
+        self.health_redirect = health_redirect
+        self.board_body = board_body
         self.health = health if health is not None else {
             "status": "ok", "auth": auth, "version": "0.0.0-fixture"}
         self.auth = auth
@@ -145,11 +149,13 @@ class Daemon:
 
             def do_GET(self):
                 self._record()
-                if self.path == "/health":
+                if self.path == "/health" and daemon.health_redirect:
+                    self._send(302, b"", (("Location", "/health/live"),))
+                elif self.path in ("/health", "/health/live"):
                     health = daemon.health
                     if daemon.health_after_board is not None and daemon.board_seen:
                         health = daemon.health_after_board
-                    self._json(200, health)
+                    self._json(daemon.health_status, health)
                 elif self.path.startswith("/api/episodes"):
                     if self._allowed():
                         self._json(200, {"episodes": []})
@@ -157,8 +163,11 @@ class Daemon:
                         self._json(401, {"error": "unauthorized"})
                 elif self.path.startswith("/api/hook/coordination-start"):
                     daemon.board_seen = True
-                    body = b"check-in" if daemon.board == "on" else b""
-                    self._send(200, body, (("X-PL-Board", daemon.board),))
+                    body = daemon.board_body
+                    if body is None:
+                        body = b"check-in" if daemon.board == "on" else b""
+                    headers = (("X-PL-Board", daemon.board),) if daemon.board is not None else ()
+                    self._send(200, body, headers)
                 elif self.path.startswith("/mcp"):
                     self._send(405, b"", (("Allow", "POST, DELETE"),))
                 else:
@@ -371,8 +380,12 @@ def _stamp_in_window(stamp: bytes, window: list[float]) -> bool:
 
 @normalize.rule("connect-backup-stamp")
 def backup_stamp(obs: dict) -> None:
-    """The UTC stamp in ``<file>.bak-pseudolife-<stamp>``: in streams and in
-    file names, only where it names a moment inside the arm's own run."""
+    """The UTC stamp in ``<file>.bak-pseudolife-<stamp>``, only where it
+    names a moment inside the arm's own run. In file names (and the
+    ``modes`` and ACL records keyed by them) two names that normalize alike
+    stay distinct (`` <normalized-collision>``), so an extra backup shows.
+    In the streams a stamp is replaced only when this arm's snapshot holds a
+    backup with that exact stamp, so a reported backup must exist."""
     window = obs["window"]
 
     def swap(match: re.Match) -> bytes:
@@ -380,12 +393,28 @@ def backup_stamp(obs: dict) -> None:
             return b".bak-pseudolife-<stamp>"
         return match.group(0)
 
+    on_disk = {match.group(1) for rel in obs["files"]
+               for match in _STAMP.finditer(rel.encode())}
+
+    def reported(match: re.Match) -> bytes:
+        return swap(match) if match.group(1) in on_disk else match.group(0)
+
     for field in ("stdout", "stderr"):
-        normalize._put(obs, field, _STAMP.sub(swap, normalize._get(obs, field)))
-    renamed = {}
+        normalize._put(obs, field, _STAMP.sub(reported, normalize._get(obs, field)))
+    names: dict[str, str] = {}
+    files = {}
     for rel, value in obs["files"].items():
-        renamed[_STAMP.sub(swap, rel.encode()).decode()] = value
-    obs["files"] = renamed
+        new_rel = _STAMP.sub(swap, rel.encode()).decode()
+        while new_rel in files:
+            new_rel += " <normalized-collision>"
+        names[rel] = new_rel
+        files[new_rel] = value
+    obs["files"] = files
+    for record in (obs.get("modes"), (obs.get("db") or {}).get("windows_acl")):
+        if isinstance(record, dict):
+            renamed = {names.get(rel, rel): value for rel, value in record.items()}
+            record.clear()
+            record.update(renamed)
 
 
 @normalize.rule("connect-restart-pid")
@@ -486,6 +515,26 @@ def _check_reported_paths(arm, obs: dict) -> None:
             raise AssertionError(f"connect row: {arm.name} reported a path outside its home: {path}")
 
 
+def _windows_acl(home: Path) -> dict:
+    """Whether each file under the home is owner-only, by the oracle's own
+    test (``credentials._windows_owner_only``). Master's core compares POSIX
+    modes and no Windows ACLs; this record rides in the compared ``db``
+    field. The arms' temporary directory is the handshake child's, not
+    connect's."""
+    from pseudolife_memory.credentials import _windows_owner_only  # noqa: PLC0415
+    found = {}
+    for path in sorted(home.rglob("*")):
+        rel = path.relative_to(home).as_posix()
+        if not path.is_file() or rel.startswith("tmp/"):
+            continue
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            found[rel] = "owner-only" if _windows_owner_only(fd) else "inherited"
+        finally:
+            os.close(fd)
+    return found
+
+
 def _after(url: str, extra=None):
     def after(arm, obs):
         try:
@@ -493,6 +542,8 @@ def _after(url: str, extra=None):
                 extra(arm, obs)
         finally:
             obs["fixture_url"] = url
+            if WINDOWS:
+                obs["db"] = {"windows_acl": _windows_acl(arm.home)}
             _check_reported_paths(arm, obs)
             _check_real_configuration(arm, url)
     return after
@@ -821,6 +872,89 @@ def cases() -> list[Case]:
               "--read-token", "--yes"], url=url, port=port, accept=(OTHER,),
              stdin=GOOD.encode() + b"\n", setup=claude_registered()))
 
+    # Inputs the first candidate deferred on, and coverage the reviews asked for.
+    port, url = _target()
+
+    def bom_token(arm):
+        path = arm.home / ".pseudolife-mcp" / "bom.token"
+        _oracle_token_writer()(path, GOOD)
+        # The oracle's writer refuses a BOM; rewrite the owner-only file's bytes.
+        with open(path, "r+b") as stream:
+            stream.write(("﻿" + GOOD).encode())
+        claude_json(arm.home, entry("shim", claude_env(arm.home, token=path)))
+    add(case("bom-token-dry-run", [url, "--client", "claude-code", "--dry-run"], url=url,
+             port=port, setup=bom_token))
+    port, url = _target()
+    add(case("bom-token-refused", [url, "--client", "claude-code", "--yes"], url=url,
+             port=port, setup=bom_token))
+    port, url = _target()
+    add(case("health-status-container", [url, "--dry-run"], url=url, port=port,
+             health={"status": {"phase": "booting", "ok": False}, "auth": True},
+             setup=claude_registered()))
+    port, url = _target()
+    add(case("health-version-container-nan", [url, "--dry-run", "--json"], url=url, port=port,
+             health={"status": "ok", "auth": True, "version": [1, float("nan")]},
+             setup=claude_registered()))
+    port, url = _target()
+    add(case("health-503", [url, "--dry-run"], url=url, port=port, health_status=503,
+             health={"status": "stopping", "auth": True}, setup=claude_registered()))
+    port, url = _target()
+    add(case("health-redirect", [url, "--client", "claude-code", "--dry-run"], url=url,
+             port=port, health_redirect=True, setup=claude_registered()))
+    for reason in ("disabled", "authentication_required", "coordination_requires_postgres",
+                   "something-new"):
+        port, url = _target()
+        add(case(f"board-{reason}", [url, "--client", "claude-code", "--yes"], url=url,
+                 port=port, board=f"off; reason={reason}", setup=claude_registered()))
+    port, url = _target()
+    add(case("board-no-header-empty-body", [url, "--client", "claude-code", "--yes"], url=url,
+             port=port, board=None, board_body=b" \x0b\n", setup=claude_registered()))
+    port, url = _target()
+
+    def literal(token):
+        def setup(arm):
+            write_json(arm.home / ".gemini" / "settings.json", {"mcpServers": {SERVER: entry(
+                "shim", {URL_KEY: OLD_URL, TOKEN_KEY: token})}})
+        return setup
+    add(case("literal-trailing-newline", [url, "--client", "gemini", "--yes"], url=url,
+             port=port, setup=literal(GOOD + "\n")))
+    port, url = _target()
+    add(case("literal-beyond-latin-1", [url, "--client", "gemini", "--yes"], url=url, port=port,
+             setup=literal(GOOD + "€")))
+    port, url = _target()
+    add(case("literal-latin-1", [url, "--client", "gemini", "--yes"], url=url, port=port,
+             setup=literal(GOOD + "é")))
+    port, url = _target()
+
+    def second_refused(arm):
+        claude_registered()(arm)
+        write_json(arm.home / ".gemini" / "settings.json", {"mcpServers": {SERVER: entry(
+            "shim", {URL_KEY: OLD_URL, TOKEN_KEY: OTHER})}})
+    add(case("verify-second-credential-refused", [url, "--yes"], url=url, port=port,
+             setup=second_refused))
+    port, url = _target()
+
+    def respelled(arm):
+        tf = token_file(arm.home)
+        text = ('﻿{"numStartups": 1E2, "ratio": 1.50, "neg": -0, "tiny": 1e-7,\r\n'
+                '"big": 123456789012345678901234567890, "odd": NaN, "inf": -Infinity,\r\n'
+                '"mcpServers": {"x": 1},\r\n'
+                '"mcpServers": {"pseudolife-memory": {"command": "shim", "env": {'
+                f'"{URL_KEY}": "{OLD_URL}", "{FILE_KEY}": ' + json.dumps(str(tf)) + "}}},\r\n"
+                '"escaped": "\\u00e9\\ud83d\\ude00\\/\\t"}\r\n')
+        (arm.home / ".claude.json").write_bytes(text.encode("utf-8"))
+    add(case("apply-json-respelling", [url, "--client", "claude-code", "--yes"], url=url,
+             port=port, setup=respelled))
+    port, url = _target()
+
+    def two_packages(arm):
+        tf = token_file(arm.home, "desktop.token")
+        for package in ("Claude_bbb", "claude_AAA"):
+            write_json(desktop_config(arm.home, package), {"mcpServers": {DESKTOP: entry(
+                "shim", {URL_KEY: OLD_URL, FILE_KEY: str(tf)})}})
+    add(case("two-msix-packages", [url, "--client", "claude-desktop", "--yes"], url=url,
+             port=port, setup=two_packages, platforms=("windows",)))
+
     # After the writes.
     port, url = _target()
     add(case("post-apply-health", [url, "--yes", "--client", "claude-code"], url=url, port=port,
@@ -886,6 +1020,23 @@ MUTANTS = [
            "let mut data = cached;\n"
            '            data.insert("url".to_owned(), Value::String(self.url.clone()));',
            ("apply-move-yes",)),
+    Mutant("connect-json-indent-4", "connect", "shim/src/cli/connect/pyjson.rs",
+           "out.extend(std::iter::repeat_n(' ', level * 2));",
+           "out.extend(std::iter::repeat_n(' ', level * 4));",
+           ("apply-move-yes",)),
+    Mutant("connect-backup-stamp-millis", "connect", "shim/src/cli/connect/files.rs",
+           '"%Y%m%d-%H%M%S-%6f"', '"%Y%m%d-%H%M%S-%3f"', ("apply-move-yes",)),
+    Mutant("connect-config-not-private", "connect", "shim/src/cli/connect/files.rs",
+           "        make_private(&file)?;\n", "        let _ = &file;\n",
+           ("apply-move-yes", "rollback-read-only-dir")),
+    Mutant("connect-verify-reverse-order", "connect", "shim/src/cli/connect/mod.rs",
+           "for (credential, label) in credentials {",
+           "for (credential, label) in credentials.into_iter().rev() {",
+           ("verify-second-credential-refused",)),
+    Mutant("connect-header-utf8", "connect", "shim/src/cli/connect/net.rs",
+           "value.push(u8::try_from(u32::from(c)).ok()?);",
+           "value.extend(c.to_string().as_bytes());",
+           ("literal-beyond-latin-1",)),
     Mutant("connect-remote-keeps-spawn", "connect", "shim/src/cli/connect/discover.rs",
            'if !matches!(current.as_str(), "1" | "true" | "yes" | "on") {',
            'if !matches!(current.as_str(), "1" | "true" | "yes" | "on" | "") {',

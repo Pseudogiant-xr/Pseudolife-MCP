@@ -1,11 +1,11 @@
 //! Python `json` and `str()` semantics for client configuration files.
 //!
-//! Values keep Python's normalized number spelling (`int(lexeme)` and
-//! `repr(float(lexeme))`) and dict insertion order; a duplicate key keeps its
-//! first position with its last value, as a Python dict does. Inputs whose
-//! Python reading this module cannot reproduce exactly (NaN/Infinity, lone
-//! surrogate escapes, very deep nesting, over-long integers, non-finite
-//! floats) defer.
+//! The reader follows CPython's C scanner (`NaN`/`Infinity` literals,
+//! strict control characters, four-digit escapes). Values keep Python's
+//! number spelling (`int(lexeme)`, `repr(float(lexeme))`) and dict insertion
+//! order; a duplicate key keeps its first position with its last value, as a
+//! Python dict does. A lone surrogate (no Rust `String` holds it), nesting
+//! past 100 and integers past 4300 digits defer.
 use super::Defer;
 use std::fmt::Write as _;
 
@@ -79,16 +79,11 @@ impl J {
         }
     }
 
-    /// `str(value)` for scalars; a container's repr defers.
+    /// `str(value)`: a str as itself, anything else its repr.
     pub(super) fn py_str(&self) -> Result<String, Defer> {
         Ok(match self {
-            J::Null => "None".to_owned(),
-            J::Bool(true) => "True".to_owned(),
-            J::Bool(false) => "False".to_owned(),
-            J::Int(value) => value.clone(),
-            J::Float(value) => float_repr(*value),
             J::Str(value) => value.clone(),
-            J::List(_) | J::Dict(_) => return Err(Defer),
+            other => py_value_repr(other),
         })
     }
 }
@@ -120,79 +115,351 @@ pub(super) fn py_strip(text: &str) -> &str {
     text.trim_matches(py_space)
 }
 
+// Python's recursion limit is ~1000 frames; this reader stays well inside.
 const MAX_DEPTH: usize = 100;
 // CPython 3.11's int_max_str_digits default.
 const MAX_INT_DIGITS: usize = 4300;
 
-fn convert(value: serde_json::Value, depth: usize) -> Result<J, Defer> {
-    if depth > MAX_DEPTH {
-        return Err(Defer);
+/// Why the reader stopped: Python's JSONDecodeError, or an input whose
+/// Python reading cannot be held here.
+enum Stop {
+    Syntax,
+    Defer,
+}
+
+/// CPython's C scanner (`json.loads` with its defaults).
+struct Reader<'a> {
+    text: &'a str,
+    at: usize,
+    depth: usize,
+}
+
+impl Reader<'_> {
+    fn peek(&self) -> Option<u8> {
+        self.text.as_bytes().get(self.at).copied()
     }
-    Ok(match value {
-        serde_json::Value::Null => J::Null,
-        serde_json::Value::Bool(value) => J::Bool(value),
-        serde_json::Value::Number(number) => {
-            let lexeme = number.as_str();
-            if lexeme.contains(['.', 'e', 'E']) {
-                let parsed: f64 = lexeme.parse().map_err(|_| Defer)?;
-                if !parsed.is_finite() {
-                    return Err(Defer);
-                }
-                J::Float(parsed)
+
+    fn space(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.at += 1;
+        }
+    }
+
+    fn word(&mut self, word: &str) -> bool {
+        if self.text[self.at..].starts_with(word) {
+            self.at += word.len();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn value(&mut self) -> Result<J, Stop> {
+        match self.peek() {
+            Some(b'"') => self.string().map(J::Str),
+            Some(b'{') => self.nested(Self::object),
+            Some(b'[') => self.nested(Self::array),
+            Some(b'n') if self.word("null") => Ok(J::Null),
+            Some(b't') if self.word("true") => Ok(J::Bool(true)),
+            Some(b'f') if self.word("false") => Ok(J::Bool(false)),
+            Some(b'N') if self.word("NaN") => Ok(J::Float(f64::NAN)),
+            Some(b'I') if self.word("Infinity") => Ok(J::Float(f64::INFINITY)),
+            Some(b'-') if self.word("-Infinity") => Ok(J::Float(f64::NEG_INFINITY)),
+            Some(b'-' | b'0'..=b'9') => self.number(),
+            _ => Err(Stop::Syntax),
+        }
+    }
+
+    fn nested(&mut self, read: fn(&mut Self) -> Result<J, Stop>) -> Result<J, Stop> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(Stop::Defer);
+        }
+        let value = read(self);
+        self.depth -= 1;
+        value
+    }
+
+    fn digits(&mut self) -> usize {
+        let start = self.at;
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.at += 1;
+        }
+        self.at - start
+    }
+
+    /// `(-?(?:0|[1-9]\d*))(\.\d+)?([eE][-+]?\d+)?`
+    fn number(&mut self) -> Result<J, Stop> {
+        let start = self.at;
+        if self.peek() == Some(b'-') {
+            self.at += 1;
+        }
+        match self.peek() {
+            Some(b'0') => self.at += 1,
+            Some(b'1'..=b'9') => {
+                self.digits();
+            }
+            _ => return Err(Stop::Syntax),
+        }
+        let integer_end = self.at;
+        let mut float = false;
+        if self.peek() == Some(b'.') {
+            let dot = self.at;
+            self.at += 1;
+            if self.digits() == 0 {
+                self.at = dot;
             } else {
-                let digits = lexeme.strip_prefix('-').unwrap_or(lexeme);
-                if digits.len() > MAX_INT_DIGITS {
-                    return Err(Defer);
-                }
-                if digits.bytes().all(|b| b == b'0') {
-                    J::Int("0".to_owned())
-                } else {
-                    J::Int(lexeme.to_owned())
-                }
+                float = true;
             }
         }
-        serde_json::Value::String(value) => J::Str(value),
-        serde_json::Value::Array(values) => J::List(
-            values
-                .into_iter()
-                .map(|value| convert(value, depth + 1))
-                .collect::<Result<_, _>>()?,
-        ),
-        serde_json::Value::Object(map) => J::Dict(
-            map.into_iter()
-                .map(|(key, value)| Ok((key, convert(value, depth + 1)?)))
-                .collect::<Result<_, Defer>>()?,
-        ),
-    })
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            let mark = self.at;
+            self.at += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.at += 1;
+            }
+            if self.digits() == 0 {
+                self.at = mark;
+            } else {
+                float = true;
+            }
+        }
+        let lexeme = &self.text[start..self.at];
+        if float {
+            return lexeme.parse::<f64>().map(J::Float).map_err(|_| Stop::Defer);
+        }
+        let digits = &self.text[start..integer_end];
+        let magnitude = digits.strip_prefix('-').unwrap_or(digits);
+        if magnitude.len() > MAX_INT_DIGITS {
+            return Err(Stop::Defer);
+        }
+        Ok(J::Int(if magnitude == "0" {
+            "0".to_owned()
+        } else {
+            digits.to_owned()
+        }))
+    }
+
+    fn hex4(&mut self) -> Result<u32, Stop> {
+        let digits = self.text.get(self.at..self.at + 4).ok_or(Stop::Syntax)?;
+        if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Stop::Syntax);
+        }
+        self.at += 4;
+        u32::from_str_radix(digits, 16).map_err(|_| Stop::Syntax)
+    }
+
+    fn string(&mut self) -> Result<String, Stop> {
+        self.at += 1;
+        let mut out = String::new();
+        loop {
+            let rest = &self.text[self.at..];
+            let c = rest.chars().next().ok_or(Stop::Syntax)?;
+            self.at += c.len_utf8();
+            match c {
+                '"' => return Ok(out),
+                '\u{0}'..='\u{1f}' => return Err(Stop::Syntax),
+                '\\' => {
+                    let escape = self.peek().ok_or(Stop::Syntax)?;
+                    self.at += 1;
+                    match escape {
+                        b'"' => out.push('"'),
+                        b'\\' => out.push('\\'),
+                        b'/' => out.push('/'),
+                        b'b' => out.push('\u{8}'),
+                        b'f' => out.push('\u{c}'),
+                        b'n' => out.push('\n'),
+                        b'r' => out.push('\r'),
+                        b't' => out.push('\t'),
+                        b'u' => {
+                            let unit = self.hex4()?;
+                            let point = if (0xd800..0xdc00).contains(&unit)
+                                && self.text[self.at..].starts_with("\\u")
+                            {
+                                let mark = self.at;
+                                self.at += 2;
+                                let low = self.hex4()?;
+                                if (0xdc00..0xe000).contains(&low) {
+                                    0x10000 + ((unit - 0xd800) << 10) + (low - 0xdc00)
+                                } else {
+                                    self.at = mark;
+                                    unit
+                                }
+                            } else {
+                                unit
+                            };
+                            // A lone surrogate is a Python str no Rust String holds.
+                            out.push(char::from_u32(point).ok_or(Stop::Defer)?);
+                        }
+                        _ => return Err(Stop::Syntax),
+                    }
+                }
+                c => out.push(c),
+            }
+        }
+    }
+
+    fn object(&mut self) -> Result<J, Stop> {
+        self.at += 1;
+        let mut dict = Vec::new();
+        self.space();
+        if self.peek() == Some(b'}') {
+            self.at += 1;
+            return Ok(J::Dict(dict));
+        }
+        loop {
+            if self.peek() != Some(b'"') {
+                return Err(Stop::Syntax);
+            }
+            let key = self.string()?;
+            self.space();
+            if self.peek() != Some(b':') {
+                return Err(Stop::Syntax);
+            }
+            self.at += 1;
+            self.space();
+            let value = self.value()?;
+            // dict assignment: a repeated key keeps its first place.
+            set(&mut dict, &key, value);
+            self.space();
+            match self.peek() {
+                Some(b',') => {
+                    self.at += 1;
+                    self.space();
+                }
+                Some(b'}') => {
+                    self.at += 1;
+                    return Ok(J::Dict(dict));
+                }
+                _ => return Err(Stop::Syntax),
+            }
+        }
+    }
+
+    fn array(&mut self) -> Result<J, Stop> {
+        self.at += 1;
+        let mut list = Vec::new();
+        self.space();
+        if self.peek() == Some(b']') {
+            self.at += 1;
+            return Ok(J::List(list));
+        }
+        loop {
+            list.push(self.value()?);
+            self.space();
+            match self.peek() {
+                Some(b',') => {
+                    self.at += 1;
+                    self.space();
+                }
+                Some(b']') => {
+                    self.at += 1;
+                    return Ok(J::List(list));
+                }
+                _ => return Err(Stop::Syntax),
+            }
+        }
+    }
 }
 
 /// `json.loads(text)`: `Ok(None)` when Python raises a JSONDecodeError.
 pub(super) fn loads(text: &str) -> Result<Option<J>, Defer> {
-    match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(value) => convert(value, 0).map(Some),
-        Err(error) => {
-            // Python accepts what serde_json refuses here; never guess.
-            if error.to_string().contains("recursion limit")
-                || text.contains("NaN")
-                || text.contains("Infinity")
-                || has_surrogate_escape(text)
-            {
-                Err(Defer)
-            } else {
-                Ok(None)
-            }
-        }
+    let mut reader = Reader {
+        text,
+        at: 0,
+        depth: 0,
+    };
+    reader.space();
+    let value = match reader.value() {
+        Ok(value) => value,
+        Err(Stop::Syntax) => return Ok(None),
+        Err(Stop::Defer) => return Err(Defer),
+    };
+    reader.space();
+    Ok((reader.at == text.len()).then_some(value))
+}
+
+fn numeric(value: &J) -> Option<Number<'_>> {
+    match value {
+        J::Bool(value) => Some(Number::Int(if *value { "1" } else { "0" })),
+        J::Int(digits) => Some(Number::Int(digits)),
+        J::Float(value) => Some(Number::Float(*value)),
+        _ => None,
     }
 }
 
-fn has_surrogate_escape(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    bytes.windows(4).any(|window| {
-        window[0] == b'\\'
-            && window[1] == b'u'
-            && matches!(window[2], b'd' | b'D')
-            && matches!(window[3], b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
-    })
+enum Number<'a> {
+    Int(&'a str),
+    Float(f64),
+}
+
+/// Python's exact int/float comparison.
+fn int_equals_float(digits: &str, value: f64) -> bool {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return false;
+    }
+    format!("{value:.0}") == digits || (value == 0.0 && digits == "0")
+}
+
+/// Python `==` between two values `json.loads` produced: dicts compare
+/// unordered, bool/int/float numerically and exactly, and NaN equals NaN
+/// because json returns one shared NaN object (identity wins in a dict).
+pub(super) fn py_eq(a: &J, b: &J) -> bool {
+    if let (Some(x), Some(y)) = (numeric(a), numeric(b)) {
+        return match (x, y) {
+            (Number::Int(x), Number::Int(y)) => x == y,
+            (Number::Float(x), Number::Float(y)) => x == y || (x.is_nan() && y.is_nan()),
+            (Number::Int(x), Number::Float(y)) | (Number::Float(y), Number::Int(x)) => {
+                int_equals_float(x, y)
+            }
+        };
+    }
+    match (a, b) {
+        (J::Null, J::Null) => true,
+        (J::Str(x), J::Str(y)) => x == y,
+        (J::List(x), J::List(y)) => x.len() == y.len() && x.iter().zip(y).all(|(x, y)| py_eq(x, y)),
+        (J::Dict(x), J::Dict(y)) => {
+            x.len() == y.len()
+                && x.iter().all(|(key, value)| {
+                    y.iter()
+                        .find(|(other, _)| other == key)
+                        .is_some_and(|(_, other)| py_eq(value, other))
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Python `repr()` of a value `json.loads` produced.
+pub(super) fn py_value_repr(value: &J) -> String {
+    match value {
+        J::Null => "None".to_owned(),
+        J::Bool(true) => "True".to_owned(),
+        J::Bool(false) => "False".to_owned(),
+        J::Int(value) => value.clone(),
+        J::Float(value) => float_repr(*value),
+        J::Str(value) => crate::cli::mode_repr(value),
+        J::List(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(py_value_repr)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        J::Dict(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(key, value)| format!(
+                    "{}: {}",
+                    crate::cli::mode_repr(key),
+                    py_value_repr(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 /// Python float repr (`float_repr_style == 'short'`).
@@ -300,6 +567,12 @@ fn append(value: &J, ascii: bool, level: usize, out: &mut String) {
         J::Null => out.push_str("null"),
         J::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
         J::Int(value) => out.push_str(value),
+        J::Float(value) if value.is_nan() => out.push_str("NaN"),
+        J::Float(value) if value.is_infinite() => out.push_str(if *value > 0.0 {
+            "Infinity"
+        } else {
+            "-Infinity"
+        }),
         J::Float(value) => out.push_str(&float_repr(*value)),
         J::Str(value) => quoted(value, ascii, out),
         J::List(values) if values.is_empty() => out.push_str("[]"),
@@ -340,25 +613,9 @@ pub(super) fn dumps(value: &J, ascii: bool) -> String {
     out
 }
 
-/// Python `repr()` of a str, for the printable-ASCII domain only.
-pub(super) fn py_repr(text: &str) -> Result<String, Defer> {
-    if !text.chars().all(|c| (' '..='~').contains(&c)) {
-        return Err(Defer);
-    }
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::from(quote);
-    for c in text.chars() {
-        if c == '\\' || c == quote {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out.push(quote);
-    Ok(out)
+/// Python `repr()` of a str (the dispatcher's pinned Unicode 14 rules).
+pub(super) fn py_repr(text: &str) -> String {
+    crate::cli::mode_repr(text)
 }
 
 #[cfg(test)]
@@ -398,17 +655,86 @@ mod tests {
     }
 
     #[test]
-    fn python_only_inputs_defer() {
-        assert!(loads("{\"a\": NaN}").is_err());
+    fn python_json_reader_domain() {
+        // json.loads accepts NaN and the infinities; json.dumps writes them back.
+        let value = loads("{\"a\": NaN, \"b\": -Infinity, \"c\": 1E2, \"d\": 1.50, \"e\": -0}")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            dumps(&value, false),
+            "{\n  \"a\": NaN,\n  \"b\": -Infinity,\n  \"c\": 100.0,\n  \"d\": 1.5,\n  \"e\": 0\n}"
+        );
+        // A lone surrogate is a Python str no Rust String can hold.
         assert!(loads("{\"a\": \"\\ud800\"}").is_err());
-        assert!(matches!(loads("{\"a\": }"), Ok(None)));
+        assert!(loads("{\"a\": \"\\udc00\\ud800\"}").is_err());
+        assert_eq!(
+            loads("\"\\ud83d\\ude00\"").unwrap(),
+            Some(J::Str("\u{1f600}".into()))
+        );
+        for refused in [
+            "{\"a\": }",
+            "[1,]",
+            "{\"a\":1,}",
+            "01",
+            "-",
+            "+1",
+            "nan",
+            "-NaN",
+            "\"\\u12\"",
+            "\"a\u{1}\"",
+            "{\"a\" 1}",
+            "\u{feff}{}",
+            "{} x",
+        ] {
+            assert!(matches!(loads(refused), Ok(None)), "{refused}");
+        }
+        assert!(loads(&"[".repeat(150)).is_err());
+    }
+
+    #[test]
+    fn container_str_is_python_repr() {
+        let value = loads("{\"k\": [1, 2.5, null, true, \"it's\", {}], \"\u{e9}\": \"a\\nb\"}")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            value.py_str().unwrap(),
+            "{'k': [1, 2.5, None, True, \"it's\", {}], '\u{e9}': 'a\\nb'}"
+        );
+        assert_eq!(J::Float(f64::NAN).py_str().unwrap(), "nan");
+        assert_eq!(J::Float(f64::NEG_INFINITY).py_str().unwrap(), "-inf");
+    }
+
+    #[test]
+    fn equality_is_python_dict_equality() {
+        let a = loads("{\"x\": 1, \"y\": [1.0, true]}").unwrap().unwrap();
+        let b = loads("{\"y\": [1, 1], \"x\": 1.0}").unwrap().unwrap();
+        assert!(py_eq(&a, &b));
+        // json's NaN is one module constant, so dict equality holds by identity.
+        let nan = loads("{\"x\": NaN}").unwrap().unwrap();
+        assert!(py_eq(&nan, &nan.clone()));
+        assert!(!py_eq(
+            &loads("[1]").unwrap().unwrap(),
+            &loads("[\"1\"]").unwrap().unwrap()
+        ));
+        assert!(!py_eq(
+            &loads("{\"x\": 1}").unwrap().unwrap(),
+            &loads("{\"x\": 1, \"y\": 2}").unwrap().unwrap()
+        ));
+        assert!(py_eq(
+            &J::Int("9007199254740993".into()),
+            &J::Int("9007199254740993".into())
+        ));
+        assert!(!py_eq(
+            &J::Int("9007199254740993".into()),
+            &J::Float(9007199254740992.0)
+        ));
     }
 
     #[test]
     fn repr_quotes_like_python() {
-        assert_eq!(py_repr("a,b").unwrap(), "'a,b'");
-        assert_eq!(py_repr("it's").unwrap(), "\"it's\"");
-        assert_eq!(py_repr("a'\"b").unwrap(), "'a\\'\"b'");
-        assert!(py_repr("é").is_err());
+        assert_eq!(py_repr("a,b"), "'a,b'");
+        assert_eq!(py_repr("it's"), "\"it's\"");
+        assert_eq!(py_repr("a'\"b"), "'a\\'\"b'");
+        assert_eq!(py_repr("\u{e9}\u{7}"), "'\u{e9}\\x07'");
     }
 }

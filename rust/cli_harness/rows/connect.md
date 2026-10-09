@@ -33,10 +33,11 @@ never starting with `-`. Everything else defers before any effect.
   (1039-1040); `--read-token` onto an existing path (1041-1046,
   `abspath(expanduser())`). Exit 2.
 - Health (1058-1074): `shim.probe_health` (`shim.py` 436-449: any HTTP
-  answer's JSON body, redirects followed); not a dict or status not `"ok"`
-  exits 4 with `(status: str(value))` for a dict; a remote target with
-  `auth: false` exits 4; `daemon` = `{version, auth}`; plain-HTTP warning
-  for a remote `http://` target (stderr, `warnings`).
+  answer's JSON body, 503 included, redirects followed); not a dict or
+  status not `"ok"` exits 4 with `(status: str(value))` for a dict, a
+  container's `str()` being its `repr`; a remote target with `auth: false`
+  exits 4; `daemon` = `{version, auth}`; plain-HTTP warning for a remote
+  `http://` target (stderr, `warnings`).
 - Remote = not `_is_loopback_url` (`daemon_url.py` 58-71).
 - Discovery (667-677): Claude Code user scope (460-494) with the settings
   copy inserted after a writable registration (497-518), project scopes in
@@ -45,7 +46,8 @@ never starting with `-`. Everything else defers before any effect.
   MSIX `Packages/Claude_*` sorted, then `APPDATA`), the legacy
   `pseudolife-memory` entry as manual (521-546); Gemini (549-560); Codex
   absent without a `config.toml`; the process `PSEUDOLIFE_MCP_DAEMON_URL`
-  row (628-635).
+  row (628-635). `Path.exists()` / `is_file()` read only pathlib's ignored
+  errors (ENOENT, ENOTDIR, EBADF, ELOOP, Windows 21/123/1921) as "no".
 - Rows (282-285): key order `client, place, file, key, state, changes,
   detail, notes, backup, created`; `changes` sorted by key with
   `<literal token>` and `_shown_url` masking (314-325); edits per
@@ -53,29 +55,39 @@ never starting with `-`. Everything else defers before any effect.
   `_settings_edits` (361-377); notes (380-395) including the launcher
   comparison by `_path_forms` (`runtimes.py` 1034-1043, 1355-1356);
   register commands (412-428) with the launcher when it is a file.
-- JSON reading/writing: `client_config._load_json` (`client_config.py`
-  73-84: utf-8-sig, whitespace-only is `{}`, messages by file name);
-  `_write_json` (87-89: indent 2, `ensure_ascii=False`, trailing newline);
-  `_write_private` (37-60: realpath, owner-only temporary, atomic
-  replace); `_backup` (63-70: `<name>.bak-pseudolife-<UTC
-  %Y%m%d-%H%M%S-%f>`).
+- JSON reading (`client_config._load_json`, `client_config.py` 75-85):
+  utf-8-sig, whitespace-only is `{}`, CPython's C scanner (`NaN`,
+  `Infinity`, `-Infinity`, strict control characters, four-digit `\u`
+  escapes with surrogate pairing, a repeated key keeping its first place
+  with its last value), messages by file name. Writing: `_write_json`
+  (88-90: indent 2, `ensure_ascii=False`, trailing newline, `int(lexeme)`
+  and `repr(float)` spellings, `NaN`/`Infinity`); `_write_private` (38-62:
+  realpath, owner-only temporary, atomic replace); `_backup` (65-72:
+  `<name>.bak-pseudolife-<UTC %Y%m%d-%H%M%S-%f>`).
 - Plan text and exits (963-975, 1083-1115): exit 3 messages with
   `_places`; dry-run note; nothing-to-write notes.
 - Confirmation (1118-1123): non-interactive without `--yes` exits 2.
-- `--read-token` (1125-1133, `client_config.write_token_file` 186-230):
-  HelperError messages, class names for OSError/CredentialError.
+- `--read-token` (1125-1133, `client_config.write_token_file` 184-230):
+  stdin is read only here, after confirmation; HelperError messages, class
+  names for OSError/CredentialError.
 - Verify (691-736): distinct credentials in row order; the
-  no-credential refusal; `check_token_file` recovery text; literal
-  well-formedness; `installer_credential_valid` (`codex_connection.py`
-  137-148: `/api/episodes?limit=1`, bearer, no redirects, 200 only); MCP
-  handshake (146-184: child env, initialize + tools/list, `the handshake
-  exited N` / `the daemon listed no tools`); `board_status` line
-  (`board_status.py` 40-71); board warning with the hint. Refusal exits 4
-  after removing a `--read-token` file.
-- Apply (755-786, 861-879) and rollback (822-858): per-file record,
-  backup, created flag, read-back; outcomes `unchanged`/`left`/`restored`/
-  `removed`/`failed` with their key orders and the rollback lines
-  (1166-1172); exit 1.
+  no-credential refusal; `check_token_file` recovery text (the BOM text
+  included); literal well-formedness; `installer_credential_valid`
+  (`codex_connection.py` 137-148: `/api/episodes?limit=1`, bearer, no
+  redirects, 200 only, the header put as `http.client` puts it: latin-1
+  bytes, and no request at all for a character past U+00FF or a CR/LF not
+  followed by folding whitespace); MCP handshake (146-184: child env,
+  initialize + tools/list, `the handshake exited N` / `the daemon listed no
+  tools`); `board_status` line (`board_status.py` 40-71, `bytes.strip()`
+  including `\x0b`); board warning with the hint. Refusal exits 4 after
+  removing a `--read-token` file.
+- Apply (755-786, 861-879) and rollback (822-858): per-file record
+  (`_bytes`: only FileNotFoundError reads as "no file"), backup, created
+  flag, read-back compared with Python dict equality (unordered keys,
+  bool/int/float numerically, json's shared NaN equal to itself; a
+  read-back that is not JSON takes the HelperError branch, which refreshes
+  `written`); outcomes `unchanged`/`left`/`restored`/`removed`/`failed`
+  with their key orders and the rollback lines (1166-1172); exit 1.
 - Report (1174-1201): backups, verified lines, `_restart` (1000-1014) over
   `runtimes.list_processes` / `processes_inside` (`runtimes.py` 920-1064),
   the Desktop and board notes, post-apply re-discovery and health (exit 5).
@@ -86,10 +98,15 @@ never starting with `-`. Everything else defers before any effect.
 ## Free items
 
 - Timeouts are budgets, not observed values (urllib's per-operation 2/3 s
-  versus a whole-request bound); the handshake child's own transport
-  details (its MCP request order and count, its own `/health` and episode
-  posts) belong to the shim's rows: the harness compares connect's own
-  requests in order and, of the child, the credentials its MCP posts carry.
+  versus a whole-request bound).
+- The handshake child's own transport (its MCP request order and count,
+  its own `/health` and episode posts, how it encodes a non-ASCII bearer)
+  belongs to the shim's rows: the harness compares connect's own requests
+  in order and, of the child, the credentials its MCP posts carry.
+- The temporary file name beside a written file (removed before exit).
+- Proxy discovery: reqwest reads the proxy environment variables; urllib
+  additionally reads the Windows registry proxy. Neither is set in any
+  supported install path.
 
 ## Shared-file fix: the handshake cache bytes
 
@@ -103,26 +120,31 @@ Python daemon emits from the same MCP models `model_dump` reads). Pinned by
 `the_handshake_cache_is_written_as_the_oracle_writes_it` (watched red first,
 bytes captured from the oracle's own writer) and compared byte for byte by
 every apply case of this row.
-- The temporary file name beside a written file (removed before exit).
-- Proxy discovery: reqwest reads the proxy environment variables; urllib
-  additionally reads the Windows registry proxy. Neither is set in any
-  supported install path; a registry-only proxy is a declared divergence.
 
 ## Deferred before any effect
 
-Pairing (`--code`, `--read-code`); a readable Codex `config.toml` with
-`codex` selected (its app-server owns Codex's config); a question or token
-prompt on a terminal (Python's `isatty`, so a Windows character device such
-as `NUL` too); a Windows User-scope `PSEUDOLIFE_MCP_DAEMON_URL`
-(`reg query`); an unattended-update schedule (`schtasks /Query` on Windows,
-the systemd user unit on Linux) when every client is selected; any input
-outside the reproduced domain: non-ASCII or control characters in a URL,
-IPvFuture or zoned IPv6 hosts, userinfo in the target, environment base
-directories not already in `str(pathlib.Path(...))` form, JSON the Python
-reader accepts and serde_json refuses (NaN/Infinity, lone surrogates,
-nesting past 100), integers past 4300 digits, non-finite floats, container
-values where the oracle prints `str()`, a literal token ending in a newline,
-non-ASCII tokens, a `--client` value outside printable ASCII.
+Every deferral below happens before any request, except the last item.
+
+- Pairing (`--code`, `--read-code`).
+- A readable Codex `config.toml` with `codex` selected (its app-server owns
+  Codex's config).
+- A question or token prompt on a terminal (Python's `isatty`, so a Windows
+  character device such as `NUL` too).
+- A Windows User-scope `PSEUDOLIFE_MCP_DAEMON_URL` (`reg query`); an
+  unattended-update schedule (`schtasks /Query` on Windows, the systemd user
+  unit on Linux) when every client is selected.
+- A target URL with a space, a control character, DEL or any non-ASCII
+  character (urllib's lstrip/tab-removal and NFKC netloc check are not
+  reproduced), an IPvFuture or zoned IPv6 host, or userinfo.
+- Environment base directories not already in `str(pathlib.Path(...))`
+  form; a stat error pathlib would raise; a read error other than
+  FileNotFoundError on a file the plan would write.
+- JSON the Python reader holds but this one cannot: a lone surrogate,
+  nesting past 100, an integer past 4300 digits (CPython raises ValueError).
+- A real run whose credentials hold DEL (urllib sends it; reqwest's header
+  type refuses it).
+- After the unauthenticated `GET /health` only: a health body with one of
+  the JSON inputs above.
 
 ## Declared divergences
 
@@ -136,13 +158,20 @@ non-ASCII tokens, a `--client` value outside printable ASCII.
   codes a config write meets; others read `OSError`.
 - Windows `normcase` uses Unicode simple lowercase (U+0130 to `i`), not
   the NLS table of the running Windows version.
-- The non-strict `realpath` resolves the longest existing prefix with the
-  OS and appends the rest; a dangling symlink inside the path is not
-  followed by hand as `ntpath._readlink_deep` would.
-- A post-apply re-read that meets an input outside the native domain (only
-  possible if a file changes during the run) reports as a failed post-apply
-  check instead of deferring, since the writes already happened; a second
-  `/health` body outside the reproduced JSON domain reads as not ok.
+- Windows `realpath` resolves the longest existing prefix with the OS and
+  appends the rest (`ntpath` normalizes first, as this does); a dangling
+  symlink inside the path is not followed by hand as `ntpath._readlink_deep`
+  would. POSIX walks components as `posixpath._joinrealpath` does.
+- Races only (a file changed by something else during the run): a read
+  error on a target after the preflight is reported as that file's write
+  failure and rolled back, and a rollback that cannot read a file leaves it
+  with its backup, where the oracle would raise a traceback; a post-apply
+  re-read that meets an input outside the native domain reports as a failed
+  post-apply check; a second `/health` body outside the reproduced JSON
+  domain reads as not ok.
+- A `--read-token` token holding DEL is refused (reqwest cannot send it);
+  the oracle would send it. Its stdin is read only after confirmation, so it
+  cannot be checked before the plan.
 
 ## Harness notes
 
@@ -159,3 +188,13 @@ non-ASCII tokens, a `--client` value outside printable ASCII.
 - A remote target is `http://localhost.:<port>`: not loopback to
   `_is_loopback_url`, resolved to `::1`/`127.0.0.1` where the fixture
   listens.
+- Permissions: master's core compares POSIX modes; on Windows each file's
+  owner-only verdict (the oracle's `credentials._windows_owner_only`) is
+  recorded in the compared `db` field as `windows_acl`.
+- `connect-backup-stamp` keeps two names that normalize alike apart
+  (` <normalized-collision>`), and replaces a stamp in the streams only
+  when this arm's snapshot holds a backup with that stamp.
+- Not covered by a case: the read-back failure (it needs a file replaced
+  between write and read-back), pinned instead by the Rust unit tests on
+  `read_back`; and the post-apply pending path (it needs a file to change
+  between the writes and the re-read), which has no test.

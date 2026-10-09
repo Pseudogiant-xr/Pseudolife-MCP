@@ -34,14 +34,36 @@ fn no_redirect(timeout: u64) -> Option<reqwest::Client> {
         .ok()
 }
 
+/// The `Authorization` value urllib would send: `http.client` encodes a
+/// header as latin-1 and refuses CR or LF not followed by folding
+/// whitespace; either refusal means no request at all (`None`).
+pub(super) fn bearer(token: &str) -> Option<reqwest::header::HeaderValue> {
+    let mut value = b"Bearer ".to_vec();
+    for c in token.chars() {
+        value.push(u8::try_from(u32::from(c)).ok()?);
+    }
+    let illegal = value.iter().enumerate().any(|(index, byte)| {
+        let next = value.get(index + 1);
+        match byte {
+            b'\n' => !matches!(next, Some(b' ' | b'\t')),
+            b'\r' => !matches!(next, Some(b' ' | b'\t' | b'\n')),
+            _ => false,
+        }
+    });
+    if illegal {
+        return None;
+    }
+    reqwest::header::HeaderValue::from_bytes(&value).ok()
+}
+
 /// `codex_connection.installer_credential_valid`.
 pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
-    let Some(client) = no_redirect(3) else {
+    let (Some(client), Some(header)) = (no_redirect(3), bearer(token)) else {
         return false;
     };
     let Ok(mut response) = client
         .get(format!("{url}/api/episodes?limit=1"))
-        .bearer_auth(token)
+        .header(reqwest::header::AUTHORIZATION, header)
         .send()
         .await
     else {
@@ -92,7 +114,8 @@ pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
             .to_owned();
     };
     let unreachable = || "off - daemon unreachable".to_owned();
-    let Some(client) = no_redirect(2) else {
+    // urllib's refusal to put the header is one more exception: unreachable.
+    let (Some(client), Some(header)) = (no_redirect(2), bearer(token)) else {
         return unreachable();
     };
     let Ok(mut response) = client
@@ -100,7 +123,7 @@ pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
             "{}/api/hook/coordination-start",
             url.trim_end_matches('/')
         ))
-        .bearer_auth(token)
+        .header(reqwest::header::AUTHORIZATION, header)
         .send()
         .await
     else {
@@ -130,7 +153,10 @@ pub(super) async fn board_line(url: &str, token: Option<&str>) -> String {
             Err(_) => return unreachable(),
         }
     }
-    let served = !body.trim_ascii().is_empty();
+    // bytes.strip(): ASCII whitespace including \x0b, which trim_ascii keeps.
+    let served = body
+        .iter()
+        .any(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c'));
     if header == "on" || (header.is_empty() && served) {
         return "on - token present, principal allowed".to_owned();
     }

@@ -370,12 +370,12 @@ fn a_current_registration_has_nothing_to_write() {
 }
 
 #[test]
-fn inputs_outside_the_native_domain_defer_after_the_probe_without_effect() {
+fn inputs_outside_the_native_domain_defer_before_any_request() {
     let health = Health::start();
     let url = health.url.clone();
-    // A NaN the Python reader accepts and serde_json refuses.
+    // A lone surrogate: a Python str that no Rust String holds.
     let home = Home::new();
-    home.write(".claude.json", "{\"mcpServers\": {}, \"x\": NaN}\n");
+    home.write(".claude.json", "{\"mcpServers\": {}, \"x\": \"\\ud800\"}\n");
     let before = home.tree();
     deferred(&home.run(&url, &[&url, "--client", "claude-code", "--dry-run"]));
     assert_eq!(home.tree(), before);
@@ -388,15 +388,66 @@ fn inputs_outside_the_native_domain_defer_after_the_probe_without_effect() {
         .args(["connect", &url, "--client", "claude-code", "--dry-run"]);
     deferred(&command.output().unwrap());
     assert_eq!(home.tree(), before);
-    // A literal token the oracle would send with its trailing newline.
+    // Discovery runs before the health probe: nothing was asked of the daemon.
+    assert!(health.requests().is_empty());
+}
+
+#[test]
+fn a_nan_config_is_read_as_python_reads_it() {
+    let health = Health::start();
+    let url = health.url.clone();
+    let home = Home::new();
+    home.write(".claude.json", "{\"mcpServers\": {}, \"x\": NaN}\n");
+    let output = home.run(&url, &[&url, "--client", "claude-code", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&native_text(
+            "connect: no registration of the shim was found for claude-code; register a client first (the commands are above), or run the installer.\n"
+        ))
+    );
+}
+
+#[test]
+fn a_header_urllib_cannot_send_is_refused_without_a_request() {
+    // http.client refuses a header value ending in LF, so the oracle's
+    // credential check returns False before anything is sent.
+    let health = Health::start();
+    let url = health.url.clone();
     let home = Home::new();
     home.write(
         ".gemini/settings.json",
         "{\"mcpServers\": {\"pseudolife-memory\": {\"command\": \"x\", \"env\": {\"PSEUDOLIFE_MCP_TOKEN\": \"abc\\n\"}}}}",
     );
+    let settings = home.0.join(".gemini").join("settings.json");
     let before = home.tree();
-    deferred(&home.run(&url, &[&url, "--client", "gemini", "--yes"]));
+    let output = home.run(&url, &[&url, "--client", "gemini", "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&native_text(&format!(
+            "connect: the daemon at {url} refused the literal PSEUDOLIFE_MCP_TOKEN of gemini registration ({}) (an authenticated request that follows no redirects did not succeed). Nothing was written.\n",
+            settings.display()
+        )))
+    );
+    assert_eq!(health.requests(), ["/health"]);
     assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn a_dry_run_never_reads_a_token_or_stdin() {
+    // A token file starting with a BOM fails only the real run's check.
+    let health = Health::start();
+    let url = health.url.clone();
+    let home = Home::new();
+    home.write(".pseudolife-mcp/bom.token", "\u{feff}token-value");
+    home.write(
+        ".claude.json",
+        "{\"mcpServers\": {\"pseudolife-memory\": {\"command\": \"x\", \"env\": {\"PSEUDOLIFE_MCP_TOKEN_FILE\": \"bom.token\"}}}}",
+    );
+    let output = home.run(&url, &[&url, "--client", "claude-code", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(health.requests(), ["/health"]);
 }
 
 #[test]

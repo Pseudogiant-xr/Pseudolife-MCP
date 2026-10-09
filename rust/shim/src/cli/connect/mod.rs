@@ -272,42 +272,25 @@ fn schedule_found() -> Result<bool, Defer> {
     Ok(false)
 }
 
-fn credentials_of(rows: &[Row]) -> Vec<Cred> {
-    let mut found = Vec::new();
-    for row in rows {
-        if matches!(row.state, "current" | "change")
-            && let Some(Some(credential)) = &row.credential
-            && !found.contains(credential)
-        {
-            found.push(credential.clone());
-        }
-    }
-    found
-}
-
-/// Credentials whose verification this module cannot send exactly as the
-/// oracle would (a literal ending in a newline, a non-ASCII token).
-fn credentials_admitted(rows: &[Row], stdin_token: Option<&[u8]>) -> bool {
-    for credential in credentials_of(rows) {
-        match credential {
-            Cred::Literal(token) => {
-                if token.ends_with(['\r', '\n']) || !token.is_ascii() {
-                    return false;
-                }
-            }
+/// urllib sends a DEL (0x7F) inside a bearer; reqwest's header type refuses
+/// it, so a real run whose credentials hold one defers. Reading a token
+/// file early is unobservable; a file that fails the oracle's own check
+/// is left to verification, which reports it exactly.
+fn tokens_sendable(rows: &[Row]) -> bool {
+    rows.iter()
+        .filter(|row| matches!(row.state, "current" | "change"))
+        .filter_map(|row| row.credential.clone().flatten())
+        .all(|credential| match credential {
+            Cred::Literal(token) => !token.contains('\u{7f}'),
             Cred::File(path) => {
-                let read = crate::credentials::CredentialProvider::new(None, Some(path.into()))
-                    .and_then(|provider| provider.snapshot());
-                if let Ok(snapshot) = read
-                    && !snapshot.token().unwrap_or_default().is_ascii()
-                {
-                    return false;
-                }
+                crate::credentials::CredentialProvider::new(None, Some(path.into()))
+                    .and_then(|provider| provider.snapshot())
+                    .map_or(true, |snapshot| {
+                        !snapshot.token().unwrap_or_default().contains('\u{7f}')
+                    })
             }
-            Cred::None => {}
-        }
-    }
-    stdin_token.is_none_or(|data| std::str::from_utf8(data).is_ok_and(str::is_ascii))
+            Cred::None => true,
+        })
 }
 
 fn shown_credential(credential: &Cred, label: &str) -> String {
@@ -421,13 +404,48 @@ struct WriteFailed {
     reason: String,
 }
 
+/// `_apply_json`'s read-back: `Ok(Some(reason))` raises `_WriteFailed`
+/// as it stands; `Err` takes the except branch, which refreshes `written`.
+fn read_back(path: &std::path::Path, data: &pyjson::Dict) -> Result<Option<String>, files::Fail> {
+    let differs = || {
+        Ok(Some(
+            "the read-back differs from what was written".to_owned(),
+        ))
+    };
+    match files::load_json(path) {
+        Ok(files::Read::Ok(read)) => {
+            if pyjson::py_eq(&J::Dict(read), &J::Dict(data.clone())) {
+                Ok(None)
+            } else {
+                differs()
+            }
+        }
+        // HelperError from _load_json is caught like any write failure.
+        Ok(files::Read::Error(message)) => Err(files::Fail::Helper(message)),
+        // A missing file reads as {}; Python's reading of what this reader
+        // cannot hold (a lone surrogate, deep nesting) is not what was written.
+        Ok(files::Read::Missing) | Err(Defer) => differs(),
+    }
+}
+
 /// `connect_cli._apply_json`.
 fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
     let spec = row.json.as_ref().expect("a change row of a JSON file");
     let path = spec.path.clone();
+    // The preflight read every target before any effect; a read error now
+    // is a change under the run (where the oracle's `_bytes` would raise).
+    let original = match files::bytes(&path) {
+        Ok(original) => original,
+        Err(error) => {
+            return Err(WriteFailed {
+                reason: files::os_error_name(&error).to_owned(),
+                path,
+            });
+        }
+    };
     steps.push(Step {
         path: path.clone(),
-        original: files::bytes(&path),
+        original,
         written: None,
         backup: None,
     });
@@ -469,17 +487,8 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
             created = true;
         }
         files::write_json(&path, &data)?;
-        steps[record].written = files::bytes(&path);
-        let read_back = match files::load_json(&path) {
-            Ok(files::Read::Ok(read)) => Some(read),
-            _ => None,
-        };
-        if read_back.as_ref() != Some(&data) {
-            return Ok(Some(
-                "the read-back differs from what was written".to_owned(),
-            ));
-        }
-        Ok(None)
+        steps[record].written = files::bytes(&path).ok().flatten();
+        read_back(&path, &data)
     })();
     steps[record].backup = backup.clone();
     row.backup = backup;
@@ -488,7 +497,7 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
         Ok(None) => Ok(()),
         Ok(Some(reason)) => Err(WriteFailed { path, reason }),
         Err(fail) => {
-            steps[record].written = files::bytes(&path);
+            steps[record].written = files::bytes(&path).ok().flatten();
             Err(WriteFailed {
                 path,
                 reason: match fail {
@@ -524,7 +533,8 @@ fn rollback(steps: &[Step], created: &[PathBuf]) -> Vec<J> {
             }
             continue;
         }
-        if files::bytes(&record.path) != record.written {
+        // A file that cannot be read now is left as it is, with its backup.
+        if !matches!(files::bytes(&record.path), Ok(current) if current == record.written) {
             outcome.push(J::Dict(vec![
                 ("file".into(), file),
                 ("state".into(), J::Str("left".into())),
@@ -682,7 +692,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     };
     let client_value = args.client.clone().unwrap_or_else(|| "all".to_owned());
     let Some(selected) = clients(&client_value) else {
-        let shown = pyjson::py_repr(&client_value)?;
+        let shown = pyjson::py_repr(&client_value);
         return Ok(Report::new(args.json).fail(
             EXIT_USAGE,
             format!("--client takes {} or all (got {shown})", CLIENTS.join(", ")),
@@ -718,7 +728,29 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     if selected.contains(&"codex") && std::fs::read(paths::codex_config()?).is_ok() {
         return Err(Defer);
     }
-    let stdin_data = args.read_token.then(stdin_token);
+    // Discovery reads only files and prints nothing, so it runs (and may
+    // defer) before any request; the oracle runs it after /health.
+    let ctx = Ctx {
+        url: url.clone(),
+        remote,
+        token_file: token_file.clone(),
+        clients: selected.clone(),
+        layout: paths::layout()?,
+    };
+    let mut rows = discover::discover(&ctx)?;
+    // `_bytes` raises on anything but FileNotFoundError; read every target
+    // now so such a file defers before any effect.
+    for row in rows.iter().filter(|row| row.state == "change") {
+        if let Some(spec) = &row.json
+            && files::bytes(&spec.path).is_err()
+        {
+            return Err(Defer);
+        }
+    }
+
+    if !args.dry_run && !tokens_sendable(&rows) {
+        return Err(Defer);
+    }
 
     let mut report = Report::new(args.json);
     report.url = Some(url.clone());
@@ -755,17 +787,6 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         Some(value) if value.truthy() => value.py_str()?,
         _ => "unknown".to_owned(),
     };
-    let ctx = Ctx {
-        url: url.clone(),
-        remote,
-        token_file: token_file.clone(),
-        clients: selected.clone(),
-        layout: paths::layout()?,
-    };
-    let mut rows = discover::discover(&ctx)?;
-    if !credentials_admitted(&rows, stdin_data.as_deref()) {
-        return Err(Defer);
-    }
 
     // ---- from here on the run prints, and never defers ----
     report.daemon = Some((version.unwrap_or(J::Null), auth.clone().unwrap_or(J::Null)));
@@ -839,8 +860,12 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         ));
     }
     let mut created: Vec<PathBuf> = Vec::new();
-    if let (Some(data), Some(token_file)) = (&stdin_data, &token_file) {
-        match files::write_token_file(std::path::Path::new(token_file), data) {
+    if args.read_token
+        && let Some(token_file) = &token_file
+    {
+        // Read only now, just before the write, as the oracle reads it.
+        let data = stdin_token();
+        match files::write_token_file(std::path::Path::new(token_file), &data) {
             Ok(()) => created.push(PathBuf::from(token_file)),
             Err(files::TokenFail::Helper(message)) => {
                 return Ok(report.fail(EXIT_USAGE, format!("{message}; nothing was changed")));
@@ -993,6 +1018,51 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str, text: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("connect-unit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_read_back_that_is_not_json_takes_the_helper_error_branch() {
+        // C1: _load_json raises HelperError, caught as a write failure whose
+        // except branch refreshes `written` before the rollback compares it.
+        let path = scratch("settings.json", "{\"env\": ");
+        let data = pyjson::loads("{\"env\": {}}").unwrap().unwrap();
+        let data = data.as_dict().unwrap();
+        match read_back(&path, data) {
+            Err(files::Fail::Helper(message)) => {
+                assert_eq!(
+                    message,
+                    "settings.json is not readable JSON; fix it, then re-run"
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_read_back_compares_as_python_dicts_do() {
+        // C3: key order and 1 versus 1.0 do not make Python dicts unequal.
+        let path = scratch("x.json", "{\"b\": 1.0, \"a\": {\"c\": true}}");
+        let data = pyjson::loads("{\"a\": {\"c\": 1}, \"b\": 1}")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            read_back(&path, data.as_dict().unwrap()),
+            Ok(None)
+        ));
+        let path = scratch("y.json", "{\"a\": 2}");
+        let data = pyjson::loads("{\"a\": 1}").unwrap().unwrap();
+        assert!(matches!(
+            read_back(&path, data.as_dict().unwrap()),
+            Ok(Some(_))
+        ));
+    }
 
     #[test]
     fn client_lists_follow_the_oracle() {

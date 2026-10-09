@@ -243,6 +243,7 @@ pub(super) fn abspath(path: &Path) -> Option<PathBuf> {
     Some(clean)
 }
 
+#[cfg(not(unix))]
 fn strip_verbatim(path: PathBuf) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path;
@@ -256,9 +257,134 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
     path
 }
 
-/// `os.path.realpath(path)` (non-strict): the longest existing prefix
-/// resolved, the rest appended as written.
+/// `os.path.realpath(path)` (non-strict). Windows (`ntpath`) normalizes
+/// first and resolves the longest existing prefix; POSIX walks the path
+/// one component at a time, so a `..` after a symlink leaves the link's
+/// target (`posixpath._joinrealpath`). `None` is an OSError.
 pub(super) fn realpath(path: &Path) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        posix::realpath(path.to_str()?).map(PathBuf::from)
+    }
+    #[cfg(not(unix))]
+    {
+        prefix_realpath(path)
+    }
+}
+
+#[cfg(unix)]
+mod posix {
+    use std::collections::HashMap;
+
+    /// `posixpath.join(a, b)`.
+    fn join(a: &str, b: &str) -> String {
+        if b.starts_with('/') {
+            b.to_owned()
+        } else if a.is_empty() || a.ends_with('/') {
+            format!("{a}{b}")
+        } else {
+            format!("{a}/{b}")
+        }
+    }
+
+    /// `posixpath.split(p)`.
+    fn split(p: &str) -> (String, String) {
+        let cut = p.rfind('/').map_or(0, |i| i + 1);
+        let (head, tail) = p.split_at(cut);
+        let head = if !head.is_empty() && !head.bytes().all(|b| b == b'/') {
+            head.trim_end_matches('/')
+        } else {
+            head
+        };
+        (head.to_owned(), tail.to_owned())
+    }
+
+    type Seen = HashMap<String, Option<String>>;
+
+    /// `posixpath._joinrealpath(path, rest, strict=False, seen)`.
+    fn walk(mut path: String, rest: &str, seen: &mut Seen) -> Option<(String, bool)> {
+        let mut rest = rest.to_owned();
+        if let Some(stripped) = rest.strip_prefix('/') {
+            rest = stripped.to_owned();
+            path = "/".to_owned();
+        }
+        while !rest.is_empty() {
+            let (name, tail) = match rest.find('/') {
+                Some(i) => (rest[..i].to_owned(), rest[i + 1..].to_owned()),
+                None => (rest.clone(), String::new()),
+            };
+            rest = tail;
+            if name.is_empty() || name == "." {
+                continue;
+            }
+            if name == ".." {
+                if path.is_empty() {
+                    path = "..".to_owned();
+                } else {
+                    let (head, last) = split(&path);
+                    path = if last == ".." {
+                        join(&join(&head, ".."), "..")
+                    } else {
+                        head
+                    };
+                }
+                continue;
+            }
+            let next = join(&path, &name);
+            let link =
+                std::fs::symlink_metadata(&next).is_ok_and(|info| info.file_type().is_symlink());
+            if !link {
+                path = next;
+                continue;
+            }
+            if let Some(known) = seen.get(&next) {
+                match known {
+                    Some(resolved) => {
+                        path = resolved.clone();
+                        continue;
+                    }
+                    None => return Some((join(&next, &rest), false)),
+                }
+            }
+            seen.insert(next.clone(), None);
+            let target = std::fs::read_link(&next).ok()?;
+            let (resolved, ok) = walk(path, target.to_str()?, seen)?;
+            path = resolved;
+            if !ok {
+                return Some((join(&path, &rest), false));
+            }
+            seen.insert(next, Some(path.clone()));
+        }
+        Some((path, true))
+    }
+
+    /// `posixpath.realpath(path)`: the walk, then `abspath`.
+    pub(super) fn realpath(path: &str) -> Option<String> {
+        let (resolved, _) = walk(String::new(), path, &mut Seen::new())?;
+        let absolute = super::abspath(std::path::Path::new(&resolved))?;
+        absolute.to_str().map(str::to_owned)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn a_parent_step_after_a_symlink_leaves_the_link_target() {
+            let base = std::env::temp_dir().join(format!("connect-real-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(base.join("real").join("sub")).unwrap();
+            std::os::unix::fs::symlink(base.join("real").join("sub"), base.join("link")).unwrap();
+            let base = std::fs::canonicalize(&base).unwrap();
+            let asked = format!("{}/link/../x", base.display());
+            assert_eq!(
+                super::realpath(&asked).unwrap(),
+                format!("{}/real/x", base.display())
+            );
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn prefix_realpath(path: &Path) -> Option<PathBuf> {
     let absolute = abspath(path)?;
     let mut head = absolute.as_path();
     let mut tail: Vec<&std::ffi::OsStr> = Vec::new();

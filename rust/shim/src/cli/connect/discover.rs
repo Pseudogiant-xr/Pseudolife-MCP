@@ -21,7 +21,7 @@ pub(super) struct Ctx {
 impl Ctx {
     fn shim(&self) -> Result<String, Defer> {
         match &self.layout {
-            Some(layout) if layout.launcher.is_file() => paths::show(&layout.launcher),
+            Some(layout) if files::is_file(&layout.launcher)? => paths::show(&layout.launcher),
             _ => Ok("<shim path>".to_owned()),
         }
     }

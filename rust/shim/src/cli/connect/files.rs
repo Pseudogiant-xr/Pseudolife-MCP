@@ -26,19 +26,7 @@ pub(super) enum Fail {
 /// The Python exception class an OS error becomes (CPython's errno and
 /// Windows error maps for the cases a config write meets).
 pub(super) fn os_error_name(error: &io::Error) -> &'static str {
-    let code = error.raw_os_error();
-    let errno = if cfg!(windows) {
-        match code {
-            Some(2 | 3 | 15 | 18 | 53 | 123 | 161 | 206) => 2,
-            Some(5 | 19 | 21 | 32 | 33 | 65 | 108 | 4390) => 13,
-            Some(80 | 183) => 17,
-            Some(267) => 20,
-            _ => 0,
-        }
-    } else {
-        code.unwrap_or(0)
-    };
-    match errno {
+    match python_errno(error) {
         1 | 13 => "PermissionError",
         2 => "FileNotFoundError",
         17 => "FileExistsError",
@@ -48,13 +36,58 @@ pub(super) fn os_error_name(error: &io::Error) -> &'static str {
     }
 }
 
+/// The errno CPython gives an OS error (Windows codes through its map).
+fn python_errno(error: &io::Error) -> i32 {
+    let code = error.raw_os_error();
+    if cfg!(windows) {
+        match code {
+            Some(2 | 3 | 15 | 18 | 53 | 67 | 123 | 161 | 206) => 2,
+            Some(5 | 19 | 21 | 32 | 33 | 65 | 108 | 4390) => 13,
+            Some(6) => 9,
+            Some(80 | 183) => 17,
+            Some(267) => 20,
+            _ => 0,
+        }
+    } else {
+        code.unwrap_or(0)
+    }
+}
+
+/// pathlib's `_ignore_error`: what `exists()` / `is_file()` read as "no".
+fn ignored_by_pathlib(error: &io::Error) -> bool {
+    const ELOOP: i32 = if cfg!(target_os = "macos") { 62 } else { 40 };
+    if cfg!(windows) && matches!(error.raw_os_error(), Some(21 | 123 | 1921)) {
+        return true;
+    }
+    let errno = python_errno(error);
+    errno == 2 || errno == 20 || errno == 9 || (!cfg!(windows) && errno == ELOOP)
+}
+
+/// `Path.exists()`; any error pathlib would raise defers.
+pub(super) fn exists(path: &Path) -> Result<bool, Defer> {
+    match fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if ignored_by_pathlib(&error) => Ok(false),
+        Err(_) => Err(Defer),
+    }
+}
+
+/// `Path.is_file()`; any error pathlib would raise defers.
+pub(super) fn is_file(path: &Path) -> Result<bool, Defer> {
+    match fs::metadata(path) {
+        Ok(info) => Ok(info.is_file()),
+        Err(error) if ignored_by_pathlib(&error) => Ok(false),
+        Err(_) => Err(Defer),
+    }
+}
+
 fn name(path: &Path) -> Result<&str, Defer> {
     path.file_name().and_then(|n| n.to_str()).ok_or(Defer)
 }
 
 /// `client_config._load_json`.
 pub(super) fn load_json(path: &Path) -> Result<Read, Defer> {
-    if fs::metadata(path).is_err() {
+    if !exists(path)? {
         return Ok(Read::Ok(Vec::new()));
     }
     let unreadable = format!("{} is not readable JSON; fix it, then re-run", name(path)?);
@@ -80,15 +113,19 @@ pub(super) fn load_json(path: &Path) -> Result<Read, Defer> {
 
 /// `connect_cli._read_json`.
 pub(super) fn read_json(path: &Path) -> Result<Read, Defer> {
-    if fs::metadata(path).is_err() {
+    if !exists(path)? {
         return Ok(Read::Missing);
     }
     load_json(path)
 }
 
-/// `connect_cli._bytes`.
-pub(super) fn bytes(path: &Path) -> Option<Vec<u8>> {
-    fs::read(path).ok()
+/// `connect_cli._bytes`: only FileNotFoundError reads as "no file".
+pub(super) fn bytes(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(data) => Ok(Some(data)),
+        Err(error) if python_errno(&error) == 2 => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn suffix() -> String {
