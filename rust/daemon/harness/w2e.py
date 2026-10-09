@@ -174,11 +174,13 @@ SCENARIOS: dict[str, dict] = {
             store("A user said this", source="user", origin="user"),
             store("The bench Postgres listens on port 5433 for disposable test banks."),
             *[store(t) for t in LABEL_TEXTS],
-            store("Explicit labels win", authority=" Directive ", distortion_tolerance="belief"),
+            # Explicit labels only in the MCP vocabulary: anything else is a
+            # binding refusal (W2-G); the body's own ValueError text is
+            # proven by the label goldens.
+            store("Explicit labels win", authority="directive", distortion_tolerance="belief"),
             store("Observation label", authority="observation"),
-            store("bad label", authority="junk"),
-            store("bad label 2", distortion_tolerance="AUTO"),
-            store("", authority="nope"),
+            store("Quoted label on a rule", authority="quoted", distortion_tolerance="episodic"),
+            store("", authority="observation"),
             *[store(t) for t in SLOT_TEXTS],
             store("First note in session A", [sess("sess-a")]),
             store("Second note in session A", [sess("sess-a")]),
@@ -210,6 +212,11 @@ SCENARIOS: dict[str, dict] = {
             store("the api port is 8080"),
             store("the api port is 9090"),
             store("Completely unrelated: the tea kettle whistles at boiling."),
+            # Near-duplicates with no contradiction anchor (no capitals,
+            # numbers, negation or possession cues): a plain gate drop.
+            store("the tea kettle whistles loudly when the water boils"),
+            store("the tea kettle whistles when the water boils"),
+            store("the kettle whistles loudly when water boils"),
         ],
     },
     # Capacity: a one-band custom preset of five entries forces true drops.
@@ -534,15 +541,54 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     result = {"scenario": name, "mutant": mutant, "steps": steps, "stats": stats}
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
+        seen: set = set()
         (GOLDENS / f"{name}.json").write_text(json.dumps(
-            {"scenario": name, "steps": [{"op": s["op"], "python": s.get("python"),
-                                          "state": s.get("_python_state"),
-                                          "numeric": s.get("_python_numeric")} for s in steps]},
+            {"scenario": name, "normalizers": "harness/w2e.py normalize_state, pack",
+             "steps": [{"op": s["op"], "python": s.get("python"),
+                        "state": pack(s["_python_state"], full=s["step"] == 0),
+                        "numeric_new": pack_numeric(s["_python_numeric"], seen)} for s in steps]},
             indent=1, sort_keys=True), encoding="utf-8")
         for s in steps:
             s.pop("_python_state", None)
             s.pop("_python_numeric", None)
     return result
+
+
+# Tables the write path touches: recorded every step (the rest only at init).
+WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions")
+
+
+def pack(state: dict, full: bool) -> dict:
+    if full:
+        return state
+    return {"rows": {f"public.{t}": state["rows"][f"public.{t}"] for t in WRITE_TABLES
+                     if f"public.{t}" in state["rows"]},
+            "catalog": {"sequences": state["catalog"]["sequences"]}}
+
+
+def pack_numeric(numeric: dict, seen: set) -> dict:
+    """New entries only, embeddings as base64 little-endian float32."""
+    import base64
+    import struct
+    out = {}
+    for eid, v in numeric.items():
+        if eid in seen:
+            continue
+        seen.add(eid)
+        emb = v["embedding"]
+        out[str(eid)] = {"surprise": v["surprise"], "embedding_f32": base64.b64encode(
+            struct.pack(f"<{len(emb)}f", *emb)).decode() if emb else None}
+    return out
+
+
+def unpack_numeric(packed: dict, into: dict) -> dict:
+    import base64
+    import struct
+    for eid, v in packed.items():
+        raw = base64.b64decode(v["embedding_f32"]) if v["embedding_f32"] else None
+        into[int(eid)] = {"surprise": v["surprise"],
+                          "embedding": list(struct.unpack(f"<{len(raw) // 4}f", raw)) if raw else None}
+    return into
 
 
 def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
@@ -560,7 +606,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
     home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
     d = daemons.rust_daemon(binary, home, daemons.free_port(),
                             daemons.base_env(home, w1a.rust_env(side_env(scn, dsn))))
-    steps, stats = [], {}
+    steps, stats, numeric = [], {}, {}
     try:
         d.start(300)
         w1a.wait_settled([d.port])
@@ -572,9 +618,9 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
-            numeric = {int(k): v for k, v in (rec["numeric"] or {}).items()}
+            unpack_numeric(rec["numeric_new"], numeric)
             row["diffs"] += compare_numeric(numeric, nr, tol, stats)
-            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], sr)]
+            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], pack(sr, full=i == 0))]
             steps.append(row)
     finally:
         d.stop()
