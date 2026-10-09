@@ -33,8 +33,8 @@ COMMIT errors attempt cleanup while retaining the original error. Failed body
 cleanup retains the typed body error and the open marker. Four rejecting cases
 cover recovery ROLLBACK, body ROLLBACK, COMMIT and failed COMMIT cleanup.
 
-Tool bodies use spawned completion tasks so a disconnected caller does not
-drop durable work. Statement/transaction isolation and pending-query recovery
+Future tool integration must use spawned completion tasks so a disconnected
+caller does not drop durable work. Statement/transaction isolation and pending-query recovery
 are tested using owned loopback PostgreSQL protocol peers; no bank or model is
 used. Graph mutations adopt `run`, and graph statements/read groups adopt
 `with_client` in this increment. Dream adopts the same interface after landing.

@@ -242,6 +242,7 @@ jobs:
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Graph store differential and recorded oracle
+        if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -262,8 +263,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
+          path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          if-no-files-found: error
+      - name: Retain graph store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-graph-store-${{ runner.os }}
           path: |
-            ${{ runner.temp }}/rust-eval-harness.junit.xml
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
           if-no-files-found: error
