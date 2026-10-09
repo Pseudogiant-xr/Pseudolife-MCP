@@ -11,9 +11,15 @@ description = "Contract-first Rust port of the Pseudolife memory daemon"
 name = "pseudolife-daemon"
 path = "src/main.rs"
 
+[[bin]]
+name = "graph-contract"
+path = "harness/graph_contract.rs"
+required-features = ["graph-harness"]
+
 [features]
 # Deliberate breaks for the harness mutant control; never in a release build.
 mutants = []
+graph-harness = []
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }

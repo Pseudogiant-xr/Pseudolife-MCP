@@ -152,7 +152,7 @@ jobs:
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
       - name: Build embedding candidate
-        run: cargo build --locked --release -p pseudolife-daemon --bin pseudolife-daemon --features mutants -j 4
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -161,6 +161,8 @@ jobs:
             rust/target/release/pseudolife-stdio.exe
             rust/target/release/pseudolife-daemon
             rust/target/release/pseudolife-daemon.exe
+            rust/target/release/graph-contract
+            rust/target/release/graph-contract.exe
           if-no-files-found: error
 
   parity-checks:
@@ -268,12 +270,39 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: Restore graph store executable permission
+        if: matrix.suite == 'cli' && runner.os == 'Linux'
+        run: chmod +x rust/target/release/graph-contract
+      - name: Graph store differential and recorded oracle
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/gen_graph_unicode.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/test_graph_store_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
+          exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          if-no-files-found: error
+      - name: Retain graph store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-graph-store-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/graph-store-live.json
+            ${{ runner.temp }}/graph-store-golden.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
