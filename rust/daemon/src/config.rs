@@ -45,6 +45,54 @@ pub struct MemoryConfig {
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
+    /// `memory.reranker` beyond `enabled` (W2-D, `RerankerConfig`).
+    pub reranker: RerankerConfig,
+    /// `memory.cortex` (W2-D, `CortexConfig`).
+    pub cortex: CortexConfig,
+    /// `memory.retrieval_log.enabled` (`RetrievalLogConfig`, default true).
+    pub retrieval_log_enabled: bool,
+}
+
+/// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RerankerConfig {
+    pub model_name: String,
+    pub top_n: i64,
+    pub fusion_weight: f64,
+    pub skip_margin: f64,
+}
+
+impl Default for RerankerConfig {
+    fn default() -> Self {
+        RerankerConfig {
+            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".to_string(),
+            top_n: 20,
+            fusion_weight: 0.7,
+            skip_margin: 0.0,
+        }
+    }
+}
+
+/// `CortexConfig` (utils/config.py:692-743), the keys the reads use.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CortexConfig {
+    pub enabled: bool,
+    pub search_first: bool,
+    pub guard_min_score: f64,
+    pub read_tracking: bool,
+    pub pin_constraints: bool,
+}
+
+impl Default for CortexConfig {
+    fn default() -> Self {
+        CortexConfig {
+            enabled: true,
+            search_first: true,
+            guard_min_score: 0.2,
+            read_tracking: true,
+            pin_constraints: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +102,8 @@ pub struct SearchConfig {
     pub candidate_pool_multiplier: i64,
     pub contiguity_neighbors: i64,
     pub timeline_channel: bool,
+    /// `memory.search.stale_policy` (default "annotate").
+    pub stale_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +114,8 @@ pub struct Bm25Config {
     pub weight: f64,
     pub top_n: i64,
     pub min_score: f64,
+    /// `memory.bm25.cortex_enabled` (default false): lexical fusion for facts.
+    pub cortex_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +125,8 @@ pub struct EmbeddingConfig {
     pub backend: String,
     pub query_prefix: String,
     pub max_seq_length: i64,
+    /// `embedding.cache_size` (default 1024): the encode LRU.
+    pub cache_size: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,6 +248,7 @@ impl Default for SearchConfig {
             candidate_pool_multiplier: 1,
             contiguity_neighbors: 0,
             timeline_channel: false,
+            stale_policy: "annotate".to_string(),
         }
     }
 }
@@ -207,6 +262,7 @@ impl Default for Bm25Config {
             weight: 0.3,
             top_n: 20,
             min_score: 0.1,
+            cortex_enabled: false,
         }
     }
 }
@@ -224,6 +280,9 @@ impl Default for MemoryConfig {
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
+            reranker: RerankerConfig::default(),
+            cortex: CortexConfig::default(),
+            retrieval_log_enabled: true,
         }
     }
 }
@@ -236,6 +295,7 @@ impl Default for EmbeddingConfig {
             backend: "torch".to_string(),
             query_prefix: DEFAULT_QUERY_PREFIX.to_string(),
             max_seq_length: 512,
+            cache_size: 1024,
         }
     }
 }
@@ -1017,6 +1077,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             backend: want_str(e, "backend", p, &d.backend)?,
             query_prefix: want_str(e, "query_prefix", p, &d.query_prefix)?,
             max_seq_length: want_int(e, "max_seq_length", p, d.max_seq_length)?,
+            cache_size: want_int(e, "cache_size", p, d.cache_size)?,
         };
     }
 
@@ -1058,10 +1119,34 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 weight: want_float(b, "weight", p, d.weight)?,
                 top_n: want_int(b, "top_n", p, d.top_n)?,
                 min_score: want_float(b, "min_score", p, d.min_score)?,
+                cortex_enabled: want_bool(b, "cortex_enabled", p, d.cortex_enabled)?,
             };
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
+            let p = "memory.reranker";
+            let d = RerankerConfig::default();
+            memory.reranker = RerankerConfig {
+                model_name: want_str(r, "model_name", p, &d.model_name)?,
+                top_n: want_int(r, "top_n", p, d.top_n)?,
+                fusion_weight: want_float(r, "fusion_weight", p, d.fusion_weight)?,
+                skip_margin: want_float(r, "skip_margin", p, d.skip_margin)?,
+            };
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            let p = "memory.cortex";
+            let d = CortexConfig::default();
+            memory.cortex = CortexConfig {
+                enabled: want_bool(c, "enabled", p, d.enabled)?,
+                search_first: want_bool(c, "search_first", p, d.search_first)?,
+                guard_min_score: want_float(c, "guard_min_score", p, d.guard_min_score)?,
+                read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
+                pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
+            };
+        }
+        if let Some(r) = section(m, "retrieval_log", "memory.")? {
+            memory.retrieval_log_enabled =
+                want_bool(r, "enabled", "memory.retrieval_log", true)?;
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;
@@ -1190,6 +1275,7 @@ fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
         )?,
         contiguity_neighbors: want_int(s, "contiguity_neighbors", p, d.contiguity_neighbors)?,
         timeline_channel: want_bool(s, "timeline_channel", p, d.timeline_channel)?,
+        stale_policy: want_str(s, "stale_policy", p, &d.stale_policy)?,
     })
 }
 
@@ -1453,6 +1539,7 @@ mod tests {
                 candidate_pool_multiplier: 1,
                 contiguity_neighbors: 0,
                 timeline_channel: false,
+                stale_policy: "annotate".into(),
             }
         );
         assert_eq!(
@@ -1463,7 +1550,8 @@ mod tests {
                 b: 0.75,
                 weight: 0.3,
                 top_n: 20,
-                min_score: 0.1
+                min_score: 0.1,
+                cortex_enabled: false,
             }
         );
         assert!(!c.memory.reranker_enabled);
@@ -1667,7 +1755,8 @@ mod tests {
                 b: 0.5,
                 weight: 0.4,
                 top_n: 30,
-                min_score: 0.2
+                min_score: 0.2,
+                cortex_enabled: false,
             }
         );
         assert!(c.memory.reranker_enabled);
@@ -1687,6 +1776,7 @@ mod tests {
                 backend: "onnx".into(),
                 query_prefix: String::new(),
                 max_seq_length: 256,
+                cache_size: 1024,
             }
         );
     }

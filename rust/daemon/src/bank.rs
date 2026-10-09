@@ -2,6 +2,7 @@
 
 use anyhow::{Result, bail};
 use serde_json::Value;
+use std::sync::atomic::AtomicI64;
 use tokio_postgres::Client;
 
 pub const DIM: usize = 1024;
@@ -14,7 +15,8 @@ pub struct Entry {
     pub text: String,
     pub surprise: f32,
     pub ts: f64,
-    pub access_count: i32,
+    /// Bumped in place by every served search hit (cms.py:1748-1752).
+    pub access_count: AtomicI64,
     pub source: String,
     pub superseded_at: Option<f64>,
     pub superseded_by_text: Option<String>,
@@ -85,7 +87,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
             text: r.get(2),
             surprise: r.get::<_, Option<f32>>(4).unwrap_or(0.0),
             ts: r.get::<_, Option<f64>>(5).unwrap_or(0.0),
-            access_count: r.get::<_, Option<i32>>(6).unwrap_or(0),
+            access_count: AtomicI64::new(r.get::<_, Option<i32>>(6).unwrap_or(0) as i64),
             source: r.get::<_, Option<String>>(7).unwrap_or_default(),
             superseded_at: r.get(8),
             superseded_by_text: r.get(9),

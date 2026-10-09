@@ -22,6 +22,8 @@ pub struct Ready {
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<Bank>,
+    /// The resident cortex (W2-D reads, W2-E writes).
+    pub cortex: Arc<crate::stores::cortex::CortexStore>,
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -181,8 +183,13 @@ impl Service {
             });
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
-        match crate::bank::hydrate(storage.client(), &self.config.memory.bands).await {
-            Ok(bank) => {
+        let hydrated = async {
+            let bank = crate::bank::hydrate(storage.client(), &self.config.memory.bands).await?;
+            let cortex = crate::stores::cortex::hydrate(storage.client()).await?;
+            Ok::<_, anyhow::Error>((bank, cortex))
+        };
+        match hydrated.await {
+            Ok((bank, cortex)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -194,6 +201,7 @@ impl Service {
                     storage,
                     embedder,
                     bank: Arc::new(bank),
+                    cortex: Arc::new(cortex),
                 });
                 inner.ready = Some(ready.clone());
                 Ok(ready)
@@ -221,7 +229,10 @@ impl Service {
     pub async fn warmup(self: Arc<Self>) {
         loop {
             match self.ensure_init().await {
-                Ok(_) => return,
+                Ok(ready) => {
+                    crate::read::search_route::warmup_probe(&self, &ready).await;
+                    return;
+                }
                 Err(e) => {
                     eprintln!("warmup init failed: {e}");
                     let (wait, backoff) = {

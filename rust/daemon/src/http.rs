@@ -5,13 +5,13 @@
 use crate::auth::{self, Resolved};
 use crate::routes::RouteTable;
 use crate::service::Service;
-use crate::{health, search, static_files};
+use crate::{health, static_files};
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -436,8 +436,10 @@ async fn api(
             json_response(404, &json!({"error": "not_found", "path": path}))
         };
     }
-    if method == "GET" && path == "/api/search" {
-        return search_route(app, raw_query).await;
+    if method == "GET"
+        && let Some(r) = crate::read::get(app, path, raw_query, h).await
+    {
+        return r;
     }
     not_implemented(path)
 }
@@ -535,146 +537,9 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     )
 }
 
-// ---- GET /api/search (spec.md S1-S7) -------------------------------------
-
 /// Python `str.strip()`: Unicode whitespace plus the U+001C..U+001F separators.
 pub fn py_strip(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-}
-
-/// Python numeric literals allow single underscores between digits only.
-fn py_underscores(t: &str) -> Option<String> {
-    let b: Vec<char> = t.chars().collect();
-    for (i, c) in b.iter().enumerate() {
-        if *c == '_'
-            && !(i > 0 && i + 1 < b.len() && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit())
-        {
-            return None;
-        }
-    }
-    Some(t.replace('_', ""))
-}
-
-fn py_int(s: &str) -> Option<i64> {
-    py_underscores(py_strip(s))?.parse::<i64>().ok()
-}
-
-fn py_float(s: &str) -> Option<f64> {
-    py_underscores(py_strip(s))?.parse::<f64>().ok()
-}
-
-/// `_tribool` (web/routes.py:55): None follows config.
-fn tribool(q: &HashMap<String, String>, key: &str) -> Option<bool> {
-    let v = q.get(key)?;
-    if matches!(v.as_str(), "" | "null" | "auto") {
-        return None;
-    }
-    Some(matches!(
-        v.trim().to_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    ))
-}
-
-fn list(q: &HashMap<String, String>, key: &str) -> Option<Vec<String>> {
-    let items: Vec<String> = q
-        .get(key)?
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    (!items.is_empty()).then_some(items)
-}
-
-async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
-    let q = parse_query(raw_query);
-    let cfg = &app.service.config.memory;
-    let ready = match app.service.ensure_init().await {
-        Ok(r) => r,
-        Err(e) => return json_response(500, &json!({"error": e})),
-    };
-    let bands = list(&q, "band");
-    if let Some(bands) = &bands {
-        let unknown: Vec<&String> = bands.iter().filter(|b| !cfg.bands.contains(b)).collect();
-        if !unknown.is_empty() {
-            let msg = format!(
-                "unknown band name(s) {unknown:?} — this preset has {:?}",
-                cfg.bands
-            );
-            return json_response(400, &json!({"error": msg}));
-        }
-    }
-    let query = q
-        .get("q")
-        .map(|s| py_strip(s).to_string())
-        .unwrap_or_default();
-    if query.is_empty() {
-        return json_response(
-            200,
-            &json!({"entries": [], "query": "", "count": 0, "low_confidence": true}),
-        );
-    }
-    let top_k = q
-        .get("top_k")
-        .filter(|s| !s.is_empty())
-        .and_then(|s| py_int(s))
-        .unwrap_or(search::ROUTE_TOP_K);
-    let k = match top_k {
-        0 => cfg.top_k.max(0) as usize,
-        n if n < 0 => return json_response(500, &json!({"error": "top_k must not be negative"})),
-        n => n as usize,
-    };
-    let b = &cfg.bm25;
-    let bm25_on = tribool(&q, "bm25").unwrap_or(b.enabled);
-    let params = search::Params {
-        query: query.clone(),
-        k,
-        sources: list(&q, "source").map(|v| v.into_iter().collect::<HashSet<_>>()),
-        tags: list(&q, "tag").map(|v| {
-            v.into_iter()
-                .map(|t| t.to_lowercase())
-                .collect::<HashSet<_>>()
-        }),
-        min_score: q
-            .get("min_score")
-            .filter(|s| !s.is_empty())
-            .and_then(|s| py_float(s)),
-        default_floor: cfg.search.min_score,
-        bm25: bm25_on.then_some(search::Bm25Knobs {
-            k1: b.k1,
-            b: b.b,
-            weight: b.weight,
-            top_n: b.top_n.max(0) as usize,
-            min_norm: b.min_score,
-        }),
-        hide_superseded: cfg.hide_superseded,
-        bands: bands.map(|v| v.into_iter().collect()),
-    };
-    let ready2 = ready.clone();
-    let floor = cfg.search_confidence_floor;
-    let result = tokio::task::spawn_blocking(move || {
-        let qv = ready2.embedder.embed_query(&query)?;
-        let hits = search::rank(&ready2.bank, &qv, &params);
-        let entries: Vec<Value> = hits
-            .iter()
-            .map(|h| search::entry_json(&ready2.bank, &ready2.bank.entries[h.idx], h.score))
-            .collect();
-        // `abstain.low_confidence` over the direct hits' raw scores.
-        let best = hits
-            .iter()
-            .map(|h| h.score)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let low = hits.is_empty() || (floor > 0.0 && best < floor);
-        Ok::<_, anyhow::Error>((params.query, entries, low))
-    })
-    .await;
-    match result {
-        Ok(Ok((query, entries, low))) => json_response(
-            200,
-            &json!({"query": query, "count": entries.len(), "low_confidence": low, "entries": entries}),
-        ),
-        Ok(Err(e)) => json_response(500, &json!({"error": e.to_string()})),
-        Err(e) => json_response(500, &json!({"error": e.to_string()})),
-    }
 }
 
 #[cfg(test)]
