@@ -14,6 +14,7 @@
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
+pub mod graph;
 pub mod schema;
 
 use std::sync::Mutex;

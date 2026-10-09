@@ -70,3 +70,10 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
 | Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## Graph and review
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
+| Traversal, communities, graph service/MCP wiring, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | graph store only; these services are not wired | W3-H, subsequent increments |
