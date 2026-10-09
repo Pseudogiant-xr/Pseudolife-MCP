@@ -214,6 +214,25 @@ jobs:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Principal store differential and golden harness
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          cargo build --locked --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness,mutants -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
+          python rust/daemon/harness/principals.py live --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/principals.py golden --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain principal store outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-principals-${{ runner.os }}
+          path: ${{ runner.temp }}/principal-*.json
+          if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         timeout-minutes: 15
         shell: pwsh

@@ -10,6 +10,8 @@ mod embed;
 mod health;
 mod http;
 mod mutants;
+#[cfg(feature = "principal-harness")]
+mod principal_probe;
 mod principals;
 mod pyjson;
 mod routes;
@@ -48,6 +50,14 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
+    #[cfg(feature = "principal-harness")]
+    if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        if runtime.block_on(principal_probe::run()).is_err() {
+            fail(1, "principal harness refused");
+        }
+        return;
+    }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
         std::env::var("PSEUDOLIFE_MCP_DATA_DIR")
@@ -165,8 +175,10 @@ fn main() {
             eprintln!("bind {host}:{}: port out of range", env.port);
             return 1;
         };
-        let store = Arc::new(auth::PrincipalStore::new());
-        let env_principals = tokens.map.iter().map(|(_, p)| p.clone()).collect();
+        let env_principals: Vec<String> = tokens.map.iter().map(|(_, p)| p.clone()).collect();
+        let store = Arc::new(auth::PrincipalStore::new_with_shadowed(
+            env_principals.clone(),
+        ));
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
         let service = Arc::new(service::Service::new(
             config,

@@ -10,6 +10,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 |---|---|
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
 | `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `spec-principals.md` | Durable principal service operations, snapshot races and identity refusal policy |
 | `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
 | `harness/` | The differential harness, its goldens and helpers |
 
@@ -45,3 +46,24 @@ the same moment and are live-only. It checks bank state only where the bank
 starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
+
+The principal-store extension reuses the disposable database guard, catalog
+dumper and type-strict comparison. It runs service operations in the native
+process, using synthetic credentials and `pl_cf_prn_*` banks, without loading
+an embedder or exposing a diagnostic HTTP endpoint:
+
+```bash
+cargo build --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness,mutants -j 3
+python rust/daemon/harness/principals.py live --rust-bin <binary> --out principals-live.json
+python rust/daemon/harness/principals.py golden --rust-bin <binary> --out principals-golden.json
+python rust/daemon/harness/principals.py mutants --rust-bin <binary> --out principals-mutants.json
+```
+
+Every database mutation compares both catalogs and all durable rows. New
+timestamps must fall inside the arm's database-clock write window, including
+the invite TTL offset; unchanged timestamps retain their event identity.
+The concurrent-redemption case verifies two blocked callers and exactly one
+durable winner; only that case's validated winning hash becomes a symbol.
+Eight rejecting clock and ownership controls guard the normalizer. Goldens contain outputs
+and post-state, never bearer tokens, pairing codes or connection strings.
+The `principal-harness` feature is absent from the serving release build.
