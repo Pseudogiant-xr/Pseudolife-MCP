@@ -271,7 +271,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("pair extra key", "POST", "/api/pair", [js], json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "a" * 64, "x": 1}).encode()),
         case("pair bad code", "POST", "/api/pair", [js], json.dumps({"code": "UUUU-UUUU-UUUU", "token_sha256": "a" * 64}).encode()),
         case("pair bad hash", "POST", "/api/pair", [js], json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "A" * 64}).encode()),
-        case("mcp path, no auth", "GET", "/mcp", declared=None if auth else "W2-G: MCP transport"),
+        case("mcp path, no auth", "GET", "/mcp"),
     ]
     return c
 
@@ -334,7 +334,7 @@ class Tokens(Scenario):
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
                  declared="W2-F: pairing redemption"),
             case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
-            case("mcp path, auth", "GET", "/mcp", [auth], declared="W2-G: MCP transport"),
+            case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
             case("search unknown band, blank q", "GET", q(band="nope"), [auth]),
@@ -364,7 +364,7 @@ class Tokenless(Scenario):
             case("tokenless maintainer POST", "POST", "/api/maintainer/send", []),
             case("tokenless agents coordination", "GET", "/api/agents?view=coordination", []),
             case("tokenless hook woke authorized", "POST", "/api/hook/woke", [], declared="W2-F: woke marker"),
-            case("tokenless mcp", "GET", "/mcp", [("Host", "127.0.0.1:1")], declared="W2-G: MCP transport"),
+            case("tokenless mcp", "GET", "/mcp", [("Host", "127.0.0.1:1")]),
             case("origin: unclosed IPv6 bracket", "GET", "/api/nope", [("Origin", "http://[::1")]),
             case("origin: bracketed name", "GET", "/api/nope", [("Origin", "http://[localhost]")]),
             case("origin: bracketed IPv4", "GET", "/api/nope", [("Origin", "http://[127.0.0.1]")]),
