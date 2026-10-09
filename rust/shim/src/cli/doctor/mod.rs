@@ -29,6 +29,11 @@ struct Args {
     agent_state: Option<String>,
 }
 
+/// The longest `--timeout` answered, in seconds. Python takes any positive
+/// float; a budget past this (about 11.6 days) defers, so no deadline or
+/// Duration can overflow.
+const MAX_TIMEOUT: f64 = 1_000_000.0;
+
 fn positive_decimal(raw: &str) -> Option<f64> {
     (raw.bytes().any(|byte| byte.is_ascii_digit())
         && raw
@@ -64,7 +69,7 @@ fn parse(values: &[OsString]) -> Option<Args> {
         if selected != 0 {
             let value = values.next()?.to_str()?;
             match selected {
-                1 => args.timeout = positive_decimal(value)?,
+                1 => args.timeout = positive_decimal(value).filter(|t| *t <= MAX_TIMEOUT)?,
                 2 => args.host = HOSTS.iter().find(|host| **host == value)?,
                 _ if value.is_empty() || value.starts_with('-') => return None,
                 _ => args.agent_state = Some(value.to_owned()),
@@ -122,8 +127,10 @@ pub(super) fn truthy(value: &Value) -> bool {
     }
 }
 
-/// urllib proxies `http_proxy`/`https_proxy` (and, on Windows without them,
-/// registry); the native probes connect directly, so a proxy defers.
+/// urllib proxies `http_proxy`/`https_proxy`; the native probes connect
+/// directly, so either variable defers. Without them urllib also reads the
+/// Windows registry (WinINet) and macOS `_scproxy` settings, which this does
+/// not consult (a declared divergence).
 fn no_proxy_environment() -> Res<()> {
     for (name, value) in std::env::vars_os() {
         // urllib's ProxyHandler uses the scheme entries only.
@@ -135,11 +142,12 @@ fn no_proxy_environment() -> Res<()> {
     Ok(())
 }
 
-/// The bearer as http.client sends it: Latin-1, no control characters.
+/// A bearer every client of the run sends alike: printable ASCII. urllib
+/// (board, maintainer) would send Latin-1, but the handshake's Python shim
+/// (httpx) and the --agent-state check cannot encode it, so anything
+/// beyond ASCII defers; DEL is a header value reqwest refuses.
 fn sendable(token: &str) -> bool {
-    token
-        .chars()
-        .all(|c| (c as u32) <= 0xff && (c as u32) >= 0x20 && c != '\u{7f}')
+    token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
 
 /// This runtime's identity, in the fields the Python report fills from its
@@ -295,9 +303,44 @@ fn coordination_snapshot(
     })
 }
 
+/// doctor_cli.py:660-674: no Git Bash, then passkeys the daemon refuses,
+/// fail the report; an earlier error keeps its name and recovery.
+fn finalize(
+    report: &mut Map<String, Value>,
+    maintainer_invalid: bool,
+    maintainer_recovery: Option<Value>,
+) {
+    if report.get("git_bash") == Some(&Value::Null) {
+        put(report, "ok", json!(false));
+        if !report.contains_key("error") {
+            put(report, "error", json!("GitBashMissing"));
+            let recovery = report
+                .get("git_bash_recovery")
+                .cloned()
+                .unwrap_or(Value::Null);
+            put(report, "recovery", recovery);
+        }
+    }
+    if maintainer_invalid {
+        put(report, "ok", json!(false));
+        if !report.contains_key("error") {
+            put(report, "error", json!("MaintainerPasskeysInvalid"));
+            put(
+                report,
+                "recovery",
+                maintainer_recovery.unwrap_or(Value::Null),
+            );
+        }
+    }
+}
+
 async fn diagnose(args: &Args) -> Res<(Value, bool)> {
     // Everything before the first request: environment and client files.
     no_proxy_environment()?;
+    // Python's int() digit limit is part of what json.loads accepts.
+    if std::env::var_os("PYTHONINTMAXSTRDIGITS").is_some() {
+        return Err(Defer);
+    }
     let mut env = Env::default();
     let (overrides, credential_source) = clients::registration_credentials(&env)?;
     for (key, value) in overrides {
@@ -343,7 +386,15 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         _ => None,
     };
 
-    let short = Duration::from_secs_f64(args.timeout.min(2.0));
+    let short = Duration::try_from_secs_f64(args.timeout.min(2.0)).map_err(|_| Defer)?;
+    // _maintainer_probe and the --agent-state check build a new provider
+    // and snapshot it again (the token file is read again).
+    let fresh = || -> Result<Option<String>, ()> {
+        provider
+            .snapshot()
+            .map(|snapshot| snapshot.token().map(str::to_owned))
+            .map_err(|_| ())
+    };
     let mut report = Map::new();
     put(&mut report, "ok", json!(false));
     for (key, value) in identity {
@@ -365,17 +416,22 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         "board",
         board.get("line").cloned().unwrap_or(Value::Null),
     );
-    let maintainer = match (&token, board_state == "on") {
-        (Some(token), true) => probes::maintainer(&url, token, short).await?,
-        _ => {
-            let mut off = Map::new();
-            off.insert("state".into(), json!("not_checked"));
-            off.insert(
-                "line".into(),
-                json!("not checked - the board is off for this token"),
-            );
-            off
+    let not_checked = |line: &str| {
+        let mut off = Map::new();
+        off.insert("state".into(), json!("not_checked"));
+        off.insert("line".into(), json!(line));
+        off
+    };
+    let maintainer = if board_state == "on" {
+        match fresh() {
+            Err(()) => not_checked("not checked - no usable credential or URL"),
+            Ok(Some(token)) if !token.is_empty() => probes::maintainer(&url, &token, short).await?,
+            Ok(_) => {
+                not_checked("not checked - no bearer token (a tokenless daemon refuses passkeys)")
+            }
         }
+    } else {
+        not_checked("not checked - the board is off for this token")
     };
     let maintainer_invalid = maintainer.get("state") == Some(&json!("invalid"));
     let maintainer_recovery = maintainer.get("recovery").cloned();
@@ -444,7 +500,7 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
         put(&mut report, "daemon_version", json!(daemon_version));
         put(&mut report, "codex_hooks", json!(hooks_line));
         // Nothing defers past this point: the handshake starts a shim.
-        let budget = Duration::from_secs_f64(args.timeout);
+        let budget = Duration::try_from_secs_f64(args.timeout).map_err(|_| Defer)?;
         match handshake::run(env.overlay(), budget).await {
             Ok(result) => {
                 let ok = result.instructions_present
@@ -522,15 +578,17 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
     wake.insert("claude_code".into(), claude_wake.report(enabled));
     wake.insert("codex".into(), codex_wake.report(enabled));
     wake.insert("caps".into(), caps(health.as_ref()));
-    let registration = match (&saved, &token) {
-        (Some(_), _) if board_state != "on" => None,
-        (Some(agent::Saved::Missing), _) => Some("missing_registration"),
-        (Some(agent::Saved::Invalid), _) => Some("invalid_state"),
-        (Some(agent::Saved::State(_)), None) => Some("missing_bearer"),
-        (Some(agent::Saved::State(state)), Some(token)) => {
-            Some(agent::probe(&url, token, state, short).await)
-        }
-        (None, _) => None,
+    // The snapshot comes first: its failure is `unavailable` whatever the
+    // saved file holds (doctor_cli.py:650-655).
+    let registration = match &saved {
+        Some(_) if board_state != "on" => None,
+        None => None,
+        Some(saved) => Some(match (fresh(), saved) {
+            (Err(()), _) => "unavailable",
+            (_, agent::Saved::Missing) => "missing_registration",
+            (_, agent::Saved::Invalid) => "invalid_state",
+            (token, agent::Saved::State(state)) => agent::probe(&url, token, state, short).await,
+        }),
     };
     let snapshot = coordination_snapshot(
         health.as_ref(),
@@ -546,30 +604,53 @@ async fn diagnose(args: &Args) -> Res<(Value, bool)> {
     if args.agent_state.is_some() && !registered {
         put(&mut report, "ok", json!(false));
     }
-    // No Git Bash fails the report; an earlier error keeps its name.
-    if report.get("git_bash") == Some(&Value::Null) {
-        put(&mut report, "ok", json!(false));
-        if !report.contains_key("error") {
-            put(&mut report, "error", json!("GitBashMissing"));
-            let recovery = report
-                .get("git_bash_recovery")
-                .cloned()
-                .unwrap_or(Value::Null);
-            put(&mut report, "recovery", recovery);
-        }
-    }
-    if maintainer_invalid {
-        put(&mut report, "ok", json!(false));
-        if !report.contains_key("error") {
-            put(&mut report, "error", json!("MaintainerPasskeysInvalid"));
-            put(
-                &mut report,
-                "recovery",
-                maintainer_recovery.unwrap_or(Value::Null),
-            );
-        }
-    }
+    finalize(&mut report, maintainer_invalid, maintainer_recovery);
     put(&mut report, "path_resolution", resolution);
     let ok = report.get("ok") == Some(&json!(true));
     Ok((Value::Object(report), ok))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(pairs: Value) -> Map<String, Value> {
+        pairs.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn missing_git_bash_fails_and_names_itself_only_without_an_earlier_error() {
+        // Unreachable through the harness on a host with Git for Windows in
+        // its default directory: doctor_cli.py hard-codes those paths.
+        let mut fresh = report(json!({"ok": true, "git_bash": null,
+            "git_bash_recovery": "install Git", "wake": {}}));
+        finalize(&mut fresh, false, None);
+        assert_eq!(
+            Value::Object(fresh),
+            json!({"ok": false, "git_bash": null, "git_bash_recovery": "install Git",
+                   "wake": {}, "error": "GitBashMissing", "recovery": "install Git"})
+        );
+        let mut earlier = report(json!({"ok": false, "error": "DaemonUnavailable",
+            "recovery": "start it", "git_bash": null, "git_bash_recovery": "install Git"}));
+        finalize(&mut earlier, true, Some(json!("fix passkeys")));
+        assert_eq!(earlier["error"], json!("DaemonUnavailable"));
+        assert_eq!(earlier["recovery"], json!("start it"));
+        let mut passkeys = report(json!({"ok": true, "git_bash": "bash.exe"}));
+        finalize(&mut passkeys, true, Some(json!("fix passkeys")));
+        assert_eq!(
+            Value::Object(passkeys),
+            json!({"ok": false, "git_bash": "bash.exe", "error": "MaintainerPasskeysInvalid",
+                   "recovery": "fix passkeys"})
+        );
+    }
+
+    #[test]
+    fn timeouts_past_the_cap_defer_in_parse() {
+        let args = |value: &str| {
+            parse(&[OsString::from("--timeout"), OsString::from(value)]).map(|args| args.timeout)
+        };
+        assert_eq!(args("1000000"), Some(1_000_000.0));
+        assert_eq!(args("1000000.5"), None);
+        assert_eq!(args("100000000000000000000"), None);
+    }
 }

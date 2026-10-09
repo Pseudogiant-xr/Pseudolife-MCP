@@ -40,15 +40,32 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | Coordination snapshot fields, order and `next` texts (registration-dependent branches included) | :505-541, :654-657 |
 | GitBashMissing and MaintainerPasskeysInvalid finalization | :660-674 |
 | `path_resolution`: CPython 3.11 `shutil.which("pseudolife-mcp")` (cwd first and PATHEXT on Windows), launcher from `PSEUDOLIFE_SHIM_RUNTIMES`/`_LAUNCHER` or the default layout, realpath/normcase comparison, warning text | :690-707, runtimes.py:127-154 |
+| Request bytes per probe: method, target, `Authorization`, `User-Agent` (`Python-urllib/3.11` for the GETs, `python-httpx/0.28.1` for the context POST), `Host`, `Content-Type`/`Content-Length` and the context body (compact JSON, nonce tokenized) | board_status.py:51-55, :390-395, shim.py:438, :470-473 |
+| Body reads stop where Python's do: board `read(65536)` on success and no read on an error status; maintainer `read(1 << 20)` / `exc.read(65536)`; health reads the whole body | board_status.py:55, :393-397, shim.py:438-447 |
+| The bearer is snapshotted afresh for the maintainer probe and the `--agent-state` check, as each builds a new provider; a failed re-read is `not checked - no usable credential or URL` / `unavailable` | :432-443, :648-653 |
+| `json.loads` refusals Python makes and serde would not: integer literals over 4300 digits (CPython 3.11 `int_max_str_digits`), a leading U+FEFF; the context answer's RecursionError past nesting depth 978 (measured on CPython 3.11.9 against the oracle doctor) is `unavailable` | :476-503 |
 | No incidental mutation: doctor writes nothing; the only file a run leaves is the handshake shim's own `~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json` (CLI-SHIM's file, written by the Python shim too) | shim.py:708-725 |
 
 ## Free items
 
-- Request headers other than the path and `Authorization` (user agent,
-  `Accept-Encoding`, `Connection`) and the shim's own HTTP traffic (CLI-SHIM).
-- `--timeout` budgets are bounds, not observable values; socket timeouts are
-  per operation in both arms.
+- `Accept`, `Accept-Encoding` and `Connection` request headers (the harness's
+  wire projection drops them on every row).
 - The interpreter identity values (declared substitution below).
+
+## Harness rules and comparison scope
+
+- Requests are compared in full except traffic positively tagged as the
+  handshake shim's: `/mcp` (any method), `/api/episode/*`, and every
+  `GET /health` after doctor's single one (doctor_cli.py probes health once,
+  :601, before it starts the shim). That traffic is CLI-SHIM's contract and is
+  summarized as one entry naming the JSON-RPC methods it proxied; any other
+  request a doctor makes is compared request by request.
+- `doctor-runtime-identity`: see below. Each observation carries the arm
+  that produced it (`after` hook), and the rule tokenizes only when that
+  arm's own identity is the one reported.
+- `doctor-context-nonce`: the context request's `uuid4().hex` nonce, only
+  that span of that body.
+- `shim-handshake-cache-semantic`: temporary, below.
 
 ## Declared substitutions and divergences
 
@@ -57,40 +74,67 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   its Python interpreter, package directory, installed distribution and MCP
   SDK versions; the native doctor reports its own executable, the directory
   it resolves into, its Cargo version and `mcp: not installed`. The rule
-  validates each arm's values against what that arm must report, then
-  tokenizes them and that arm's own version where the report or the shim's
-  mismatch warning repeats it. `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
+  checks that each arm reports its OWN identity (the native arm its
+  executable, resolved directory, Cargo version and no SDK; the oracle arm an
+  existing Python interpreter and package directory), then tokenizes them and
+  that arm's own version where the report or the shim's mismatch warning
+  repeats it. A native report carrying Python's identity stays a difference
+  (mutant `doctor-identity-claims-python`).
+  `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
   asserts `interpreter == sys.executable` and can never hold for a native
   runtime.
-- `shim-handshake-cache-semantic` (harness rule, inherited from CLI-SHIM):
-  the Python shim writes the handshake cache with `json.dumps` (spaced
-  separators, ASCII escapes, `url` first); the native shim's `cache.rs`
-  writes compact UTF-8 with `url` last. Compared as parsed JSON, that path
-  only.
-- Proxies: urllib honours `http_proxy`/`https_proxy` and, on Windows
-  without them, the WinINet registry proxy. The native probes connect
-  directly; either variable defers, the registry is not consulted.
+- `shim-handshake-cache-semantic` (harness rule, inherited from CLI-SHIM,
+  temporary): the Python shim writes the handshake cache with `json.dumps`
+  (spaced separators, ASCII escapes, `url` first); the native shim's
+  `cache.rs` writes compact UTF-8 with `url` last. Compared as parsed JSON,
+  that path only. The connect leaf's cache.rs fix writes Python's bytes; the
+  rule goes once it merges.
+- Timeouts are observable: a small `--timeout` (or the 2-second probe cap)
+  races startup and response speed differently in each runtime, and the
+  native doctor bounds connect and each read the way sockets do, not
+  urllib's exact sequence of socket operations. Cases use budgets far from
+  either arm's latency; `--timeout` over 1,000,000 seconds defers (Python
+  accepts any positive float).
+- Proxies: urllib honours `http_proxy`/`https_proxy` and, without them, the
+  Windows registry (WinINet) and macOS `_scproxy` settings. The native probes
+  connect directly; either variable defers, the platform settings are not
+  consulted.
 - https daemons: TLS trust is the native shim's reqwest/rustls
   configuration, not CPython's default `ssl` context.
 - Closed stdout: the oracle's print raises and CPython exits 120 after a
   shutdown flush trailer; the native doctor exits 1.
 - Context answers after the handshake cannot defer: a 200 or 400/403
-  `/api/coordination/context` body that only Python's decoder admits (a
-  UTF-8 BOM, UTF-16/32, NaN or Infinity) is answered as a JSON failure
-  (`unsupported_capability`). The daemon's `_send_json` never produces one.
+  `/api/coordination/context` body that only Python's decoder admits
+  (UTF-16/32, encoded surrogates, NaN or Infinity) is answered as a JSON
+  failure (`unsupported_capability`); a malformed body whose nesting passes
+  978 before its first error is answered by the error, not RecursionError.
+  The daemon's `_send_json` never produces one.
+- The nesting threshold 978 is the oracle's recursion limit (1000) less the
+  frames above the decode in doctor's call path, measured on CPython 3.11.9;
+  another interpreter build can move it by a few levels.
+- `python-httpx/0.28.1` is the oracle environment's httpx; another httpx
+  version sends another agent string.
+- Missing Git for Windows (`GitBashMissing`) is not reachable through the
+  harness on a host with Git in its default directory: doctor_cli.py
+  hard-codes `C:\Program Files\Git\bin\bash.exe` and the x86 variant with
+  no environment override. A Rust unit test pins the finalization instead.
 
 ## Deferral domain (before the first request unless noted)
 
-nonempty-DSN `--disposable-proof`; noncanonical argv; an `--agent-state`
-path with a `..` component, a symlinked or junction ancestor, or a
-stat error pathlib would raise; a nonempty `http_proxy` or `https_proxy`
-(any case); an invalid daemon URL; a credential provider error
-(missing, unsafe or malformed token file, invalid static token); a bearer
-outside Latin-1 or with control characters; saved tunnels present
-(`~/.pseudolife-mcp/tunnel`); JSON files only Python may read (NaN,
-Infinity, `\u` escapes, nesting past the parser's limit) and every TOML
-parse failure; non-UTF-8 environment values read; settings values whose
-`str()` needs Python's repr (floats, non-empty containers); `~` in
+nonempty-DSN `--disposable-proof`; noncanonical argv; `--timeout` past
+1,000,000 seconds; an `--agent-state` path with a `..` component, a
+symlinked or junction ancestor of an existing file, or a stat error pathlib
+would raise (a missing file is `missing_registration` whatever its ancestors:
+`exists()` comes first, doctor_cli.py:458); a nonempty `http_proxy` or
+`https_proxy` (any case); `PYTHONINTMAXSTRDIGITS` set; an invalid daemon
+URL; a credential provider error (missing, unsafe or malformed token file,
+invalid static token); a bearer outside printable ASCII (urllib would send
+Latin-1, but the handshake's Python shim and the `--agent-state` check use
+httpx, which cannot); saved tunnels present (`~/.pseudolife-mcp/tunnel`);
+JSON files only Python may read (NaN, Infinity, `\u` escapes, nesting past
+the parser's limit) and every TOML parse failure other than a leading BOM;
+non-UTF-8 environment values read; settings values whose `str()` needs
+Python's repr (floats, non-empty containers); `~` in
 `CODEX_HOME`/`PSEUDOLIFE_CODEX_BIN`; UNC, device and drive-relative paths;
 PATH absent on POSIX (`os.confstr`); stat errors pathlib would raise.
 After a read-only GET (board, maintainer or health) but always before the

@@ -38,7 +38,7 @@ HERE = Path(__file__).resolve().parent
 RUST = HERE.parents[1]
 CARGO_VERSION = re.search(r'(?m)^version = "([^"]+)"',
                           (RUST / "shim" / "Cargo.toml").read_text(encoding="utf-8")).group(1)
-RULES = ("doctor-runtime-identity", "shim-handshake-cache-semantic")
+RULES = ("doctor-runtime-identity", "shim-handshake-cache-semantic", "doctor-context-nonce")
 
 
 @functools.lru_cache(maxsize=None)
@@ -126,11 +126,15 @@ class Route:
     the connection without an answer."""
 
     def __init__(self, status: int = 200, payload: Any = None, *, raw: bytes | None = None,
-                 headers: dict | None = None, drop: bool = False):
+                 headers: dict | None = None, drop: bool = False, stall: float = 0.0):
         self.status = status
         self.raw = raw if raw is not None else (b"" if payload is None else body(payload))
         self.headers = headers or {}
         self.drop = drop
+        # ``stall``: announce more bytes than are sent, send the body, then
+        # hold the connection open this long (a reader bounded below the
+        # body's length returns; one that reads to the end waits).
+        self.stall = stall
 
 
 class FixtureDaemon:
@@ -173,49 +177,71 @@ class FixtureDaemon:
                     self.send_header(key, value)
                 if "Content-Type" not in route.headers:
                     self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(route.raw)))
+                self.send_header("Content-Length",
+                                 str(len(route.raw) + (4096 if route.stall else 0)))
                 self.end_headers()
                 self.wfile.write(route.raw)
+                if route.stall:
+                    self.wfile.flush()
+                    time.sleep(route.stall)
+                    self.close_connection = True
+
+            def _entry(self, body: bytes = b"") -> dict:
+                """The request in the harness's wire shape (core.py)."""
+                return {"method": self.command, "target": self.path,
+                        "headers": [[k, v] for k, v in self.headers.items()],
+                        "body": body.decode("utf-8", "backslashreplace")}
+
+            def _shim(self, path: str) -> bool:
+                """Positively the handshake shim's traffic: the MCP route,
+                its episode posts, and every /health after doctor's one."""
+                if path == "/mcp" or path.startswith("/api/episode/"):
+                    return True
+                if path == "/health":
+                    with daemon._lock:
+                        return any(e["target"].split("?", 1)[0] == "/health"
+                                   for e in daemon._seen if not e.get("via"))
+                return False
 
             def do_GET(self):  # noqa: N802 - http.server naming
                 path = self.path.split("?", 1)[0]
-                auth = self.headers.get("Authorization")
+                entry = self._entry()
+                if self._shim(path):
+                    entry["via"] = "shim"
+                self._record(entry)
                 if path == "/mcp":
-                    self._record({"method": "GET", "path": path, "via": "shim"})
                     self._answer(Route(405, {"error": "method_not_allowed"}))
                     return
-                self._record({"method": "GET", "path": path, "authorization": auth})
                 route = daemon.routes.get(path)
                 self._answer(route(daemon) if route else Route(404, {"error": "not_found"}))
 
             def do_DELETE(self):  # noqa: N802
-                self._record({"method": "DELETE", "path": self.path, "via": "shim"})
+                entry = self._entry()
+                if self._shim(self.path.split("?", 1)[0]):
+                    entry["via"] = "shim"
+                self._record(entry)
                 self._answer(Route(200, {}))
 
             def do_POST(self):  # noqa: N802
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
                 path = self.path.split("?", 1)[0]
-                if path == "/api/coordination/context":
-                    # Doctor's own saved-instance proof: the request's fields
-                    # except its random nonce are recorded.
-                    try:
-                        request = json.loads(raw)
-                    except ValueError:
-                        request = None
-                    fields = (sorted(request) if isinstance(request, dict) else None)
-                    self._record({"method": "POST", "path": path,
-                                  "authorization": self.headers.get("Authorization"),
-                                  "fields": fields,
-                                  "agent_id": (request or {}).get("agent_id"),
-                                  "read_only": (request or {}).get("read_only")})
-                    route = daemon.routes.get("POST " + path)
-                    self._answer(route(daemon, request) if route
-                                 else Route(404, {"error": "not_found"}))
-                    return
+                entry = self._entry(raw)
+                if self._shim(path):
+                    entry["via"] = "shim"
                 if path != "/mcp":
-                    self._record({"method": "POST", "path": path, "via": "shim"})
-                    self._answer(Route(200, {"ok": True}))
+                    self._record(entry)
+                    route = daemon.routes.get("POST " + path)
+                    if route is not None:
+                        try:
+                            request = json.loads(raw)
+                        except ValueError:
+                            request = None
+                        self._answer(route(daemon, request))
+                    elif entry.get("via"):
+                        self._answer(Route(200, {"ok": True}))
+                    else:
+                        self._answer(Route(404, {"error": "not_found"}))
                     return
                 try:
                     request = json.loads(raw)
@@ -223,7 +249,8 @@ class FixtureDaemon:
                     self._answer(Route(400, {"error": "bad_json"}))
                     return
                 method = request.get("method") if isinstance(request, dict) else None
-                self._record({"method": "POST", "path": path, "via": "shim", "rpc": method})
+                entry["rpc"] = method
+                self._record(entry)
                 if daemon.mcp_status != 200:
                     self._answer(Route(daemon.mcp_status, {"error": "unauthorized"}))
                     return
@@ -260,15 +287,20 @@ class FixtureDaemon:
         self.thread.start()
 
     def requests(self) -> list:
-        """Doctor's own requests, in order. The handshake shim's traffic
-        (``via: shim``) is the shim's contract (CLI-SHIM), not doctor's:
-        it is summarized as the set of JSON-RPC methods it proxied."""
+        """Doctor's own requests, in order and in full. The handshake shim's
+        traffic (positively tagged ``via: shim``) is CLI-SHIM's contract:
+        it is summarized as one entry naming the JSON-RPC methods it
+        proxied. Anything untagged is compared request by request."""
         with self._lock:
             seen = list(self._seen)
-        own = [entry for entry in seen if entry.get("via") != "shim"]
+        own = [entry for entry in seen if not entry.get("via")]
         proxied = sorted({entry["rpc"] for entry in seen
-                          if entry.get("via") == "shim" and entry.get("rpc")})
-        return own + [{"shim_rpc": proxied}]
+                          if entry.get("via") and entry.get("rpc")})
+        shim = [entry for entry in seen if entry.get("via")]
+        if shim:
+            own.append({"method": "SHIM", "target": "rpc:" + ",".join(proxied),
+                        "headers": [], "body": ""})
+        return own
 
     def close(self) -> None:
         self.server.shutdown()
@@ -316,7 +348,8 @@ def runtime_identity(obs: dict) -> None:
     out = normalize._get(obs, "stdout")
     fields = {m.group(2).decode(): json.loads(b'"' + m.group(3) + b'"')
               for m in _TOP.finditer(out)}
-    if _arm_of(fields) is None:
+    # Each arm must carry its OWN identity; another arm's is a difference.
+    if obs.get("arm") not in ("python", "rust") or _arm_of(fields) != obs["arm"]:
         return
     own = fields["pseudolife-mcp"]
 
@@ -350,9 +383,10 @@ def handshake_cache_semantic(obs: dict) -> None:
     separators, ASCII escapes, ``url`` first); the native shim
     (``cache.rs``) writes compact UTF-8 with ``url`` last. Its only reader
     parses it. Only that path, only when the content is a JSON object
-    whose ``url`` names the fixture origin and whose other keys are
-    ``instructions``/``tools``, is re-serialized with sorted keys; any
-    value difference still shows."""
+    whose ``url`` is the fixture origin (already ``{DAEMON}``) and whose
+    other keys are ``instructions``/``tools``, is re-serialized with sorted
+    keys; any value difference still shows. Temporary: the connect leaf's
+    cache.rs fix writes Python's bytes, and this rule goes once it merges."""
     for rel in list(obs["files"]):
         if not _CACHE.match(rel):
             continue
@@ -361,11 +395,34 @@ def handshake_cache_semantic(obs: dict) -> None:
             value = json.loads(raw)
         except (TypeError, ValueError):
             continue
-        if (not isinstance(value, dict) or not re.match(r"^http://127\.0\.0\.1:[0-9]+$",
-                                                        str(value.get("url")))
+        if (not isinstance(value, dict) or value.get("url") != "{DAEMON}"
                 or not set(value) <= {"url", "instructions", "tools"}):
             continue
         normalize._set_file(obs, rel, json.dumps(value, sort_keys=True).encode())
+
+
+_NONCE = re.compile(r'"nonce":"([0-9a-f]{32})"')
+
+
+@normalize.rule("doctor-context-nonce")
+def context_nonce(obs: dict) -> None:
+    """``probe_registration`` sends ``uuid.uuid4().hex`` as the context
+    request's nonce: random per run. Only the request to
+    ``/api/coordination/context`` whose body is a JSON object with exactly
+    agent_id, nonce and read_only, and only those 32 hex digits, become
+    ``<nonce>``; every other byte of the body stays compared."""
+    for request in obs.get("requests", []):
+        if request.get("target") != "/api/coordination/context":
+            continue
+        try:
+            value = json.loads(request["body"])
+        except ValueError:
+            continue
+        if not isinstance(value, dict) or set(value) != {"agent_id", "nonce", "read_only"}:
+            continue
+        match = _NONCE.search(request["body"])
+        if match and match.group(1) == value["nonce"] and len(_NONCE.findall(request["body"])) == 1:
+            request["body"] = request["body"].replace(match.group(1), "<nonce>")
 
 
 # --- fixtures -----------------------------------------------------------------
@@ -394,6 +451,7 @@ def setup(*steps):
     def run(arm):
         if arm.daemon is not None:
             arm.daemon.version = own_version(arm)
+            arm.daemon.home = arm.home
         for step in steps:
             step(arm)
     return run
@@ -470,7 +528,23 @@ def saved_instance(private: bool = True, raw: str | None = None, **fields):
     return step
 
 
-def context_proof(bank: str = BANK, principal: str = PRINCIPAL, proof: str | None = None):
+def redirected_dir(rel: str):
+    """``rel`` as a redirect to an empty directory: a junction on Windows
+    (no privilege needed), a symlink elsewhere."""
+    def step(arm):
+        target = arm.home / (rel + "-target")
+        target.mkdir(parents=True)
+        link = arm.home / rel
+        if core.WINDOWS:
+            import _winapi  # noqa: PLC0415
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.symlink(target, link, target_is_directory=True)
+    return step
+
+
+def context_proof(bank: str = BANK, principal: str = PRINCIPAL, proof: str | None = None,
+                  extra: str | None = None):
     """``/api/coordination/context``'s read-only answer: the daemon's nonce
     proof over the request's agent and nonce (``web/coordination``)."""
     import hashlib
@@ -482,8 +556,11 @@ def context_proof(bank: str = BANK, principal: str = PRINCIPAL, proof: str | Non
                              ensure_ascii=True).encode("ascii")
         good = hmac.new(hashlib.sha256(CREDENTIAL.encode()).digest(), message,
                         hashlib.sha256).hexdigest()
-        body = {"bank_id": bank, "principal": principal, "proof": proof or good}
-        return Route(200, body)
+        value = {"bank_id": bank, "principal": principal, "proof": proof or good}
+        if extra is None:
+            return Route(200, value)
+        # One more member, spelled raw (deep nesting, long integers).
+        return Route(200, raw=(json.dumps(value)[:-1] + ', "x": ' + extra + "}").encode())
     return answer
 
 
@@ -504,8 +581,14 @@ TOKEN = {"PSEUDOLIFE_MCP_TOKEN": "fixture-token"}
 def case(id: str, argv=(), *, routes=None, steps=(), env=None, rules=RULES, daemon=True,
          timeout=60.0, **options) -> Case:
     return Case(id, ["doctor", *argv], env=dict(env or {}),
-                setup=setup(*steps), rules=rules, timeout=timeout,
+                setup=setup(*steps), rules=rules, timeout=timeout, after=tag_arm,
                 daemon=fixture(routes, **options) if daemon else None)
+
+
+def tag_arm(arm, observation: dict) -> None:
+    """Which arm produced the observation, for the identity rule only (the
+    comparison never reads this key)."""
+    observation["arm"] = arm.name
 
 
 def cases() -> list[Case]:
@@ -526,6 +609,13 @@ def cases() -> list[Case]:
     add(case("health-not-json", routes={"/health": lambda _: Route(200, raw=b"<html>hi</html>")}))
     add(case("health-empty-object", routes={"/health": lambda _: Route(200, {})}))
     add(case("health-no-status", routes={"/health": lambda _: Route(200, {"version": "1"})}))
+    # Python 3.11's int() refuses more than 4300 digits (a ValueError).
+    for digits, name in ((4301, "long-integer"), (4300, "integer-at-limit")):
+        add(case(f"health-{name}", routes={"/health": (lambda n: lambda daemon: Route(
+            200, raw=json.dumps(health(daemon.version))[:-1].encode() + b', "n": '
+            + b"9" * n + b"}"))(digits)}))
+    add(case("health-stalled-body", routes={"/health": lambda daemon: Route(
+        200, health(daemon.version), stall=6.0)}))
     add(case("bearer-rejected", env=TOKEN, routes={
         "/health": lambda _: Route(401, {"error": "unauthorized"}),
         "/api/hook/coordination-start": lambda _: Route(401, {"error": "unauthorized"})}))
@@ -590,6 +680,21 @@ def cases() -> list[Case]:
         add(case(f"maintainer-{name}", env=TOKEN, routes={
             "/health": healthy(), board: lambda _: BOARD_ON,
             "/api/maintainer": (lambda r: lambda _: r)(route)}))
+    # Python reads at most 65536 (board, maintainer refusal) or 1 MiB
+    # (maintainer success) bytes and returns while the rest never comes.
+    add(case("board-stalled-body", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: Route(200, raw=b"x" * 70000,
+                                                     headers={"X-PL-Board": "on"}, stall=6.0),
+        "/api/maintainer": lambda _: MAINTAINER_UNSET}))
+    add(case("maintainer-stalled-refusal", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: BOARD_ON,
+        "/api/maintainer": lambda _: Route(409, raw=MAINTAINER_UNSET.raw + b" " * 70000,
+                                           stall=6.0)}))
+    add(case("maintainer-stalled-success", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: BOARD_ON,
+        "/api/maintainer": lambda _: Route(200, raw=body({"rp_id": "box.example",
+                                                          "origin": "https://box.example"})
+                                           + b" " * (1 << 20), stall=6.0)}))
     add(case("maintainer-invalid-unreachable-daemon", env=TOKEN, routes={
         "/health": lambda _: Route(503, {"status": "degraded"}), board: lambda _: BOARD_ON,
         "/api/maintainer": lambda _: Route(409, {"error": "maintainer_https_required",
@@ -603,12 +708,13 @@ def cases() -> list[Case]:
     state_arg = ["--agent-state", "{HOME}/" + STATE]
     context = "POST /api/coordination/context"
 
-    def agent(id, *, answer=None, steps=None, argv=(), env=TOKEN, daemon=True):
+    def agent(id, *, answer=None, steps=None, argv=(), env=TOKEN, daemon=True, path=STATE):
         routes = {"/health": healthy(), board: lambda _: BOARD_ON,
                   "/api/maintainer": lambda _: MAINTAINER_UNSET}
         if answer is not None:
             routes[context] = answer
-        add(case(f"agent-state-{id}", [*state_arg, *argv], env=env, routes=routes,
+        state = ["--agent-state", "{HOME}/" + path] if path != STATE else state_arg
+        add(case(f"agent-state-{id}", [*state, *argv], env=env, routes=routes,
                  steps=steps if steps is not None else [saved_instance()], daemon=daemon))
 
     agent("authenticated", answer=context_proof())
@@ -649,6 +755,30 @@ def cases() -> list[Case]:
     agent("board-off", answer=context_proof(), env={})
     agent("claude-desktop", answer=context_proof(), argv=["--host", "claude-desktop"])
     agent("unreachable-daemon", daemon=False)
+    # Review round 1: bearer encoding, unhashable codes, nesting, long
+    # integers, path spelling, and a missing file under a redirected dir.
+    agent("error-list", answer=lambda _d, _r: Route(400, {"error": []}))
+    agent("error-object", answer=lambda _d, _r: Route(403, {"error": {}}))
+    agent("error-number", answer=lambda _d, _r: Route(400, {"error": 7}))
+    agent("deep-parsed", answer=context_proof(extra="[" * 977 + "]" * 977))
+    agent("too-deep", answer=context_proof(extra="[" * 978 + "]" * 978))
+    agent("too-deep-refusal", answer=lambda _d, _r: Route(
+        400, raw=b'{"error": ' + b"[" * 1200 + b"]" * 1200 + b"}"))
+    agent("long-integer", answer=context_proof(extra="9" * 4301))
+    agent("integer-at-limit", answer=context_proof(extra="9" * 4300))
+    agent("trailing-separator", answer=context_proof(), path=STATE + "/")
+    # The bearer is read again for each probe (doctor_cli.py:434, :650):
+    # the board answer rotates the token file before the next ones.
+    def rotate(daemon):
+        from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle)
+        _write_token_file(daemon.home / "secrets/token", "rotated-token")
+        return BOARD_ON
+    add(case("token-rotated-between-probes", state_arg,
+             env={"PSEUDOLIFE_MCP_TOKEN_FILE": "{HOME}/secrets/token"},
+             steps=[token_file("secrets/token"), saved_instance()], routes={
+                 "/health": healthy(), board: rotate,
+                 "/api/maintainer": lambda _: MAINTAINER_UNSET, context: context_proof()}))
+    agent("missing-under-redirect", answer=context_proof(), steps=[redirected_dir("state")])
 
     # Client registrations lend the credential a plain shell lacks.
     reg_routes = {"/health": healthy(auth=True), board: lambda _: BOARD_ON,
@@ -671,6 +801,15 @@ def cases() -> list[Case]:
         routes=reg_routes))
     add(case("claude-config-dir-registration", env={"CLAUDE_CONFIG_DIR": "{HOME}/claude-config"},
              steps=[write("claude-config/.claude.json",
+                          claude_registration({"PSEUDOLIFE_MCP_TOKEN": "fixture-token"}))],
+             routes=reg_routes))
+    add(case("claude-config-dir-dot-parts",
+             env={"CLAUDE_CONFIG_DIR": "{HOME}/./claude-config//"},
+             steps=[write("claude-config/.claude.json",
+                          claude_registration({"PSEUDOLIFE_MCP_TOKEN": "fixture-token"}))],
+             routes=reg_routes))
+    add(case("claude-config-dir-non-ascii", env={"CLAUDE_CONFIG_DIR": "{HOME}/claud\u00e9"},
+             steps=[write("claud\u00e9/.claude.json",
                           claude_registration({"PSEUDOLIFE_MCP_TOKEN": "fixture-token"}))],
              routes=reg_routes))
     codex_toml = ('[mcp_servers.pseudolife-memory]\ncommand = "pseudolife-mcp"\n'
@@ -747,6 +886,16 @@ def cases() -> list[Case]:
         routes=reg_routes))
     add(case("codex-config-undecodable", ["--host", "codex"],
              steps=[write(".codex/config.toml", b"\xff\xfe[x]\n")], routes=ok))
+    # tomllib refuses a leading U+FEFF; utf-8-sig removes one first.
+    add(case("codex-wake-bom", ["--host", "codex"], steps=[
+        write("bin/codex.exe", b""),
+        write(".codex/config.toml", "\ufeff" + codex('PSEUDOLIFE_WRITER_ID = "codex"\n'
+                                                     'PSEUDOLIFE_MCP_TOKEN = "t"\n' + cli))],
+        routes=ok))
+    add(case("codex-registration-bom", ["--host", "codex"], steps=[
+        write(".codex/config.toml", "\ufeff" + codex_toml)], routes=reg_routes))
+    add(case("codex-registration-double-bom", ["--host", "codex"], steps=[
+        write(".codex/config.toml", "\ufeff\ufeff" + codex_toml)], routes=reg_routes))
 
     # Codex's hook copy.
     add(case("codex-hooks-bundle-present", steps=[mkdir(".codex/pseudolife/hooks")], routes=ok))
@@ -771,6 +920,9 @@ def cases() -> list[Case]:
                                            + ("" if core.WINDOWS else ".exe")},
              steps=[write("bin/launcher" + ("" if core.WINDOWS else ".exe"), "x")], daemon=False))
     add(case("no-path", env={"PATH": ""}, daemon=False))
+    if core.WINDOWS:
+        # The working directory comes before PATH (CPython 3.11 on Windows).
+        add(case("which-cwd-first", steps=[write("cwd/" + launcher_name, "x")], daemon=False))
 
     # Git Bash (Windows): what Claude Code would run the plugin hooks with.
     if core.WINDOWS:
@@ -797,7 +949,25 @@ def cases() -> list[Case]:
 
 # --- mutants ------------------------------------------------------------------
 
+def _python_identity_mutant() -> Mutant:
+    """The native report claiming the oracle interpreter's identity (this
+    interpreter and the oracle package directory, resolved at run time):
+    the identity rule must not tokenize another arm's identity."""
+    source = (producers._SOURCE or RUST.parent) / "pseudolife_memory"
+    return Mutant(
+        "doctor-identity-claims-python", "doctor", "shim/src/cli/doctor/mod.rs",
+        '        ("interpreter", interpreter),\n        ("source", source),\n'
+        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
+        '        ("mcp", "not installed".to_owned()),',
+        f'        ("interpreter", r"{sys.executable}".to_owned()),\n'
+        f'        ("source", {{ let _ = (interpreter, source); r"{source}".to_owned() }}),\n'
+        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
+        '        ("mcp", "2.1.1".to_owned()),',
+        ("unreachable",))
+
+
 MUTANTS = [
+    _python_identity_mutant(),
     Mutant("doctor-version-mismatch-ok", "doctor", "shim/src/cli/doctor/mod.rs",
            'put(&mut report, "ok", json!(false));\n                    put(&mut report, "version_mismatch"',
            'put(&mut report, "ok", json!(true));\n                    put(&mut report, "version_mismatch"',
@@ -810,8 +980,8 @@ MUTANTS = [
            '"on - token present, principal allowed"', '"on - token present, principal admitted"',
            ("board-on",)),
     Mutant("doctor-skip-maintainer", "doctor", "shim/src/cli/doctor/mod.rs",
-           "(Some(token), true) => probes::maintainer(&url, token, short).await?,",
-           "(Some(_), true) => Map::new(),", ("maintainer-on",)),
+           "probes::maintainer(&url, &token, short).await?",
+           "{ let _ = &token; Map::new() }", ("maintainer-on",)),
     Mutant("doctor-registration-label", "doctor", "shim/src/cli/doctor/clients.rs",
            '"Claude Code registration ({claude})"', '"Claude registration ({claude})"',
            ("claude-registration-token",)),
@@ -823,6 +993,37 @@ MUTANTS = [
     Mutant("doctor-agent-proof-inverted", "doctor", "shim/src/cli/doctor/agent.rs",
            "if answer == expected {", "if answer != expected {",
            ("agent-state-authenticated", "agent-state-bad-proof")),
+    Mutant("doctor-maintainer-frozen-bearer", "doctor", "shim/src/cli/doctor/mod.rs",
+           "        match fresh() {\n", "        match Ok::<_, ()>(token.clone()) {\n",
+           ("token-rotated-between-probes",)),
+    Mutant("doctor-unbounded-body-read", "doctor", "shim/src/cli/doctor/probes.rs",
+           "let limit = if success(status) { limits.0 } else { limits.1 };",
+           "let limit: Option<usize> = None;",
+           ("board-stalled-body", "maintainer-stalled-refusal")),
+    Mutant("doctor-unhashable-error-refused", "doctor", "shim/src/cli/doctor/agent.rs",
+           'Some(Value::Array(_) | Value::Object(_)) => "unsupported_capability",', "",
+           ("agent-state-error-list", "agent-state-error-object")),
+    Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
+           "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",
+           ("agent-state-too-deep", "agent-state-deep-parsed")),
+    Mutant("doctor-int-digits-at-limit", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           "len() > INT_MAX_STR_DIGITS", "len() >= INT_MAX_STR_DIGITS",
+           ("health-integer-at-limit", "agent-state-integer-at-limit")),
+    Mutant("doctor-toml-bom-accepted", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           "if text.starts_with('\\u{feff}') {", "if text.starts_with('\\u{0}') {",
+           ("codex-wake-bom", "codex-registration-double-bom")),
+    Mutant("doctor-agent-path-unnormalized", "doctor", "shim/src/cli/doctor/agent.rs",
+           "let normalized = super::pyenv::path_str(value)?;", "let normalized = value.to_owned();",
+           ("agent-state-trailing-separator",)),
+    Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           'directories.insert(0, ".");', "", ("which-cwd-first",)),
+    Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
+           ("claude-config-dir-dot-parts",)),
+    Mutant("doctor-escape-upper-hex", "doctor", "shim/src/cli/doctor/pyjson.rs",
+           'format!("\\\\u{unit:04x}")', 'format!("\\\\u{unit:04X}")',
+           ("claude-config-dir-non-ascii",)),
     Mutant("doctor-drop-final-newline", "doctor", "shim/src/cli/doctor/mod.rs",
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]

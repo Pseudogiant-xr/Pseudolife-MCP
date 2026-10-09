@@ -417,12 +417,20 @@ fn a_healthy_daemon_is_checked_through_this_runtimes_own_shim() {
     assert_eq!(map["coordination_tools_present"], json!(true));
     assert_eq!(map["ok"], json!(false));
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(
-        map["recovery"],
-        json!(
-            "Check shim stderr and daemon MCP access, then compare daemon and shim versions; update the component missing instructions or annotations and reconnect."
-        )
-    );
+    if map.get("git_bash") == Some(&Value::Null) {
+        // A Windows host without Git for Windows: GitBashMissing names the
+        // failure and its recovery replaces the handshake's.
+        assert_eq!(map["error"], json!("GitBashMissing"));
+        assert_eq!(map["recovery"], map["git_bash_recovery"]);
+    } else {
+        assert!(!map.contains_key("error"));
+        assert_eq!(
+            map["recovery"],
+            json!(
+                "Check shim stderr and daemon MCP access, then compare daemon and shim versions; update the component missing instructions or annotations and reconnect."
+            )
+        );
+    }
     assert_eq!(
         map["wake"]["caps"],
         json!("unknown (the daemon does not report them; update it)")
@@ -464,7 +472,7 @@ type Prepare = fn(&Home, &mut Command);
 
 #[test]
 fn shapes_beyond_the_port_defer_before_any_request() {
-    let cases: [(&str, Prepare); 9] = [
+    let cases: [(&str, Prepare); 13] = [
         ("saved instance path through ..", |home, command| {
             std::fs::create_dir_all(home.0.join("x")).unwrap();
             std::fs::write(home.0.join("state.json"), b"{}").unwrap();
@@ -486,6 +494,21 @@ fn shapes_beyond_the_port_defer_before_any_request() {
         }),
         ("token outside Latin-1", |_, command| {
             command.env("PSEUDOLIFE_MCP_TOKEN", "token-\u{4e00}");
+        }),
+        (
+            "Latin-1 token the shim's httpx cannot send",
+            |_, command| {
+                command.env("PSEUDOLIFE_MCP_TOKEN", "fixture-t\u{f6}k");
+            },
+        ),
+        ("Python's int digit limit changed", |_, command| {
+            command.env("PYTHONINTMAXSTRDIGITS", "0");
+        }),
+        ("timeout past the cap", |_, command| {
+            command.args(["--timeout", "100000000000000000000"]);
+        }),
+        ("timeout just past the cap", |_, command| {
+            command.args(["--timeout", "1000000.5"]);
         }),
         ("invalid config.toml", |home, _| {
             std::fs::create_dir_all(home.0.join("codex")).unwrap();

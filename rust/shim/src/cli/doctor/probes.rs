@@ -11,14 +11,20 @@ pub(super) struct Answer {
     body: Vec<u8>,
 }
 
+/// How much of a body urllib's caller reads: `read(n)` for a success and
+/// for an HTTP error status, or the whole body (`None`).
+type Limits = (Option<usize>, Option<usize>);
+
 /// One GET the way urllib sends it: per-operation socket timeouts, no
-/// proxy, redirects followed only for the health probe.
+/// proxy, redirects followed only for the health probe, and a body read
+/// that stops where the caller's `read(n)` stops.
 async fn get(
     url: &str,
     path: &str,
     token: Option<&str>,
     timeout: Duration,
     follow: bool,
+    limits: Limits,
 ) -> Option<Answer> {
     let client = reqwest::Client::builder()
         .redirect(if follow {
@@ -35,7 +41,12 @@ async fn get(
         .ok()?;
     let mut request = client.get(format!("{}{path}", url.trim_end_matches('/')));
     if let Some(token) = token {
-        // Admitted by the preflight: Latin-1, no control characters.
+        // http.client encodes header values as Latin-1; anything else raises
+        // UnicodeEncodeError before sending, which the callers report as an
+        // unreachable daemon.
+        if !token.chars().all(|c| (c as u32) <= 0xff) {
+            return None;
+        }
         let bytes: Vec<u8> = format!("Bearer {token}")
             .chars()
             .map(|c| c as u32 as u8)
@@ -45,7 +56,7 @@ async fn get(
             reqwest::header::HeaderValue::from_bytes(&bytes).ok()?,
         );
     }
-    let response = request.send().await.ok()?;
+    let mut response = request.send().await.ok()?;
     let status = response.status().as_u16();
     let board = response
         .headers()
@@ -53,7 +64,17 @@ async fn get(
         .iter()
         .map(|value| value.as_bytes().to_vec())
         .collect();
-    let body = response.bytes().await.ok()?.to_vec();
+    let limit = if success(status) { limits.0 } else { limits.1 };
+    let mut body = Vec::new();
+    while limit.is_none_or(|limit| body.len() < limit) {
+        match response.chunk().await.ok()? {
+            Some(chunk) => body.extend_from_slice(&chunk),
+            None => break,
+        }
+    }
+    if let Some(limit) = limit {
+        body.truncate(limit);
+    }
     Some(Answer {
         status,
         board,
@@ -87,6 +108,7 @@ pub(super) async fn board(
         Some(token),
         timeout,
         false,
+        (Some(65536), Some(0)),
     )
     .await
     else {
@@ -110,7 +132,7 @@ pub(super) async fn board(
         }
         _ => return Err(Defer),
     };
-    let head = &answer.body[..answer.body.len().min(65536)];
+    let head = &answer.body;
     let served = head
         .iter()
         .any(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c));
@@ -163,9 +185,8 @@ const MAINTAINER_NOTE: &str = "Maintainer authority on this host also rests on t
 /// `json.loads(body)` on bytes: BOM-aware UTF-8, `None` where Python
 /// raises too.
 fn loads_bytes(body: &[u8]) -> Res<Option<Value>> {
-    if body.starts_with(&[0xef, 0xbb, 0xbf]) {
-        return loads_bytes(&body[3..]);
-    }
+    // utf-8-sig removes one BOM; a second one is json's ValueError.
+    let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(body);
     if body.iter().take(4).any(|byte| *byte == 0)
         || body.starts_with(&[0xff, 0xfe])
         || body.starts_with(&[0xfe, 0xff])
@@ -195,17 +216,14 @@ pub(super) async fn maintainer(
     timeout: Duration,
 ) -> Res<Map<String, Value>> {
     let mut out = Map::new();
-    let Some(answer) = get(url, "/api/maintainer", Some(token), timeout, false).await else {
+    let limits = (Some(1 << 20), Some(65536));
+    let Some(answer) = get(url, "/api/maintainer", Some(token), timeout, false, limits).await
+    else {
         out.insert("state".into(), json!("not_checked"));
         out.insert("line".into(), json!("not checked - daemon unreachable"));
         return Ok(out);
     };
-    let limit = if success(answer.status) {
-        1 << 20
-    } else {
-        65536
-    };
-    let parsed = loads_bytes(&answer.body[..answer.body.len().min(limit)])?;
+    let parsed = loads_bytes(&answer.body)?;
     let body = match parsed {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
@@ -270,7 +288,7 @@ pub(super) async fn maintainer(
 /// `shim.probe_health(url)`: the parsed body of any answer, `None` when
 /// there is none or it is not JSON.
 pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
-    let Some(answer) = get(url, "/health", None, timeout, true).await else {
+    let Some(answer) = get(url, "/health", None, timeout, true, (None, None)).await else {
         return Ok(None);
     };
     if (300..400).contains(&answer.status) {

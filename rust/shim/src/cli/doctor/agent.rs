@@ -34,7 +34,12 @@ fn redirect(path: &Path) -> Res<bool> {
 
 /// `Path(value).exists()` then `coordination_identity.read_legacy`.
 pub(super) fn read(value: &str, url: &str) -> Res<Saved> {
-    let path = Path::new(value);
+    // argparse's type=Path: pathlib's spelling (trailing separators and `.`
+    // parts dropped) is the path every later call sees.
+    let normalized = super::pyenv::path_str(value)?;
+    let path = Path::new(&normalized);
+    // `exists()` comes before read_legacy's ancestor walk, so a missing file
+    // is missing_registration whatever its ancestors are.
     if path
         .components()
         .any(|part| matches!(part, std::path::Component::ParentDir))
@@ -148,14 +153,58 @@ fn proof(credential: &str, items: &[&str]) -> String {
         .collect()
 }
 
+/// The deepest nesting `response.json()` decodes inside
+/// `probe_registration` before CPython 3.11 raises RecursionError: measured
+/// 2026-10-09 against the oracle doctor (Windows, CPython 3.11.9; the
+/// recursion limit of 1000 less the frames above the call). Deeper answers
+/// are RecursionError, which the doctor reports as `unavailable`.
+const PYTHON_JSON_DEPTH: usize = 978;
+
+/// `response.json()` as httpx decodes the body.
+enum Decoded {
+    Value(Value),
+    /// ValueError: not JSON, or an integer literal over 4300 digits.
+    Invalid,
+    /// RecursionError: nesting past the interpreter's limit.
+    TooDeep,
+}
+
+fn decode(body: &[u8]) -> Decoded {
+    // detect_encoding's utf-8-sig removes one BOM.
+    let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(body);
+    let Ok(text) = std::str::from_utf8(body) else {
+        return Decoded::Invalid;
+    };
+    if super::pyenv::json_depth(text.as_bytes()) > PYTHON_JSON_DEPTH {
+        return Decoded::TooDeep;
+    }
+    match super::pyenv::json_unbounded(text) {
+        Some(value) if !super::pyenv::long_integer(&value) => Decoded::Value(value),
+        _ => Decoded::Invalid,
+    }
+}
+
 /// The registration state `probe_registration` returns for a readable
-/// saved instance.
+/// saved instance. `token` is the credential snapshot taken afresh, as
+/// `CredentialProvider.from_environment().snapshot()` is at :650; its
+/// failure is the doctor's `unavailable`.
 pub(super) async fn probe(
     url: &str,
-    token: &str,
+    token: Result<Option<String>, ()>,
     state: &Map<String, Value>,
     timeout: Duration,
 ) -> &'static str {
+    let Ok(token) = token else {
+        return "unavailable";
+    };
+    let Some(token) = token.filter(|token| !token.is_empty()) else {
+        return "missing_bearer";
+    };
+    // httpx encodes header values as ASCII: anything else raises
+    // UnicodeEncodeError (a ValueError) before the request is sent.
+    if !token.is_ascii() {
+        return "unsupported_capability";
+    }
     let agent = state
         .get("agent_id")
         .and_then(Value::as_str)
@@ -166,13 +215,19 @@ pub(super) async fn probe(
         .no_proxy()
         .connect_timeout(timeout)
         .read_timeout(timeout)
+        // httpx's own agent string in the oracle environment.
+        .user_agent("python-httpx/0.28.1")
         .build()
     else {
         return "unavailable";
     };
+    let Ok(bearer) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) else {
+        // h11 refuses the value: a LocalProtocolError, a TransportError.
+        return "unavailable";
+    };
     let sent = client
         .post(format!("{url}/api/coordination/context"))
-        .header("Authorization", format!("Bearer {token}"))
+        .header("Authorization", bearer)
         .json(&json!({"agent_id": agent, "nonce": nonce, "read_only": true}))
         .send()
         .await;
@@ -183,14 +238,12 @@ pub(super) async fn probe(
     let Ok(body) = response.bytes().await else {
         return "unavailable";
     };
-    let parsed = || match std::str::from_utf8(&body) {
-        Ok(text) => serde_json::from_str::<Value>(text).ok(),
-        Err(_) => None,
-    };
     match status {
         200 => {
-            let Some(Value::Object(value)) = parsed() else {
-                return "unsupported_capability";
+            let value = match decode(&body) {
+                Decoded::Value(Value::Object(value)) => value,
+                Decoded::TooDeep => return "unavailable",
+                _ => return "unsupported_capability",
             };
             let field = |key: &str| value.get(key).and_then(Value::as_str);
             let (Some(bank_id), Some(principal), Some(answer)) =
@@ -229,14 +282,21 @@ pub(super) async fn probe(
         401 => "unauthorized",
         404 | 405 => "unsupported_capability",
         400 | 403 => {
-            let Some(value) = parsed() else {
-                return "unsupported_capability";
+            let value = match decode(&body) {
+                Decoded::Value(value) => value,
+                Decoded::TooDeep => return "unavailable",
+                Decoded::Invalid => return "unsupported_capability",
             };
-            match value.get("error").and_then(Value::as_str) {
-                Some("instance_not_found") => "missing_registration",
-                Some("invalid_credential") => "invalid_credential",
-                Some("principal_not_allowed") => "principal_not_allowed",
-                Some("unexpected_parameter") => "unsupported_capability",
+            match value.as_object().and_then(|value| value.get("error")) {
+                // dict.get with a list or dict key: TypeError (unhashable).
+                Some(Value::Array(_) | Value::Object(_)) => "unsupported_capability",
+                Some(Value::String(code)) => match code.as_str() {
+                    "instance_not_found" => "missing_registration",
+                    "invalid_credential" => "invalid_credential",
+                    "principal_not_allowed" => "principal_not_allowed",
+                    "unexpected_parameter" => "unsupported_capability",
+                    _ => "refused",
+                },
                 _ => "refused",
             }
         }

@@ -225,11 +225,68 @@ pub(super) fn read_text(path: &str, sig: bool) -> Text {
     Text::Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
+/// CPython 3.11's `int()` refuses decimal strings over 4300 digits
+/// (`sys.int_info.default_max_str_digits`): `json.loads` raises ValueError
+/// on such an integer literal.
+const INT_MAX_STR_DIGITS: usize = 4300;
+
+/// Whether `value` holds an integer literal Python's decoder refuses.
+pub(super) fn long_integer(value: &Value) -> bool {
+    match value {
+        Value::Number(number) => {
+            let text = number.to_string();
+            super::pyjson::is_int_token(&text)
+                && text.trim_start_matches('-').len() > INT_MAX_STR_DIGITS
+        }
+        Value::Array(items) => items.iter().any(long_integer),
+        Value::Object(items) => items.values().any(long_integer),
+        _ => false,
+    }
+}
+
+/// The deepest array/object nesting in a JSON text, strings skipped.
+pub(super) fn json_depth(text: &[u8]) -> usize {
+    let (mut depth, mut deepest, mut string, mut escaped) = (0usize, 0usize, false, false);
+    for byte in text {
+        if string {
+            match (escaped, byte) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// `json.loads` without this parser's nesting limit: `None` for any JSON
+/// error. Callers bound the depth first.
+pub(super) fn json_unbounded(text: &str) -> Option<Value> {
+    use serde::Deserialize;
+    let mut decoder = serde_json::Deserializer::from_str(text);
+    decoder.disable_recursion_limit();
+    let value = Value::deserialize(serde_stacker::Deserializer::new(&mut decoder)).ok()?;
+    decoder.end().ok()?;
+    Some(value)
+}
+
 /// `json.loads(text)`: `Ok(None)` where Python raises `ValueError` too; a
 /// failure that may be a Python success (NaN, Infinity, escapes that may be
 /// lone surrogates, nesting deeper than this parser's limit) defers.
 pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
     match serde_json::from_str::<Value>(text) {
+        Ok(value) if long_integer(&value) => Ok(None),
         Ok(value) => Ok(Some(value)),
         Err(error) => {
             if text.contains("NaN")
@@ -245,10 +302,15 @@ pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
     }
 }
 
-/// `tomllib.loads(text)`; any parse failure defers (TOML 1.0 parsers can
-/// still disagree at the edges, and Python's integers are unbounded).
-pub(super) fn toml_loads(text: &str) -> Res<toml::Table> {
-    text.parse::<toml::Table>().map_err(|_| Defer)
+/// `tomllib.loads(text)`: `Ok(None)` for a leading U+FEFF, which tomllib
+/// refuses (TOMLDecodeError, a ValueError) and this parser would skip; any
+/// other parse failure defers (TOML 1.0 parsers can still disagree at the
+/// edges, and Python's integers are unbounded).
+pub(super) fn toml_loads(text: &str) -> Res<Option<toml::Table>> {
+    if text.starts_with('\u{feff}') {
+        return Ok(None);
+    }
+    text.parse::<toml::Table>().map(Some).map_err(|_| Defer)
 }
 
 /// `os.path.join(directory, file)` for a file name with no drive or root.

@@ -92,26 +92,25 @@ pub(super) fn registration_credentials(env: &Env) -> Res<(Overrides, Option<Stri
     }
     // Then Codex: config.toml's mcp_servers.
     let codex = codex_config_path(env)?;
-    if let Text::Ok(text) = read_text(&codex, true) {
-        let data = toml_loads(&text)?;
-        if let Some(block) = data
+    if let Text::Ok(text) = read_text(&codex, true)
+        && let Some(data) = toml_loads(&text)?
+        && let Some(block) = data
             .get("mcp_servers")
             .and_then(toml::Value::as_table)
             .and_then(|servers| servers.get(SERVER))
             .and_then(toml::Value::as_table)
             .and_then(|server| server.get("env"))
             .and_then(toml::Value::as_table)
-        {
-            let text_of = |key: &str| {
-                block
-                    .get(key)
-                    .and_then(toml::Value::as_str)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_owned)
-            };
-            if let Some(found) = credential_overrides(env, text_of)? {
-                return Ok((found, Some(format!("Codex registration ({codex})"))));
-            }
+    {
+        let text_of = |key: &str| {
+            block
+                .get(key)
+                .and_then(toml::Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        if let Some(found) = credential_overrides(env, text_of)? {
+            return Ok((found, Some(format!("Codex registration ({codex})"))));
         }
     }
     Ok((Vec::new(), None))
@@ -329,15 +328,13 @@ pub(super) fn codex_wake(env: &Env) -> Res<CodexWake> {
     if !is_file(&config)? {
         return Ok(CodexWake::Fixed(json!({"registered": false})));
     }
-    let text = match read_text(&config, false) {
-        Text::Ok(text) => text,
-        _ => {
-            return Ok(CodexWake::Fixed(
-                json!({"registered": "unknown (unreadable config.toml)"}),
-            ));
-        }
+    let unreadable = || CodexWake::Fixed(json!({"registered": "unknown (unreadable config.toml)"}));
+    let Text::Ok(text) = read_text(&config, false) else {
+        return Ok(unreadable());
     };
-    let data = toml_loads(&text)?;
+    let Some(data) = toml_loads(&text)? else {
+        return Ok(unreadable());
+    };
     let server = match data.get("mcp_servers") {
         None => None,
         Some(toml::Value::Table(servers)) => servers.get(SERVER),
