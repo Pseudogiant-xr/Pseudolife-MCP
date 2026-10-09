@@ -349,7 +349,27 @@ fn resolved_label(r: Resolved) -> Option<String> {
 }
 
 /// The `memory_store` tool body (W1): the dict `_store_noted` returns.
+///
+/// Runs to completion in its own task: Python's body runs on a worker
+/// thread that a disconnecting client cannot stop (`_async_offload`), so a
+/// store whose caller hung up still lands.
 pub async fn memory_store(
+    ready: &Arc<Ready>,
+    cfg: &MemoryConfig,
+    caller: &Caller,
+    args: &Map<String, Value>,
+) -> Result<Value, ToolError> {
+    let (ready, cfg, caller, args) = (ready.clone(), cfg.clone(), caller.clone(), args.clone());
+    let task = async move { store_body(&ready, &cfg, &caller, &args).await };
+    if crate::mutants::active("store-cancellable") {
+        return task.await;
+    }
+    tokio::spawn(task)
+        .await
+        .map_err(|e| ToolError::Internal(e.to_string()))?
+}
+
+async fn store_body(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
     caller: &Caller,
@@ -487,11 +507,16 @@ mod tests {
         let main = include_str!("main.rs");
         for (src, needle) in [(http, "harness_route::call"), (main, "mod harness_route;")] {
             let lines: Vec<&str> = src.lines().collect();
-            let hits: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].contains(needle)).collect();
+            let hits: Vec<usize> = (0..lines.len())
+                .filter(|&i| lines[i].contains(needle))
+                .collect();
             assert_eq!(hits.len(), 1, "{needle}");
             let gated = (hits[0].saturating_sub(2)..hits[0])
                 .any(|i| lines[i].trim() == "#[cfg(feature = \"harness\")]");
-            assert!(gated, "{needle} must sit under #[cfg(feature = \"harness\")]");
+            assert!(
+                gated,
+                "{needle} must sit under #[cfg(feature = \"harness\")]"
+            );
         }
     }
 

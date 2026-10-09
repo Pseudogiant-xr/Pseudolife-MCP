@@ -67,7 +67,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
-MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw"]
+MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
+           "store-cancellable"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -111,6 +112,14 @@ class Mcp:
             "clientInfo": {"name": "w2e-harness", "version": "0"}}})
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    def abandon(self, name: str, args: dict, headers=()) -> None:
+        self.ids += 1
+        body = json.dumps({"jsonrpc": "2.0", "id": self.ids, "method": "tools/call",
+                           "params": {"name": name, "arguments": args}}).encode()
+        abandon(self.port, "/mcp", [AUTH, ("Content-Type", "application/json"),
+                                    ("Accept", "application/json, text/event-stream"),
+                                    ("mcp-session-id", self.session), *headers], body)
+
     def call(self, name: str, args: dict, headers=()) -> dict:
         self.ids += 1
         msg = self._post({"jsonrpc": "2.0", "id": self.ids, "method": "tools/call",
@@ -121,6 +130,21 @@ class Mcp:
             value = json.loads(res["content"][0]["text"])
         # FastMCP wraps a non-object return under "result".
         return {"isError": bool(res.get("isError")), "value": value}
+
+
+CRLF = chr(13) + chr(10)
+
+
+def abandon(port: int, path: str, headers: list, body: bytes, after_s: float = 0.15) -> None:
+    """Send a request and close the socket before the answer: a client that
+    disconnects mid-call (a killed session, a timeout)."""
+    import socket
+    s = socket.create_connection(("127.0.0.1", port), timeout=10)
+    head = [f"POST {path} HTTP/1.1", f"Host: 127.0.0.1:{port}", f"Content-Length: {len(body)}",
+            *[f"{k}: {v}" for k, v in headers], "", ""]
+    s.sendall(CRLF.join(head).encode("latin-1") + body)
+    time.sleep(after_s)
+    s.close()
 
 
 def rust_tool(port: int, name: str, args: dict, headers=()) -> dict:
@@ -191,6 +215,10 @@ SCENARIOS: dict[str, dict] = {
             store("Short handle", episode="abc"),
             store("Empty handle", episode=""),
             store("Empty header falls through", [sess("")]),
+            # The client hangs up mid-call; Python finishes the store on its
+            # worker thread regardless.
+            {**store("Stored although the caller disconnected", [sess("sess-a")]), "abandon": True},
+            store("The next store after a disconnect", [sess("sess-a")]),
         ],
     },
     # The gate on: meta filter, surprise threshold, contradiction admission.
@@ -466,6 +494,15 @@ def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict |
         return {"isError": r["status"] != 200, "value": r.get("json", r.get("bytes"))}
     args = resolve_args(op["args"], dsn)
     headers = [tuple(h) for h in op.get("headers", [])]
+    if op.get("abandon"):
+        if rust:
+            abandon(port, f"/api/_harness/tool/{op['name']}",
+                    [AUTH, ("Content-Type", "application/json"), *headers],
+                    json.dumps(args).encode())
+        else:
+            mcp.abandon(op["name"], args, headers)
+        time.sleep(4)  # let a call that survives the disconnect finish
+        return {"isError": False, "value": "<abandoned>"}
     if rust:
         return rust_tool(port, op["name"], args, headers)
     return mcp.call(op["name"], args, headers)
@@ -608,6 +645,11 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
                             daemons.base_env(home, w1a.rust_env(side_env(scn, dsn))))
     steps, stats, numeric = [], {}, {}
     try:
+        # The oracle's template was booted once to seed it and once to run,
+        # so its writer-lease epoch is 2: boot the Rust bank twice as well.
+        d.start(300)
+        w1a.wait_settled([d.port])
+        d.stop()
         d.start(300)
         w1a.wait_settled([d.port])
         for i, rec in enumerate(golden["steps"]):
