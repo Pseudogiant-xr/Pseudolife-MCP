@@ -77,6 +77,7 @@ class Normalizer:
         # Audit seqs relabelled inside a fan-out burst: both producers write
         # a burst's send events in raw recipient-id order, which is free.
         self.seq_map: dict[int, int] = {}
+        self.message_seq: dict[str, int] = {}
         self.problems: list[str] = []
 
     # -- id registry ------------------------------------------------------
@@ -110,6 +111,7 @@ class Normalizer:
         """``sends``: every send event (seq, agent_id, recipient_agent_id,
         created_at, request_id) in seq order."""
         groups: list[list[dict]] = []
+        self.message_seq = {r["message_id"]: r["seq"] for r in sends if r.get("message_id")}
         for r in sends:
             key = (r["agent_id"], r["created_at"], r["request_id"])
             if groups and groups[-1][0]["_key"] == key and groups[-1][-1]["seq"] + 1 == r["seq"]:
@@ -126,6 +128,22 @@ class Normalizer:
             by_ordinal = sorted(g, key=lambda r: self.ids.get(r["recipient_agent_id"], 1 << 30))
             for new, r in zip(sorted(x["seq"] for x in g), by_ordinal):
                 self.seq_map[r["seq"]] = new
+
+    def _burst_order(self, v: list, key: str | None) -> list:
+        """Lists ordered by audit seq (history and receive ``messages``,
+        the Console's ``events``): reorder by the relabelled seq, so the
+        free order inside a burst cannot differ."""
+        if key == "messages" and v and all(isinstance(x, dict) and x.get("message_id") in self.message_seq
+                                           for x in v):
+            seqs = [self.message_seq[x["message_id"]] for x in v]
+            if seqs == sorted(seqs):
+                return sorted(v, key=lambda x: self.seq_map.get(self.message_seq[x["message_id"]],
+                                                                self.message_seq[x["message_id"]]))
+        if key == "events" and v and all(isinstance(x, dict) and isinstance(x.get("seq"), int) for x in v):
+            seqs = [x["seq"] for x in v]
+            if seqs == sorted(seqs, reverse=True):
+                return sorted(v, key=lambda x: self.seq_map.get(x["seq"], x["seq"]), reverse=True)
+        return v
 
     def _id_text(self, s: str) -> str:
         def full(m):
@@ -152,6 +170,7 @@ class Normalizer:
                 if raw != sorted(raw, key=str):
                     return f"<{key} not sorted by {field}>"
                 return sorted((self.value(x, key) for x in v), key=lambda x: json.dumps(x, sort_keys=True))
+            v = self._burst_order(v, key)
             out = [self.value(x, key) for x in v]
             # Sorted by raw random id on both arms: its order is free.
             return sorted(out, key=json.dumps) if key in UNORDERED_KEYS else out

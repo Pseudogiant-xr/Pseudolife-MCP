@@ -208,10 +208,11 @@ class Arm:
         import psycopg
         with psycopg.connect(self.dsn, autocommit=True) as conn:
             rows = conn.execute(
-                "SELECT seq, agent_id, recipient_agent_id, created_at, payload::jsonb->>'request_id' "
-                "FROM coordination_events WHERE event='send' ORDER BY seq").fetchall()
+                "SELECT seq, agent_id, recipient_agent_id, created_at, payload::jsonb->>'request_id', "
+                "message_id FROM coordination_events WHERE event='send' ORDER BY seq").fetchall()
         self.norm.refresh_seqs([{"seq": r[0], "agent_id": r[1], "recipient_agent_id": r[2],
-                                 "created_at": r[3], "request_id": r[4]} for r in rows])
+                                 "created_at": r[3], "request_id": r[4], "message_id": r[5]}
+                                for r in rows])
 
 
 def normalize_response(resp: dict, norm: Normalizer) -> dict:
