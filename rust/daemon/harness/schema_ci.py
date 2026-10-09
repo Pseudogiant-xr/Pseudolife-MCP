@@ -70,9 +70,9 @@ def main(argv: list[str] | None = None) -> int:
             binary = args.rust_test_bin.resolve()
         else:
             build = subprocess.run(
-                ["cargo", "test", "--manifest-path", "rust/Cargo.toml", "-p", PACKAGE,
+                ["cargo", "test", "--manifest-path", "Cargo.toml", "-p", PACKAGE,
                  "--no-run", "--message-format=json", "--features", "mutants", "-j", "3"],
-                cwd=REPO, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8",
+                cwd=REPO / "rust", env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8",
             )
             if build.returncode:
                 # Keep Cargo's failure code, including when the JSON stream is partial.
