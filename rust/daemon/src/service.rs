@@ -175,15 +175,11 @@ impl Service {
         if inner.embedder.is_none() {
             // Built once and kept across failed attempts; a failure here
             // records nothing, as in Python (it is outside the abandon path).
-            let dir = self
-                .model_dir
-                .clone()
-                .ok_or_else(|| "PSEUDOLIFE_DAEMON_ONNX_DIR is not set".to_string())?;
+            let dir = self.model_dir.clone();
             let threads = self.ort_threads;
-            let prefix = self.config.embedding.query_prefix.clone();
-            let max_tokens = self.config.embedding.max_seq_length.max(1) as usize;
+            let config = self.config.embedding.clone();
             let embedder = tokio::task::spawn_blocking(move || {
-                Embedder::load(&dir, threads, &prefix, max_tokens)
+                Embedder::load_config(&config, dir.as_deref(), threads)
             })
             .await
             .map_err(|e| e.to_string())?
@@ -195,7 +191,13 @@ impl Service {
             });
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
-        match crate::bank::hydrate(storage.client(), &self.config.memory.bands).await {
+        match crate::bank::hydrate(
+            storage.client(),
+            &self.config.memory.bands,
+            embedder.embedding_dim(),
+        )
+        .await
+        {
             Ok(bank) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
@@ -214,7 +216,7 @@ impl Service {
             }
             Err(e) => {
                 if let Some(stale) = e.downcast_ref::<crate::bank::StaleDims>() {
-                    let msg = self.stale_dims_message(stale);
+                    let msg = self.stale_dims_message(stale, embedder.embedding_dim());
                     self.update(|s| s.init_refusal = Some(msg.clone()));
                     let mut inner2 = inner;
                     self.update(|s| s.not_ready = None);
@@ -240,7 +242,7 @@ impl Service {
     }
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
-    fn stale_dims_message(&self, s: &crate::bank::StaleDims) -> String {
+    fn stale_dims_message(&self, s: &crate::bank::StaleDims, dim: usize) -> String {
         let dims: Vec<String> = s.dims.iter().map(|d| d.to_string()).collect();
         format!(
             "Refusing to serve: {} hydrated row(s) in the bank at {} are embedded at {} dims, but the live \
@@ -255,7 +257,7 @@ impl Service {
             self.data_dir.display(),
             dims.join(", "),
             self.config.embedding.model_name,
-            crate::bank::DIM,
+            dim,
         )
     }
 

@@ -158,6 +158,15 @@ jobs:
           shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
+      - name: Retain default static candidate
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $daemonName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
+      - name: Build embedding candidate
+        run: cargo build --locked --release -p pseudolife-daemon --bin pseudolife-daemon --features mutants -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -166,6 +175,8 @@ jobs:
             rust/target/release/pseudolife-stdio.exe
             rust/target/release/pseudolife-daemon
             rust/target/release/pseudolife-daemon.exe
+            rust/target/release/pseudolife-daemon-static
+            rust/target/release/pseudolife-daemon-static.exe
           if-no-files-found: error
 
   parity-checks:
@@ -208,7 +219,7 @@ jobs:
           path: rust/target/release
       - name: Restore executable permission
         if: runner.os == 'Linux'
-        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon
+        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon rust/target/release/pseudolife-daemon-static
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -228,6 +239,19 @@ jobs:
           $env:PSEUDOLIFE_PORT_EPISODE_JSON = ConvertTo-Json -InputObject @($episodeCandidate) -Compress
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
+          exit $LASTEXITCODE
+      # This fixture creates a small graph locally; no model is downloaded.
+      - name: Offline embedding golden and mutant row
+        if: matrix.suite == 'eval'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          python -m pytest -q rust/daemon/harness/test_embedding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/release' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
           exit $LASTEXITCODE
       - name: CLI differential harness
         if: matrix.suite == 'cli'
@@ -267,7 +291,7 @@ jobs:
         env:
           PL_HARNESS_SLICE: http
         run: |
-          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PL_STATIC_DEFAULT_BIN = $candidate
           python -m pytest -q rust/daemon/harness/test_static.py

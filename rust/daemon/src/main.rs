@@ -7,9 +7,12 @@ mod auth;
 mod bank;
 mod config;
 mod embed;
+mod embedding_math;
 mod health;
 mod http;
 mod mutants;
+mod onnx_artifacts;
+mod onnx_runtime;
 mod principals;
 mod pyjson;
 mod routes;
@@ -53,6 +56,13 @@ fn main() {
     {
         println!("{}", mutants::supports_loopback_bind_fixture());
         return;
+    }
+    // The embedding harness exercises the same loader and encoder without a bank.
+    if std::env::var_os("PSEUDOLIFE_DAEMON_EMBED_PROBE").is_some() {
+        match embed::probe() {
+            Ok(()) => return,
+            Err(e) => fail(1, &e.to_string()),
+        }
     }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
