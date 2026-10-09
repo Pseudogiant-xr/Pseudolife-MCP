@@ -125,6 +125,8 @@ pub fn error_text(e: &tokio_postgres::Error) -> String {
 /// The open writer session plus what `ping` and `cached_bank_id` need.
 pub struct Storage {
     client: Client,
+    /// Serialize multi-statement writes on this one writer session.
+    writer: tokio::sync::Mutex<()>,
     conn_task: JoinHandle<()>,
     /// The DSN as parsed, without the application-name fallback: Python's
     /// `ping` and `cached_bank_id` connections pass none.
@@ -531,6 +533,7 @@ impl Storage {
         match built.await {
             Ok(lease_epoch) => Ok(Storage {
                 client,
+                writer: tokio::sync::Mutex::new(()),
                 conn_task,
                 base,
                 lease_epoch,
@@ -645,6 +648,10 @@ impl Storage {
     /// The writer session, for later slices.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    pub async fn writer_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.writer.lock().await
     }
 
     /// `close()`: end the session and wait until the connection task has

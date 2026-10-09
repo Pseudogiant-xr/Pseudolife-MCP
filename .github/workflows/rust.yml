@@ -207,6 +207,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: Dream cursor differential harness
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w3d
+        run: |
+          cargo build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --bin dream-contract --features contract-harness,mutants -j 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'dream-contract.exe' } else { 'dream-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
+          $env:PL_DREAM_CONTRACT_BINARY = $candidate
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py mutants --ci-fixture --rust-bin $candidate
+          exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always()
         uses: actions/upload-artifact@v4

@@ -6,6 +6,7 @@
 mod auth;
 mod bank;
 mod config;
+mod dream;
 mod embed;
 mod health;
 mod http;
