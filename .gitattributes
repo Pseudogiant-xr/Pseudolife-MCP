@@ -23,3 +23,4 @@ docs/evidence/rust-stream-c-episode-20261009.json linguist-generated=true
 
 # The MCP tool catalogue is compared byte for byte with the Python daemon.
 rust/daemon/src/mcp/tools.jsonl text eol=lf
+rust/daemon/harness/goldens/mcp.json text eol=lf
