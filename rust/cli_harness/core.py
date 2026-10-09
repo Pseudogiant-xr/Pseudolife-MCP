@@ -75,6 +75,10 @@ class Case:
     # Needs real oracle daemons on disposable banks: live local acceptance
     # only, never golden replay (the candidate still needs the oracle daemon).
     bank: bool = False
+    # False: the observation shows state the row seeds afresh in every harness
+    # process (wall-clock stamps, random codes), so the case runs live only;
+    # --record and --golden leave it out. The row's .md names the reason.
+    golden: bool = True
     # The case exists to show both arms succeed (a trickle, an https daemon):
     # an arm with empty stdout makes the case differ instead of matching
     # vacuously when both arms fail the same quiet way.

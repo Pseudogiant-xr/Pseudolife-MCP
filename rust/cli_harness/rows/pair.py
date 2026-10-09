@@ -477,8 +477,9 @@ def cases() -> list[core.Case]:
          health={"status": "ok", "auth": {"a": [1, 2.5, None]}})
     live("refused-degraded", [CODE], health={"status": "degraded", "auth": True})
     live("refused-health-not-object", [CODE], health=[1])
-    port, url = target()
-    add(case("refused-unreachable", [url, CODE, "--json"]))
+    # A closed loopback port (core.DEAD_DAEMON_URL): the same URL in every run,
+    # so the case replays as a golden.
+    add(case("refused-unreachable", [core.DEAD_DAEMON_URL, CODE, "--json"]))
     live("refused-existing-token-file", [CODE, "--token-file", "{HOME}" + SEP + "existing.token",
                                          "--json"],
          seed=seed_file("existing.token", "kept-" + "k" * 32))

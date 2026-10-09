@@ -1,0 +1,1921 @@
+{
+ "row": "CLI-MOVE-REFUSALS",
+ "platform": "linux",
+ "oracle_commit": "846ccd38",
+ "cases": {
+  "oracle-test-no-arguments": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tdG8K",
+   "window": [
+    1791577699.4540489,
+    1791577699.5031056
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "oracle-test-proxycommand": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiBhcmd1bWVudCAtLXRvOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
+   "window": [
+    1791577699.9066567,
+    1791577699.961357
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "oracle-test-ftp-url": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577700.413749,
+    1791577700.4827912
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCgpNb3ZlIHRoaXMgaG9zdCdzIERvY2tlci10aWVyIGJhbmsgdG8gYW5vdGhlciBEb2NrZXItdGllciBjaGVja291dCBob3N0IG92ZXIKa2V5LWJhc2VkIHNzaDogcHJlZmxpZ2h0LCBmaW5hbCBiYWNrdXAgZnJvbSB0aGUgc3RvcHBlZCBzb3VyY2UsIGRhdGFiYXNlCmZlbmNlLCByZXN0b3JlIGFuZCB2ZXJpZnkgb24gdGhlIHRhcmdldCwgc3RhcnQgaXQgb25jZSwgcmUtcG9pbnQgdGhpcwptYWNoaW5lJ3MgY2xpZW50cy4gQSBmYWlsdXJlIHJvbGxzIGJhY2suIEV4aXQgY29kZXM6IDAgbW92ZWQsIDEgZmFpbGVkIGFuZApyb2xsZWQgYmFjaywgMiB1c2FnZSBvciBub3QgY29uZmlybWVkLCA0IHJlZnVzZWQgYmVmb3JlIGFueSBjaGFuZ2UsIDUgbW92ZWQKYnV0IHJlLXBvaW50aW5nIGZhaWxlZCwgNiBmYWlsZWQgYW5kIHRoZSByb2xsYmFjayBjb3VsZCBub3QgZmluaXNoLiBSdW4gaXQKdW5kZXIgdG11eCwgc2NyZWVuIG9yIG5vaHVwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tdG8gU1NILVRBUkdFVCAgICAgICB0aGUgdGFyZ2V0IGhvc3QgYXMgc3NoIHRha2VzIGl0IChyb290QGJveCwgb3IgYQogICAgICAgICAgICAgICAgICAgICAgICB+Ly5zc2gvY29uZmlnIGFsaWFzKQogIC0tdGFyZ2V0LWNoZWNrb3V0IFBBVEgKICAgICAgICAgICAgICAgICAgICAgICAgdGhlIGNoZWNrb3V0IG9uIHRoZSB0YXJnZXQgKGRlZmF1bHQgfi9zcmMvUHNldWRvbGlmZS0KICAgICAgICAgICAgICAgICAgICAgICAgTUNQKQogIC0tdGFyZ2V0LXVybCBVUkwgICAgICB0aGUgVVJMIGNsaWVudHMgd2lsbCB1c2UgZm9yIHRoZSB0YXJnZXQgKGRlZmF1bHQ6IGl0cwogICAgICAgICAgICAgICAgICAgICAgICBgZXhwb3NlIHN0YXR1c2ApCiAgLS1uby1rZWVwLXRva2VucyAgICAgIGRvIG5vdCBjYXJyeSB0aGUgZW52aXJvbm1lbnQgaWRlbnRpdGllczsgaW52aXRlIGVhY2gKICAgICAgICAgICAgICAgICAgICAgICAgbWFjaGluZSBvbiB0aGUgdGFyZ2V0IGFnYWluCiAgLS1yZXN1bWUgICAgICAgICAgICAgIG92ZXJ3cml0ZSB0aGUgaGFsZi1yZXN0b3JlZCBiYW5rIGFuIGVhcmxpZXIgYXR0ZW1wdCBvZgogICAgICAgICAgICAgICAgICAgICAgICB0aGlzIG1vdmUgbGVmdCBvbiB0aGUgdGFyZ2V0CiAgLS1kcnktcnVuICAgICAgICAgICAgIHNob3cgdGhlIHBsYW47IGNoYW5nZSBub3RoaW5nCiAgLS15ZXMgICAgICAgICAgICAgICAgIG1vdmUgd2l0aG91dCBhc2tpbmcKICAtLWpzb24gICAgICAgICAgICAgICAgb25lIEpTT04gcmVwb3J0IG9uIHN0ZG91dAo=",
+   "stderr": "",
+   "window": [
+    1791577700.9074955,
+    1791577700.9489548
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "help-short": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCgpNb3ZlIHRoaXMgaG9zdCdzIERvY2tlci10aWVyIGJhbmsgdG8gYW5vdGhlciBEb2NrZXItdGllciBjaGVja291dCBob3N0IG92ZXIKa2V5LWJhc2VkIHNzaDogcHJlZmxpZ2h0LCBmaW5hbCBiYWNrdXAgZnJvbSB0aGUgc3RvcHBlZCBzb3VyY2UsIGRhdGFiYXNlCmZlbmNlLCByZXN0b3JlIGFuZCB2ZXJpZnkgb24gdGhlIHRhcmdldCwgc3RhcnQgaXQgb25jZSwgcmUtcG9pbnQgdGhpcwptYWNoaW5lJ3MgY2xpZW50cy4gQSBmYWlsdXJlIHJvbGxzIGJhY2suIEV4aXQgY29kZXM6IDAgbW92ZWQsIDEgZmFpbGVkIGFuZApyb2xsZWQgYmFjaywgMiB1c2FnZSBvciBub3QgY29uZmlybWVkLCA0IHJlZnVzZWQgYmVmb3JlIGFueSBjaGFuZ2UsIDUgbW92ZWQKYnV0IHJlLXBvaW50aW5nIGZhaWxlZCwgNiBmYWlsZWQgYW5kIHRoZSByb2xsYmFjayBjb3VsZCBub3QgZmluaXNoLiBSdW4gaXQKdW5kZXIgdG11eCwgc2NyZWVuIG9yIG5vaHVwLgoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAogIC0tdG8gU1NILVRBUkdFVCAgICAgICB0aGUgdGFyZ2V0IGhvc3QgYXMgc3NoIHRha2VzIGl0IChyb290QGJveCwgb3IgYQogICAgICAgICAgICAgICAgICAgICAgICB+Ly5zc2gvY29uZmlnIGFsaWFzKQogIC0tdGFyZ2V0LWNoZWNrb3V0IFBBVEgKICAgICAgICAgICAgICAgICAgICAgICAgdGhlIGNoZWNrb3V0IG9uIHRoZSB0YXJnZXQgKGRlZmF1bHQgfi9zcmMvUHNldWRvbGlmZS0KICAgICAgICAgICAgICAgICAgICAgICAgTUNQKQogIC0tdGFyZ2V0LXVybCBVUkwgICAgICB0aGUgVVJMIGNsaWVudHMgd2lsbCB1c2UgZm9yIHRoZSB0YXJnZXQgKGRlZmF1bHQ6IGl0cwogICAgICAgICAgICAgICAgICAgICAgICBgZXhwb3NlIHN0YXR1c2ApCiAgLS1uby1rZWVwLXRva2VucyAgICAgIGRvIG5vdCBjYXJyeSB0aGUgZW52aXJvbm1lbnQgaWRlbnRpdGllczsgaW52aXRlIGVhY2gKICAgICAgICAgICAgICAgICAgICAgICAgbWFjaGluZSBvbiB0aGUgdGFyZ2V0IGFnYWluCiAgLS1yZXN1bWUgICAgICAgICAgICAgIG92ZXJ3cml0ZSB0aGUgaGFsZi1yZXN0b3JlZCBiYW5rIGFuIGVhcmxpZXIgYXR0ZW1wdCBvZgogICAgICAgICAgICAgICAgICAgICAgICB0aGlzIG1vdmUgbGVmdCBvbiB0aGUgdGFyZ2V0CiAgLS1kcnktcnVuICAgICAgICAgICAgIHNob3cgdGhlIHBsYW47IGNoYW5nZSBub3RoaW5nCiAgLS15ZXMgICAgICAgICAgICAgICAgIG1vdmUgd2l0aG91dCBhc2tpbmcKICAtLWpzb24gICAgICAgICAgICAgICAgb25lIEpTT04gcmVwb3J0IG9uIHN0ZG91dAo=",
+   "stderr": "",
+   "window": [
+    1791577701.4111798,
+    1791577701.455741
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "missing-to-with-flags": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tdG8K",
+   "window": [
+    1791577701.9095697,
+    1791577701.9510648
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-path": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577702.415522,
+    1791577702.4660504
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-query": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577702.91331,
+    1791577702.9770088
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-fragment": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577703.4198713,
+    1791577703.4752455
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-credentials": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577703.916866,
+    1791577703.9771824
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-scheme": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577704.418199,
+    1791577704.474661
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-no-scheme": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577704.9277751,
+    1791577705.0194976
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577705.4228196,
+    1791577705.4851136
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-port-range": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577705.9296143,
+    1791577705.9935243
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-port-letters": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577706.4211059,
+    1791577706.4756103
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-empty-host": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577706.9233134,
+    1791577706.9785662
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-space": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577707.4266872,
+    1791577707.4847212
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-nbsp": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577707.933281,
+    1791577707.9946468
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-before-to": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577708.4288526,
+    1791577708.4826584
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577708.9293125,
+    1791577708.96738
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-space": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577709.4375346,
+    1791577709.4873857
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-tab": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577709.936089,
+    1791577709.9806626
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-newline": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577710.4365406,
+    1791577710.4869463
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-ideographic-space": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577710.9323223,
+    1791577710.9761395
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-separator-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577711.431486,
+    1791577711.4752557
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-control": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577711.9349427,
+    1791577712.0035863
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-escape": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577712.4344275,
+    1791577712.503805
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-after-valid-url": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577712.9365156,
+    1791577712.986866
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "to-before-checkout": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577713.4374359,
+    1791577713.512773
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "checkout-newline": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtY2hlY2tvdXQgaG9sZHMgYSBjb250cm9sIGNoYXJhY3Rlcgo=",
+   "window": [
+    1791577713.94058,
+    1791577714.021402
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "checkout-cr": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtY2hlY2tvdXQgaG9sZHMgYSBjb250cm9sIGNoYXJhY3Rlcgo=",
+   "window": [
+    1791577714.4427407,
+    1791577714.5138383
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "checkout-cr-slashes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtY2hlY2tvdXQgaG9sZHMgYSBjb250cm9sIGNoYXJhY3Rlcgo=",
+   "window": [
+    1791577714.94071,
+    1791577715.006267
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-help-columns": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdIFstLXRhcmdldC11cmwgVVJMXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXSBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCgpNb3ZlIHRoaXMgaG9zdCdzIERvY2tlci10aWVyIGJhbmsgdG8gYW5vdGhlciBEb2NrZXItdGllciBjaGVja291dCBob3N0IG92ZXIga2V5LWJhc2VkIHNzaDoKcHJlZmxpZ2h0LCBmaW5hbCBiYWNrdXAgZnJvbSB0aGUgc3RvcHBlZCBzb3VyY2UsIGRhdGFiYXNlIGZlbmNlLCByZXN0b3JlIGFuZCB2ZXJpZnkgb24gdGhlIHRhcmdldCwKc3RhcnQgaXQgb25jZSwgcmUtcG9pbnQgdGhpcyBtYWNoaW5lJ3MgY2xpZW50cy4gQSBmYWlsdXJlIHJvbGxzIGJhY2suIEV4aXQgY29kZXM6IDAgbW92ZWQsIDEKZmFpbGVkIGFuZCByb2xsZWQgYmFjaywgMiB1c2FnZSBvciBub3QgY29uZmlybWVkLCA0IHJlZnVzZWQgYmVmb3JlIGFueSBjaGFuZ2UsIDUgbW92ZWQgYnV0IHJlLQpwb2ludGluZyBmYWlsZWQsIDYgZmFpbGVkIGFuZCB0aGUgcm9sbGJhY2sgY291bGQgbm90IGZpbmlzaC4gUnVuIGl0IHVuZGVyIHRtdXgsIHNjcmVlbiBvciBub2h1cC4KCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQKICAtLXRvIFNTSC1UQVJHRVQgICAgICAgdGhlIHRhcmdldCBob3N0IGFzIHNzaCB0YWtlcyBpdCAocm9vdEBib3gsIG9yIGEgfi8uc3NoL2NvbmZpZyBhbGlhcykKICAtLXRhcmdldC1jaGVja291dCBQQVRICiAgICAgICAgICAgICAgICAgICAgICAgIHRoZSBjaGVja291dCBvbiB0aGUgdGFyZ2V0IChkZWZhdWx0IH4vc3JjL1BzZXVkb2xpZmUtTUNQKQogIC0tdGFyZ2V0LXVybCBVUkwgICAgICB0aGUgVVJMIGNsaWVudHMgd2lsbCB1c2UgZm9yIHRoZSB0YXJnZXQgKGRlZmF1bHQ6IGl0cyBgZXhwb3NlIHN0YXR1c2ApCiAgLS1uby1rZWVwLXRva2VucyAgICAgIGRvIG5vdCBjYXJyeSB0aGUgZW52aXJvbm1lbnQgaWRlbnRpdGllczsgaW52aXRlIGVhY2ggbWFjaGluZSBvbiB0aGUgdGFyZ2V0CiAgICAgICAgICAgICAgICAgICAgICAgIGFnYWluCiAgLS1yZXN1bWUgICAgICAgICAgICAgIG92ZXJ3cml0ZSB0aGUgaGFsZi1yZXN0b3JlZCBiYW5rIGFuIGVhcmxpZXIgYXR0ZW1wdCBvZiB0aGlzIG1vdmUgbGVmdCBvbgogICAgICAgICAgICAgICAgICAgICAgICB0aGUgdGFyZ2V0CiAgLS1kcnktcnVuICAgICAgICAgICAgIHNob3cgdGhlIHBsYW47IGNoYW5nZSBub3RoaW5nCiAgLS15ZXMgICAgICAgICAgICAgICAgIG1vdmUgd2l0aG91dCBhc2tpbmcKICAtLWpzb24gICAgICAgICAgICAgICAgb25lIEpTT04gcmVwb3J0IG9uIHN0ZG91dAo=",
+   "stderr": "",
+   "window": [
+    1791577715.442119,
+    1791577715.488349
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-missing-to-columns": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10KICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tcmVzdW1lXSBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiB0aGUgZm9sbG93aW5nIGFyZ3VtZW50cyBhcmUgcmVxdWlyZWQ6IC0tdG8K",
+   "window": [
+    1791577715.9460595,
+    1791577715.9902139
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-missing-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiBhcmd1bWVudCAtLXRvOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
+   "window": [
+    1791577716.4505413,
+    1791577716.505286
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-to-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577716.9466658,
+    1791577716.9926655
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-to-negative-number": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577717.4496086,
+    1791577717.4960864
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-to-joined-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577717.9485443,
+    1791577717.9898582
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-unknown-flag": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiAtLWJvZ3VzCg==",
+   "window": [
+    1791577718.4496934,
+    1791577718.4916208
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-positional": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiB1bnJlY29nbml6ZWQgYXJndW1lbnRzOiBleHRyYQo=",
+   "window": [
+    1791577718.9496765,
+    1791577718.9903312
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-control-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "ewogICJtb3ZlX2lkIjogIjIwMjYxMDEwLTA3MjgzOS1jZTNkZjQ3MCIsCiAgImRyeV9ydW4iOiBmYWxzZSwKICAic291cmNlIjoge30sCiAgInRhcmdldCI6IHt9LAogICJwbGFuIjogW10sCiAgInN0ZXBzIjogW10sCiAgInJvbGxiYWNrIjogW10sCiAgInJlcG9ydCI6IHt9LAogICJjb25uZWN0IjogbnVsbCwKICAid2FybmluZ3MiOiBbXSwKICAiZXJyb3IiOiAiLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzIiwKICAiZXhpdCI6IDIKfQo=",
+   "stderr": "",
+   "window": [
+    1791577719.4522243,
+    1791577719.5220778
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-checkout-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "ewogICJtb3ZlX2lkIjogIjIwMjYxMDEwLTA3Mjg0MC0yMTZmZjQ2ZSIsCiAgImRyeV9ydW4iOiBmYWxzZSwKICAic291cmNlIjoge30sCiAgInRhcmdldCI6IHt9LAogICJwbGFuIjogW10sCiAgInN0ZXBzIjogW10sCiAgInJvbGxiYWNrIjogW10sCiAgInJlcG9ydCI6IHt9LAogICJjb25uZWN0IjogbnVsbCwKICAid2FybmluZ3MiOiBbXSwKICAiZXJyb3IiOiAiLS10YXJnZXQtY2hlY2tvdXQgaG9sZHMgYSBjb250cm9sIGNoYXJhY3RlciIsCiAgImV4aXQiOiAyCn0K",
+   "stderr": "",
+   "window": [
+    1791577719.9541655,
+    1791577720.0205681
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-url-invalid-unsure": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577720.454549,
+    1791577720.5042794
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-url-dash-value": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiBhcmd1bWVudCAtLXRhcmdldC11cmw6IGV4cGVjdGVkIG9uZSBhcmd1bWVudAo=",
+   "window": [
+    1791577720.957381,
+    1791577721.0045683
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-checkout-dash-newline": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiBhcmd1bWVudCAtLXRhcmdldC1jaGVja291dDogZXhwZWN0ZWQgb25lIGFyZ3VtZW50Cg==",
+   "window": [
+    1791577721.4632158,
+    1791577721.5204039
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-to-dash-control": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1vdmUgWy1oXSAtLXRvIFNTSC1UQVJHRVQgWy0tdGFyZ2V0LWNoZWNrb3V0IFBBVEhdCiAgICAgICAgICAgICAgICAgICAgICAgICAgIFstLXRhcmdldC11cmwgVVJMXSBbLS1uby1rZWVwLXRva2Vuc10gWy0tcmVzdW1lXQogICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1kcnktcnVuXSBbLS15ZXNdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIG1vdmU6IGVycm9yOiBhcmd1bWVudCAtLXRvOiBleHBlY3RlZCBvbmUgYXJndW1lbnQK",
+   "window": [
+    1791577721.968058,
+    1791577722.0355246
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-1": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577722.4646313,
+    1791577722.5223732
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-2": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577722.962034,
+    1791577723.0184517
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-3": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577723.465087,
+    1791577723.5242064
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-4": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577723.9678314,
+    1791577724.0238001
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-5": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577724.464431,
+    1791577724.5195875
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-6": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577724.9702199,
+    1791577725.0289056
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-7": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577725.4726992,
+    1791577725.5479312
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-valid-8": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577725.976469,
+    1791577726.0345383
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-1": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577726.4780693,
+    1791577726.5462248
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-2": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577726.9764323,
+    1791577727.0357757
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-3": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577727.478256,
+    1791577727.5427632
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-4": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577727.9978733,
+    1791577728.0971358
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-5": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577728.4902902,
+    1791577728.6015644
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-6": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577728.9857452,
+    1791577729.0558739
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-7": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577729.4848197,
+    1791577729.5468202
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-8": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577729.9829848,
+    1791577730.037558
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-9": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577730.4865663,
+    1791577730.5493376
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-10": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577730.9847205,
+    1791577731.0471003
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-11": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577731.486668,
+    1791577731.5393522
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-invalid-12": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577731.9863374,
+    1791577732.0426211
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-1": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577732.4844627,
+    1791577732.5391078
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-2": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577732.9984295,
+    1791577733.0523508
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-3": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577733.4871252,
+    1791577733.5460148
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-4": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10YXJnZXQtdXJsIG11c3QgYmUgYW4gaHR0cChzKSBvcmlnaW4gc3VjaCBhcyBodHRwOi8vMTAwLjY0LjAuMjo4NzY1IChubyBwYXRoLCBxdWVyeSBvciBjcmVkZW50aWFscykK",
+   "window": [
+    1791577733.9897392,
+    1791577734.0438323
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-5": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577734.492616,
+    1791577734.5474584
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-6": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577734.991817,
+    1791577735.0441937
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "url-unsure-7": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "bW92ZTogLS10byB0YWtlcyBhbiBzc2ggdGFyZ2V0IHN1Y2ggYXMgcm9vdEBib3ggb3IgYSB+Ly5zc2gvY29uZmlnIGFsaWFzCg==",
+   "window": [
+    1791577735.496446,
+    1791577735.5475168
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-minimal": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577736.0094438,
+    1791577736.0230944
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-dry-run": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577736.496257,
+    1791577736.5095596
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-resume-yes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577736.9960308,
+    1791577737.009379
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577737.4966543,
+    1791577737.5107613
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-every-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577738.0001802,
+    1791577738.015006
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-url-trailing-slash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577738.5023508,
+    1791577738.5158381
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-checkout-tab": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577739.0051608,
+    1791577739.023228
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "valid-to-del": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577739.502778,
+    1791577739.5191166
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-url-bracketed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577740.006435,
+    1791577740.0276155
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-url-empty-userinfo": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577740.5056937,
+    1791577740.5245411
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-url-empty-port": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577741.0090797,
+    1791577741.0243447
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-joined-to": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577741.5078437,
+    1791577741.5216699
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-abbreviation": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577742.0075445,
+    1791577742.0207942
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "defer-repeated-flag": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "bW92ZSByb3c6IHRoZSBvcmFjbGUgd2FzIG5vdCBydW4gZm9yIHRoaXMgYXJndgo=",
+   "window": [
+    1791577742.5082324,
+    1791577742.5222106
+   ],
+   "requests": [],
+   "arm": "python",
+   "listener": {
+    "leaf_io": []
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {
+    "cwd": "0o755"
+   }
+  }
+ }
+}

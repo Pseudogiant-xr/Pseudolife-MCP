@@ -298,3 +298,26 @@ def test_run_arm_refuses_before_setup_and_before_the_arm(tmp_path):
     case.programs = ()
     core.run_arm(case, target, tmp_path / "root" / "h")
     assert ran == ["setup"] and marker.exists()
+
+
+def test_record_scrubs_host_paths_from_oracle_streams(tmp_path):
+    from cli_harness import runner  # noqa: PLC0415
+    source = tmp_path / "checkout"
+    python = Path(sys.executable)
+    trace = (f'  File "{source / "pseudolife_memory" / "cli.py"}", line 1\n'
+             f'  File "{python.parent / "Lib" / "runpy.py"}", line 2\n').encode()
+    normal = {"stdout": base64.b64encode(b"plain").decode(),
+              "stderr": base64.b64encode(trace).decode()}
+    runner._scrub(normal, runner._host_paths(source, str(python)))
+    stderr = base64.b64decode(normal["stderr"])
+    assert str(source).encode() not in stderr and str(python.parent).encode() not in stderr
+    assert b"{ORACLE}" in stderr and b"{PYTHON}" in stderr
+    assert base64.b64decode(normal["stdout"]) == b"plain"
+
+
+def test_closed_stderr_arm_still_observes(tmp_path):
+    case = core.Case("c", [], stderr_closed=True)
+    target = core.Target("python", [sys.executable, "-c",
+                                    "import sys; print('out'); sys.stderr.write('x')"])
+    obs = core.run_arm(case, target, tmp_path / "root" / "h")
+    assert core.decode(obs, "stdout").strip() == b"out" and core.decode(obs, "stderr") == b""

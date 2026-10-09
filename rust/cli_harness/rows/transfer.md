@@ -167,6 +167,18 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
   schema_version other than 55 (older or newer).
 - `mode '<m>' on the embedded lite tier is deferred ... (needs native
   embedded_pg)`.
+- `import lost the answer to its COMMIT (native-pg-diagnostics); it may
+  have been committed: inspect the target bank before retrying`, exit 1:
+  the COMMIT's answer was FATAL or PANIC, or never came (the connection was
+  lost), so the import may have become durable. The oracle raises out of
+  `conn.transaction()` there (a traceback, exit 1) and claims nothing either
+  way; this line says the outcome is open rather than borrowing the certain
+  one below. Only a server ERROR at COMMIT, which rolls the transaction
+  back, keeps that certain line. Cases `import-commit-refused-fails` (a
+  deferred constraint trigger raises at COMMIT) and
+  `import-commit-lost-unknown` (it ends its own backend there), rules
+  `expect-import-commit-refused` / `expect-import-commit-unknown`, mutants
+  `transfer-commit-error-uncertain`, `transfer-commit-fatal-certain`.
 - `<mode> failed (native-pg-diagnostics); nothing was committed`: a
   PostgreSQL error after the work began, or an export value the pre-checks
   should have deferred (Python prints a traceback). Import rolls back exactly
@@ -177,3 +189,14 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
   filesystem failure after export began writing (creating directories or
   `.part`, writing, or the final replace, which leaves `.part` as the oracle
   does). Python prints a traceback.
+
+## Hosted CI and goldens
+
+Both Parity lanes run every case live on the disposable PostgreSQL that the
+lease step provisions (pg0, with the test login). The goldens
+(`goldens/transfer.<os>.json`) hold a subset: `export-help`, `import-help`,
+`export-no-database`, `import-no-database`, `export-float-ties` and
+`import-float-ties`. The whole row recorded is 14 MB, mostly each case's
+full bank dump. The others are marked live-only (`Case.golden` False,
+`GOLDEN_CASES` in `transfer.py`), so `--record` and `--golden` leave them
+out.

@@ -59,7 +59,11 @@ own options (`_parser`, 456-482).
 - A newly drawn password (random by design), masked only after validation
   against that arm's server and only when it is not the file's pre-run
   password; whether the pre-run password was kept compares exactly. Rule
-  `test-login-password`.
+  `test-login-password`: the arm itself rewrites that line to
+  `<validated>` once its server has validated it, before the home is
+  snapshotted, so no comparison or golden carries a drawn password. The
+  re-apply fixture `GENERATED_PASSWORD` is a fixed token-shaped constant, the
+  same in every harness process.
 - A verifier echoed by the server's error CONTEXT when the role change fails
   (its salt and keys come from a password drawn for that run and never
   kept); the iteration count stays exact. Rule `test-login-verifier-echo`.
@@ -129,3 +133,24 @@ and `os.replace` on Windows, with ` -> '<dst>'` for a replace, file names in
 8. Docker ended by a signal: `Popen.returncode` is minus the signal, so an
    error with no output reads `exit -N`; the port reproduces that on POSIX
    (Windows has no signals). Not exercised by a case.
+
+## Hosted CI and goldens
+
+Both Parity lanes (`.github/workflows/rust.yml`) run the row live after the
+lease step installs pg0, whose `~/.pg0/installation/<ver>/bin` supplies
+`initdb` and pgvector for the throwaway clusters. The ubuntu lane first
+builds `pseudolife-pg:18` from `ops/Dockerfile.pg`, so its container cases
+run too.
+
+- Container cases skip unless `docker version` reports a Linux server: a
+  WSL distro without Docker integration, and hosted Windows, whose engine
+  runs Windows containers only.
+- `goldens/test_login.windows.json` is replayed on hosted Windows. There is
+  no Linux golden: recording needs pg0's `initdb` (which needs libicu) and a
+  Linux Docker engine, and the WSL distro that records Linux goldens has
+  neither. The ubuntu lane's live run is the row's Linux proof.
+- Rule `test-login-run-tokens`: each arm records the throwaway cluster's
+  port and the disposable containers' name token it ran with, and only
+  those exact spellings (`127.0.0.1:<port>`, `pl-cf-w1c-testlogin-<token>-`,
+  `...-absent-<token>`) are replaced in the streams, so a golden recorded by
+  one harness process replays in another.

@@ -120,3 +120,21 @@ Guards, every arm:
   change cannot be attributed to an arm and would fail the guard falsely.
   Everything else is compared strictly: `tunnel/` and its contents, every
   top-level file, and the root directory itself.
+
+## Hosted CI and goldens
+
+Both Parity lanes run the row live and against `goldens/tunnel.<os>.json`.
+What keeps a golden replayable in another process, on another host and on
+another day:
+
+- The setup snapshot a deferral case compares against is stored with the
+  home and daemon tokens already applied (the case's `after`), so it never
+  carries the recording arm's home path or port.
+- Rule `tunnel-dpapi-key`: whether a Windows key file still holds exactly
+  the bytes setup sealed, and unseals to the fixture key, is decided in the
+  arm (`dpapi_fixture`), as the user and host that sealed it; the rule
+  applies that verdict. A runner cannot unseal another user's DPAPI blob.
+- Rule `tunnel-near-expiry` (`status-expiry-near`, `...-text`): `NEAR` is
+  three days after the day the row loads. A midnight UTC stamp one to three
+  days after the start of the arm's own window becomes `<near>`; any other
+  date stays as written.

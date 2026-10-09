@@ -108,3 +108,22 @@ cannot print. List and revoke make no request.
   (`code_expires_at - ttl` likewise), and the printed expiry only spelled
   exactly as the oracle spells the stored value. Mutant
   `invite-ttl-shortened` (0.6 s short) is caught by it.
+
+## Hosted CI and goldens
+
+Both Parity lanes run the row live on the disposable PostgreSQL the lease
+step provisions, and against `goldens/invite.<os>.json`. No tailscale or
+docker can be reached on a runner either: `PATH` stays inside the home and
+the Windows Program Files default (`ProgramW6432\Tailscale`) is moved into
+it, and core's program preflight proves both before every arm. Rule
+`invite-port`: the `--port` a case passes is a free port drawn when the row
+loads; each arm records it, and only `port <p>`, `127.0.0.1:<p>` and
+`localhost:<p>` with that exact value become `<port>` in the streams.
+
+The 24 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
+their output or bank dump. The oracle's writers stamp those rows with the
+wall clock and draw their codes and tokens at random in every harness
+process, so the cases run live only (`Case.golden` False).
+`health-nested-at-limit-json` is live-only too: its report pretty-prints
+the daemon's auth value nested to the limit, 2.6 MB of indentation. The
+goldens hold the other 61.

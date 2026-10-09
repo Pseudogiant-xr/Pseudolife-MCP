@@ -112,3 +112,9 @@ in the contract test, and by every harness case on the source the
 candidate binary was built from (the mutant copy under `--mutants`). The
 `move-direct-socket` mutant inserts such a connect behind `if false`, so it
 never runs and only the scan can catch it.
+
+## Hosted CI and goldens
+
+Both Parity lanes run the row live and against `goldens/move.<os>.json`.
+The guards above are unchanged on a runner: `PATH` points at an empty
+directory and every proxy variable at the recording listener.

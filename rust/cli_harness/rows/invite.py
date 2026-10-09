@@ -393,10 +393,33 @@ def _stash(arm) -> None:
     arm.state["before_modes"] = core.modes(arm.home)
 
 
-def _record(arm, obs) -> None:
+def _record(arm, obs, argv=()) -> None:
     obs["arm"] = arm.name
     obs["before"] = arm.state.get("before", {})
     obs["before_modes"] = arm.state.get("before_modes", {})
+    if "--port" in argv:
+        obs["argv_port"] = argv[argv.index("--port") + 1]
+
+
+_PORT_FORMS = ("port {}", "127.0.0.1:{}", "localhost:{}")
+
+
+@normalize.rule("invite-port")
+def invite_port(obs: dict) -> None:
+    """The ``--port`` a case passes is a free port drawn when the row loads,
+    so it differs between the harness process that recorded a golden and
+    the one replaying it. Each arm records the exact value it was given
+    (``argv_port``); only ``port <p>``, ``127.0.0.1:<p>`` and
+    ``localhost:<p>`` with that value become ``<port>`` in the streams."""
+    port = obs.get("argv_port")
+    if not port:
+        return
+    for field in ("stdout", "stderr"):
+        data = base64.b64decode(obs[field])
+        for form in _PORT_FORMS:
+            data = re.sub(re.escape(form.format(port)).encode() + rb"(?![0-9])",
+                          form.format("<port>").encode(), data)
+        obs[field] = base64.b64encode(data).decode()
 
 
 def _daemon(port: int, payload, status: int = 200):
@@ -414,14 +437,14 @@ def read_case(case_id, kind, argv, *, daemon=None, extra_env=None, rules=(), fil
         _stash(arm)
 
     def after(arm, obs):
-        _record(arm, obs)
+        _record(arm, obs, argv)
         name = PREFIX + kind
         dump = _bank.dump(name)
         obs["db"] = "unchanged" if dump == _BASELINE[name] else dump
 
     return core.Case(case_id, ["invite", *argv], env=env(kind, **(extra_env or {})),
-                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60,
-                     programs=PROGRAMS)
+                     setup=setup, after=after, rules=(*rules, "invite-port"), daemon=daemon,
+                     timeout=60, programs=PROGRAMS)
 
 
 def write_case(case_id, kind, argv, *, daemon=None, extra_env=None, ttl=900,
@@ -437,18 +460,45 @@ def write_case(case_id, kind, argv, *, daemon=None, extra_env=None, ttl=900,
         _stash(arm)
 
     def after(arm, obs):
-        _record(arm, obs)
+        _record(arm, obs, argv)
         dump = _bank.dump(ARM_DB)
         obs["ttl"] = ttl
         obs["seed_rows"] = _principals(arm.state["seed"])
         obs["db"] = "unchanged" if dump == arm.state["seed"] else dump
 
     return core.Case(case_id, ["invite", *argv], env=env("arm", **(extra_env or {})),
-                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60,
-                     programs=PROGRAMS)
+                     setup=setup, after=after, rules=(*rules, "invite-port"), daemon=daemon,
+                     timeout=60, programs=PROGRAMS)
+
+
+# Cases whose observation shows the seeded principals: the oracle's writers
+# stamp them with the wall clock and draw their codes and tokens at random in
+# every harness process, so these run live only (rows/invite.md "Hosted CI
+# and goldens"). The others replay as goldens.
+LIVE_ONLY = frozenset({
+    "list", "list-json", "list-bank", "invite-new", "invite-new-json",
+    "invite-new-placeholder", "invite-new-placeholder-json", "invite-empty-url",
+    "invite-options", "invite-board", "invite-minutes-half-even", "invite-minutes-up",
+    "invite-day", "reinvite-pending", "reinvite-expired-tier-json",
+    "reinvite-expired-board", "paired-replace", "revoked-reinvite-json",
+    "invite-bank-match", "invite-health-int-at-limit", "invite-env-port", "revoke",
+    "revoke-json", "revoke-again",
+    # Its report is the daemon's auth value nested to the limit and
+    # pretty-printed: 2.6 MB of indentation, compared live only.
+    "health-nested-at-limit-json"})
 
 
 def cases() -> list[core.Case]:
+    out = _cases()
+    missing = LIVE_ONLY - {case.id for case in out}
+    if missing:
+        raise ValueError(f"LIVE_ONLY names no case: {sorted(missing)}")
+    for case in out:
+        case.golden = case.id not in LIVE_ONLY
+    return out
+
+
+def _cases() -> list[core.Case]:
     out: list[core.Case] = []
     add = out.append
 

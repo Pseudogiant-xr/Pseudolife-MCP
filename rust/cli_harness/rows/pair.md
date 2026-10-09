@@ -94,3 +94,12 @@ Others:
   (`PermissionError`, `FileNotFoundError`, `FileExistsError`,
   `NotADirectoryError`, `IsADirectoryError`, else `OSError`); CPython maps
   some other errnos to further subclasses.
+
+## Hosted CI and goldens
+
+Both Parity lanes run the row live and against `goldens/pair.<os>.json`.
+`refused-unreachable` names core's closed loopback port (`127.0.0.1:9`)
+rather than a free port, so its URL is the same in every run. The oracle's
+tracebacks in deferral cases are recorded with the oracle checkout, its
+interpreter and the real home replaced by tokens (`runner.record`); the
+deferral rules replace those streams anyway.

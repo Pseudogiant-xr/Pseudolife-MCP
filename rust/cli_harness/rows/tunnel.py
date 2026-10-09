@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import socket
 import stat
@@ -368,12 +369,9 @@ def tunnel_deferral(obs: dict) -> None:
     obs["exit"] = 1
     obs["stdout"] = ""
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    before = {"stdout": "", "stderr": "", "files": dict(obs.get("before", {}))}
-    # The same home and daemon tokens apply() gave the observed files.
-    normalize.home_tokens(before, obs["home"])
-    if obs.get("daemon_url"):
-        normalize.daemon_tokens(before, obs["daemon_url"])
-    obs["files"] = before["files"]
+    # ``before`` carries the home and daemon tokens apply() gave the observed
+    # files (the case's ``after`` applied them), so a golden needs neither.
+    obs["files"] = dict(obs.get("before", {}))
     obs["modes"] = dict(obs.get("before_modes", {}))
 
 
@@ -382,14 +380,27 @@ def tunnel_dpapi_key(obs: dict) -> None:
     """Windows ``set_key`` output is DPAPI ciphertext, fresh per arm. A key
     file is tokenized only when its bytes are exactly the ones this arm's
     setup seeded (recorded before the arm ran) and the oracle's own
-    ``_dpapi`` unprotects them to the fixture key. A rewritten, re-encrypted
-    or foreign key stays as observed and shows as a difference."""
+    ``_dpapi`` unprotected them to the fixture key. The unprotect runs in the
+    case's ``after``, as the arm's own user on the arm's own host, and its
+    verdict (``dpapi_fixture``) travels with the observation, so a golden
+    replays where that user's keys cannot be read. A rewritten,
+    re-encrypted or foreign key stays as observed and shows as a
+    difference."""
     seeded = obs.get("before", {})
-    for rel, value in list(obs["files"].items()):
-        if not (rel.endswith(".key") and value.startswith("file:")) or seeded.get(rel) != value:
+    for rel in obs.get("dpapi_fixture", ()):
+        value = obs["files"].get(rel)
+        if value is not None and seeded.get(rel) == value:
+            obs["files"][rel] = "file:" + base64.b64encode(b"DPAPI\0<fixture key>").decode()
+
+
+def _dpapi_fixture(home) -> list[str]:
+    """Key files under ``home`` the oracle's ``_dpapi`` unprotects to the
+    fixture key (Windows ``set_key`` output), as this user on this host."""
+    found = []
+    for rel, value in core.snapshot(home).items():
+        if not (rel.endswith(".key") and value.startswith("file:")):
             continue
-        data = base64.b64decode(value[5:])
-        prefix, _, sealed = data.partition(b"\0")
+        prefix, _, sealed = base64.b64decode(value[5:]).partition(b"\0")
         if prefix != b"DPAPI":
             continue
         try:
@@ -397,7 +408,36 @@ def tunnel_dpapi_key(obs: dict) -> None:
         except Exception:  # noqa: BLE001 - an unreadable key stays as observed
             continue
         if unsealed == FIXTURE_KEY.encode():
-            obs["files"][rel] = "file:" + base64.b64encode(b"DPAPI\0<fixture key>").decode()
+            found.append(rel)
+    return sorted(found)
+
+
+_NEAR = re.compile(rb"\b(\d{4}-\d{2}-\d{2})T00:00:00Z")
+
+
+@normalize.rule("tunnel-near-expiry")
+def tunnel_near_expiry(obs: dict) -> None:
+    """``NEAR`` is three days from the day the row was loaded, so a golden
+    replayed on another day seeds another date. A midnight UTC stamp in
+    stdout or a file becomes ``<near>`` only when it lies one to three days
+    after the start of this arm's own run window (the oracle reports such a
+    key as ``near-expiry``); any other date stays as written."""
+    start = obs["window"][0]
+
+    def swap(data: bytes) -> bytes:
+        def one(match):
+            moment = datetime.strptime(match.group(1).decode(), "%Y-%m-%d").replace(
+                tzinfo=timezone.utc).timestamp()
+            if 86_400 < moment - start <= 3 * 86_400:
+                return b"<near>"
+            return match.group(0)
+        return _NEAR.sub(one, data)
+
+    obs["stdout"] = base64.b64encode(swap(base64.b64decode(obs["stdout"]))).decode()
+    for rel, value in list(obs["files"].items()):
+        if value.startswith("file:"):
+            obs["files"][rel] = "file:" + base64.b64encode(
+                swap(base64.b64decode(value[5:]))).decode()
 
 
 def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux"),
@@ -415,8 +455,15 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
 
     def after(arm, obs):
         obs["arm"] = arm.name
-        obs["before"] = arm.state.get("before", {})
+        # The setup snapshot with the tokens apply() gives observed files,
+        # so neither a deferral's expectation nor a golden carries this
+        # arm's home path or daemon port.
+        before = {"stdout": "", "stderr": "", "files": dict(arm.state.get("before", {}))}
+        normalize.home_tokens(before, str(arm.home))
+        normalize.daemon_tokens(before, arm.daemon.url)
+        obs["before"] = before["files"]
         obs["before_modes"] = arm.state.get("before_modes", {})
+        obs["dpapi_fixture"] = _dpapi_fixture(arm.home) if core.WINDOWS else []
         _guard_real(arm.state.get("real"))
 
     environment = {
@@ -486,8 +533,10 @@ def cases() -> list[core.Case]:
                json_out=False),
         status("status-expired-json", profile(runtime_key_expires_at="2020-01-01T00:00:00Z")),
         status("status-expiry-date-only", profile(runtime_key_expires_at="2099-12-31")),
-        status("status-expiry-near", profile(runtime_key_expires_at=NEAR)),
-        status("status-expiry-near-text", profile(runtime_key_expires_at=NEAR), json_out=False),
+        status("status-expiry-near", profile(runtime_key_expires_at=NEAR),
+               rules=("tunnel-near-expiry",)),
+        status("status-expiry-near-text", profile(runtime_key_expires_at=NEAR), json_out=False,
+               rules=("tunnel-near-expiry",)),
         status("status-expiry-offset",
                ready(runtime_key_expires_at="2030-06-01T12:00:00.250+05:30")),
         status("status-catalog-full", profile(minimum_catalog="full",

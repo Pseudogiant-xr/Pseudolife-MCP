@@ -28,8 +28,10 @@ def _golden_path(row: str) -> Path:
     return GOLDENS / f"{row}.{core.PLATFORM}.json"
 
 
-def _select(row: str, wanted: list[str], bank: bool = True) -> list[core.Case]:
-    selected = [c for c in rows.load(row) if c.runs_here() and (bank or not c.bank)]
+def _select(row: str, wanted: list[str], bank: bool = True,
+            replay: bool = False) -> list[core.Case]:
+    selected = [c for c in rows.load(row) if c.runs_here() and (bank or not c.bank)
+                and (c.golden or not replay)]
     if wanted:
         selected = [c for c in selected if c.id in wanted]
         missing = set(wanted) - {c.id for c in selected}
@@ -72,6 +74,36 @@ def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
     return results
 
 
+def _host_paths(source: Path, python: str) -> list[tuple[bytes, bytes]]:
+    """Host paths a recorded oracle stream may name: its source checkout,
+    its interpreter's installation and the real home they usually sit
+    under. Each becomes a token in a golden, in raw and JSON-escaped
+    spellings, longest first. Only streams a rule replaces can hold them
+    (a Python traceback the candidate defers instead of printing), so the
+    tokens change no comparison; they keep host identifiers out of goldens."""
+    import json as _json  # noqa: PLC0415
+    exe = Path(python).resolve()
+    paths = {str(source): "{ORACLE}", str(exe.parent.parent): "{PYTHON}",
+             str(exe.parent): "{PYTHON}", sys.prefix: "{PYTHON}",
+             sys.base_prefix: "{PYTHON}", str(Path.home()): "{USER_HOME}"}
+    forms: dict[bytes, bytes] = {}
+    for path, token in paths.items():
+        if len(path) < 4:
+            continue
+        for spelling in (path, _json.dumps(path)[1:-1]):
+            forms.setdefault(spelling.encode(), token.encode())
+    return sorted(forms.items(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _scrub(normal: dict, forms: list[tuple[bytes, bytes]]) -> None:
+    import base64  # noqa: PLC0415
+    for field in ("stdout", "stderr"):
+        data = base64.b64decode(normal[field])
+        for old, new in forms:
+            data = data.replace(old, new)
+        normal[field] = base64.b64encode(data).decode()
+
+
 def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
            commit: str | None) -> Path:
     import subprocess
@@ -80,11 +112,13 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
                                 capture_output=True, text=True).stdout.strip() or "unknown"
     golden = {"row": rows.ROWS[row], "platform": core.PLATFORM, "oracle_commit": commit,
               "cases": {}}
+    forms = _host_paths(source, oracle.command[0])
     for case in cases:
         obs = core.run_arm(case, oracle, core._home_root() / "h")
         normal = normalize.apply(obs, (), obs["home"])
         normal["home"] = None
         normal.pop("daemon_url", None)
+        _scrub(normal, forms)
         golden["cases"][case.id] = normal
         print(f"  recorded {_label(case)} (exit {obs['exit']})", flush=True)
     path = _golden_path(row)
@@ -128,7 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     summary: dict = {"platform": core.PLATFORM, "rows": {}}
     failed = 0
     for row in args.row:
-        cases = _select(row, args.case, bank=not (args.skip_bank or args.golden or args.record))
+        cases = _select(row, args.case, bank=not (args.skip_bank or args.golden or args.record),
+                        replay=args.golden or args.record)
         print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
             print(f"  wrote {record(row, cases, oracle, args.oracle_source.resolve(), args.oracle_commit)}")

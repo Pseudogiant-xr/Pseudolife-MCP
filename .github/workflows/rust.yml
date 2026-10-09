@@ -136,7 +136,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # 40 minutes before the W1-C rows; their live and golden runs need up to
+    # an hour more on a hosted runner (test_login alone took 5 minutes live
+    # on the maintainer host, 2026-10-10).
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
         with:
@@ -206,6 +209,40 @@ jobs:
           python rust/cli_harness --row lease --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
+          exit $LASTEXITCODE
+      # The W1-C native leaves: every row runs live (this checkout's Python
+      # oracle beside the candidate, on disposable homes), then against its
+      # goldens. transfer, invite and maintainer use the disposable
+      # PostgreSQL and test login the lease step provisioned; test_login
+      # starts its own throwaway clusters from that step's pg0 bundle and,
+      # on Linux, disposable containers of the image built below. Declared
+      # exceptions (each in its row's .md):
+      # - test_login has no Linux golden: recording needs pg0's initdb and a
+      #   Linux Docker engine, which the recording host's WSL lacks, so this
+      #   lane's live run is its Linux proof. Hosted Windows' Docker runs
+      #   Windows containers only, so its container cases skip there.
+      # - Cases marked live-only (Case.golden False) are left out of goldens
+      #   and run in the live pass: transfer keeps help, the no-database
+      #   refusals and the float-tie cases (the whole row is 14 MB of bank
+      #   dumps); invite leaves out the 24 cases that show principals its
+      #   seed stamps with the wall clock and random codes, and one 2.6 MB
+      #   report.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI W1-C differential harness
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $rows = @('transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', 'tunnel')
+          $live = $rows | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $golden = $rows | Where-Object { $IsWindows -or $_ -ne 'test_login' } | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @golden --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Retain additive executable node outcomes
         if: always()

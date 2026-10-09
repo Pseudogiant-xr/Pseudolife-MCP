@@ -489,6 +489,19 @@ normalize.rule("expect-import-lite-deferred")(_expect(
     "candidate (needs native embedded_pg)", False,
     lambda obs, stderr: (_traceback(obs, stderr) and "PG_VERSION" in stderr)
     or (obs["exit"] == 1 and stderr.startswith(_NO_DATABASE))))
+# A COMMIT the server refuses (an ERROR: rolled back) keeps the certain
+# line; a COMMIT whose answer is FATAL or lost gets the uncertain one. The
+# oracle raises out of ``conn.transaction()`` either way: a traceback, exit 1.
+COMMIT_UNKNOWN = ("pseudolife-stdio: import lost the answer to its COMMIT "
+                  "(native-pg-diagnostics); it may have been committed: inspect the "
+                  "target bank before retrying")
+normalize.rule("expect-import-commit-refused")(_expect(
+    "pseudolife-stdio: import failed (native-pg-diagnostics); nothing was committed",
+    True, lambda obs, stderr: _traceback(obs, stderr)
+    and "harness: refused at commit" in stderr))
+normalize.rule("expect-import-commit-unknown")(_expect(
+    COMMIT_UNKNOWN, True, lambda obs, stderr: _traceback(obs, stderr)
+    and "AdminShutdown" in stderr))
 normalize.rule("expect-import-native-failure")(_expect(
     "pseudolife-stdio: import failed (native-pg-diagnostics); nothing was committed",
     True, lambda obs, stderr: _traceback(obs, stderr)
@@ -594,6 +607,24 @@ def _seed_bank_id(conn) -> None:
                  "'\"22222222-2222-4222-8222-222222222222\"')")
 
 
+def _commit_trigger(action: str):
+    """A deferred constraint trigger on ``episodes`` that acts at COMMIT, on
+    the disposable target: ``raise`` makes the server refuse the COMMIT (an
+    ERROR, rolled back); ``terminate`` ends the importing session's own
+    backend there, so its client gets a FATAL and no settled outcome."""
+    body = {"raise": "RAISE EXCEPTION 'harness: refused at commit';",
+            "terminate": "PERFORM pg_terminate_backend(pg_backend_pid()); "
+                         "PERFORM pg_sleep(5);"}[action]
+
+    def seed(conn) -> None:
+        conn.execute("CREATE FUNCTION pl_cf_at_commit() RETURNS trigger LANGUAGE plpgsql "
+                     f"AS $$ BEGIN {body} RETURN NULL; END $$")
+        conn.execute("CREATE CONSTRAINT TRIGGER pl_cf_at_commit AFTER INSERT ON episodes "
+                     "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+                     "EXECUTE FUNCTION pl_cf_at_commit()")
+    return seed
+
+
 def _schema_54(conn) -> None:
     conn.execute("UPDATE meta SET value = '54' WHERE key = 'schema_version'")
 
@@ -639,7 +670,20 @@ def _import(cid, archive, argv=(), rules=(), note="", **setup):
                      rules=(*rules, "transfer-zip"), timeout=120, note=note)
 
 
+# The cases kept in goldens (rows/transfer.md "Hosted CI and goldens"): the
+# whole row recorded is 14 MB of bank dumps. Every case runs live.
+GOLDEN_CASES = frozenset({"export-help", "import-help", "export-no-database",
+                          "import-no-database", "export-float-ties", "import-float-ties"})
+
+
 def cases() -> list[core.Case]:
+    out = _cases()
+    for case in out:
+        case.golden = case.id in GOLDEN_CASES
+    return out
+
+
+def _cases() -> list[core.Case]:
     zip_rules = ("transfer-zip",)
     return [
         core.Case("export-help", ["export", "--help"], note="argparse help at COLUMNS=80"),
@@ -709,6 +753,13 @@ def cases() -> list[core.Case]:
                 rules=("expect-import-schema-deferred",)),
         _import("import-blank-database-defers", "current", schema=False,
                 rules=("expect-import-schema-deferred",)),
+        # Review of #678 (2026-10-10): what a failed COMMIT may claim.
+        _import("import-commit-refused-fails", "current", seed=_commit_trigger("raise"),
+                rules=("expect-import-commit-refused",),
+                note="the server refuses the COMMIT: rolled back, the certain line"),
+        _import("import-commit-lost-unknown", "current", seed=_commit_trigger("terminate"),
+                rules=("expect-import-commit-unknown",),
+                note="the COMMIT's answer is FATAL: the outcome is not known"),
         _import("import-fk-violation-fails", "bad-evidence",
                 rules=("expect-import-native-failure",),
                 note="a SQL error inside the transaction: rolled back by both arms"),
@@ -772,6 +823,14 @@ MUTANTS = [
            "    let (mantissa, power) = scientific(&text);\n"
            "    let significant = mantissa.trim_end_matches('0');\n",
            ("export-float-ties", "import-float-ties")),
+    # Review of #678 (2026-10-10): only a server ERROR at COMMIT is certain.
+    Mutant("transfer-commit-fatal-certain", ROW, "shim/src/cli/transfer/sql.rs",
+           "Some(db) if db.parsed_severity() == Some(Severity::Error) =>",
+           "Some(_) =>", ("import-commit-lost-unknown",)),
+    Mutant("transfer-commit-error-uncertain", ROW, "shim/src/cli/transfer/sql.rs",
+           "Some(db) if db.parsed_severity() == Some(Severity::Error) =>",
+           "Some(db) if db.parsed_severity() == Some(Severity::Panic) =>",
+           ("import-commit-refused-fails",)),
     Mutant("transfer-meta-skip", ROW, "shim/src/cli/transfer.rs",
            '"active_session_pointer",', '"active_session_pointer_x",', ("export-seeded",)),
     Mutant("transfer-nonempty-wording", ROW, "shim/src/cli/transfer/import.rs",

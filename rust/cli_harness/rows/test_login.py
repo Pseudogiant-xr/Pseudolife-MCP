@@ -45,9 +45,11 @@ from . import _cluster
 
 ROLE = "pseudolife_test"
 SEEDED_PASSWORD = "seeded-" + "s" * 36
-# A password shaped like a drawn one, the same in both arms: re-applying it
-# must keep it, which the shape alone cannot show.
-GENERATED_PASSWORD = secrets.token_urlsafe(32)
+# A password shaped like a drawn one (token_urlsafe(32)), the same in both
+# arms and in every harness process, so goldens replay: re-applying it must
+# keep it, which the shape alone cannot show. A throwaway cluster's test value.
+GENERATED_PASSWORD = base64.urlsafe_b64encode(
+    hashlib.sha256(b"pl-cf-w1c test-login generated password").digest()).rstrip(b"=").decode()
 TOKEN = secrets.token_hex(4)
 USER_KEY = "PSEUDOLIFE_TEST_PG_USER"
 PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"
@@ -185,53 +187,44 @@ def _observe(server, home: Path, login: Path, before: str | None) -> dict:
             "authenticates": server.can_login(user, password, "postgres"),
             "bank": server.can_login(user, password, _cluster.BANK),
             "kept": None if before is None else password == before,
-            "password_mark": _mark(password),
         }
+        _redact_validated(login, password, out["login"])
     return out
+
+
+def _redact_validated(login: Path, password: str, seen: dict) -> None:
+    """A newly drawn password leaves the arm as ``<validated>``: rewritten in
+    the login file itself, after this arm's server validated that very
+    password (it authenticates as the role and the role's SCRAM verifier
+    verifies it) and only when it is not the password the file held before
+    the run. Done in the arm, before the home is snapshotted, so neither a
+    comparison nor a golden ever carries it. A kept, seeded or unvalidated
+    password stays as written; ``kept`` itself compares exactly, so a
+    re-apply that drew a new password differs from the oracle's."""
+    verifier = seen.get("verifier") or {}
+    if not (seen.get("shape") == "token_urlsafe32" and seen.get("authenticates") == "ok"
+            and seen.get("kept") is not True
+            and verifier.get("stored_key") and verifier.get("server_key")):
+        return
+    data = login.read_bytes()
+    line = f"{PASSWORD_KEY}={password}".encode()
+    lines = [f"{PASSWORD_KEY}=<validated>".encode() if item.rstrip(b"\r") == line else item
+             for item in data.split(b"\n")]
+    with open(login, "r+b") as handle:  # in place: the file's ACL and mode stay
+        handle.write(b"\n".join(lines))
+        handle.truncate()
 
 
 def _password_before(arm, rel: str = LOGIN_REL) -> str | None:
     return _read_login(_login_path(arm, rel)).get(PASSWORD_KEY) or None
 
 
-# A per-process key: the observation identifies the validated password line
-# without carrying the password or a plain hash of it.
-_MARK_KEY = secrets.token_bytes(32)
-
-
-def _mark(password: str) -> str:
-    return hmac.new(_MARK_KEY, password.encode(), "sha256").hexdigest()
-
-
 @normalize.rule("test-login-password")
 def password_rule(obs: dict) -> None:
-    """A newly drawn password in the login file becomes ``<validated>``, only
-    when this arm's server validated that very password (it authenticates as
-    the role and the role's SCRAM verifier verifies it, ``_observe``) and it is
-    not the password the file held before the run. A kept, seeded or
-    unvalidated password stays as written; ``kept`` itself compares exactly,
-    so a re-apply that drew a new password differs from the oracle's."""
-    login = (obs.get("db") or {}).get("login")
-    if not login:
-        return
-    mark = login.pop("password_mark", None)
-    verifier = login.get("verifier") or {}
-    valid = (login.get("shape") == "token_urlsafe32" and login.get("authenticates") == "ok"
-             and login.get("kept") is not True
-             and verifier.get("stored_key") and verifier.get("server_key"))
-    for rel, value in list(obs["files"].items()):
-        if not (rel.endswith(".env") and value.startswith("file:")):
-            continue
-        try:
-            lines = base64.b64decode(value[5:]).decode("utf-8").split("\n")
-        except UnicodeDecodeError:
-            continue  # not a file this run wrote; compared byte for byte
-        for index, line in enumerate(lines):
-            key, sep, password = line.partition("=")
-            if (valid and sep and key == PASSWORD_KEY
-                    and mark is not None and hmac.compare_digest(_mark(password), mark)):
-                lines[index] = f"{PASSWORD_KEY}=<validated>"
-        obs["files"][rel] = "file:" + base64.b64encode("\n".join(lines).encode()).decode()
+    """Declares that a newly drawn password is compared as ``<validated>``.
+    The validation and the rewrite happen in the arm (``_redact_validated``,
+    called from ``_observe``), so the rule itself changes nothing; it names
+    the free item every case opts into."""
 
 
 # A SCRAM-SHA-256 verifier for a 16-byte salt: base64 of 16 and of 32 bytes.
@@ -333,6 +326,29 @@ def stdout_traceback_rule(obs: dict) -> None:
         obs["stderr"] = ""
 
 
+@normalize.rule("test-login-run-tokens")
+def run_tokens_rule(obs: dict) -> None:
+    """Values this harness process drew, not the CLI: the throwaway cluster's
+    port in ``127.0.0.1:<port>`` and the disposable containers' name token
+    (``pl-cf-w1c-testlogin-<token>-...``, ``...-absent-<token>``). Each arm
+    records the exact values it ran with (``run_tokens``); only those exact
+    spellings are replaced in stdout and stderr, so a golden recorded by one
+    process replays in another."""
+    tokens = obs.get("run_tokens")
+    if not tokens:
+        return
+    forms = [(f"127.0.0.1:{tokens['port']}".encode(), b"127.0.0.1:<port>"),
+             (f"{_cluster.CONTAINER_PREFIX}absent-{tokens['token']}".encode(),
+              _cluster.CONTAINER_PREFIX.encode() + b"absent-<token>"),
+             (f"{_cluster.CONTAINER_PREFIX}{tokens['token']}-".encode(),
+              _cluster.CONTAINER_PREFIX.encode() + b"<token>-")]
+    for field in ("stdout", "stderr"):
+        data = base64.b64decode(obs[field])
+        for old, new in forms:
+            data = data.replace(old, new)
+        obs[field] = base64.b64encode(data).decode()
+
+
 # ── cases ────────────────────────────────────────────────────────────────────
 
 def _login_path(arm, rel: str = LOGIN_REL) -> Path:
@@ -410,14 +426,17 @@ _DOCKER: list[bool] = []
 
 
 def _no_docker() -> bool:
-    """Skip container cases where docker cannot reach an engine (a WSL distro
-    without Docker Desktop integration): the --admin-url cases still run."""
+    """Skip container cases where docker cannot reach an engine that runs
+    Linux containers: a WSL distro without Docker Desktop integration, or a
+    hosted Windows runner, whose engine runs Windows containers only and
+    cannot start the ``pseudolife-pg:18`` image. The --admin-url cases still
+    run."""
     if not _DOCKER:
         import subprocess  # noqa: PLC0415
         try:
-            done = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+            done = subprocess.run(["docker", "version", "--format", "{{.Server.Os}}"],
                                   capture_output=True, timeout=30)
-            _DOCKER.append(done.returncode == 0)
+            _DOCKER.append(done.returncode == 0 and done.stdout.strip() == b"linux")
         except (OSError, subprocess.TimeoutExpired):
             _DOCKER.append(False)
     return not _DOCKER[0]
@@ -633,7 +652,7 @@ def cases() -> list[Case]:
         _container_case("container-role-reserved", ["--role", "pg_test"], _cluster.BANK,
                         rules=("test-login-verifier-echo",)),
     ]
-    return [_guard(case) for case in out]
+    return [_with_run_tokens(_guard(case)) for case in out]
 
 
 # ── the executor guard ───────────────────────────────────────────────────────
@@ -674,6 +693,21 @@ def _guard(case: Case) -> Case:
             inner(arm)
 
     case.setup = setup
+    return case
+
+
+def _with_run_tokens(case: Case) -> Case:
+    """Every arm records the cluster port and container token it ran with,
+    and every case opts into ``test-login-run-tokens``."""
+    inner = case.after
+
+    def after(arm, obs):
+        obs["run_tokens"] = {"port": _cluster.PORT, "token": TOKEN}
+        if inner:
+            inner(arm, obs)
+
+    case.after = after
+    case.rules = (*case.rules, "test-login-run-tokens")
     return case
 
 
