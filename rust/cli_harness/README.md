@@ -27,7 +27,30 @@ Defaults: the oracle is this checkout with the running interpreter
 
 - Each arm gets a fresh home under the default temporary directory (owner-only
   credential checks need its ACLs), the same path for both arms, reset between
-  them. `HOME`, `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` point into it.
+  them. `HOME`, `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` point into it, and
+  on Windows so do `ProgramW6432` and `ProgramFiles` (`{HOME}\Program Files`):
+  a 64-bit child derives `ProgramFiles` from `ProgramW6432`, and with neither
+  set a default-location lookup falls back to the real `C:\Program Files`.
+- External programs: a case whose oracle may look up a real program (docker,
+  pg_dump, tailscale, cloudflared, codex, claude, git, bash, ssh, a browser,
+  the tunnel runtime) names it in `Case.programs`. Before each arm, on the
+  arm's still-empty home and before the case's setup, core runs the same
+  Python interpreter (and nothing else) with that arm's exact environment and
+  cwd, and asks it for `shutil.which` of each name (current directory first
+  and `PATHEXT` on Windows) and the lookup inputs it sees (`PATH`, `PATHEXT`,
+  the Program Files variables, `LOCALAPPDATA`, `APPDATA`, `SystemRoot`,
+  `HOME`, `USERPROFILE`). The case is refused (`ProgramLeak`, the run fails)
+  if any name resolves outside the home, or on Windows unless `ProgramW6432`
+  and `ProgramFiles` are non-empty and inside it. A case declaring a program
+  therefore pins `PATH` inside the home. One child runs per distinct
+  environment, cwd and name list. The check covers lookups, not what setup
+  later places in the home (a hard-linked host binary is inside the home).
+- `Case.real_programs` is the escape hatch for a case that deliberately runs
+  a named host program (backup's `dsn-path` runs this host's bundled
+  `pg_dump` from `PATH` against a disposable database). Only the named
+  programs may resolve outside the home; each run prints them on the case's
+  line (`match dsn-path  [real programs: pg_dump]`) and in the `--out`
+  summary.
 - The environment is an allowlist of process plumbing (`PATH`, `SYSTEMROOT`,
   `TEMP`, ...). Tokens, digest and lock directories never leak in from the
   caller. `PSEUDOLIFE_MCP_DAEMON_URL` always names the case's fixture daemon,
