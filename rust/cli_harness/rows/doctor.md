@@ -32,7 +32,7 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | Board line: no token = `missing_bearer`; `GET /api/hook/coordination-start` with `Bearer`, no redirects; HTTP error states 401/404-405/other; `X-PL-Board` on / served body / `reason=` table / unrecognized / unsupported | board_status.py:46-73, :340-354 |
 | Maintainer passkeys only when the board is on; `GET /api/maintainer`; 200 on-line with active-key count, 404/405, 409 unset/invalid(+recovery)/older, other `HTTP n code`; not-checked when the board is off | :380-443, :594-596 |
 | Git Bash (Windows only): settings env block over process env, `CLAUDE_CODE_GIT_BASH_PATH` name check, default install dirs, `git` on PATH two levels up; `bash` on PATH and WSL-launcher test; both recovery texts | :26-101, :598-599 |
-| `GET /health` (redirects followed; an error status's JSON body counts); `daemon_status` (`unreachable` for none or `{}`); `BearerRejected` / `DaemonUnavailable` / `BearerMissing` and their recovery text | shim.py:436-451, :600-614 |
+| `GET /health` (redirects followed by `Location`, else `URI`; where urllib's redirect handler raises HTTPError instead, with no target, a scheme other than http/https/ftp or past its repeat limits, the 3xx body is parsed as `e.read()` is; an error status's JSON body counts); `daemon_status` (`unreachable` for none or `{}`); `BearerRejected` / `DaemonUnavailable` / `BearerMissing` and their recovery text | shim.py:436-451, :600-614 |
 | `daemon_version` (`or "unknown"`), `codex_hooks` (`bundle-present`, `not-configured`, `unknown` without digest, `unknown (UnicodeDecodeError)`) | :615-617, client_updates.py:1528-1592 |
 | Handshake: own shim with `PSEUDOLIFE_MCP_NO_SPAWN=1`, `PSEUDOLIFE_AGENT_COORDINATION=0`, the overridden environment; SDK initialize, `tools/list` (one page); `instructions_present`, `tool_count`, `tools_missing_annotations`, `coordination_tools_present`; `ok` rule and recovery; version mismatch rule and recovery text; `TimeoutError` (whole handshake incl. shutdown under `--timeout`) and `ExceptionGroup` (anything raised inside the client) with their recovery text | :104-125, :618-646 |
 | Wake report: Claude Code Stop hook (registration substring, installed_plugins, settings env block over process env, enabledPlugins false), Codex doorbell (TOML env table, `env_vars` forwarding, writer, bearer, CLI lookup), `_wake_state` texts, caps filter (known keys, JSON integers >= 0, daemon order) | :197-324, codex_doorbell.py:125-172 |
@@ -40,16 +40,15 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | Coordination snapshot fields, order and `next` texts (registration-dependent branches included) | :505-541, :654-657 |
 | GitBashMissing and MaintainerPasskeysInvalid finalization | :660-674 |
 | `path_resolution`: CPython 3.11 `shutil.which("pseudolife-mcp")` (cwd first and PATHEXT on Windows), launcher from `PSEUDOLIFE_SHIM_RUNTIMES`/`_LAUNCHER` or the default layout, realpath/normcase comparison, warning text | :690-707, runtimes.py:127-154 |
-| Request bytes per probe: method, target, `Authorization`, `User-Agent` (`Python-urllib/3.11` for the GETs, `python-httpx/0.28.1` for the context POST), `Host`, `Content-Type`/`Content-Length` and the context body (compact JSON, nonce tokenized) | board_status.py:51-55, :390-395, shim.py:438, :470-473 |
-| Body reads stop where Python's do: board `read(65536)` on success and no read on an error status; maintainer `read(1 << 20)` / `exc.read(65536)`; health reads the whole body | board_status.py:55, :393-397, shim.py:438-447 |
+| Request bytes per probe, every header field compared: the GETs carry urllib's fields exactly (`Host` as written, `User-Agent: Python-urllib/3.11`, `Accept-Encoding: identity`, `Connection: close`, an optional `Authorization`, no `Accept`; sent through `cli::hook_http`, which also gives urllib's per-receive timeouts and redirect limits); the context POST carries httpx's (`Host`, `Accept: */*`, `Accept-Encoding: gzip, deflate`, `Connection: keep-alive`, `User-Agent: python-httpx/0.28.1`, `Authorization`, `Content-Type`/`Content-Length`) and its body (compact JSON, nonce tokenized) | board_status.py:51-55, :390-395, shim.py:438, :470-473 |
+| Body reads stop where Python's do: board `read(65536)` on success and no read on an error status; maintainer `read(1 << 20)` / `exc.read(65536)`; health reads the whole body. A bounded `read(amt)` of a length-delimited body cut short returns what arrived, none included (`HTTPResponse.read`, http/client.py 3.11); reading to the end, or a chunked body, fails as `IncompleteRead` does. A failed board or maintainer success read is the probes' `except Exception` (unreachable); a failed health read is `None` | board_status.py:55, :393-397, shim.py:438-447 |
+| The context POST's answer is decoded as httpx decodes it: `Content-Encoding` codings split on commas, `gzip` and `deflate` (zlib, else raw deflate) applied in reverse, `identity` and unknown codings left alone, a truncated stream yielding what decoded, a corrupt one `unavailable` (DecodingError) | httpx `_decoders.py` |
 | The bearer is snapshotted afresh for the maintainer probe and the `--agent-state` check, as each builds a new provider; a failed re-read is `not checked - no usable credential or URL` / `unavailable` | :432-443, :648-653 |
 | `json.loads` refusals Python makes and serde would not: integer literals over 4300 digits (CPython 3.11 `int_max_str_digits`), a leading U+FEFF; the context answer's RecursionError past nesting depth 978 (measured on CPython 3.11.9 against the oracle doctor) is `unavailable` | :476-503 |
 | No incidental mutation: doctor writes nothing; the only file a run leaves is the handshake shim's own `~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json` (CLI-SHIM's file, written by the Python shim too) | shim.py:708-725 |
 
 ## Free items
 
-- `Accept`, `Accept-Encoding` and `Connection` request headers (the harness's
-  wire projection drops them on every row).
 - The interpreter identity values (declared substitution below).
 
 ## Harness rules and comparison scope
@@ -122,6 +121,16 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   so the threshold differs there and is not measured: the three threshold
   cases and their mutant run on Windows only. No daemon answer nests this
   deep.
+- The context POST advertises `gzip, deflate` because the oracle
+  environments (Windows CPython 3.11, the WSL venv) have httpx 0.28.1 and
+  none of brotli, brotlicffi or zstandard; with one of those installed httpx
+  also advertises and decodes `br` or `zstd`, which the native doctor
+  neither sends nor decodes.
+- A maintainer error status whose body fails to read (a timeout, a reset, a
+  truncated chunked body) defers after the read-only GETs: Python's
+  `exc.read(65536)` runs inside `except HTTPError` (doctor_cli.py:396), so
+  the failure escapes and doctor ends in a traceback with exit 1. This is
+  declared residue, as on the other leaves, not an answer.
 - `python-httpx/0.28.1` is the oracle environment's httpx; another httpx
   version sends another agent string.
 - Missing Git for Windows (`GitBashMissing`) is not reachable through the
@@ -150,7 +159,9 @@ PATH absent on POSIX (`os.confstr`); stat errors pathlib would raise.
 After a read-only GET (board, maintainer or health) but always before the
 handshake starts the shim: a non-object health body, a
 non-string `status`, a truthy non-string `version`, a `hooks_digest` with a
-Codex plugin configured (digest comparison not ported), an unfollowed
-redirect, a duplicate or non-ASCII `X-PL-Board` header, maintainer
-`rp_id`/`origin` that are not strings or null, response bodies only
-Python's decoder admits.
+Codex plugin configured (digest comparison not ported), a health redirect
+to `ftp:` or to a target that is not text (urllib would follow it), a
+maintainer error body that fails to read (Python crashes there), a
+duplicate or non-ASCII `X-PL-Board` header, maintainer `rp_id`/`origin`
+that are not strings or null, response bodies only Python's decoder
+admits.

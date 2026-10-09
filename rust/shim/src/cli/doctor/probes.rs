@@ -9,76 +9,61 @@ pub(super) struct Answer {
     status: u16,
     board: Vec<Vec<u8>>,
     body: Vec<u8>,
+    /// The status arrived; reading the body failed.
+    body_failed: bool,
+    /// A redirect urllib follows and this port does not.
+    unsupported: bool,
 }
 
-/// How much of a body urllib's caller reads: `read(n)` for a success and
-/// for an HTTP error status, or the whole body (`None`).
-type Limits = (Option<usize>, Option<usize>);
-
-/// One GET the way urllib sends it: per-operation socket timeouts, no
-/// proxy, redirects followed only for the health probe, and a body read
-/// that stops where the caller's `read(n)` stops.
+/// One GET the way urllib sends it (`cli::hook_http`: urllib's request
+/// fields, per-receive socket timeouts, `HTTPRedirectHandler`'s limits,
+/// no proxy), its body read stopping where the caller's `read(n)` stops.
 async fn get(
     url: &str,
     path: &str,
     token: Option<&str>,
     timeout: Duration,
     follow: bool,
-    limits: Limits,
+    limits: crate::cli::hook_http::Limits,
 ) -> Option<Answer> {
-    let client = reqwest::Client::builder()
-        .redirect(if follow {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .no_proxy()
-        .referer(false)
-        .connect_timeout(timeout)
-        .read_timeout(timeout)
-        .user_agent("Python-urllib/3.11")
-        .build()
-        .ok()?;
-    let mut request = client.get(format!("{}{path}", url.trim_end_matches('/')));
-    if let Some(token) = token {
-        // http.client encodes header values as Latin-1; anything else raises
-        // UnicodeEncodeError before sending, which the callers report as an
-        // unreachable daemon.
-        if !token.chars().all(|c| (c as u32) <= 0xff) {
-            return None;
+    let authorization = match token {
+        None => None,
+        Some(token) => {
+            // http.client encodes header values as Latin-1; anything else
+            // raises UnicodeEncodeError before sending, which the callers
+            // report as an unreachable daemon.
+            if !token.chars().all(|c| (c as u32) <= 0xff) {
+                return None;
+            }
+            Some(
+                format!("Bearer {token}")
+                    .chars()
+                    .map(|c| c as u32 as u8)
+                    .collect::<Vec<u8>>(),
+            )
         }
-        let bytes: Vec<u8> = format!("Bearer {token}")
-            .chars()
-            .map(|c| c as u32 as u8)
-            .collect();
-        request = request.header(
-            "Authorization",
-            reqwest::header::HeaderValue::from_bytes(&bytes).ok()?,
-        );
-    }
-    let mut response = request.send().await.ok()?;
-    let status = response.status().as_u16();
-    let board = response
-        .headers()
+    };
+    let reply = crate::cli::hook_http::get_bounded(
+        url.trim_end_matches('/'),
+        path,
+        authorization.as_deref(),
+        timeout,
+        follow,
+        limits,
+    )
+    .await?;
+    let board = reply
+        .headers
         .get_all("X-PL-Board")
         .iter()
         .map(|value| value.as_bytes().to_vec())
         .collect();
-    let limit = if success(status) { limits.0 } else { limits.1 };
-    let mut body = Vec::new();
-    while limit.is_none_or(|limit| body.len() < limit) {
-        match response.chunk().await.ok()? {
-            Some(chunk) => body.extend_from_slice(&chunk),
-            None => break,
-        }
-    }
-    if let Some(limit) = limit {
-        body.truncate(limit);
-    }
     Some(Answer {
-        status,
+        status: reply.status,
         board,
-        body,
+        body: reply.body,
+        body_failed: reply.body_failed,
+        unsupported: reply.unsupported,
     })
 }
 
@@ -114,6 +99,10 @@ pub(super) async fn board(
     else {
         return Ok(line("unreachable", "off - daemon unreachable".into()));
     };
+    // read(65536) failing inside the `with`: the probe's `except Exception`.
+    if answer.body_failed {
+        return Ok(line("unreachable", "off - daemon unreachable".into()));
+    }
     if !success(answer.status) {
         let state = match answer.status {
             401 => "unauthorized",
@@ -217,11 +206,18 @@ pub(super) async fn maintainer(
 ) -> Res<Map<String, Value>> {
     let mut out = Map::new();
     let limits = (Some(1 << 20), Some(65536));
-    let Some(answer) = get(url, "/api/maintainer", Some(token), timeout, false, limits).await
-    else {
-        out.insert("state".into(), json!("not_checked"));
-        out.insert("line".into(), json!("not checked - daemon unreachable"));
-        return Ok(out);
+    let answer = get(url, "/api/maintainer", Some(token), timeout, false, limits).await;
+    let answer = match answer {
+        // exc.read(65536) runs inside `except HTTPError`: its failure escapes
+        // maintainer_probe and doctor ends in a traceback. Defer instead.
+        Some(answer) if answer.body_failed && !success(answer.status) => return Err(Defer),
+        Some(answer) if !answer.body_failed => answer,
+        // A failed read(1 << 20), or no answer: the `except Exception`.
+        _ => {
+            out.insert("state".into(), json!("not_checked"));
+            out.insert("line".into(), json!("not checked - daemon unreachable"));
+            return Ok(out);
+        }
     };
     let parsed = loads_bytes(&answer.body)?;
     let body = match parsed {
@@ -286,14 +282,19 @@ pub(super) async fn maintainer(
 }
 
 /// `shim.probe_health(url)`: the parsed body of any answer, `None` when
-/// there is none or it is not JSON.
+/// there is none, its body fails to read or it is not JSON. A 3xx reply here
+/// is where urllib's redirect handler raised HTTPError (no target, a refused
+/// scheme, the repeat limits): `e.read()` parses its body like any other.
 pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
     let Some(answer) = get(url, "/health", None, timeout, true, (None, None)).await else {
         return Ok(None);
     };
-    if (300..400).contains(&answer.status) {
-        // A redirect urllib would not follow (limit, scheme, status).
+    if answer.unsupported {
+        // An ftp: or non-text redirect target urllib would still follow.
         return Err(Defer);
+    }
+    if answer.body_failed {
+        return Ok(None);
     }
     match std::str::from_utf8(&answer.body) {
         Ok(text) => json_loads(text),

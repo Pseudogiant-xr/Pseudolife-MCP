@@ -126,7 +126,8 @@ class Route:
     the connection without an answer."""
 
     def __init__(self, status: int = 200, payload: Any = None, *, raw: bytes | None = None,
-                 headers: dict | None = None, drop: bool = False, stall: float = 0.0):
+                 headers: dict | None = None, drop: bool = False, stall: float = 0.0,
+                 short: int = 0):
         self.status = status
         self.raw = raw if raw is not None else (b"" if payload is None else body(payload))
         self.headers = headers or {}
@@ -135,6 +136,9 @@ class Route:
         # hold the connection open this long (a reader bounded below the
         # body's length returns; one that reads to the end waits).
         self.stall = stall
+        # ``short``: announce this many bytes more than are sent, then close
+        # the connection cleanly (a body cut short of its Content-Length).
+        self.short = short
 
 
 class FixtureDaemon:
@@ -178,9 +182,13 @@ class FixtureDaemon:
                 if "Content-Type" not in route.headers:
                     self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length",
-                                 str(len(route.raw) + (4096 if route.stall else 0)))
+                                 str(len(route.raw) + (4096 if route.stall else 0)
+                                     + route.short))
                 self.end_headers()
                 self.wfile.write(route.raw)
+                if route.short:
+                    self.wfile.flush()
+                    self.close_connection = True
                 if route.stall:
                     self.wfile.flush()
                     time.sleep(route.stall)
@@ -541,6 +549,29 @@ def saved_instance(private: bool = True, raw: str | None = None, **fields):
     return step
 
 
+def encoded_proof(encoding: str):
+    """``context_proof``'s answer compressed as ``Content-Encoding`` says
+    (``deflate-raw`` is a headerless deflate stream labelled ``deflate``)."""
+    import gzip as gzip_module  # noqa: PLC0415
+    import zlib  # noqa: PLC0415
+
+    plain = context_proof()
+
+    def answer(daemon, request):
+        raw = plain(daemon, request).raw
+        if encoding == "gzip":
+            data, label = gzip_module.compress(raw), "gzip"
+        elif encoding == "deflate":
+            data, label = zlib.compress(raw), "deflate"
+        elif encoding == "deflate-raw":
+            squeeze = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+            data, label = squeeze.compress(raw) + squeeze.flush(), "deflate"
+        else:  # gzip then deflate, listed in the order applied
+            data, label = zlib.compress(gzip_module.compress(raw)), "gzip, deflate"
+        return Route(200, raw=data, headers={"Content-Encoding": label})
+    return answer
+
+
 def redirected_dir(rel: str):
     """``rel`` as a redirect to an empty directory: a junction on Windows
     (no privilege needed), a symlink elsewhere."""
@@ -632,6 +663,23 @@ def cases() -> list[Case]:
             + b"9" * n + b"}"))(digits)}))
     add(case("health-stalled-body", routes={"/health": lambda daemon: Route(
         200, health(daemon.version), stall=6.0)}))
+    # urllib follows Location, else URI; with neither, past its repeat
+    # limit, or to a scheme it refuses, HTTPError carries the 3xx body,
+    # which probe_health parses (request.py HTTPRedirectHandler).
+    degraded = {"status": "degraded", "init_refusal": "fixture"}
+    add(case("health-redirect-uri", routes={
+        "/health": lambda _: Route(302, {}, headers={"URI": "/health-moved"}),
+        "/health-moved": lambda _: Route(503, degraded)}))
+    add(case("health-redirect-without-target", routes={
+        "/health": lambda _: Route(302, degraded)}))
+    add(case("health-redirect-loop", routes={
+        "/health": lambda _: Route(302, {}, headers={"Location": "/health-loop"}),
+        "/health-loop": lambda _: Route(307, degraded, headers={"Location": "/health-loop"})}))
+    add(case("health-redirect-refused-scheme", routes={
+        "/health": lambda _: Route(301, degraded, headers={"Location": "gopher://x/y"})}))
+    add(case("health-redirect-to-healthy", routes={
+        "/health": lambda _: Route(308, {}, headers={"Location": "/health-moved"}),
+        "/health-moved": lambda _: Route(503, degraded)}))
     add(case("bearer-rejected", env=TOKEN, routes={
         "/health": lambda _: Route(401, {"error": "unauthorized"}),
         "/api/hook/coordination-start": lambda _: Route(401, {"error": "unauthorized"})}))
@@ -706,6 +754,21 @@ def cases() -> list[Case]:
         "/health": healthy(), board: lambda _: BOARD_ON,
         "/api/maintainer": lambda _: Route(409, raw=MAINTAINER_UNSET.raw + b" " * 70000,
                                            stall=6.0)}))
+    # read(n) returns what arrived when the peer closes early (no error).
+    add(case("board-short-body", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: Route(200, raw=b"x" * 50,
+                                                     headers={"X-PL-Board": "on"}, short=50),
+        "/api/maintainer": lambda _: MAINTAINER_UNSET}))
+    add(case("board-short-empty-body", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: Route(200, raw=b"", short=50),
+        "/api/maintainer": lambda _: MAINTAINER_UNSET}))
+    add(case("maintainer-short-success", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: BOARD_ON,
+        "/api/maintainer": lambda _: Route(200, {"rp_id": "box.example",
+                                                 "origin": "https://box.example"}, short=100)}))
+    add(case("maintainer-short-refusal", env=TOKEN, routes={
+        "/health": healthy(), board: lambda _: BOARD_ON,
+        "/api/maintainer": lambda _: Route(409, raw=MAINTAINER_UNSET.raw, short=100)}))
     add(case("maintainer-stalled-success", env=TOKEN, routes={
         "/health": healthy(), board: lambda _: BOARD_ON,
         "/api/maintainer": lambda _: Route(200, raw=body({"rp_id": "box.example",
@@ -795,6 +858,10 @@ def cases() -> list[Case]:
                  "/health": healthy(), board: rotate,
                  "/api/maintainer": lambda _: MAINTAINER_UNSET, context: context_proof()}))
     agent("missing-under-redirect", answer=context_proof(), steps=[redirected_dir("state")])
+    # httpx decodes Content-Encoding (gzip, deflate) before .json().
+    for encoding in ("gzip", "deflate", "deflate-raw", "gzip, deflate"):
+        agent(f"encoded-{encoding.replace(', ', '-then-')}",
+              answer=encoded_proof(encoding))
 
     # Client registrations lend the credential a plain shell lacks.
     reg_routes = {"/health": healthy(auth=True), board: lambda _: BOARD_ON,
@@ -1020,9 +1087,9 @@ MUTANTS = [
            "        match fresh() {\n", "        match Ok::<_, ()>(token.clone()) {\n",
            ("token-rotated-between-probes",)),
     Mutant("doctor-unbounded-body-read", "doctor", "shim/src/cli/doctor/probes.rs",
-           "let limit = if success(status) { limits.0 } else { limits.1 };",
-           "let limit: Option<usize> = None;",
-           ("board-stalled-body", "maintainer-stalled-refusal")),
+           "let limits = (Some(1 << 20), Some(65536));",
+           "let limits = (None, None);",
+           ("maintainer-stalled-refusal", "maintainer-stalled-success")),
     Mutant("doctor-unhashable-error-refused", "doctor", "shim/src/cli/doctor/agent.rs",
            'Some(Value::Array(_) | Value::Object(_)) => "unsupported_capability",', "",
            ("agent-state-error-list", "agent-state-error-object")),
@@ -1035,19 +1102,44 @@ MUTANTS = [
     Mutant("doctor-agent-path-unnormalized", "doctor", "shim/src/cli/doctor/agent.rs",
            "let normalized = super::pyenv::path_str(value)?;", "let normalized = value.to_owned();",
            ("agent-state-trailing-separator",)),
-    Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
-           'directories.insert(0, ".");', "", ("which-cwd-first",)),
-    Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
-           ("claude-config-dir-dot-parts",)),
     Mutant("doctor-escape-upper-hex", "doctor", "shim/src/cli/doctor/pyjson.rs",
            'format!("\\\\u{unit:04x}")', 'format!("\\\\u{unit:04X}")',
            ("claude-config-dir-non-ascii",)),
+    Mutant("doctor-wire-keep-alive", "doctor", "shim/src/cli/hook_http.rs",
+           '.header("Connection", "close")', '.header("Connection", "keep-alive")',
+           ("healthy", "board-on")),
+    Mutant("doctor-context-no-encodings", "doctor", "shim/src/cli/doctor/agent.rs",
+           '.header("Accept-Encoding", "gzip, deflate")', "",
+           ("agent-state-authenticated",)),
+    Mutant("doctor-board-unbounded-read", "doctor", "shim/src/cli/doctor/probes.rs",
+           "(Some(65536), Some(0)),", "(None, Some(0)),", ("board-stalled-body",)),
+    Mutant("doctor-context-no-keep-alive", "doctor", "shim/src/cli/doctor/agent.rs",
+           '.header("Connection", "keep-alive")', "", ("agent-state-authenticated",)),
+    Mutant("doctor-short-body-fails", "doctor", "shim/src/cli/hook_http.rs",
+           "!(short_reads && limit.is_some() && !chunked && ended_early(&error));",
+           "!(false && short_reads && limit.is_some() && !chunked && ended_early(&error));",
+           ("board-short-body", "maintainer-short-success")),
+    Mutant("doctor-redirect-uri-ignored", "doctor", "shim/src/cli/hook_http.rs",
+           'reply.headers.get("URI")', 'reply.headers.get("X-Not-URI")',
+           ("health-redirect-uri",)),
+    Mutant("doctor-redirect-raise-unreachable", "doctor", "shim/src/cli/hook_http.rs",
+           "urllib_errors.then_some(reply)", "{ let _ = (urllib_errors, reply); None }",
+           ("health-redirect-without-target", "health-redirect-loop")),
+    Mutant("doctor-gzip-not-decoded", "doctor", "shim/src/cli/doctor/agent.rs",
+           'coding == "gzip" || coding == "deflate"', 'coding == "deflate"',
+           ("agent-state-encoded-gzip",)),
     Mutant("doctor-drop-final-newline", "doctor", "shim/src/cli/doctor/mod.rs",
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]
 if core.WINDOWS:
+    # shutil.which searches the working directory first, and pathlib drops
+    # '.' parts of a backslashed path, on Windows only.
+    MUTANTS.append(Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           'directories.insert(0, ".");', "", ("which-cwd-first",)))
+    MUTANTS.append(Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
+           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
+           ("claude-config-dir-dot-parts",)))
     # Its cases run only where the depth threshold was measured.
     MUTANTS.append(Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
                           "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",
