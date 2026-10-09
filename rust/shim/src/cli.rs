@@ -13,6 +13,7 @@ mod episode;
 mod hook_http;
 mod hook_json;
 pub mod lease;
+pub mod maintainer;
 mod test_login;
 mod transfer;
 mod version;
