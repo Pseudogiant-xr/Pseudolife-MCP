@@ -224,6 +224,10 @@ Every deferral below happens before any request, except the last item.
   shim's cache file is named `sha256(url)[:16]` of the fixture URL, whose
   port differs per run; only that name, validated against this case's own
   fixture URL, becomes `<fixture-url-hash>.json`, so goldens replay.
+- Live-only off Windows: `apply-restart-pids` runs live on both OSes but
+  is left out of the Linux golden (`Case.golden`). Its stand-in runtime
+  process is a copy of the host's `sleep`, whose bytes the file snapshot
+  keeps; a multicall coreutils `sleep` is about 15 MB.
 - `connect-target-url`: where no fixture daemon answers the target
   (`health-unreachable`), the harness's daemon token never runs; the case's
   own target URL (a free loopback port the harness picked, recorded as

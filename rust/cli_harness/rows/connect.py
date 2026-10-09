@@ -691,7 +691,7 @@ def _with_temp(setup):
 
 def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=None, after=None,
          env=None, stdin: bytes = b"", platforms=("windows", "linux"), timeout: float = 120,
-         stderr_closed: bool = False, **daemon) -> Case:
+         stderr_closed: bool = False, golden: bool = True, **daemon) -> Case:
     # With every client selected (no --client), the oracle reads the
     # unattended-update schedule: on Windows it runs this host's System32
     # schtasks /Query, which no PATH inside the home can hide.
@@ -699,7 +699,7 @@ def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=Non
     return Case(case_id, ["connect", *argv], env=_env(**(env or {})), stdin=stdin,
                 setup=_with_temp(setup), during=_arm_pid, real_programs=schedule,
                 after=_after(url, after), timeout=timeout, rules=RULES, platforms=platforms,
-                stderr_closed=stderr_closed,
+                stderr_closed=stderr_closed, golden=golden,
                 daemon=_fixture(port, url, **daemon) if port is not None else None)
 
 
@@ -969,8 +969,10 @@ def cases() -> list[Case]:
             obs["restart_pid"] = process.pid
             process.kill()
             process.wait(10)
+    # Live-only off Windows: the stand-in process is a copy of the host's `sleep`,
+    # whose bytes the snapshot keeps (a multicall coreutils binary is ~15 MB).
     add(case("apply-restart-pids", [url, "--yes", "--client", "claude-code"], url=url, port=port,
-             setup=runtime_process, after=stop_runtime_process))
+             setup=runtime_process, after=stop_runtime_process, golden=WINDOWS))
 
     # Verification refusals.
     port, url = _target()
