@@ -12,10 +12,76 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `POST /api/coordination/*` after the body checks | the board hub | W2-F |
-| `/mcp`, `/mcp/*` after the bearer gate | the MCP transport | W2-G |
 | `/api/hook/session-start`, `memory-policy`, `coordination-start` (any caller) | briefing, policy and board check-in text | W2-D / W2-F |
 | Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
 | `POST /api/pair` after a valid body on an authenticated install | redemption (principal store write) | W2-F |
+
+## MCP surface (W2-G)
+
+`/mcp` is served (spec.md, "MCP surface (W2-G)"); `tools/list` is byte-equal
+at every tier. A `tools/call` of a tool whose body has not landed answers the
+declared stub (delegate ruling 2026-10-09): the normal refusal envelope,
+`isError: true`, structured content equal to the JSON text,
+`{"error": "not_implemented", "message": "not_implemented: <tool> is not yet served by the Rust daemon"}`,
+with no `mutation` key because nothing ran. Nothing installs the Rust daemon
+before cutover, so no client sees it. The harness (`harness/mcp_compare.py`,
+`UNSERVED`) checks the stub for every row here; the PR that wires a body
+deletes its row in both places, and from then on the harness compares that
+tool's answers by value.
+
+| Tool | Body owner |
+|---|---|
+| `memory_agents` | W2-F |
+| `memory_message` | W2-F |
+| `memory_search` | W2-D |
+| `memory_recall` | W2-D |
+| `memory_world_search` | W2-D |
+| `memory_lesson_search` | W2-D |
+| `memory_get` | W2-D |
+| `memory_recent` | W2-D |
+| `memory_history` | W2-D |
+| `memory_stats` | W2-D |
+| `memory_graph` | W2-D |
+| `memory_fact_get` | W2-D |
+| `document_search` | W2-D |
+| `memory_episode_summary` | W2-D |
+| `memory_consolidation_candidates` | W2-D |
+| `memory_store` | W2-E |
+| `memory_fact_set` | W2-E |
+| `memory_set_add` | W2-E |
+| `memory_set_remove` | W2-E |
+| `memory_fact_resolve` | W2-E |
+| `memory_world_set` | W2-E |
+| `memory_outcome` | W2-E |
+| `memory_episode_start` | W2-E |
+| `memory_episode_end` | W2-E |
+| `memory_session_title` | W2-E |
+| `memory_supersede` | W2-E |
+| `memory_reinstate` | W2-E |
+| `memory_reinforce` | W2-E |
+| `memory_forget` | W2-E |
+| `document_ingest` | W2-E |
+| `memory_dream` | W3-H |
+| `memory_graph_review` | W3-H |
+| `memory_consolidate` | W3-H |
+| `memory_graph_relate` | W3-H |
+| `memory_graph_unrelate` | W3-H |
+| `memory_alias` | W3-H |
+| `memory_relation_define` | W3-H |
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Argument binding for tools other than `memory_toolset` (`unknown_parameter`, pydantic type, enum, length and range refusals, the string-to-list pre-parse, `_non_blank`, `_check_as_of`) | refused before the body runs | not yet: every unserved tool answers the stub whatever its arguments | W2-G (next PR) |
+| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
+| `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; no served tool reads the binding yet | W2-F supplies the check, W2-G calls it |
+| A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
+| Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
+| A refused non-`initialize` request with no session id | registers a live, uninitialized session under the fresh id it reports | registers nothing; that id is later unknown | non-canonical (no client reuses a refusal's id) |
+| Request body size on `/mcp` | unbounded | 64 MiB | bounded memory |
+| `logging/setLevel`, `completion/complete` | -32602 for these params (capabilities do not advertise them) | -32601 `Method not found` | non-canonical |
+| `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
+| JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
+| Duplicate `X-PL-Writer` / `X-PL-Session` headers | the SDK request context's header mapping | the first value | non-canonical |
 
 ## Startup and configuration
 
