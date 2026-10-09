@@ -279,10 +279,11 @@ jobs:
       #   seed stamps with the wall clock and random codes, and one 2.6 MB
       #   report.
       - name: Build the test_login container image
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.suite == 'cli'
         timeout-minutes: 10
         run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
       - name: CLI W1-C differential harness
+        if: matrix.suite == 'cli'
         timeout-minutes: 60
         shell: pwsh
         run: |
