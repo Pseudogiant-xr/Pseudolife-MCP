@@ -66,8 +66,7 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
   bank verify and redact.
 - `--out` that cannot be created; on Windows, a `--out` write failure with a
   Win32 error other than `ERROR_DISK_FULL` (the file is removed first).
-- `export` to stdout when descriptor 1 is closed (POSIX; CPython has no
-  `sys.stdout`); a verify report or a redaction refusal stdout refuses.
+- A verify report or a redaction refusal stdout refuses.
 - Redaction reasons holding a non-Cc category-C character (Cf vs Co/Cn needs
   a table the crate does not pin); any redaction SQL error other than lock
   timeout (rolled back).
@@ -79,6 +78,12 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
   newest 4096 in the clean-up note.
 - A process limit that raises SIGXFSZ during a `--out` write: CPython ignores
   the signal and reports `cannot write`; the native process is not shielded.
+- `export` to stdout with descriptor 1 closed at exec (POSIX `>&-`): CPython
+  has no `sys.stdout` and exits 2 with its generic line; Rust's runtime
+  reopens a closed descriptor 0-2 on `/dev/null` before `main`, so the leaf
+  cannot tell this from `>/dev/null` and exits 0 with the lines discarded.
+  Measured on Linux (WSL) 2026-10-09: Python exit 2, Rust exit 0. On Windows
+  both exit 0.
 
 ## Coverage notes
 
@@ -87,9 +92,9 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
   ANALYZE-time `RAISE WARNING` arrives exactly like a skip, with the database
   hiding warnings by default (`redact-vacuum-warning`). The restored
   `client_min_messages` itself is session state and not observable.
-- `--out` write failures and closed descriptor 1 are not reproducible in the
-  harness; unit tests pin the strerror mapping, and the POSIX check needs a
-  Linux run.
+- `--out` write failures are not reproducible in the harness; unit tests pin
+  the strerror mapping. The closed-descriptor case was measured by hand on
+  Linux (see the declared divergence).
 
 ## Proposed PARITY split
 

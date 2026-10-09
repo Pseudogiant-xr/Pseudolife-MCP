@@ -40,8 +40,6 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
                         ) => {}
                     Err(_) => return deferred(),
                 }
-            } else if !stdout_present() {
-                return deferred();
             }
             with_bank(|dsn| async move { bank::export(&dsn, &export).await })
         }
@@ -161,23 +159,6 @@ fn print_line(value: &Json) -> Result<(), ()> {
         .write_all(&super::text_bytes(&text))
         .and_then(|()| stdout.flush())
         .map_err(|_| ())
-}
-
-/// Whether file descriptor 1 exists at all. On POSIX, CPython then has no
-/// `sys.stdout` (`None`), so `export` to stdout fails with its generic
-/// line, while Rust's stdout would silently discard the lines. On Windows a
-/// process started without a stdout handle still gets a `sys.stdout` that
-/// discards writes (observed: export exits 0 with nothing written), as
-/// Rust's does, so nothing is detected there.
-fn stdout_present() -> bool {
-    #[cfg(unix)]
-    {
-        rustix::io::fcntl_getfd(io::stdout()).is_ok()
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
 }
 
 fn deferred() -> u8 {
