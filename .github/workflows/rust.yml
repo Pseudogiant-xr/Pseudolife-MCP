@@ -215,6 +215,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
+          python rust/daemon/harness/gen_graph_unicode.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/test_graph_store_harness.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')

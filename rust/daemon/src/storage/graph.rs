@@ -2,6 +2,9 @@
 use serde_json::{Value, json};
 use tokio_postgres::{Client, Row, Transaction};
 
+#[path = "graph_lower.rs"]
+mod unicode14;
+
 fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -12,7 +15,7 @@ fn now() -> f64 {
 /// Graph names differ from cortex slot keys.
 pub fn norm_name(raw: &str) -> String {
     let mut out = String::new();
-    for c in super::py_strip(raw).to_lowercase().chars() {
+    for c in unicode14::lower(super::py_strip(raw)).chars() {
         let c = if c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c) || "_/\\.:".contains(c) {
             '-'
         } else {
@@ -53,7 +56,13 @@ pub async fn ensure_entity(
         // authoritative. Mint-only repair is part of this transaction.
         let segment = canonical
             .split('-')
-            .max_by_key(|s| s.chars().count())
+            .reduce(|best, next| {
+                if next.chars().count() > best.chars().count() {
+                    next
+                } else {
+                    best
+                }
+            })
             .unwrap();
         let like = format!(
             "%{}%",

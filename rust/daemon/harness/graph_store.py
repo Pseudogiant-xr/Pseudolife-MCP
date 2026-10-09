@@ -71,6 +71,10 @@ def seed(url):
                 ("Node A", "Node B", a, b), ("node_a", "Node C", None, c),
                 ("G:", "capacity", None, None), ("alpha beta", "x", None, None),
                 ("ΟΣ", "Greek", None, None), ("100%_done", "percent", None, None),
+                ("AA_İ", "tied-segment", None, None),
+                ("prefix_\uA7CB", "unicode-14-a", None, None),
+                ("prefix_\u1C89", "unicode-14-b", None, None),
+                ("prefix_\uA7CC", "unicode-14-c", None, None),
             ]):
                 st.upsert_fact(dict(entity=name, attribute=f"attr-{index}",
                     entity_norm=name.lower(), attribute_norm=f"attr-{index}",
@@ -136,6 +140,10 @@ def operations():
         op("ensure_entity", canonical="ος", display="ΟΣ"),
         op("ensure_entity", canonical="100%-done", display="100%_done"),
         op("ensure_entity", canonical="", display=""),
+        op("ensure_entity", canonical="aa-i\u0307"),
+        op("ensure_entity", canonical="prefix-\uA7CB"),
+        op("ensure_entity", canonical="prefix-\u1C89"),
+        op("ensure_entity", canonical="prefix-\uA7CC"),
         op("load_graph"), op("find_entity", name_norm="g"),
         # FK errors must roll back and permit the next ordinary operation.
         op("add_alias", alias_norm="bad", entity_id=999),

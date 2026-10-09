@@ -35,3 +35,10 @@ confidence, origin, revival, blessing, aliases, orphan repair and merging.
 Traversal/order, communities, service/MCP wiring, proposals, review and deep
 dream remain later increments. No NetworkX ordering substitution is exercised
 by this storage increment.
+
+Review corrections: Python's orphan prefilter selects the first longest
+canonical segment on ties (`storage/postgres.py:2806`); choosing the last can
+drop a Unicode match under PostgreSQL ILIKE. Graph identity lowercase follows
+the Python 3.11 Unicode14 oracle, including final-sigma context; Rust's newer
+Unicode tables changed freshly assigned letters and orphan links. Generated
+data and exhaustive lowercase/context hashes pin that graph-name contract.
