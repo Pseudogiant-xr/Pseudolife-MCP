@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mcp_wire import ACCEPT, PROTOCOL, Session, header, request, sse_data  # noqa: E402
+from mcp_wire import ACCEPT, PROTOCOL, Session, header, request, sse_data, sse_events  # noqa: E402
 
 TOK = {"default": "tok-default-0001", "alice": "tok-alice-0001", "bob": "tok-bob-0001",
        "carol": "tok-carol-0001",
@@ -66,18 +66,22 @@ def init_body(version=PROTOCOL, params=None):
 def norm(resp):
     """The comparable view of one response."""
     keep = {}
-    for k in ("content-type", "allow", "location"):
+    for k in ("content-type", "allow", "location", "cache-control", "connection",
+              "x-accel-buffering"):
         v = header(resp, k)
         if v is not None:
             keep[k] = v
-    keep["mcp-session-id"] = header(resp, "mcp-session-id") is not None
+    sid = header(resp, "mcp-session-id")
+    # The echoed id must be the request's own; a fresh one is only present.
+    keep["mcp-session-id"] = (None if sid is None
+                              else "<request>" if sid == resp.get("req_sid") else "<fresh>")
     ctype = header(resp, "content-type") or ""
     if ctype == "application/json; charset=utf-8":
         # The Console gate's `_send_json` (W1-A's contract): values, not bytes.
         return {"status": resp["status"], "headers": keep,
                 "body": {"json": json.loads(resp["body"] or b"null")}}
     if ctype.startswith("text/event-stream"):
-        body = {"sse": sse_data(resp)}
+        body = {"sse": sse_data(resp), "events": sse_events(resp)}
     else:
         text = resp["body"].decode("utf-8", "replace")
         try:
@@ -140,6 +144,18 @@ def methods(port):
     out = [norm(s.call(m, {})) for m in ["prompts/list", "resources/list", "resources/templates/list",
                                          "nosuch/method", "subscriptions/listen"]]
     out.append(norm(s.call("initialize", init_body()["params"])))
+    for m, p in [("tools/list", {"cursor": 5}), ("tools/list", {"cursor": "x"}),
+                 ("tools/list", {"cursor": None}), ("prompts/list", {"cursor": 1}),
+                 ("ping", {"_meta": 5}), ("ping", {"_meta": {}}),
+                 ("tools/call", {"name": "memory_toolset", "arguments": {"action": "status"},
+                                 "_meta": 5}),
+                 ("tools/call", {"name": 5}), ("prompts/get", {}), ("prompts/get", {"name": "x"}),
+                 ("resources/read", {}), ("resources/read", {"uri": "x://y"}),
+                 ("resources/subscribe", {}), ("resources/subscribe", {"uri": "x://y"}),
+                 ("resources/unsubscribe", {"uri": "x://y"}),
+                 ("initialize", {"protocolVersion": PROTOCOL, "capabilities": {"roots": 5},
+                                 "clientInfo": {"name": "a", "version": "1"}})]:
+        out.append(norm(s.call(m, p)))
     out.append(norm(s.notify("notifications/cancelled")))
     out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 77, "result": {}}, s._headers())))
     s.close()
@@ -175,7 +191,9 @@ def toolset(port):
         s.close()
     s = Session(port, TOK["carol"])
     for args in [{"action": "bogus"}, {}, {"actoin": "status"}, {"actoin": "x", "zzz": 1},
-                 {"action": "status", "verbose": True}, {"action": 3}, {"action": None}]:
+                 {"action": "status", "verbose": True}, {"action": 3}, {"action": None},
+                 # SequenceMatcher is not symmetric: difflib scores (candidate, word).
+                 {"iain": "status"}, {"cint": 1}]:
         out.append(norm(s.tool("memory_toolset", args)))
     s.close()
     return out
@@ -210,20 +228,30 @@ def list_changed_stream(port):
     second = request(port, "GET", None, [("Accept", "text/event-stream"),
                                          ("Authorization", f"Bearer {TOK['carol']}"),
                                          ("mcp-session-id", s.sid or "")])
+    def next_event(buf):
+        # Read until one complete data event (keep-alive comments skipped).
+        while not any(e.startswith(b"event:") or b"\r\ndata: " in e or e.startswith(b"data: ")
+                      for e in buf.split(b"\r\n\r\n")[:-1]):
+            chunk = g.read1(4096)
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
     s.tool("memory_toolset", {"action": "expand"})
-    buf = b""
-    while b"\r\n\r\n" not in buf.lstrip(b": ping"):
+    buf = next_event(b"")
+    s.tool("memory_toolset", {"action": "collapse"})
+    n_before = buf.count(b"data: ")
+    while buf.count(b"data: ") == n_before:
         chunk = g.read1(4096)
         if not chunk:
             break
         buf += chunk
-        if b"data: " in buf and buf.endswith(b"\r\n\r\n"):
-            break
     head["body"] = buf
-    s.tool("memory_toolset", {"action": "collapse"})
     s.close()
     c.close()
-    return [norm(head) | {"body": {"sse": sse_data(head)}}, norm(second)]
+    return [norm(head) | {"body": {"sse": sse_data(head), "events": sse_events(head)}},
+            norm(second)]
 
 
 def stream_reconnect(port):
@@ -249,6 +277,109 @@ def stream_reconnect(port):
         time.sleep(1.0)
     s.close()
     return out
+
+
+def init_gate(port):
+    """Refused or unanswered first requests still register a session, which
+    then refuses every request but ping until it is initialized."""
+    auth = [("Authorization", f"Bearer {TOK['carol']}")]
+    out = []
+
+    def on(sid):
+        return JSON_HDRS + auth + [("mcp-session-id", sid or ""), ("mcp-protocol-version", PROTOCOL)]
+
+    r = request(port, "POST", init_body(params={}), JSON_HDRS + auth)
+    out.append(norm(r))
+    sid = header(r, "mcp-session-id")
+    for body in [{"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                 {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+                 {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                 {"jsonrpc": "2.0", "id": 4, "method": "tools/list"}]:
+        out.append(norm(request(port, "POST", body, on(sid))))
+    request(port, "DELETE", None, on(sid))
+    for first in [
+        (JSON_HDRS + auth, {"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+        ([("Content-Type", "application/json"), ("Accept", "application/json")] + auth, init_body()),
+        ([("Content-Type", "text/plain"), ("Accept", ACCEPT)] + auth, init_body()),
+        (JSON_HDRS + auth, b'{"jsonrpc":'),
+    ]:
+        r = request(port, "POST", first[1], first[0])
+        out.append(norm(r))
+        sid = header(r, "mcp-session-id")
+        if sid:
+            out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 2, "method": "ping"}, on(sid))))
+            out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                                    on(sid))))
+            request(port, "DELETE", None, on(sid))
+    for m in ("GET", "DELETE", "PUT"):
+        r = request(port, m, None, [("Accept", ACCEPT)] + auth)
+        out.append(norm(r))
+        sid = header(r, "mcp-session-id")
+        if sid:
+            out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 2, "method": "ping"}, on(sid))))
+            request(port, "DELETE", None, on(sid))
+    return out
+
+
+def body_limit(port):
+    """The SDK's 4 MiB body limit answers 413 before sessions or routing."""
+    auth = [("Authorization", f"Bearer {TOK['carol']}")]
+    big = b'{"jsonrpc":"2.0","id":5,"method":"ping","x":"' + b"a" * (4 * 1024 * 1024) + b'"}'
+    edge = b'{"jsonrpc":"2.0","id":5,"method":"ping","x":"' + b"a" * (4 * 1024 * 1024 - 46) + b'"}'
+    s = Session(port, TOK["carol"])
+    out = [norm(request(port, "POST", big, s._headers())),
+           norm(request(port, "POST", edge, s._headers())),
+           norm(request(port, "POST", big, JSON_HDRS + auth + [("mcp-session-id", "deadbeef" * 4)])),
+           norm(request(port, "GET", None, auth + [("Content-Length", "9999999")])),
+           norm(request(port, "GET", None, auth + [("Content-Length", " 9999999 ")])),
+           norm(request(port, "GET", None, auth + [("Content-Length", "x9")]))]
+    s.close()
+    return out
+
+
+def messages(port):
+    """jsonrpc_message_adapter's union: request, notification, response, error."""
+    s = Session(port, TOK["carol"])
+    out = []
+    for b in [{"jsonrpc": "2.0", "id": 1, "method": "ping", "params": []},
+              {"jsonrpc": "2.0", "id": 77, "result": 5},
+              {"jsonrpc": "2.0", "id": 78, "result": {}},
+              {"jsonrpc": "2.0", "id": None, "method": "ping"},
+              {"jsonrpc": "2.0", "id": True, "method": "ping"},
+              {"jsonrpc": "2.0", "id": 1.5, "method": "ping"},
+              {"jsonrpc": "2.0", "id": 2.0, "method": "ping"},
+              {"jsonrpc": "2.0", "id": "7", "method": "ping"},
+              {"jsonrpc": "2.0", "method": "ping", "params": 5},
+              {"jsonrpc": "2.0", "id": 3, "error": {"code": 1, "message": "x"}},
+              {"jsonrpc": "2.0", "id": None, "error": {"code": 1, "message": "x"}},
+              {"jsonrpc": "2.0", "id": 3, "error": 5},
+              {"jsonrpc": "1.0", "id": 3, "method": "ping"}]:
+        out.append(norm(request(port, "POST", b, s._headers())))
+    s.close()
+    return out
+
+
+def concurrent(port):
+    """Eight requests in flight on one session at once."""
+    import threading
+    s = Session(port, TOK["carol"])
+    results = [None] * 8
+    bodies = [("tools/list", {}), ("ping", {}), ("tools/call", {"name": "memory_toolset",
+                                                               "arguments": {"action": "status"}}),
+              ("prompts/list", {})] * 2
+
+    def go(i):
+        m, p = bodies[i]
+        results[i] = request(port, "POST", {"jsonrpc": "2.0", "id": 100 + i, "method": m,
+                                            "params": p}, s._headers())
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    s.close()
+    return [norm(r) for r in results]
 
 
 def transport(port):
@@ -296,6 +427,9 @@ def paths(port):
     import http.client
     out = []
     for path, hdrs in [("/mcp/", {"Authorization": f"Bearer {TOK['carol']}"}),
+                       ("/mcp//", {"Authorization": f"Bearer {TOK['carol']}"}),
+                       ("/mcp///?a=1", {"Authorization": f"Bearer {TOK['carol']}"}),
+                       ("/mcp/x/", {"Authorization": f"Bearer {TOK['carol']}"}),
                        ("/mcp/x", {"Authorization": f"Bearer {TOK['carol']}"}),
                        ("/mcp", {}),
                        ("/mcp", {"Authorization": "Bearer nope"})]:
@@ -350,6 +484,15 @@ def rebinding(port):
             out.append(norm(request(port, "POST", ping, JSON_HDRS + extra
                                     + [("mcp-session-id", sid), ("mcp-protocol-version", PROTOCOL)])))
             request(port, "DELETE", None, [("Host", f"127.0.0.1:{port}"), ("mcp-session-id", sid)])
+    good = [("Host", f"127.0.0.1:{port}")]
+    r = request(port, "POST", init_body(), JSON_HDRS + good)
+    sid = header(r, "mcp-session-id")
+    request(port, "DELETE", None, good + [("mcp-session-id", sid)])
+    for host in (f"127.0.0.1:{port}", "evil.example:1"):
+        out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 9, "method": "ping"},
+                                JSON_HDRS + [("Host", host), ("mcp-session-id", sid)])))
+        out.append(norm(request(port, "POST", {"jsonrpc": "2.0", "id": 9, "method": "ping"},
+                                JSON_HDRS + [("Host", host), ("mcp-session-id", "deadbeef" * 4)])))
     out.append(norm(request(port, "GET", None, [("Host", "evil.example:1"),
                                                ("Accept", "text/event-stream")])))
     out.append(norm(request(port, "DELETE", None, [("Host", "evil.example:1")])))
@@ -369,10 +512,25 @@ def open_lists(port):
     return out
 
 
+def config_lists(port):
+    """PSEUDOLIFE_WRITER_ID keys the default principal's tier; the default tier
+    and tier map parse leniently (mcp_run.py --config2)."""
+    out = []
+    for who, extra in [("default", {}), ("default", {"X-PL-Writer": "writer-x"}),
+                       ("alice", {}), ("bob", {}), ("carol", {})]:
+        s = Session(port, TOK[who], extra)
+        out.append(norm(s.call("tools/list", {})))
+        out.append(norm(s.tool("memory_toolset", {"action": "status"})))
+        s.close()
+    return out
+
+
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
-         stream_reconnect, transport, paths]
+         stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths]
 if "--tokenless" in sys.argv:
     CASES = [rebinding, open_lists]
+if "--config2" in sys.argv:
+    CASES = [config_lists]
 
 
 def stub_expected(name):
@@ -427,6 +585,12 @@ def sanity(data, diffs):
             got = [ntools(r) for r in data[case]]
             if got != counts:
                 diffs.append(f"sanity {case}: tool counts {got} != {counts}")
+    if "config_lists" in data:
+        got = [ntools(r) for r in data["config_lists"][::2]]
+        # default via PSEUDOLIFE_WRITER_ID=writer-m, writer-x (bogus default:
+        # full), alice, bob (the later valid entry), carol (full)
+        if got != [10, 38, 10, 24, 38]:
+            diffs.append(f"sanity config_lists: tool counts {got}")
     if "rebinding" in data:
         statuses = sorted({r["status"] for r in data["rebinding"]})
         # 400: a POST's Content-Type is checked before Host.
@@ -447,9 +611,13 @@ def check_stubs(py_stub, rust_stub, diffs, served):
         if "exception" in resp:
             diffs.append(f"stub calls raised: {resp['exception']}")
         elif name in UNSERVED:
-            data = resp["body"].get("sse", [None])[0]
-            want_suffix = stub_expected(name)
-            if resp["status"] != 200 or data is None or not data.endswith(f'"result":{want_suffix}}}'):
+            data = (resp["body"].get("sse") or [None])[0]
+            try:
+                rid = json.loads(data)["id"]
+            except (TypeError, ValueError, KeyError):
+                rid = None
+            want = '{"jsonrpc":"2.0","id":%s,"result":%s}' % (json.dumps(rid), stub_expected(name))
+            if resp["status"] != 200 or not isinstance(rid, int) or data != want:
                 diffs.append(f"stub {name}: {json.dumps(resp)[:400]}")
         elif py_stub is not None and py_stub.get(name) != resp:
             diffs.append(f"served {name}: python={json.dumps(py_stub.get(name))[:400]} rust={json.dumps(resp)[:400]}")
@@ -461,7 +629,7 @@ def main():
     if mode == "record":
         port, out = int(sys.argv[2]), sys.argv[3]
         data = run_all(port)
-        if "--tokenless" not in sys.argv:
+        if "--tokenless" not in sys.argv and "--config2" not in sys.argv:
             data["stub_tools"] = stub_tools(port)
         Path(out).write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"recorded {sum(len(v) for v in data.values())} responses to {out}")
@@ -470,7 +638,8 @@ def main():
         py, rs, out = int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
         a = run_all(py)
         b = run_all(rs)
-        a_stub, b_stub = None, ({} if "--tokenless" in sys.argv else stub_tools(rs))
+        side_configs = "--tokenless" in sys.argv or "--config2" in sys.argv
+        a_stub, b_stub = None, ({} if side_configs else stub_tools(rs))
     elif mode == "golden":
         a = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
         a_stub = a.pop("stub_tools", None)

@@ -1,7 +1,7 @@
 """Run the MCP-surface harness end to end on disposable banks.
 
-usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME] [--tokenless]
-                         [--record <golden.json>]
+usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME]
+                         [--tokenless | --config2] [--record <golden.json>]
 
 Creates pl_cf_w2g_py and pl_cf_w2g_rs through the test login, starts the
 Python oracle (from this checkout) and the Rust daemon on them with the
@@ -97,6 +97,10 @@ def main():
     if "--tokenless" in args:
         env = {"PSEUDOLIFE_MCP_TIER_MAP": ENV["PSEUDOLIFE_MCP_TIER_MAP"],
                "PSEUDOLIFE_MCP_TOOLSET": "core"}
+    if "--config2" in args:
+        env = dict(ENV, PSEUDOLIFE_WRITER_ID="writer-m", PSEUDOLIFE_MCP_TOOLSET=" Bogus ",
+                   PSEUDOLIFE_MCP_TIER_MAP=" Alice : Minimal ,bad,:core,writer-m:minimal,bob:huge,"
+                                           "bob:core, x:y:z")
     out.mkdir(parents=True, exist_ok=True)
     root = daemons.scratch_root() / "w2g"
     started = []
@@ -114,7 +118,7 @@ def main():
         started.append(py)
         rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env).start(wait_s=60)
         started.append(rs)
-        if "--tokenless" not in args:
+        if "--tokenless" not in args and "--config2" not in args:
             # Both daemons created the principals table at start; seed, then
             # outwait both 10 s snapshot refreshes.
             import time
@@ -127,8 +131,9 @@ def main():
         else:
             cmd = [sys.executable, str(HERE / "mcp_compare.py"), "compare", str(py_port),
                    str(rs_port), str(out / ("mutant-" + mutant + ".json" if mutant else "compare.json"))]
-        if "--tokenless" in args:
-            cmd.append("--tokenless")
+        for flag in ("--tokenless", "--config2"):
+            if flag in args:
+                cmd.append(flag)
         code = subprocess.run(cmd).returncode
     finally:
         for d in reversed(started):

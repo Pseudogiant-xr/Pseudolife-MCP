@@ -28,7 +28,8 @@ def request(port, method, body, headers, timeout=120):
     raw = r.read()
     hdrs = [(k.lower(), v) for k, v in r.getheaders()]
     c.close()
-    return {"status": r.status, "headers": hdrs, "body": raw}
+    req_sid = next((v for k, v in pairs if k.lower() == "mcp-session-id"), None)
+    return {"status": r.status, "headers": hdrs, "body": raw, "req_sid": req_sid}
 
 
 def header(resp, name):
@@ -36,6 +37,16 @@ def header(resp, name):
         if k == name:
             return v
     return None
+
+
+def sse_events(resp):
+    """The SSE body's events as raw text blocks, keep-alive comments dropped."""
+    out = []
+    for event in resp["body"].decode("utf-8").split("\r\n\r\n"):
+        lines = [ln for ln in event.split("\r\n") if ln and not ln.startswith(":")]
+        if lines:
+            out.append("\r\n".join(lines))
+    return out
 
 
 def sse_data(resp):

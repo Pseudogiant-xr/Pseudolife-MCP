@@ -29,7 +29,8 @@ TOOLSET_ARGS = [{"action": "status"}, {"action": "expand"}, {"action": "status"}
                 {"action": "collapse"}, {"action": "collapse"}, {"action": "collapse"},
                 {"action": "status"}]
 BINDING_ARGS = [{"action": "bogus"}, {}, {"actoin": "status"}, {"actoin": "x", "zzz": 1},
-                {"action": "status", "verbose": True}, {"action": 3}, {"action": None}]
+                {"action": "status", "verbose": True}, {"action": 3}, {"action": None},
+                {"iain": "status"}, {"cint": 1}]
 
 
 def result_text(resp):
