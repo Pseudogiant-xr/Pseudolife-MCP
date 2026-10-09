@@ -37,6 +37,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
+    import embedding
+    raise SystemExit(embedding.main(sys.argv[2:]))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
@@ -759,6 +762,11 @@ print(json.dumps({
  "memory.reranker.enabled": c.memory.reranker.enabled, "memory.retrieval_log.enabled": c.memory.retrieval_log.enabled,
  "embedding.model_name": e.model_name, "embedding.device": e.device, "embedding.query_prefix": e.query_prefix,
  "embedding.max_seq_length": e.max_seq_length,
+ "embedding.backend": e.backend,
+ "embedding.onnx_file_name": e.onnx_file_name,
+ "embedding.batch_size": e.batch_size,
+ "embedding.cache_size": e.cache_size,
+ "embedding.cpu_dtype": e.cpu_dtype,
  "coordination.enabled": co.enabled, "coordination.wake": asdict(co.wake), "coordination.allowed_principals": co.allowed_principals,
  "updates.check_releases": u.check_releases, "updates.unattended_clients": u.unattended_clients,
  "updates.unattended_daemon": u.unattended_daemon, "updates.check_interval_seconds": u.check_interval_seconds,
@@ -1226,6 +1234,9 @@ def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "embedding":
+        import embedding
+        return embedding.main(sys.argv[2:])
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["live", "golden", "mutants"])
     ap.add_argument("--rust-bin", required=True, type=Path)
