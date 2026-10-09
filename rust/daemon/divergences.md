@@ -67,3 +67,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
 | `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
 | Tie order among equal scores | `torch.topk` (unspecified) and stable sorts | stable sorts, resident order | free (spec) |
+| Casefold in slot keys and pin scope | `str.casefold()` (full Unicode folding) | `to_lowercase` plus `ß` to `ss` and final sigma | rare foldings (ligatures and similar) differ; no producer writes them in slot names. Closable with a casefold crate |
+| Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` |
+| Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory only | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer |
+| Telemetry failure counters (`_retrieval_log_errors`, slot-read failures) | counted for `stats()` | logged to stderr | `/api/stats` (W2-D, a later PR) |
