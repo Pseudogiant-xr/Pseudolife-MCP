@@ -9,6 +9,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from background_sessions import normalize_closes, validate_restart_clocks, graceful_stop
 
 
+def test_live_only_background_cases_remain_in_the_registered_corpus():
+    import run as harness
+    expected = {"session-reap", "session-sweep", "session-restart",
+                "session-tombstone-restart", "sweep-recovery"}
+    assert expected <= harness.SCENARIOS.keys()
+    for name in expected:
+        case = harness.SCENARIOS[name]()
+        assert type(case).timeline is not harness.Scenario.timeline
+        assert not case.golden_replay
+    assert harness.SCENARIOS["sweep-pruning"].golden_replay
+
+
 def state():
     return {"rows": {
         "public.episodes": {"columns": ["id", "parent_id", "ended_at"],
