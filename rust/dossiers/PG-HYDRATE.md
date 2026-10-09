@@ -35,7 +35,7 @@ There is no dedicated hydration HTTP route. Ordinary service operations reach `_
 | `pseudolife_memory/storage/postgres.py:1424` `load_entries`, `:1669` `load_episodes`, `:1918` `load_facts`, `:1966` `load_world_facts`, `:1987` `load_lessons`, `:2711` `meta_get` | Ordered SELECTs and vector output conversion (`:230` `_embedding_out`). |
 | `pseudolife_memory/storage/postgres.py:935` `update_entry`, `:2665` `meta_set`, `:775` `_txn`, `:798` `transaction` | Hydration stamp write-through and explicit/pinned mutation transaction primitives. |
 
-The initialization branches into `pseudolife_memory/storage/migrate.py:109` `migrate_legacy`, CMS weights/file loaders and ReferenceBank (`pseudolife_memory/service.py:1479`, `:1515`, `:1546`); their compatibility contract is [STORAGE-COMPAT.md](STORAGE-COMPAT.md). Dream-state initialization (`pseudolife_memory/service.py:3606`, storage `pseudolife_memory/storage/postgres.py:1459`) and pending correction/curation/lesson recovery are integration dependencies, not newly assigned dream/write/curation scope. Exact helper entry-line verification for those dependencies remains incomplete.
+The initialization branches into `pseudolife_memory/storage/migrate.py:109` `migrate_legacy`, CMS weights/file loaders and ReferenceBank (`pseudolife_memory/service.py:1479`, `:1515`, `:1546`); their compatibility contract is the STORAGE-COMPAT row. Dream-state initialization (`pseudolife_memory/service.py:3606`, storage `pseudolife_memory/storage/postgres.py:1459`) and pending correction/curation/lesson recovery are integration dependencies, not newly assigned dream/write/curation scope. Exact helper entry-line verification for those dependencies remains incomplete.
 
 ## 3. State touched, SQL and transaction boundaries
 
