@@ -24,9 +24,10 @@
 # pip + HuggingFace caches, diagnostic artifacts for the full Linux lanes.
 #
 # Rust-only pull requests (maintainer decision 2026-10-09): a PR that touches
-# rust/ and whose every other changed file is .github/workflows/rust.yml or
-# CHANGELOG.md changes no Python, so the four Python suite lanes are skipped
-# for it and the `guards` job runs the tree-wide and release-doc guards
+# rust/ and whose every other changed file is .github/workflows/rust.yml,
+# CHANGELOG.md or a changelog.d/ fragment changes no Python, so the four
+# Python suite lanes are skipped for it and the `guards` job runs the
+# tree-wide and release-doc guards
 # instead (tracked-tree identifiers and control bytes, CHANGELOG and release
 # pins, committed eval evidence). The Rust workflow is that PR's gate. The
 # full suite still runs on every master push and nightly.
@@ -57,8 +58,9 @@ jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. Only a pull
     # request whose net change (merge commit vs its base parent) is entirely
-    # under rust/, or is .github/workflows/rust.yml or CHANGELOG.md, skips
-    # them; an empty or unreadable diff runs everything.
+    # under rust/, or is .github/workflows/rust.yml, CHANGELOG.md or a
+    # changelog.d/ fragment, skips them; an empty or unreadable diff runs
+    # everything.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -85,7 +87,7 @@ jobs:
           # touches rust/ (a CHANGELOG-only docs PR keeps the full suite).
           # Here-strings, not pipes: under pipefail an early-exiting grep -q
           # can SIGPIPE the writer and flip the result on a long file list.
-          if grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$)' <<<"$files" \
+          if grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$|changelog\.d/)' <<<"$files" \
              || ! grep -qE '^rust/' <<<"$files"; then
             echo "python=true" >> "$GITHUB_OUTPUT"
           else
@@ -127,6 +129,7 @@ jobs:
           tests/test_codex_hook_launcher.py tests/test_label_pair.py
           tests/test_merge_queue.py tests/test_plugin_packaging.py
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
+          tests/test_changelog_fragments.py
 
   test:
     needs: scope
