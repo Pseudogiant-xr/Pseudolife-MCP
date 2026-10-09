@@ -20,9 +20,9 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 PREFIX = "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
-# Delegate ruling, 2026-10-10: Qwen fp32 Windows, 78 replicated banks /
-# 592 facts plus 12 canonical docs / 30 queries: observed worst max abs
-# 9.69e-7, cosine loss 2.343e-11 (Linux), rounded upward. ST5.3 / TF4.57.6 /
+# Delegate ruling, 2026-10-10: Qwen fp32, 78 replicated banks / 592 facts
+# plus 12 canonical docs / 30 queries: Linux worst max abs 9.704e-7 and
+# cosine loss 2.343e-11, rounded upward. ST5.3 / TF4.57.6 /
 # ORT1.27; torch2.13 Linux / torch2.10 Windows. No token/cache/rank tolerance.
 FP32_MAX_ABS = 1e-6
 FP32_MIN_COSINE = 0.99999999997
@@ -86,6 +86,16 @@ def oracle(request, backend):
     if root is None:
         raise RuntimeError("configured graph unavailable; no torch-only result substitutes for ONNX identity")
     pipe = EmbeddingPipeline(cfg)
+    if request.get("fixture_position_ids"):
+        # Fixture-only adapter for the documented stock wrapper omission.
+        # Pooling/cache/normalization still run through EmbeddingPipeline;
+        # this does not repair or relabel the real Qwen ONNX arm.
+        forward = pipe.model[0].auto_model.forward
+        def positioned(*args, **kwargs):
+            ids = kwargs["input_ids"]
+            kwargs["position_ids"] = torch.arange(ids.shape[1], dtype=torch.int64).expand(ids.shape[0], -1)
+            return forward(*args, **kwargs)
+        pipe.model[0].auto_model.forward = positioned
     stamp = embedder_stamp.describe(pipe)
     forwards = 0
     original = pipe.model.encode
@@ -367,11 +377,14 @@ def fixture(args):
                else next(runtime_dir.glob("libonnxruntime.so.*")))
     env["ORT_DYLIB_PATH"] = str(runtime)
     mutants = ["embedding-no-prefix", "embedding-wrong-pool", "embedding-no-normalize",
-               "embedding-no-truncation", "embedding-cache-disabled", "embedding-cache-key"]
-    report = {"platform": sys.platform, "mutants": {}, "profiles": [], "refusals": []}
+               "embedding-no-truncation", "embedding-cache-disabled", "embedding-cache-key",
+               "embedding-mean-mask-blind", "embedding-batch-row-offset"]
+    report = {"platform": sys.platform, "mutants": {}, "profiles": [], "refusals": [],
+              "oracle_adjustment": "last-left-normalize fixture explicitly supplies arange position_ids to the stock ORT wrapper; real Qwen wrapper remains unmodified"}
     with tempfile.TemporaryDirectory(prefix="pl_cf_emb_fixture_") as tmp:
         root = Path(tmp)
         create(root / "model")
+        create(root / "last-model", last_token=True)
         config = {"model_name": str(root / "model"), "batch_size": 3, "cache_size": 2,
                   "max_seq_length": 32, "query_prefix": "query ", "cpu_dtype": "fp32"}
         ops = [{"texts": ["memory cursor", "cache", "memory cursor " * 100, "日本語 café 🧠"]},
@@ -380,12 +393,15 @@ def fixture(args):
                {"texts": ["normalize cache partition"]},
                {"texts": ["normalize cache partition"], "normalize": False},
                {"texts": ["memory cursor", "cache", "memory cursor"]},
+               {"texts": ["document cache cursor", "cursor"], "normalize": False},
                {"texts": []}]
         goldens = []
-        profiles = [(2, "query "), (0, ""), (-2, "")]
-        for cache_size, prefix in profiles:
-            config.update(cache_size=cache_size, query_prefix=prefix)
-            req = {"config": dict(config), "operations": ops}
+        profiles = [(2, "query ", "mean"), (0, "", "mean"), (-2, "", "mean"), (2, "query ", "last-left-normalize")]
+        for cache_size, prefix, pooling_profile in profiles:
+            is_last = pooling_profile == "last-left-normalize"
+            config.update(cache_size=cache_size, query_prefix=prefix,
+                          model_name=str(root / ("last-model" if is_last else "model")))
+            req = {"config": dict(config), "operations": ops, "fixture_position_ids": is_last}
             req_file = root / "request.json"
             req_file.write_text(json.dumps(req), encoding="utf-8")
             cfg_file = root / "config.yaml"
@@ -420,17 +436,18 @@ def fixture(args):
                 return result
 
             diffs, metrics = compare(expected, candidate())
-            report["profiles"].append({"cache_size": cache_size, "prefix": prefix,
+            report["profiles"].append({"cache_size": cache_size, "prefix": prefix, "pooling": pooling_profile,
                                        "diffs": diffs, "metrics": metrics})
             if diffs:
                 break
-            if cache_size == 2:
+            if cache_size == 2 and not is_last:
                 for mutant in mutants:
                     differences, _ = compare(expected, candidate(mutant))
                     report["mutants"][mutant] = differences
                 for case, patch, extra_env in [
                     ("invalid backend", {"backend": "other"}, {}),
                     ("invalid dtype override", {}, {"PSEUDOLIFE_EMBEDDING_CPU_DTYPE": "invalid"}),
+                    ("bf16 ONNX", {}, {"PSEUDOLIFE_EMBEDDING_CPU_DTYPE": "bf16"}),
                     ("zero batch", {"batch_size": 0}, {}),
                     ("escaping artifact", {"onnx_file_name": "../model.onnx"}, {}),
                     ("missing artifact", {"onnx_file_name": "onnx/missing.onnx"}, {}),
@@ -443,7 +460,10 @@ def fixture(args):
                     proc = subprocess.run([str(args.rust_bin.resolve())], input=request_bytes,
                         env=dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1", **extra_env),
                         capture_output=True, timeout=120)
-                    report["refusals"].append({"case": case, "refused": proc.returncode != 0 and not proc.stdout})
+                    refused = proc.returncode != 0 and not proc.stdout
+                    if case == "bf16 ONNX":
+                        refused = refused and b"deferred: bf16 ONNX" in proc.stderr
+                    report["refusals"].append({"case": case, "refused": bool(refused)})
                 saved_prompt_file = root / "model/config_sentence_transformers.json"
                 saved_prompt_file.write_text(json.dumps({"prompts": {"query": "query "}, "default_prompt_name": "query"}), encoding="utf-8")
                 cfg_file.write_text(json.dumps({"embedding": dict(config, backend="onnx", device="cpu")}), encoding="utf-8")
@@ -452,7 +472,8 @@ def fixture(args):
                 report["refusals"].append({"case": "saved default prompt", "refused": proc.returncode != 0 and not proc.stdout})
                 saved_prompt_file.unlink()
         if args.record and not any(p["diffs"] for p in report["profiles"]):
-            args.golden.write_text(json.dumps({"fixture": "embedding_fixture.py", "profiles": goldens}, indent=1) + "\n", encoding="utf-8")
+            args.golden.write_text(json.dumps({"fixture": "embedding_fixture.py",
+                "oracle_adjustment": report["oracle_adjustment"], "profiles": goldens}, indent=1) + "\n", encoding="utf-8")
     failures = [p for p in report["profiles"] if p["diffs"]]
     survivors = [m for m, diffs in report["mutants"].items() if not diffs]
     report["survivors"] = survivors

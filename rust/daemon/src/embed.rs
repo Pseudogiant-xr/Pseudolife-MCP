@@ -102,6 +102,11 @@ impl Embedder {
         if !matches!(dtype.as_str(), "auto" | "fp32" | "bf16") {
             bail!("embedding cpu_dtype must be 'auto', 'fp32' or 'bf16'");
         }
+        // The port currently admits float32 hidden states only. An explicit
+        // bf16 request must not silently become the measured fp32 policy.
+        if dtype == "bf16" {
+            bail!("deferred: bf16 ONNX");
+        }
         if config.batch_size <= 0 || config.max_seq_length <= 0 {
             bail!("embedding batch_size and max_seq_length must be positive");
         }
@@ -358,9 +363,19 @@ impl Embedder {
             } else {
                 self.pooling
             };
+            let row_index = if crate::mutants::active("embedding-batch-row-offset") {
+                (i + 1) % texts.len()
+            } else {
+                i
+            };
+            let mask_blind = (crate::mutants::active("embedding-mean-mask-blind")
+                && matches!(mode, Pooling::Mean))
+            .then(|| vec![1; t]);
             let mut row = embedding_math::pool(
-                &hidden[i * t * self.dim..(i + 1) * t * self.dim],
-                encoding.get_attention_mask(),
+                &hidden[row_index * t * self.dim..(row_index + 1) * t * self.dim],
+                mask_blind
+                    .as_deref()
+                    .unwrap_or(encoding.get_attention_mask()),
                 self.dim,
                 mode,
             )?;

@@ -7,12 +7,21 @@ import subprocess
 import embedding
 
 from embedding import compare, rankings
+from embedding_fixture import fixture_weights
 
 
 def observation(rows):
     rows = np.array(rows, dtype="<f4")
     return {"dim": rows.shape[1], "copy_safe": True, "operations": [
         {"bits": rows.view("<u4").tolist(), "tokens": [], "forwards": 1}]}
+
+
+def test_fixture_vectors_vary_after_normalization_and_have_mixed_signs():
+    weights = fixture_weights(9)
+    normalized = weights / np.linalg.norm(weights, axis=1, keepdims=True)
+    assert np.any(weights < 0)
+    assert np.count_nonzero(np.any(weights != 0, axis=0)) >= 2
+    assert len({row.tobytes() for row in normalized}) > 1
 
 
 def test_exact_self_comparison_uses_bits_when_cosine_rounds_below_one():

@@ -13515,6 +13515,656 @@
  "fixture": [
   {
    "platform": "Windows",
+   "profiles": [
+    {
+     "cache_size": 2,
+     "prefix": "query ",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": 0,
+     "prefix": "",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": -2,
+     "prefix": "",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": 2,
+     "prefix": "query ",
+     "pooling": "last-left-normalize",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      }
+     ]
+    }
+   ],
+   "mutants": {
+    "embedding-no-prefix": [
+     "operation 1: tokens",
+     "operation 1: vectors"
+    ],
+    "embedding-wrong-pool": [
+     "operation 0: vectors",
+     "operation 1: vectors",
+     "operation 2: vectors",
+     "operation 3: vectors",
+     "operation 4: vectors",
+     "operation 5: vectors",
+     "operation 6: vectors"
+    ],
+    "embedding-no-normalize": [
+     "operation 0: vectors",
+     "operation 1: vectors",
+     "operation 3: vectors",
+     "operation 5: vectors"
+    ],
+    "embedding-no-truncation": [
+     "operation 0: tokens"
+    ],
+    "embedding-cache-disabled": [
+     "operation 4: forwards",
+     "operation 5: forwards",
+     "operation 6: forwards",
+     "operation 7: forwards"
+    ],
+    "embedding-cache-key": [
+     "operation 3: forwards",
+     "operation 3: vectors",
+     "operation 4: forwards",
+     "operation 5: forwards",
+     "operation 6: forwards",
+     "operation 7: forwards"
+    ],
+    "embedding-mean-mask-blind": [
+     "operation 0: vectors",
+     "operation 6: vectors"
+    ],
+    "embedding-batch-row-offset": [
+     "operation 0: vectors",
+     "operation 5: vectors",
+     "operation 6: vectors"
+    ]
+   },
+   "refusals": [
+    {
+     "case": "invalid backend",
+     "refused": true
+    },
+    {
+     "case": "invalid dtype override",
+     "refused": true
+    },
+    {
+     "case": "bf16 ONNX",
+     "refused": true
+    },
+    {
+     "case": "zero batch",
+     "refused": true
+    },
+    {
+     "case": "escaping artifact",
+     "refused": true
+    },
+    {
+     "case": "missing artifact",
+     "refused": true
+    },
+    {
+     "case": "Qwen dimension",
+     "refused": true
+    },
+    {
+     "case": "MiniLM dimension",
+     "refused": true
+    },
+    {
+     "case": "saved default prompt",
+     "refused": true
+    }
+   ],
+   "survivors": [],
+   "oracle_adjustment": "last-left-normalize fixture explicitly supplies arange position_ids to the stock ORT wrapper; real Qwen wrapper remains unmodified"
+  },
+  {
+   "platform": "Linux",
+   "profiles": [
+    {
+     "cache_size": 2,
+     "prefix": "query ",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": 0,
+     "prefix": "",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": -2,
+     "prefix": "",
+     "pooling": "mean",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 1.0
+      }
+     ]
+    },
+    {
+     "cache_size": 2,
+     "prefix": "query ",
+     "pooling": "last-left-normalize",
+     "diffs": [],
+     "metrics": [
+      {
+       "operation": 0,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 1,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 2,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 3,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 4,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 5,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      },
+      {
+       "operation": 6,
+       "exact": true,
+       "max_abs": 0.0,
+       "max_ulp": 0,
+       "min_cosine": 0.9999999999999998
+      }
+     ]
+    }
+   ],
+   "mutants": {
+    "embedding-no-prefix": [
+     "operation 1: tokens",
+     "operation 1: vectors"
+    ],
+    "embedding-wrong-pool": [
+     "operation 0: vectors",
+     "operation 1: vectors",
+     "operation 2: vectors",
+     "operation 3: vectors",
+     "operation 4: vectors",
+     "operation 5: vectors",
+     "operation 6: vectors"
+    ],
+    "embedding-no-normalize": [
+     "operation 0: vectors",
+     "operation 1: vectors",
+     "operation 3: vectors",
+     "operation 5: vectors"
+    ],
+    "embedding-no-truncation": [
+     "operation 0: tokens"
+    ],
+    "embedding-cache-disabled": [
+     "operation 4: forwards",
+     "operation 5: forwards",
+     "operation 6: forwards",
+     "operation 7: forwards"
+    ],
+    "embedding-cache-key": [
+     "operation 3: forwards",
+     "operation 3: vectors",
+     "operation 4: forwards",
+     "operation 5: forwards",
+     "operation 6: forwards",
+     "operation 7: forwards"
+    ],
+    "embedding-mean-mask-blind": [
+     "operation 0: vectors",
+     "operation 6: vectors"
+    ],
+    "embedding-batch-row-offset": [
+     "operation 0: vectors",
+     "operation 5: vectors",
+     "operation 6: vectors"
+    ]
+   },
+   "refusals": [
+    {
+     "case": "invalid backend",
+     "refused": true
+    },
+    {
+     "case": "invalid dtype override",
+     "refused": true
+    },
+    {
+     "case": "bf16 ONNX",
+     "refused": true
+    },
+    {
+     "case": "zero batch",
+     "refused": true
+    },
+    {
+     "case": "escaping artifact",
+     "refused": true
+    },
+    {
+     "case": "missing artifact",
+     "refused": true
+    },
+    {
+     "case": "Qwen dimension",
+     "refused": true
+    },
+    {
+     "case": "MiniLM dimension",
+     "refused": true
+    },
+    {
+     "case": "saved default prompt",
+     "refused": true
+    }
+   ],
+   "survivors": [],
+   "oracle_adjustment": "last-left-normalize fixture explicitly supplies arange position_ids to the stock ORT wrapper; real Qwen wrapper remains unmodified"
+  }
+ ],
+ "post_capture_fixes": "Qwen Windows capture precedes XDG-only path fix; Qwen Linux capture precedes saved-prompt/home-path/timeout review fixes. Canonical measured artifacts have no active saved default prompt, use absolute/local-or-Hub paths, and all arms completed. Affected review-fix cases were watched fail then pass on both OSes.",
+ "db_dimension": {
+  "cases": 2,
+  "diff_cases": 0,
+  "declared_cases": 0,
+  "db_state_scenarios": 1,
+  "db_diff_scenarios": 0
+ },
+ "historical_fixture": [
+  {
+   "platform": "Windows",
    "profiles": 3,
    "mutants": {
     "embedding-no-prefix": [
@@ -13652,12 +14302,6 @@
    "survivors": []
   }
  ],
- "post_capture_fixes": "Qwen Windows capture precedes XDG-only path fix; Qwen Linux capture precedes saved-prompt/home-path/timeout review fixes. Canonical measured artifacts have no active saved default prompt, use absolute/local-or-Hub paths, and all arms completed. Affected review-fix cases were watched fail then pass on both OSes.",
- "db_dimension": {
-  "cases": 2,
-  "diff_cases": 0,
-  "declared_cases": 0,
-  "db_state_scenarios": 1,
-  "db_diff_scenarios": 0
- }
+ "historical_fixture_note": "Superseded at the Opus gate: single-axis fixture vectors were insufficient for normalized-vector sensitivity.",
+ "precision_divergence": "Evidence pins fp32. auto uses fp32; explicit effective bf16 refuses with deferred: bf16 ONNX. Python auto can select bf16 torch on native-bf16 CPUs."
 }

@@ -181,6 +181,7 @@ jobs:
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
+        timeout-minutes: 10
         shell: pwsh
         run: |
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"

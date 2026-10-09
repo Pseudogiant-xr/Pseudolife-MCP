@@ -57,5 +57,9 @@ artifact-specific bounds in `spec-embedding.md`, preserving exact tokens, cache
 behavior and full/top-eight order. A missing or failing arm stays a failure.
 The Qwen Python ONNX `position_ids` failure is recorded, never treated as a
 successful ONNX comparison. `--fixture --golden harness/goldens/embedding-fixture.json`
-uses a locally generated small graph for CI and catches six compiled mutants.
+uses locally generated mixed-sign graphs for CI and catches eight compiled
+mutants. Mean/right-padding and last-token/left-padding/Normalize profiles include
+padded raw batches; the latter consumes attention-mask, token-type and position
+inputs. Its Python fixture adapter supplies position IDs explicitly, with that
+adjustment recorded; the real Qwen wrapper remains unmodified.
 It certifies the process/cache/tokenization seam, not real-model equivalence.

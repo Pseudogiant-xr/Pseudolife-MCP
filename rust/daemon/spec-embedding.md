@@ -50,4 +50,8 @@ supplied Qwen graph. W3-J owns provisioning and reconciliation with the existing
 verified export; the stock Python ONNX wrapper's missing-position-IDs failure is
 a Python-side finding. This implementation remains a cutover blocker until
 that runtime artifact is provisioned. CPU ONNX does not implement torch's
-automatic bf16 policy; it validates the dtype request and uses graph precision.
+automatic bf16 policy: `auto` uses fp32, while an effective explicit bf16 request
+refuses with `deferred: bf16 ONNX`. The evidence pins fp32. Cache overrides must
+already be expanded; `~`/environment-variable interpolation in HF_HOME,
+HF_HUB_CACHE and XDG_CACHE_HOME is deferred. Nonpositive batch/sequence limits
+refuse, and a zero-token batch reports `empty tokenization`.
