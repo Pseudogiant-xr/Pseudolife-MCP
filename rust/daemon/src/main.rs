@@ -77,12 +77,23 @@ fn main() {
     let config = config::load(&config_file).unwrap_or_else(|e| fail(1, &e.to_string()));
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
 
+    // A token that is not valid Unicode would read as unset and open the
+    // bank; refuse instead (declared divergence: Python starts and answers
+    // 500 to every bearer).
+    for name in ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"] {
+        if std::env::var_os(name).is_some_and(|v| v.to_str().is_none()) {
+            fail(
+                2,
+                &format!("{name} is not valid Unicode; refusing to start"),
+            );
+        }
+    }
     let tokens = auth::EnvTokens::from_env();
     // `misconfigured_tokens_env`: the map is set and non-blank, yet nothing parsed.
     if env
         .tokens_raw
         .as_deref()
-        .is_some_and(|r| !r.trim().is_empty())
+        .is_some_and(|r| !crate::storage::py_strip(r).is_empty())
         && tokens.map.is_empty()
     {
         if tokens.single.is_none() {
@@ -113,14 +124,42 @@ fn main() {
             );
         }
     }
+    // The background threads' settings, parsed where Python parses them
+    // (after the bind guard): a bad value is an uncaught ValueError, exit 1.
+    let seconds = |name: &str, default: f64| -> f64 {
+        match std::env::var(name) {
+            Err(_) => default,
+            Ok(raw) => crate::storage::py_strip(&raw)
+                .replace('_', "")
+                .parse::<f64>()
+                .unwrap_or_else(|_| fail(1, &format!("{name}={raw:?} is not a number"))),
+        }
+    };
+    seconds("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", 30.0);
+    if (config.dream.enabled || config.memory.retrieval_log_enabled)
+        && !config.dream.sweep_interval_ok
+    {
+        fail(1, "memory.dream.sweep_interval_seconds is not a number");
+    }
+    seconds("PSEUDOLIFE_SESSION_IDLE_SECONDS", 1800.0);
+    let reap_every = seconds("PSEUDOLIFE_SESSION_REAP_SECONDS", 300.0);
     let static_dir = std::env::var_os("PSEUDOLIFE_DAEMON_STATIC_DIR").map(PathBuf::from);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap_or_else(|e| fail(1, &format!("runtime: {e}")));
     let code = runtime.block_on(async move {
-        let host = env.host.clone();
-        let port = env.port;
+        // asyncio binds every interface for an empty host (IPv4 here: the
+        // IPv6 wildcard is a declared divergence).
+        let host = if env.host.is_empty() {
+            "0.0.0.0".to_string()
+        } else {
+            env.host.clone()
+        };
+        let Ok(port) = u16::try_from(env.port) else {
+            eprintln!("bind {host}:{}: port out of range", env.port);
+            return 1;
+        };
         let store = Arc::new(auth::PrincipalStore::new());
         let env_principals = tokens.map.iter().map(|(_, p)| p.clone()).collect();
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
@@ -132,6 +171,7 @@ fn main() {
             auth_configured,
         ));
         tokio::spawn(service.clone().warmup());
+        tokio::spawn(service.clone().reaper(reap_every));
         let app = Arc::new(http::App::new(service, tokens, store, static_dir));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {

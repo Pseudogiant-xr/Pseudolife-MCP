@@ -44,11 +44,14 @@ impl EnvTokens {
 pub fn parse_token_map(raw: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for part in raw.split(',') {
-        let part = part.trim();
+        let part = crate::storage::py_strip(part);
         let Some((tok, principal)) = part.rsplit_once(':') else {
             continue;
         };
-        let (tok, principal) = (tok.trim(), principal.trim().to_lowercase());
+        let (tok, principal) = (
+            crate::storage::py_strip(tok),
+            crate::storage::py_strip(principal).to_lowercase(),
+        );
         if tok.is_empty() || principal.is_empty() || RESERVED_ENV.contains(&principal.as_str()) {
             continue;
         }

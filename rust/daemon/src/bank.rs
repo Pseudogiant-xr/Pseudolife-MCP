@@ -1,6 +1,6 @@
 //! Read-only hydration of a schema-55 bank into a resident matrix (spec S7).
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde_json::Value;
 use std::sync::atomic::AtomicI64;
 use tokio_postgres::Client;
@@ -57,17 +57,23 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
     let mut matrix = Vec::with_capacity(rows.len() * DIM);
+    let mut stale: Vec<usize> = Vec::new();
     for r in rows {
-        let mut emb: Vec<f32> = r.get(3);
-        if emb.len() != DIM {
-            bail!(
-                "entry {} has a {}-dim vector, expected {DIM}",
-                r.get::<_, i64>(0),
-                emb.len()
-            );
+        // A NULL vector fails hydration (torch.as_tensor(None) in Python):
+        // an ordinary error, recorded as not_ready.
+        let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
+            anyhow::bail!("TypeError: entry {} has no embedding", r.get::<_, i64>(0));
+        };
+        if emb.len() == DIM {
+            normalize(&mut emb);
+            matrix.extend_from_slice(&emb);
+        } else {
+            // Seated and stamped like any row, then refused after the
+            // write-back (`_refuse_on_stale_hydrated_dims` runs after
+            // `hydrate_cms`).
+            stale.push(emb.len());
+            matrix.extend(std::iter::repeat_n(0.0, DIM));
         }
-        normalize(&mut emb);
-        matrix.extend_from_slice(&emb);
         let tags: Option<Value> = r.get(12);
         let slots: Option<Value> = r.get(13);
         entries.push(Entry {
@@ -126,8 +132,34 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
             }
         }
     }
+    if !stale.is_empty() {
+        stale.sort_unstable();
+        let count = stale.len();
+        stale.dedup();
+        return Err(anyhow::Error::new(StaleDims { count, dims: stale }));
+    }
     Ok(Bank { entries, matrix })
 }
+
+/// Hydrated rows whose vectors do not fit the embedder: the caller records
+/// `init_refusal` (`service.py:1142-1210`).
+#[derive(Debug)]
+pub struct StaleDims {
+    pub count: usize,
+    pub dims: Vec<usize>,
+}
+
+impl std::fmt::Display for StaleDims {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} hydrated row(s) embedded at the wrong dimension",
+            self.count
+        )
+    }
+}
+
+impl std::error::Error for StaleDims {}
 
 pub fn normalize_query(v: &mut [f32]) {
     normalize(v)

@@ -167,6 +167,8 @@ pub struct DreamConfig {
     pub fallback_base_url: Option<String>,
     pub fallback_model: Option<String>,
     pub extractor_model_override: Option<String>,
+    /// `float(sweep_interval_seconds)` succeeds (`mcp_server.py:3268`).
+    pub sweep_interval_ok: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,7 +194,8 @@ fn refuse(message: impl Into<String>) -> ConfigError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DaemonEnv {
     pub host: String,
-    pub port: u16,
+    /// Python `int()` of the variable; the range is checked at bind.
+    pub port: i64,
     pub token: Option<String>,
     pub tokens_raw: Option<String>,
     pub trust_bind: bool,
@@ -346,6 +349,7 @@ impl Default for DreamConfig {
             fallback_base_url: None,
             fallback_model: None,
             extractor_model_override: None,
+            sweep_interval_ok: true,
         }
     }
 }
@@ -501,11 +505,8 @@ impl DaemonEnv {
         let port = match env("PSEUDOLIFE_MCP_PORT") {
             None => 8765,
             Some(raw) => match py_int(&raw) {
-                Some(value) => u16::try_from(value).map_err(|_| {
-                    refuse(format!(
-                        "PSEUDOLIFE_MCP_PORT {raw:?} is not a port (0-65535)"
-                    ))
-                })?,
+                Some(value) => i64::try_from(value)
+                    .map_err(|_| refuse(format!("PSEUDOLIFE_MCP_PORT {raw:?} is out of range")))?,
                 None => {
                     return Err(refuse(format!(
                         "PSEUDOLIFE_MCP_PORT {raw:?} is not an integer"
@@ -693,9 +694,13 @@ fn resolve_scalar(value: String, style: TScalarStyle, tag: Option<Tag>) -> Resul
     })
 }
 
-fn check_collection_tag(tag: Option<Tag>) -> Result<(), String> {
+/// SafeLoader constructs a tagged collection only as itself: `!!seq` on a
+/// sequence, `!!map` on a mapping. Any other tag is a `ConstructorError`
+/// (`!!str {}`, `!!foo []`, `!!map [1]`); `!!set`, `!!omap` and `!!pairs`
+/// construct Python types no config key accepts, and are refused too.
+fn check_collection_tag(tag: Option<Tag>, kind: &str) -> Result<(), String> {
     match tag {
-        Some(tag) if tag.handle != CORE_TAG => Err(unknown_tag(&tag)),
+        Some(tag) if tag.handle != CORE_TAG || tag.suffix != kind => Err(unknown_tag(&tag)),
         _ => Ok(()),
     }
 }
@@ -799,7 +804,7 @@ impl Loader {
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
-                check_collection_tag(tag)?;
+                check_collection_tag(tag, "seq")?;
                 self.stack.push(Frame::Seq(Vec::new(), anchor));
             }
             Event::SequenceEnd => {
@@ -808,11 +813,18 @@ impl Loader {
                 }
             }
             Event::MappingStart(anchor, tag) => {
-                check_collection_tag(tag)?;
+                check_collection_tag(tag, "map")?;
                 self.stack.push(Frame::Map(Vec::new(), None, anchor));
             }
             Event::MappingEnd => {
                 if let Some(Frame::Map(pairs, _, anchor)) = self.stack.pop() {
+                    // A collection key is unhashable for construct_mapping.
+                    if pairs
+                        .iter()
+                        .any(|(k, _)| matches!(k, Node::Map(_) | Node::Seq(_)))
+                    {
+                        return Err("found unhashable key while constructing a mapping".into());
+                    }
                     let node = finish_mapping(pairs)?;
                     self.complete(node, anchor);
                 }
@@ -1125,6 +1137,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 cortex_enabled: want_bool(b, "cortex_enabled", p, d.cortex_enabled)?,
             };
         }
+        if let Some(r) = section(m, "retrieval_log", "memory.")? {
+            memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
+        }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
             let p = "memory.reranker";
@@ -1146,9 +1161,6 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
                 pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
             };
-        }
-        if let Some(r) = section(m, "retrieval_log", "memory.")? {
-            memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;
@@ -1295,6 +1307,15 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         fallback_base_url: want_opt_str(d, "fallback_base_url", p)?,
         fallback_model: want_opt_str(d, "fallback_model", p)?,
         extractor_model_override: want_opt_str(d, "extractor_model_override", p)?,
+        // Python `float()`: numbers, bools and numeric strings.
+        sweep_interval_ok: match lookup(d, "sweep_interval_seconds") {
+            None | Some(Node::Int(_) | Node::Float(_) | Node::Bool(_)) => true,
+            Some(Node::Str(s)) => crate::storage::py_strip(s)
+                .replace('_', "")
+                .parse::<f64>()
+                .is_ok(),
+            Some(_) => false,
+        },
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {
@@ -1504,6 +1525,23 @@ mod tests {
 
     fn refused(text: &str) -> bool {
         matches!(load_str(text), Err(ConfigError::Refused(_)))
+    }
+
+    #[test]
+    fn collection_tags_and_unhashable_keys_refuse_like_safe_load() {
+        // yaml.safe_load, probed 2026-10-09: ConstructorError for each.
+        for text in [
+            "!!foo {}\n",
+            "other: !!str {}\n",
+            "? [x]\n: 1\n",
+            "? {a: 1}\n: 1\n",
+            "!!map [1]\n",
+        ] {
+            assert!(refused(text), "{text:?}");
+        }
+        for text in ["!!map {memory: {top_k: 3}}\n", "x: !!seq [1]\n"] {
+            assert!(!refused(text), "{text:?}");
+        }
     }
 
     fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -2136,13 +2174,16 @@ mod tests {
         assert_eq!(build.built_at, "unknown");
         assert_eq!(build.source, "unknown");
 
-        for port in [
-            "", "abc", "8_", "8__0", "0x10", "1.0", "-1", "70000", "65536",
-        ] {
+        for port in ["", "abc", "8_", "8__0", "0x10", "1.0"] {
             assert!(
                 DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_MCP_PORT", port)])).is_err(),
                 "{port:?}"
             );
+        }
+        // `int()` accepts these; Python fails only at bind, after the guards.
+        for (port, want) in [("-1", -1), ("70000", 70000), ("65536", 65536)] {
+            let e = DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_MCP_PORT", port)])).unwrap();
+            assert_eq!(e.port, want, "{port:?}");
         }
         let empty_sha = env_of(&[("PSEUDOLIFE_BUILD_GIT_SHA", "")]);
         assert!(DaemonEnv::from_env(&empty_sha).unwrap().build.is_none());

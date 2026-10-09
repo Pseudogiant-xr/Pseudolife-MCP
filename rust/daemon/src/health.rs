@@ -167,7 +167,7 @@ pub fn last_backup(data_dir: &Path) -> Option<Value> {
     let at_value = record.as_object()?.get("created_at")?;
     // `str(record["created_at"])`: only a string can parse as the timestamp.
     let at = at_value.as_str()?;
-    let created = chrono::NaiveDateTime::parse_from_str(at, "%Y-%m-%dT%H:%M:%SZ").ok()?;
+    let created = strptime_backup(at)?;
     let age_s = (chrono::Utc::now().naive_utc() - created).num_microseconds()? as f64 / 1e6;
     let rotation = match record.get("rotation") {
         None => "unknown".to_string(),
@@ -175,6 +175,23 @@ pub fn last_backup(data_dir: &Path) -> Option<Value> {
         Some(other) => py_str(other),
     };
     Some(json!({"at": at, "age_hours": round1(age_s / 3600.0), "rotation": rotation}))
+}
+
+/// `datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ")`: CPython's `_strptime`
+/// field patterns (one-digit fields, a space-padded day) and its
+/// case-insensitive literals; then a real-date check.
+fn strptime_backup(at: &str) -> Option<chrono::NaiveDateTime> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\A(\d\d\d\d)-(1[0-2]|0[1-9]|[1-9])-(3[01]|[12]\d|0[1-9]|[1-9]| [1-9])T(2[0-3]|[0-1]\d|\d):([0-5]\d|\d):(6[0-1]|[0-5]\d|\d)Z\z",
+        )
+        .expect("valid pattern")
+    });
+    let c = re.captures(at)?;
+    let n = |i: usize| c[i].trim().parse::<u32>().ok();
+    let date = chrono::NaiveDate::from_ymd_opt(n(1)? as i32, n(2)?, n(3)?)?;
+    date.and_hms_opt(n(4)?, n(5)?, n(6)?)
 }
 
 fn round1(x: f64) -> f64 {
@@ -381,6 +398,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(last_backup(&root), None);
+        // CPython strptime, probed 2026-10-09.
+        let write = |at: &str| {
+            std::fs::write(
+                root.join("last-backup.json"),
+                format!("{{\"created_at\": \"{at}\"}}"),
+            )
+            .unwrap()
+        };
+        for ok in [
+            "2026-10-09t00:00:00z",
+            "2026-1-9T0:0:0Z",
+            "2026-10- 9T00:00:00Z",
+        ] {
+            write(ok);
+            assert!(last_backup(&root).is_some(), "{ok}");
+        }
+        for bad in [
+            "2026-10-09T24:00:00Z",
+            "2026-10-09T23:59:60Z",
+            "02026-10-09T00:00:00Z",
+            "2026-10-09T00:00:00Z ",
+        ] {
+            write(bad);
+            assert!(last_backup(&root).is_none(), "{bad}");
+        }
         std::fs::write(
             root.join("last-backup.json"),
             "{\"created_at\": \"2026-10-09T00:00:00Z\", \"rotation\": true}",

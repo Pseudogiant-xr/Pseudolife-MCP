@@ -172,10 +172,14 @@ impl Service {
                 .clone()
                 .ok_or_else(|| "PSEUDOLIFE_DAEMON_ONNX_DIR is not set".to_string())?;
             let threads = self.ort_threads;
-            let embedder = tokio::task::spawn_blocking(move || Embedder::load(&dir, threads))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())?;
+            let prefix = self.config.embedding.query_prefix.clone();
+            let max_tokens = self.config.embedding.max_seq_length.max(1) as usize;
+            let embedder = tokio::task::spawn_blocking(move || {
+                Embedder::load(&dir, threads, &prefix, max_tokens)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
             let embedder = Arc::new(embedder);
             inner.embedder = Some(embedder.clone());
             self.update(|s| {
@@ -207,6 +211,14 @@ impl Service {
                 Ok(ready)
             }
             Err(e) => {
+                if let Some(stale) = e.downcast_ref::<crate::bank::StaleDims>() {
+                    let msg = self.stale_dims_message(stale);
+                    self.update(|s| s.init_refusal = Some(msg.clone()));
+                    let mut inner2 = inner;
+                    self.update(|s| s.not_ready = None);
+                    Self::arm_backoff(&mut inner2);
+                    return Err(msg);
+                }
                 // `_abandon_partial_init`: retryable unless it is the refusal
                 // already recorded.
                 let reason = e.to_string();
@@ -220,6 +232,42 @@ impl Service {
                 });
                 Self::arm_backoff(&mut inner);
                 Err(reason)
+            }
+        }
+    }
+
+    /// `_refuse_on_stale_hydrated_dims`'s message.
+    fn stale_dims_message(&self, s: &crate::bank::StaleDims) -> String {
+        let dims: Vec<String> = s.dims.iter().map(|d| d.to_string()).collect();
+        format!(
+            "Refusing to serve: {} hydrated row(s) in the bank at {} are embedded at {} dims, but the live \
+             embedder ({}) produces {}-d vectors — every search/store would crash with a torch shape error. \
+             If this daemon was started by accident against an old or retired bank (e.g. a shim-spawned \
+             fallback while the real Docker daemon was still booting), stop it and point the client at the \
+             intended daemon. Otherwise migrate deliberately: a file-mode bank is re-embedded on import when \
+             the daemon is given Postgres storage (set PSEUDOLIFE_MCP_DATABASE_URL, or install \
+             pseudolife-mcp[lite]); a Postgres bank migrates with `python ops/migrate_embeddings.py`. Or \
+             configure the embedding model that produced these vectors.",
+            s.count,
+            self.data_dir.display(),
+            dims.join(", "),
+            self.config.embedding.model_name,
+            crate::bank::DIM,
+        )
+    }
+
+    /// The session reaper's init retry (`mcp_server._session_reaper_loop`
+    /// calls `reap_idle_sessions`, which runs `_ensure_init` first): a
+    /// daemon whose warmup gave up still recovers with no client traffic.
+    /// Reaping sessions themselves belongs to the episode slice.
+    pub async fn reaper(self: Arc<Self>, every_s: f64) {
+        if !(every_s.is_finite() && every_s >= 0.0) {
+            return; // time.sleep raises in Python's thread: the reaper dies
+        }
+        loop {
+            tokio::time::sleep(Duration::from_secs_f64(every_s.max(0.001))).await;
+            if let Err(e) = self.ensure_init().await {
+                eprintln!("session reaper error: {e}");
             }
         }
     }

@@ -22,9 +22,13 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Item | Python | Rust | Why |
 |---|---|---|---|
 | Storage modes | file mode, or embedded lite Postgres when no DSN | refuses to start (exit 2) without `PSEUDOLIFE_MCP_DATABASE_URL` | the port targets the Postgres tier; lite tier is cutover work (W3-J) |
-| TLS to Postgres | libpq `sslmode` (default `prefer`) | plaintext only | no producer DSN asks for TLS; the shim's rustls client can be reused when one does |
-| YAML dialect | PyYAML (YAML 1.1: `yes/no/on/off`, `010` octal, `1_000`, `0x10`) | yaml-rust2 (YAML 1.2 core) | canonical config files use `true/false` and plain decimals |
-| Wrong-typed values for keys Python does not validate (`memory.top_k: abc`) | starts, fails later at use | refuses to start (exit 1) naming the key | fail early instead of serving a half-broken daemon |
+| TLS and libpq conventions | libpq: `sslmode` (default `prefer`), every DSN keyword (`sslrootcert`, `gssencmode`, `client_encoding`, ...), `PGPASSWORD`, `~/.pgpass`, `PGHOST`, `PGSSLMODE` | tokio-postgres: plaintext only, its own keyword set (an unknown keyword is a connection failure: nothing recorded, `/health` keeps no `db` key, stored principals never load) | producer DSNs are plain `postgresql://user:pass@host:port/db`; the shim's rustls/libpq-compatible client is the fix when one is not |
+| YAML dialect | PyYAML (YAML 1.1: `yes/no/on/off`, `010` octal, `1_000`, `0x10`, `Null`/`NULL` as null, `1e-1` as a string, unhashable keys refused, ints past 2^63 accepted) | yaml-rust2 (YAML 1.2 core) loaded PyYAML-style (last duplicate wins, merge keys) | canonical config files use `true/false`, plain decimals and string keys |
+| Wrong-typed values for keys Python does not validate (`memory.top_k: abc`), and sections that are null or not mappings (`updates:` with every child commented out) | starts, fails later at use, or omits that `/health` key | refuses to start (exit 1) naming the key | fail early instead of serving a half-broken daemon |
+| A token variable that is not valid Unicode (Linux) | starts with auth on; every bearer answers 500 | refuses to start (exit 2) | fail closed: read as unset it would open the bank |
+| `PSEUDOLIFE_MCP_HOST=""` | asyncio binds every IPv4 and IPv6 interface | binds `0.0.0.0` only | dual-stack wildcard is packaging work (W3-J) |
+| `PSEUDOLIFE_MCP_PORT` with Unicode digits, or `PSEUDOLIFE_MCP_*_SECONDS` with Python-only float spellings | `int()`/`float()` accept them | refuses to start (exit 1) | non-canonical input |
+| `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | parsed at start on Linux/glibc (exit 1 when not a number) | not read | heap trimming is a W3-I duty |
 | Embedding model | `embedding.model_name` from the Hugging Face cache, torch or ONNX | the ONNX export in `PSEUDOLIFE_DAEMON_ONNX_DIR`; ORT library from `ORT_DYLIB_PATH` | model resolution and packaging are cutover work (W3-J) |
 | Plugin dir for `hooks_digest` | `PSEUDOLIFE_PLUGIN_DIR`, else `plugin/` beside the package | `PSEUDOLIFE_PLUGIN_DIR` only | the image sets the env var; a checkout run sets it too |
 | Console static dir | the package's `web/static` | `PSEUDOLIFE_DAEMON_STATIC_DIR` | packaging (W3-J) |
@@ -47,6 +51,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
+| Session reaper | closes idle session episodes every `PSEUDOLIFE_SESSION_REAP_SECONDS`, after `_ensure_init` | only the `_ensure_init` retry runs on that cadence | W2-E (episodes) |
+| Search knobs `memory.search.{fusion: rrf, candidate_pool_multiplier > 1, contiguity_neighbors, timeline_channel}`, `memory.reranker.enabled`, `?rerank=`, the recency boost on multi-band presets | change `/api/search` | parsed and validated, ignored by search | W2-D (search) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)
