@@ -11,74 +11,53 @@ pub(super) struct Answer {
     body: Vec<u8>,
 }
 
-/// How much of a body urllib's caller reads: `read(n)` for a success and
-/// for an HTTP error status, or the whole body (`None`).
-type Limits = (Option<usize>, Option<usize>);
-
-/// One GET the way urllib sends it: per-operation socket timeouts, no
-/// proxy, redirects followed only for the health probe, and a body read
-/// that stops where the caller's `read(n)` stops.
+/// One GET the way urllib sends it (`cli::hook_http`: urllib's request
+/// fields, per-receive socket timeouts, `HTTPRedirectHandler`'s limits,
+/// no proxy), its body read stopping where the caller's `read(n)` stops.
 async fn get(
     url: &str,
     path: &str,
     token: Option<&str>,
     timeout: Duration,
     follow: bool,
-    limits: Limits,
+    limits: crate::cli::hook_http::Limits,
 ) -> Option<Answer> {
-    let client = reqwest::Client::builder()
-        .redirect(if follow {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .no_proxy()
-        .referer(false)
-        .connect_timeout(timeout)
-        .read_timeout(timeout)
-        .user_agent("Python-urllib/3.11")
-        .build()
-        .ok()?;
-    let mut request = client.get(format!("{}{path}", url.trim_end_matches('/')));
-    if let Some(token) = token {
-        // http.client encodes header values as Latin-1; anything else raises
-        // UnicodeEncodeError before sending, which the callers report as an
-        // unreachable daemon.
-        if !token.chars().all(|c| (c as u32) <= 0xff) {
-            return None;
+    let authorization = match token {
+        None => None,
+        Some(token) => {
+            // http.client encodes header values as Latin-1; anything else
+            // raises UnicodeEncodeError before sending, which the callers
+            // report as an unreachable daemon.
+            if !token.chars().all(|c| (c as u32) <= 0xff) {
+                return None;
+            }
+            Some(
+                format!("Bearer {token}")
+                    .chars()
+                    .map(|c| c as u32 as u8)
+                    .collect::<Vec<u8>>(),
+            )
         }
-        let bytes: Vec<u8> = format!("Bearer {token}")
-            .chars()
-            .map(|c| c as u32 as u8)
-            .collect();
-        request = request.header(
-            "Authorization",
-            reqwest::header::HeaderValue::from_bytes(&bytes).ok()?,
-        );
-    }
-    let mut response = request.send().await.ok()?;
-    let status = response.status().as_u16();
-    let board = response
-        .headers()
+    };
+    let reply = crate::cli::hook_http::get_bounded(
+        url.trim_end_matches('/'),
+        path,
+        authorization.as_deref(),
+        timeout,
+        follow,
+        limits,
+    )
+    .await?;
+    let board = reply
+        .headers
         .get_all("X-PL-Board")
         .iter()
         .map(|value| value.as_bytes().to_vec())
         .collect();
-    let limit = if success(status) { limits.0 } else { limits.1 };
-    let mut body = Vec::new();
-    while limit.is_none_or(|limit| body.len() < limit) {
-        match response.chunk().await.ok()? {
-            Some(chunk) => body.extend_from_slice(&chunk),
-            None => break,
-        }
-    }
-    if let Some(limit) = limit {
-        body.truncate(limit);
-    }
     Some(Answer {
-        status,
+        status: reply.status,
         board,
-        body,
+        body: reply.body,
     })
 }
 

@@ -19,7 +19,13 @@ use tokio::time::{Instant, Sleep};
 pub(super) struct Reply {
     pub(super) status: u16,
     pub(super) body: Vec<u8>,
+    /// The final response's header fields.
+    pub(super) headers: http::HeaderMap,
 }
+
+/// How much body a caller's `read(n)` takes: on a 2xx reply, and on any
+/// other reply; `None` reads to the end.
+pub(super) type Limits = (Option<usize>, Option<usize>);
 
 /// One GET as `urllib.request.urlopen` performs it:
 /// - each resolved address in resolver order, each with its own connect
@@ -51,6 +57,21 @@ pub(super) async fn get(
     get_with(origin, target, authorization, timeout, follow, None).await
 }
 
+/// [`get`] with the caller's body bounds: `response.read(n)` stops after
+/// `n` bytes, and an HTTP error status's body is read only as far as the
+/// caller's `exc.read(n)`. Used by `doctor`; [`get`] keeps its own bounds
+/// (the whole body, and none for an unfollowed non-2xx reply).
+pub(super) async fn get_bounded(
+    origin: &str,
+    target: &str,
+    authorization: Option<&[u8]>,
+    timeout: Duration,
+    follow: bool,
+    limits: Limits,
+) -> Option<Reply> {
+    request(origin, target, authorization, timeout, follow, limits, None).await
+}
+
 async fn get_with(
     origin: &str,
     target: &str,
@@ -59,10 +80,23 @@ async fn get_with(
     follow: bool,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<Reply> {
+    let limits = (None, if follow { None } else { Some(0) });
+    request(origin, target, authorization, timeout, follow, limits, tls).await
+}
+
+async fn request(
+    origin: &str,
+    target: &str,
+    authorization: Option<&[u8]>,
+    timeout: Duration,
+    follow: bool,
+    limits: Limits,
+    tls: Option<Arc<rustls::ClientConfig>>,
+) -> Option<Reply> {
     let mut url = format!("{origin}{target}");
     let mut visited: HashMap<String, u32> = HashMap::new();
     loop {
-        let (reply, location) = once(&url, authorization, timeout, follow, tls.clone()).await?;
+        let (reply, location) = once(&url, authorization, timeout, limits, tls.clone()).await?;
         if !(follow && matches!(reply.status, 301 | 302 | 303 | 307 | 308)) {
             return Some(reply);
         }
@@ -87,7 +121,7 @@ async fn once(
     url: &str,
     authorization: Option<&[u8]>,
     timeout: Duration,
-    follow: bool,
+    limits: Limits,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<(Reply, Option<String>)> {
     let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
@@ -162,23 +196,35 @@ async fn once(
             .get(http::header::LOCATION)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        if !follow && !(200..300).contains(&status) {
-            return Some((
-                Reply {
-                    status,
-                    body: Vec::new(),
-                },
-                location,
-            ));
+        let headers = response.headers().clone();
+        let limit = if (200..300).contains(&status) {
+            limits.0
+        } else {
+            limits.1
+        };
+        let mut body = Vec::new();
+        let mut incoming = response.into_body();
+        while limit.is_none_or(|limit| body.len() < limit) {
+            match incoming.frame().await {
+                None => break,
+                Some(frame) => {
+                    if let Ok(data) = frame.ok()?.into_data() {
+                        body.extend_from_slice(&data);
+                    }
+                }
+            }
         }
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .ok()?
-            .to_bytes()
-            .to_vec();
-        Some((Reply { status, body }, location))
+        if let Some(limit) = limit {
+            body.truncate(limit);
+        }
+        Some((
+            Reply {
+                status,
+                body,
+                headers,
+            },
+            location,
+        ))
     }
     .await;
     driver.abort();
@@ -534,6 +580,43 @@ mod tests {
         .unwrap();
         assert_eq!((rejected.status, rejected.body.len()), (500, 0));
         assert!(started.elapsed() < Duration::from_secs(2));
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_bounded_read_stops_at_its_limit_and_reads_error_bodies_to_theirs() {
+        // A body cut short of its declared length: read(20) returns its first
+        // 20 bytes; reading to the end fails as IncompleteRead does.
+        let short = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n";
+        let mut reply = short.to_vec();
+        reply.extend(std::iter::repeat_n(b'x', 50));
+        let (port, task) = server(reply, 1024, Duration::ZERO, None).await;
+        let origin = format!("http://127.0.0.1:{port}");
+        let timeout = Duration::from_millis(500);
+        let bounded = get_bounded(&origin, "/a", None, timeout, false, (Some(20), Some(0)))
+            .await
+            .unwrap();
+        assert_eq!((bounded.status, bounded.body.len()), (200, 20));
+        assert!(
+            get_bounded(&origin, "/a", None, timeout, false, (None, None))
+                .await
+                .is_none()
+        );
+        task.abort();
+        // An unfollowed error status's body is read as far as exc.read(n).
+        let refused = b"HTTP/1.1 409 No\r\nContent-Length: 9\r\nX-PL-Board: off\r\nConnection: close\r\n\r\nrefused!!";
+        let (port, task) = server(refused.to_vec(), 1024, Duration::ZERO, None).await;
+        let origin = format!("http://127.0.0.1:{port}");
+        let error = get_bounded(&origin, "/a", None, timeout, false, (None, Some(7)))
+            .await
+            .unwrap();
+        assert_eq!(
+            (error.status, error.body.as_slice()),
+            (409, b"refused".as_slice())
+        );
+        assert_eq!(error.headers.get("X-PL-Board").unwrap(), "off");
+        let plain = get(&origin, "/a", None, timeout, false).await.unwrap();
+        assert_eq!((plain.status, plain.body.len()), (409, 0));
         task.abort();
     }
 

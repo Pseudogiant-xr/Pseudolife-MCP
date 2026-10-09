@@ -227,6 +227,11 @@ pub(super) async fn probe(
     };
     let sent = client
         .post(format!("{url}/api/coordination/context"))
+        // httpx's default request fields besides Host, User-Agent and the
+        // body's (reqwest sends `Accept: */*` itself). The daemon never
+        // compresses, so the advertised encodings are never decoded here.
+        .header("Accept-Encoding", "gzip, deflate")
+        .header("Connection", "keep-alive")
         .header("Authorization", bearer)
         .json(&json!({"agent_id": agent, "nonce": nonce, "read_only": true}))
         .send()

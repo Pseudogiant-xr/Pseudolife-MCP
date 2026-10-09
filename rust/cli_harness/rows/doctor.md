@@ -40,7 +40,7 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 | Coordination snapshot fields, order and `next` texts (registration-dependent branches included) | :505-541, :654-657 |
 | GitBashMissing and MaintainerPasskeysInvalid finalization | :660-674 |
 | `path_resolution`: CPython 3.11 `shutil.which("pseudolife-mcp")` (cwd first and PATHEXT on Windows), launcher from `PSEUDOLIFE_SHIM_RUNTIMES`/`_LAUNCHER` or the default layout, realpath/normcase comparison, warning text | :690-707, runtimes.py:127-154 |
-| Request bytes per probe: method, target, `Authorization`, `User-Agent` (`Python-urllib/3.11` for the GETs, `python-httpx/0.28.1` for the context POST), `Host`, `Content-Type`/`Content-Length` and the context body (compact JSON, nonce tokenized) | board_status.py:51-55, :390-395, shim.py:438, :470-473 |
+| Request bytes per probe, every header field compared: the GETs carry urllib's fields exactly (`Host` as written, `User-Agent: Python-urllib/3.11`, `Accept-Encoding: identity`, `Connection: close`, an optional `Authorization`, no `Accept`; sent through `cli::hook_http`, which also gives urllib's per-receive timeouts and redirect limits); the context POST carries httpx's (`Host`, `Accept: */*`, `Accept-Encoding: gzip, deflate`, `Connection: keep-alive`, `User-Agent: python-httpx/0.28.1`, `Authorization`, `Content-Type`/`Content-Length`) and its body (compact JSON, nonce tokenized) | board_status.py:51-55, :390-395, shim.py:438, :470-473 |
 | Body reads stop where Python's do: board `read(65536)` on success and no read on an error status; maintainer `read(1 << 20)` / `exc.read(65536)`; health reads the whole body | board_status.py:55, :393-397, shim.py:438-447 |
 | The bearer is snapshotted afresh for the maintainer probe and the `--agent-state` check, as each builds a new provider; a failed re-read is `not checked - no usable credential or URL` / `unavailable` | :432-443, :648-653 |
 | `json.loads` refusals Python makes and serde would not: integer literals over 4300 digits (CPython 3.11 `int_max_str_digits`), a leading U+FEFF; the context answer's RecursionError past nesting depth 978 (measured on CPython 3.11.9 against the oracle doctor) is `unavailable` | :476-503 |
@@ -122,6 +122,8 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   so the threshold differs there and is not measured: the three threshold
   cases and their mutant run on Windows only. No daemon answer nests this
   deep.
+- The context POST advertises `gzip, deflate` as httpx does but cannot
+  decode a compressed answer (the daemon never compresses one).
 - `python-httpx/0.28.1` is the oracle environment's httpx; another httpx
   version sends another agent string.
 - Missing Git for Windows (`GitBashMissing`) is not reachable through the

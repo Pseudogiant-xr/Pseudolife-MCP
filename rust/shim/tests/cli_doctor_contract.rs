@@ -446,6 +446,23 @@ fn a_healthy_daemon_is_checked_through_this_runtimes_own_shim() {
         ("GET", "/health")
     );
     assert!(!records[0].headers.contains_key("authorization"));
+    // urllib's request fields exactly: no Accept, identity encoding, close.
+    let mut fields: Vec<(&str, &str)> = records[0]
+        .headers
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    fields.sort();
+    let host = fixture.url.trim_start_matches("http://");
+    assert_eq!(
+        fields,
+        [
+            ("accept-encoding", "identity"),
+            ("connection", "close"),
+            ("host", host),
+            ("user-agent", "Python-urllib/3.11"),
+        ]
+    );
     let methods: Vec<&str> = records
         .iter()
         .filter_map(|record| record.message.get("method").and_then(Value::as_str))
