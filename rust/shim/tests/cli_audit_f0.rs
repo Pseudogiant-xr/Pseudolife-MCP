@@ -31,6 +31,60 @@ fn archive(home: &Path, content: &[u8]) -> Output {
     output
 }
 
+// Supplementary CPython codec vector; the real producer archive stays private.
+const REGISTER: &str = r#"{"seq":1,"event":"register","actor":"agent","principal":"example","agent_id":"example-agent","recipient_agent_id":null,"project":"","task":"","message_id":null,"created_at":1e-5,"hlc":"","payload":{"z":false,"a":"é雪😀\u007f"},"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","hash":"d30856b187296aa980e034350209a4b5725f03681f1dabbc8641f77176cde0f7","body":null,"body_salt":null}"#;
+
+#[test]
+fn register_hash_and_lazy_failure_precedence() {
+    let home = std::env::temp_dir().join(format!("audit-f1-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let output = archive(&home, REGISTER.as_bytes());
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["head_created_at"], 1e-5);
+    assert_eq!(report["events"], 1);
+    let row: serde_json::Value = serde_json::from_str(REGISTER).unwrap();
+    for (key, value, reason) in [
+        (
+            "prev_hash",
+            serde_json::json!("f".repeat(64)),
+            "broken_link",
+        ),
+        ("seq", serde_json::json!(2), "hash_mismatch"),
+        ("body", serde_json::json!("body"), "body_mismatch"),
+    ] {
+        let mut changed = row.clone();
+        changed[key] = value;
+        let text = format!("{}\nnot JSON\n", serde_json::to_string(&changed).unwrap());
+        let output = archive(&home, text.as_bytes());
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["reason"], reason);
+    }
+    let mut second = row.clone();
+    second["seq"] = serde_json::json!(3);
+    second["prev_hash"] = row["hash"].clone();
+    let text = format!(
+        "{REGISTER}\n{}\nnot JSON\n",
+        serde_json::to_string(&second).unwrap()
+    );
+    let output = archive(&home, text.as_bytes());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["reason"], "sequence_gap");
+    for key in ["seq", "created_at"] {
+        let mut changed = row.clone();
+        changed[key] = serde_json::json!(true);
+        let output = archive(&home, serde_json::to_string(&changed).unwrap().as_bytes());
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+    }
+    fs::remove_dir_all(&home).unwrap();
+}
+
 #[test]
 fn empty_archive_verifies_without_python_or_bank_attachment() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
@@ -49,10 +103,10 @@ fn empty_archive_verifies_without_python_or_bank_attachment() {
 }
 
 #[test]
-fn nonempty_and_blank_archives_cannot_claim_an_intact_chain() {
+fn unsupported_archives_cannot_claim_an_intact_chain() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    for content in [b"{}\n".as_slice(), b"\n", b"\xff"] {
+    for content in [b"{\n".as_slice(), b"\xff"] {
         let output = archive(&home, content);
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
@@ -61,6 +115,21 @@ fn nonempty_and_blank_archives_cannot_claim_an_intact_chain() {
                 .unwrap()
                 .contains("deferred")
         );
+    }
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn blank_lines_and_decoded_duplicates_follow_archive_reader_order() {
+    let home = std::env::temp_dir().join(format!("audit-f1-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let output = archive(&home, "\n\r\n\u{1c}\u{85}\u{2000}\n".as_bytes());
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    for content in [b"{}\n".as_slice(), br#"{"payload":{"a":1,"\u0061":2}}"#] {
+        let output = archive(&home, content);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
     }
     fs::remove_dir_all(&home).unwrap();
 }

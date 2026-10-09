@@ -69,7 +69,7 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
         let expected = if mode == "board-audit" {
             bytes(concat!(
                 "board-audit: this path is deferred; ",
-                "only verify --input of an empty archive is implemented\n"
+                "verify --input supports empty and register archives\n"
             ))
         } else {
             bytes(&format!(
