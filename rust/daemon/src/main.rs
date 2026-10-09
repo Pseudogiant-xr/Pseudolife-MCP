@@ -74,6 +74,12 @@ fn main() {
         fail(1, &format!("data dir {}: {e}", data_dir.display()));
     }
     let config = config::load(&config_file).unwrap_or_else(|e| fail(1, &e.to_string()));
+    // Harness hook: print the parsed configuration and exit, so the config
+    // differential can compare it with Python's AppConfig (harness/run.py).
+    if std::env::var_os("PSEUDOLIFE_DAEMON_DUMP_CONFIG").is_some() {
+        println!("{}", pyjson::dumps(&config.dump()));
+        std::process::exit(0);
+    }
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
 
     // A token that is not valid Unicode would read as unset and open the

@@ -1,7 +1,10 @@
-"""Record the Console route table (``ConsoleRoutes.table``) as a golden.
+"""Record the Python constants the Rust gate embeds, as goldens.
 
-The Rust daemon embeds ``goldens/routes.json`` to answer 404 versus 405 the
-way Python does; ``--check`` exits 1 when the Python table has moved.
+``goldens/routes.json`` is the Console route table (``ConsoleRoutes.table``),
+so 404 versus 405 match; ``goldens/checkin.txt`` is
+``coordination.CHECKIN_TEXT``, the board check-in
+``/api/hook/coordination-start`` serves. ``--check`` exits 1 when either has
+moved in Python.
 
 usage: python record_routes.py [--check]
 """
@@ -14,6 +17,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 TARGET = HERE / "goldens" / "routes.json"
+CHECKIN = HERE / "goldens" / "checkin.txt"
 
 
 def table() -> dict:
@@ -30,17 +34,21 @@ def table() -> dict:
 
 
 def main() -> int:
-    want = json.dumps(table(), indent=1) + "\n"
+    routes = json.dumps(table(), indent=1) + "\n"
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    files = {TARGET: routes, CHECKIN: CHECKIN_TEXT}
     if "--check" in sys.argv:
-        have = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
-        if have.replace("\r\n", "\n") != want:
-            print(f"{TARGET} is stale; rerun record_routes.py", file=sys.stderr)
-            return 1
-        print("routes.json matches ConsoleRoutes")
+        for path, text in files.items():
+            have = path.read_bytes().decode("utf-8").replace("\r\n", "\n") if path.exists() else ""
+            if have != text:
+                print(f"{path} is stale; rerun record_routes.py", file=sys.stderr)
+                return 1
+        print("routes.json and checkin.txt match the Python source")
         return 0
     TARGET.parent.mkdir(parents=True, exist_ok=True)
-    TARGET.write_text(want, encoding="utf-8", newline="\n")
-    print(f"wrote {TARGET}")
+    for path, text in files.items():
+        path.write_bytes(text.encode("utf-8"))
+        print(f"wrote {path}")
     return 0
 
 

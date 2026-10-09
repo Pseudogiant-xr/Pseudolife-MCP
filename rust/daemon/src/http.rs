@@ -397,10 +397,62 @@ async fn hook(app: &App, path: &str, method: &str, h: &HeaderMap, body: Body) ->
             }
             not_implemented(path)
         }
-        // session-start, memory-policy, coordination-start: their bodies
-        // (briefing, policy and board text) belong to later slices.
+        "/api/hook/coordination-start" => {
+            // `coordination.unavailable_reason`: config, the bearer and the
+            // stored-principal view only, never the board's storage.
+            let reason = board_unavailable_reason(app, h);
+            let text = if reason.is_some() {
+                String::new()
+            } else {
+                format!("{CHECKIN_TEXT}\n")
+            };
+            let state = match &reason {
+                Some(r) => format!("off; reason={r}"),
+                None => "on".to_string(),
+            };
+            let mut r = hook_text(&text);
+            r.headers_mut().insert(
+                "x-pl-board",
+                HeaderValue::from_str(&state).expect("ascii reason codes"),
+            );
+            r
+        }
+        // session-start, memory-policy: their bodies (briefing and policy
+        // text) belong to a later slice (W2-D).
         _ => not_implemented(path),
     }
+}
+
+/// `coordination.CHECKIN_TEXT`, recorded from Python (`harness/record_routes.py`).
+const CHECKIN_TEXT: &str = include_str!("../harness/goldens/checkin.txt");
+
+/// `coordination.unavailable_reason` (coordination.py:360-377).
+fn board_unavailable_reason(app: &App, h: &HeaderMap) -> Option<&'static str> {
+    if !app.service.config.coordination.enabled {
+        return Some("disabled");
+    }
+    // `authenticated_principal`: an open install never authenticates.
+    if !app.auth_configured() {
+        return Some("authentication_required");
+    }
+    let principal = match resolve(app, h) {
+        Resolved::Unavailable => return Some("principals_unavailable"),
+        Resolved::None => return Some("unauthorized"),
+        Resolved::Principal(p) => p,
+    };
+    // `principal_admitted` (principals.py:199-210).
+    let admitted = !matches!(principal.as_str(), "daemon" | "maintainer")
+        && (app
+            .service
+            .config
+            .coordination
+            .allowed_principals
+            .contains(&principal)
+            || app.store.admitted(&principal));
+    if !admitted {
+        return Some("principal_not_allowed");
+    }
+    None // a DSN is always configured in this port
 }
 
 fn body_limit(path: &str) -> usize {
@@ -488,6 +540,11 @@ async fn api(
         }
     }
     if coordination_path {
+        // `authenticated_principal` runs before the hub: an open install is
+        // refused (api.py:775-778); the hub itself is a later slice (W2-F).
+        if !app.auth_configured() && !crate::mutants::active("tokenless-maintainer-open") {
+            return json_response(401, &json!({"error": "authentication_required"}));
+        }
         return not_implemented(path);
     }
     if (coordination_errors || maintainer_path)

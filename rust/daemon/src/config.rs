@@ -82,6 +82,8 @@ pub struct EmbeddingConfig {
 pub struct CoordinationConfig {
     pub enabled: bool,
     pub wake: WakeConfig,
+    /// Stripped, lower-cased; `["default"]` when the key is absent.
+    pub allowed_principals: Vec<String>,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -116,6 +118,62 @@ pub struct DreamConfig {
     pub extractor_model_override: Option<String>,
     /// `float(sweep_interval_seconds)` succeeds (`mcp_server.py:3268`).
     pub sweep_interval_ok: bool,
+}
+
+impl Config {
+    /// Every value this port reads, under its Python dotted path, for the
+    /// harness's config differential (`PSEUDOLIFE_DAEMON_DUMP_CONFIG`).
+    pub fn dump(&self) -> serde_json::Value {
+        let m = &self.memory;
+        let (s, b, e, c, u, d) = (
+            &m.search,
+            &m.bm25,
+            &self.embedding,
+            &self.coordination,
+            &self.updates,
+            &self.dream,
+        );
+        serde_json::json!({
+            "memory.top_k": m.top_k,
+            "memory.hide_superseded": m.hide_superseded,
+            "memory.search_confidence_floor": m.search_confidence_floor,
+            "memory.recency_boost_enabled": m.recency_boost_enabled,
+            "memory.recency_base_half_life_s": m.recency_base_half_life_s,
+            "memory.miras.preset": m.preset,
+            "memory.miras.bands": m.bands,
+            "memory.search.min_score": s.min_score,
+            "memory.search.fusion": s.fusion,
+            "memory.search.candidate_pool_multiplier": s.candidate_pool_multiplier,
+            "memory.search.contiguity_neighbors": s.contiguity_neighbors,
+            "memory.search.timeline_channel": s.timeline_channel,
+            "memory.bm25.enabled": b.enabled,
+            "memory.bm25.k1": b.k1,
+            "memory.bm25.b": b.b,
+            "memory.bm25.weight": b.weight,
+            "memory.bm25.top_n": b.top_n,
+            "memory.bm25.min_score": b.min_score,
+            "memory.reranker.enabled": m.reranker_enabled,
+            "memory.retrieval_log.enabled": m.retrieval_log_enabled,
+            "embedding.model_name": e.model_name,
+            "embedding.device": e.device,
+            "embedding.query_prefix": e.query_prefix,
+            "embedding.max_seq_length": e.max_seq_length,
+            "coordination.enabled": c.enabled,
+            "coordination.wake": c.wake.to_json(),
+            "coordination.allowed_principals": c.allowed_principals,
+            "updates.check_releases": u.check_releases,
+            "updates.unattended_clients": u.unattended_clients,
+            "updates.unattended_daemon": u.unattended_daemon,
+            "updates.check_interval_seconds": u.check_interval_seconds,
+            "memory.dream.enabled": d.enabled,
+            "memory.dream.extractor_source": d.extractor_source,
+            "memory.dream.extractor_base_url": d.extractor_base_url,
+            "memory.dream.extractor_model": d.extractor_model,
+            "memory.dream.fallback_base_url": d.fallback_base_url,
+            "memory.dream.fallback_model": d.fallback_model,
+            "memory.dream.extractor_model_override": d.extractor_model_override,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +323,7 @@ impl Default for CoordinationConfig {
         CoordinationConfig {
             enabled: true,
             wake: WakeConfig::default(),
+            allowed_principals: vec![DEFAULT_PRINCIPAL.to_string()],
         }
     }
 }
@@ -1296,7 +1355,10 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             "coordination.audit_retention_days must be a whole number of days, 0 or more",
         ));
     }
-    principal_list(c, "allowed_principals")?;
+    let allowed_principals = match lookup(c, "allowed_principals") {
+        None => vec![DEFAULT_PRINCIPAL.to_string()],
+        Some(_) => principal_list(c, "allowed_principals")?,
+    };
     principal_list(c, "daemon_notice_principals")?;
     let maintainers = principal_list(c, "maintainer_principals")?;
     let mut shared: Vec<&str> = [DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL]
@@ -1310,7 +1372,11 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             shared.join(", ")
         )));
     }
-    Ok(CoordinationConfig { enabled, wake })
+    Ok(CoordinationConfig {
+        enabled,
+        wake,
+        allowed_principals,
+    })
 }
 
 /// `MaintainerConfig(**mapping)`: unknown or non-string keys are a

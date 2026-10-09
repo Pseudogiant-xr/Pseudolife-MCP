@@ -1,0 +1,154 @@
+{
+ "db_state": {
+  "catalog": {
+   "column_types": {
+    "rows": 2,
+    "sha256": "a9534dfda23da49ba4310102"
+   },
+   "columns": {
+    "rows": 2,
+    "sha256": "c4396dece5ba5370e6ce11b2"
+   },
+   "constraints": {
+    "rows": 2,
+    "sha256": "23572f55e4fb5087c60ce36c"
+   },
+   "extensions": {
+    "rows": 2,
+    "sha256": "f58378ad9e787652d80b1192"
+   },
+   "functions": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "indexes": {
+    "rows": 1,
+    "sha256": "e4961bcec9273b6045de667c"
+   },
+   "owners_and_comments": {
+    "rows": 3,
+    "sha256": "92ed2fd164c92cd5c59b3a77"
+   },
+   "schemas": {
+    "rows": 1,
+    "sha256": "7bc06edb30fe47a6a1afd841"
+   },
+   "sequence_bounds": {
+    "rows": 1,
+    "sha256": "bf5ce3c1c018f1b7be279015"
+   },
+   "sequences": {
+    "rows": 1,
+    "sha256": "e0b80a2e6b46366becb2904f"
+   },
+   "triggers": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "views": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   }
+  },
+  "rows": {
+   "public.entries": {
+    "columns": [
+     "id",
+     "embedding"
+    ],
+    "rows": []
+   }
+  }
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "table",
+    "retrieval_events",
+    null,
+    "the warmup search logs a retrieval event (W2-D telemetry)"
+   ],
+   [
+    "sequence",
+    "retrieval_events_id_seq",
+    null,
+    "advanced by that retrieval event (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "auth": false,
+    "bank": null,
+    "coordination": {
+     "enabled": true,
+     "wake": {
+      "active_seconds": 60,
+      "authority_per_sender_per_hour": 12,
+      "fan_out_stagger_seconds": 30,
+      "nightly_total": 200,
+      "per_recipient_per_hour": 20,
+      "urgent_per_sender_per_hour": 6
+     }
+    },
+    "extractor": "none",
+    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "init_refusal": "Refusing to start: <free>",
+    "memory": {
+     "source": "unavailable"
+    },
+    "persist_errors": 0,
+    "schema": 55,
+    "status": "degraded",
+    "storage": "postgres",
+    "updates": {
+     "check_releases": false,
+     "checked_at": "<free number>",
+     "latest_release": "<free str|null>",
+     "unattended_clients": false,
+     "unattended_daemon": false
+    },
+    "version": "<free str>"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "<free text>"
+   },
+   "status": 500
+  }
+ ]
+}

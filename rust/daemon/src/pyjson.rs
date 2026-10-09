@@ -68,7 +68,8 @@ fn string(out: &mut String, s: &str) {
             '\t' => out.push_str("\\t"),
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 || (c as u32) > 0x7f => {
+            // json.encoder ESCAPE_ASCII: everything outside ' '..'~', DEL included.
+            c if (c as u32) < 0x20 || (c as u32) > 0x7e => {
                 let mut buf = [0u16; 2];
                 for unit in c.encode_utf16(&mut buf) {
                     let _ = write!(out, "\\u{unit:04x}");
@@ -197,6 +198,12 @@ mod tests {
             // json.dumps in CPython 3.11, probed 2026-10-09.
             "{\"q\": \"caf\\u00e9 \\ud83d\\ude00 \\\"x\\\"\\n\", \"n\": null, \"b\": [true, false]}"
         );
+    }
+
+    #[test]
+    fn del_is_escaped_like_json_dumps() {
+        // json.dumps("a\x7fb") in CPython 3.11: "a\u007fb".
+        assert_eq!(dumps(&json!("a\u{7f}b")), "\"a\\u007fb\"");
     }
 
     #[test]

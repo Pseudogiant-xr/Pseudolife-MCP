@@ -28,6 +28,7 @@ import http.client
 import json
 import os
 import re
+import tempfile
 import shutil
 import sys
 import time
@@ -58,7 +59,7 @@ DB_DECLARED = [
 HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
                                "capacity_warning", "lesson_reconciliation_required"}
 NOT_IMPLEMENTED = "not_implemented"
-MUTANTS = ["serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
+MUTANTS = ["auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff"]
 
@@ -382,6 +383,15 @@ class Tokens(Scenario):
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
             case("search unknown band, blank q", "GET", q(band="nope"), [auth]),
             case("search basic", "GET", q(q="how does the daemon start", top_k=3), [auth]),
+            case("board check-in: no bearer", "GET", "/api/hook/coordination-start"),
+            case("board check-in: default principal (allowed)", "GET", "/api/hook/coordination-start", [auth]),
+            case("board check-in: env principal not allowed", "GET", "/api/hook/coordination-start", [bearer(T_ALICE)]),
+            case("board check-in: stored principal with board", "GET", "/api/hook/coordination-start",
+                 [bearer("stored-carol-token-w1a")]),
+            case("board check-in: revoked stored principal", "GET", "/api/hook/coordination-start",
+                 [bearer("stored-dave-token-w1a")]),
+            case("coordination hub (authenticated)", "POST", "/api/coordination/receive",
+                 [auth, ("Content-Type", "application/json")], b"{}", declared="W2-F: board hub"),
         ]
         return c
 
@@ -419,6 +429,11 @@ class Tokenless(Scenario):
             case("origin: duplicate, loopback first", "GET", "/api/nope",
                  [("Origin", "http://localhost"), ("Origin", "http://evil.example")]),
             case("ui: embedded NUL", "GET", "/ui/a%00b"),
+            case("tokenless coordination hub", "POST", "/api/coordination/receive",
+                 [("Content-Type", "application/json")], b"{}"),
+            case("tokenless coordination hub, no body", "POST", "/api/coordination/agents"),
+            case("tokenless board check-in", "GET", "/api/hook/coordination-start"),
+            case("DEL in a query echoed back", "GET", "/api/search?q=%7F"),
         ]
         return c
 
@@ -479,6 +494,7 @@ unknown_section:
             case("band of continuum", "GET", q(q="memory", band="working,forever"), [auth]),
             case("band of flat refused", "GET", q(q="memory", band="flat"), [auth]),
             case("search top_k=0 uses config", "GET", q(q="memory", top_k=0), [auth]),
+            case("board check-in with the board disabled", "GET", "/api/hook/coordination-start", [auth]),
         ]
 
 
@@ -661,6 +677,88 @@ class SeededBank(Scenario):
                                           "bearer tokens for remote clients", "schema version bump"])]
 
 
+CONFIG_PROFILES = {
+    "no file": None,
+    "empty": "",
+    "comments only": "# nothing\n",
+    "top-level list": "- a\n- b\n",
+    "memory knobs": "memory:\n  top_k: 3\n  hide_superseded: true\n  search_confidence_floor: 0.2\n  recency_boost_enabled: true\n",
+    "half-life set": "memory:\n  recency_base_half_life_s: 120.5\n",
+    # "recency_base_half_life_s: {}" keeps a dict in Python and refuses here:
+    # a declared wrong-type divergence (divergences.md), not a profile.
+    "continuum": "memory:\n  miras:\n    preset: continuum\n",
+    "alias memora": "memory:\n  miras:\n    preset: memora\n",
+    "custom bands": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: hot\n      - {max_entries: 3}\n",
+    "search block": "memory:\n  search:\n    min_score: 0\n    fusion: rrf\n    candidate_pool_multiplier: 2\n    contiguity_neighbors: 1\n    timeline_channel: true\n",
+    "bm25 block": "memory:\n  bm25:\n    enabled: false\n    k1: 1.2\n    b: 0.5\n    weight: 0.4\n    top_n: 7\n    min_score: 0.2\n",
+    "reranker and log": "memory:\n  reranker:\n    enabled: true\n  retrieval_log:\n    enabled: false\n",
+    "embedding": "embedding:\n  model_name: m\n  device: cpu\n  query_prefix: ''\n  max_seq_length: 256\n",
+    "coordination": "coordination:\n  enabled: false\n  allowed_principals: [' Alice ', bob]\n  wake:\n    nightly_total: 9\n",
+    "updates": "updates:\n  check_releases: false\n  unattended_clients: true\n  check_interval_seconds: 600\n",
+    "dream from config": "memory:\n  dream:\n    enabled: true\n    extractor_source: config\n    extractor_base_url: http://x\n    extractor_model: m\n    extractor_model_override: o\n",
+    "duplicate keys": "memory:\n  top_k: 3\n  top_k: 5\n",
+    "anchors and merge": "base: &b {top_k: 4}\nmemory:\n  <<: *b\n  hide_superseded: true\n",
+}
+
+
+def python_config_dump(home: Path, config_yaml: str | None) -> dict:
+    """The same keys as the Rust dump, read from Python's AppConfig after
+    the MCP overlay (MemoryService construction does both, no model load)."""
+    import subprocess
+    code = r'''
+import json, sys
+from pseudolife_memory.service import MemoryService
+c = MemoryService(data_dir=sys.argv[1]).config
+m, s, b, e, co, u, d = c.memory, c.memory.search, c.memory.bm25, c.embedding, c.coordination, c.updates, c.memory.dream
+from dataclasses import asdict
+print(json.dumps({
+ "memory.top_k": m.top_k, "memory.hide_superseded": m.hide_superseded,
+ "memory.search_confidence_floor": m.search_confidence_floor, "memory.recency_boost_enabled": m.recency_boost_enabled,
+ "memory.recency_base_half_life_s": m.recency_base_half_life_s, "memory.miras.preset": m.miras.preset,
+ "memory.miras.bands": [x.name for x in m.miras.bands],
+ "memory.search.min_score": s.min_score, "memory.search.fusion": s.fusion,
+ "memory.search.candidate_pool_multiplier": s.candidate_pool_multiplier,
+ "memory.search.contiguity_neighbors": s.contiguity_neighbors, "memory.search.timeline_channel": s.timeline_channel,
+ "memory.bm25.enabled": b.enabled, "memory.bm25.k1": b.k1, "memory.bm25.b": b.b, "memory.bm25.weight": b.weight,
+ "memory.bm25.top_n": b.top_n, "memory.bm25.min_score": b.min_score,
+ "memory.reranker.enabled": c.memory.reranker.enabled, "memory.retrieval_log.enabled": c.memory.retrieval_log.enabled,
+ "embedding.model_name": e.model_name, "embedding.device": e.device, "embedding.query_prefix": e.query_prefix,
+ "embedding.max_seq_length": e.max_seq_length,
+ "coordination.enabled": co.enabled, "coordination.wake": asdict(co.wake), "coordination.allowed_principals": co.allowed_principals,
+ "updates.check_releases": u.check_releases, "updates.unattended_clients": u.unattended_clients,
+ "updates.unattended_daemon": u.unattended_daemon, "updates.check_interval_seconds": u.check_interval_seconds,
+ "memory.dream.enabled": d.enabled, "memory.dream.extractor_source": d.extractor_source,
+ "memory.dream.extractor_base_url": d.extractor_base_url, "memory.dream.extractor_model": d.extractor_model,
+ "memory.dream.fallback_base_url": d.fallback_base_url, "memory.dream.fallback_model": d.fallback_model,
+ "memory.dream.extractor_model_override": d.extractor_model_override}))
+'''
+    env = daemons.base_env(home, {})
+    r = subprocess.run([sys.executable, "-c", code, str(home / "data")], env=dict(env, PYTHONPATH=str(REPO)),
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return {"<exit>": r.returncode}
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def run_config_differential(binary: Path, root: Path) -> list[dict]:
+    import subprocess
+    rows = []
+    for name, text in CONFIG_PROFILES.items():
+        home = daemons.make_home(root, "config-diff", text)
+        py = python_config_dump(home, text)
+        env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": f"postgresql://x@127.0.0.1:9/{pg.PREFIX}none",
+                                      "PSEUDOLIFE_DAEMON_DUMP_CONFIG": "1"})
+        r = subprocess.run([str(binary)], env=env, cwd=home, capture_output=True, text=True, timeout=60)
+        rs = json.loads(r.stdout) if r.returncode == 0 else {"<exit>": r.returncode}
+        # Python lower-cases and strips but keeps duplicates out; order is the list's.
+        if isinstance(py.get("coordination.allowed_principals"), list):
+            py["coordination.allowed_principals"] = sorted(set(py["coordination.allowed_principals"]))
+        if isinstance(rs.get("coordination.allowed_principals"), list):
+            rs["coordination.allowed_principals"] = sorted(set(rs["coordination.allowed_principals"]))
+        rows.append({"case": f"config: {name}", "diffs": diff_values(py, rs)})
+    return rows
+
+
 STARTUP_REFUSALS = [
     ("token map parses to nothing", {"PSEUDOLIFE_MCP_TOKENS": "junk,,x:default"}, None, 2),
     ("non-loopback bind without token", {"PSEUDOLIFE_MCP_HOST": "0.0.0.0"}, None, 2),
@@ -750,6 +848,28 @@ class DbLost(Scenario):
         return out
 
 
+class Encodings(Scenario):
+    """Token precedence across a bearer's two candidate encodings
+    (principals.py:290-300), made visible by the board check-in: the map
+    principal alice is admitted, the singular token's default is not."""
+    name = "encodings"
+    config_yaml = "coordination:\n  allowed_principals: [alice]\n"
+    settle = False
+
+    def __init__(self):
+        # The singular token is UTF-8 "caf\u00e9" read as latin-1; the map's is "caf\u00e9".
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": "caf\u00c3\u00a9", "PSEUDOLIFE_MCP_TOKENS": "caf\u00e9:alice"}
+
+    def cases(self):
+        hook = "/api/hook/coordination-start"
+        return [
+            case("UTF-8 bearer: the map wins over the singular token", "GET", hook,
+                 [("Authorization", b"Bearer caf\xc3\xa9")]),
+            case("latin-1 bearer matching the map", "GET", hook, [("Authorization", b"Bearer caf\xe9")]),
+            case("non-ASCII bearer matching nothing", "GET", hook, [("Authorization", b"Bearer \xff\xfe")]),
+        ]
+
+
 class TrustBind(Scenario):
     """Tokenless on 0.0.0.0, allowed by PSEUDOLIFE_MCP_TRUST_BIND."""
     name = "trust-bind"
@@ -764,7 +884,7 @@ class TrustBind(Scenario):
 
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
-                                  TrustBind, NullEmbedding, UnconstrainedDims, DbLost)}
+                                  TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings)}
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -877,6 +997,8 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             else:
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"]) if "python" in procs else golden["responses"][i]
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"])
+                if "python" not in procs:
+                    rs_r = golden_scrub(rs_r)
             rows.append(compare_case(c, py_r, rs_r))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
@@ -893,8 +1015,12 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
             scrubbed[side] = out["declared"]
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
-    if mode == "golden" and golden.get("db_state"):
-        db_diffs = dbstate.diff(golden["db_state"], states["rust"])
+    # A template seeded at record time holds run-specific values (pairing
+    # hashes, seeding timestamps) a replay cannot reproduce: golden mode
+    # checks bank state only for scenarios whose bank starts empty.
+    seeded_template = type(scn).prepare_template is not Scenario.prepare_template
+    if mode == "golden" and golden.get("db_state") and not seeded_template:
+        db_diffs = dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if record:
         save_golden(scn.name, rows, states.get("python"))
@@ -961,14 +1087,64 @@ def load_golden(name: str) -> dict:
     return json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
 
 
+def _machine_paths() -> list[str]:
+    """Paths of this machine that a response may echo (data dirs, homes),
+    in every escaping a golden can hold them in."""
+    out = []
+    for path in {str(Path.home()), str(daemons.scratch_root()), str(REPO), tempfile.gettempdir()}:
+        for form in {path, path.replace("\\", "/"), json.dumps(path)[1:-1], json.dumps(json.dumps(path)[1:-1])[1:-1]}:
+            if len(form) > 3:
+                out.append(form)
+    return sorted(out, key=len, reverse=True)
+
+
+def golden_scrub(value):
+    """What a committed golden may hold: no raw bodies, no machine paths
+    (refusal texts and /api/config echo the data dir), and vectors as a
+    digest, so the file stays small and portable."""
+    import hashlib
+    paths = _machine_paths()
+
+    def digest(v) -> str:
+        return hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest()[:24]
+
+    def walk(v):
+        if isinstance(v, dict):
+            out = {}
+            for k, x in v.items():
+                if k == "raw":
+                    continue
+                if k == "bytes" and isinstance(x, str) and len(x) > 4096:
+                    out[k] = f"<{len(x)} bytes sha256:{digest(x)}>"
+                elif k == "catalog" and isinstance(x, dict) and all(isinstance(r, list) for r in x.values()):
+                    out[k] = {name: {"rows": len(rows), "sha256": digest(walk(rows))} for name, rows in x.items()}
+                else:
+                    out[k] = walk(x)
+            return out
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str):
+            if v.startswith("[") and v.count(",") >= 255 and len(v) > 2000:
+                return "<vector sha256:" + hashlib.sha256(v.encode()).hexdigest()[:16] + ">"
+            for path in paths:
+                v = v.replace(path, "<machine path>")
+            return v
+        return v
+    return walk(value)
+
+
 def save_golden(name: str, rows: list[dict], state: dict | None) -> None:
     GOLDENS.mkdir(exist_ok=True)
-    data = {"normalizers": {"db_nondeterministic": [list(k) + [v] for k, v in DB_NONDETERMINISTIC.items()],
-                            "db_declared": [list(r) for r in DB_DECLARED],
-                            "health": "normalize_health in run.py"},
-            "responses": [r.pop("_python") for r in rows], "db_state": state}
-    (GOLDENS / f"{name}.json").write_text(json.dumps(data, indent=1, sort_keys=True) + "\n",
-                                          encoding="utf-8", newline="\n")
+    data = golden_scrub({"normalizers": {"db_nondeterministic": [list(k) + [v] for k, v in DB_NONDETERMINISTIC.items()],
+                                         "db_declared": [list(r) for r in DB_DECLARED],
+                                         "health": "normalize_health in run.py",
+                                         "golden": "golden_scrub in run.py"},
+                         "responses": [r.pop("_python") for r in rows], "db_state": state})
+    text = json.dumps(data, indent=1, sort_keys=True) + "\n"
+    leaked = [p for p in _machine_paths() if p in text]
+    if leaked:
+        raise RuntimeError(f"golden {name} would carry machine paths {leaked}; refusing to write it")
+    (GOLDENS / f"{name}.json").write_text(text, encoding="utf-8", newline="\n")
 
 
 def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]:
@@ -987,6 +1163,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
     ap.add_argument("--no-refusals", action="store_true")
+    ap.add_argument("--mutants", nargs="*", help="run only these mutants (default: all)")
     args = ap.parse_args()
     args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
@@ -1000,7 +1177,14 @@ def main() -> int:
         for n in names:
             if n not in SCENARIOS:
                 continue
-            r = run_scenario(SCENARIOS[n](), args.rust_bin, root, mode, args.record)
+            try:
+                r = run_scenario(SCENARIOS[n](), args.rust_bin, root, mode, args.record)
+            except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
+                r = {"scenario": n, "cases": [{"case": "scenario error", "diffs": [f"{type(exc).__name__}: {exc}"],
+                                               "declared": None}], "db_diffs": [], "declared_db_writes": {}}
+                for name in pg.existing():
+                    if name.startswith(f"{pg.PREFIX}{n.replace('-', '_')}_"):
+                        pg.drop(name)
             results.append(r)
             bad = [c["case"] for c in r["cases"] if c["diffs"]]
             print(f"[{n}] cases {len(r['cases'])} diffs {len(bad)} db_diffs {len(r['db_diffs'])} {bad[:6]}",
@@ -1009,7 +1193,7 @@ def main() -> int:
                 print(f"  DB DIFF {d[:400]}", flush=True)
             if args.out:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
-        refusals = (run_refusals(args.rust_bin, root)
+        refusals = (run_refusals(args.rust_bin, root) + run_config_differential(args.rust_bin, root)
                     if "refusals" in names and mode != "golden" and not args.no_refusals else [])
         return results, refusals
 
@@ -1022,7 +1206,7 @@ def main() -> int:
             print("control run is not clean; mutant results would not be attributable")
             return 1
         outcome = {}
-        for m in MUTANTS:
+        for m in (args.mutants or MUTANTS):
             os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
             results, refusals = one_pass("live")
             cases, diff_cases, db = summarize(results, refusals)
@@ -1055,6 +1239,18 @@ def main() -> int:
         args.out.write_text(json.dumps({"summary": summary, "scenarios": results, "refusals": refusals},
                                        indent=1), encoding="utf-8")
     return 1 if diff_cases or db else 0
+
+
+def rescrub_goldens() -> None:
+    """Apply golden_scrub to committed goldens in place (no re-record)."""
+    for path in sorted(GOLDENS.glob("*.json")):
+        if path.name == "routes.json":
+            continue
+        data = golden_scrub(json.loads(path.read_text(encoding="utf-8")))
+        data.setdefault("normalizers", {})["golden"] = "golden_scrub in run.py"
+        text = json.dumps(data, indent=1, sort_keys=True) + "\n"
+        assert not [p for p in _machine_paths() if p in text], path
+        path.write_text(text, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":
