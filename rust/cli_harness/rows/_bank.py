@@ -59,10 +59,13 @@ def _admin():
 def drop(name: str) -> None:
     url(name)  # validates the name
     with _admin() as conn:
+        # Only this login's sessions: an autovacuum worker is not ours to end,
+        # and DROP ... WITH (FORCE) waits it out.
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = %s AND pid <> pg_backend_pid()", (name,))
-        conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            "WHERE datname = %s AND pid <> pg_backend_pid() "
+            "AND usename = current_user", (name,))
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 
 def create(name: str, schema: bool = True) -> str:
