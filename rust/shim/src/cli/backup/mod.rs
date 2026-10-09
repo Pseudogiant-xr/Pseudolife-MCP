@@ -152,48 +152,34 @@ fn default_data_dir() -> Option<PathBuf> {
     canonical(cwd.to_str()?).then(|| cwd.join("data"))
 }
 
-fn absolute(path: &Path) -> Option<PathBuf> {
-    if path.is_absolute() {
-        Some(path.to_path_buf())
-    } else {
-        Some(std::env::current_dir().ok()?.join(path))
-    }
-}
-
-fn same_name(left: &str, right: &str) -> bool {
-    if cfg!(windows) {
-        left.to_lowercase() == right.to_lowercase()
-    } else {
-        left == right
-    }
-}
-
-/// Defer when `--out` would sit inside an archived child of the data dir,
-/// or be the data dir itself: Python would archive its own partial file.
-fn nested_out(data_dir: &Path, bdir: &Path) -> Option<bool> {
-    let data = absolute(data_dir)?;
-    let out = absolute(bdir)?;
-    let data: Vec<_> = data.components().collect();
-    let out: Vec<_> = out.components().collect();
-    if out.len() < data.len() {
-        return Some(false);
-    }
-    let inside = data.iter().zip(&out).all(|(left, right)| {
-        same_name(
-            &left.as_os_str().to_string_lossy(),
-            &right.as_os_str().to_string_lossy(),
-        )
-    });
-    Some(inside && out.len() != data.len() + 1)
-}
-
-fn write_stream(stdout: bool, text: &str) {
+fn write_stream(stdout: bool, text: &str) -> io::Result<()> {
     let bytes = super::text_bytes(text);
-    let _ = if stdout {
-        io::stdout().lock().write_all(&bytes)
+    if stdout {
+        let mut out = io::stdout().lock();
+        out.write_all(&bytes)?;
+        out.flush()
     } else {
         io::stderr().lock().write_all(&bytes)
+    }
+}
+
+/// Names in the backups dir that Python's rotation glob reads the way this
+/// port does: UTF-8 everywhere, ASCII on Windows (whose glob folds case with
+/// Unicode rules).
+fn rotation_names_supported(bdir: &Path) -> Option<()> {
+    let entries = match fs::read_dir(bdir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Some(()),
+        Err(_) => return None,
     };
+    for entry in entries {
+        let name = entry.ok()?.file_name();
+        let name = name.to_str()?;
+        if cfg!(windows) && !name.is_ascii() {
+            return None;
+        }
+    }
+    Some(())
 }
 
 fn help() -> u8 {
@@ -221,7 +207,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     match data_dir.try_exists() {
         Ok(true) => {}
         Ok(false) => {
-            write_stream(
+            let _ = write_stream(
                 false,
                 &format!(
                     "data dir {} does not exist — nothing to back up.\n",
@@ -253,20 +239,33 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         Err(error) if error.kind() != io::ErrorKind::NotFound => return None,
         _ => {}
     }
-    if args.out.is_some() && nested_out(&data_dir, &bdir)? {
+    // Python's C runtime honours TZ on Windows; this port reads the system zone.
+    if cfg!(windows) && std::env::var_os("TZ").is_some_and(|tz| !tz.is_empty()) {
         return None;
     }
     archive::admit(&data_dir, &bdir)?;
+    rotation_names_supported(&bdir)?;
     let pg_dump = match &dsn {
-        Some(_) => Some(dump::find(&home()?)),
+        Some(_) => Some(dump::find(&home()?)?),
         None => None,
     };
-
-    // Effects start here, in Python's order.
-    if fs::create_dir_all(&bdir).is_err() {
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    // Python's Windows rename refuses an existing target after writing the partial.
+    if cfg!(windows)
+        && [
+            format!("{STATE_PREFIX}{ts}.tar.gz"),
+            format!("{DUMP_PREFIX}{ts}.sql.gz"),
+        ]
+        .iter()
+        .any(|name| !matches!(bdir.join(name).try_exists(), Ok(false)))
+    {
         return None;
     }
-    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+
+    // Effects start here, in Python's order.
+    if let Err(error) = fs::create_dir_all(&bdir) {
+        return Some(failed(&error.to_string()));
+    }
     let dump = match (&dsn, pg_dump) {
         (Some(dsn), Some(Some(pg_dump))) => match dump::write(dsn, &pg_dump, &bdir, &ts) {
             Ok(path) => Some(path),
@@ -298,12 +297,16 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     for path in pruned {
         text.push_str(&format!("rotated out:   {}\n", path.display()));
     }
-    write_stream(true, &text);
-    Some(0)
+    // Python flushes stdout at interpreter shutdown; a closed stdout makes that exit 120.
+    Some(if write_stream(true, &text).is_ok() {
+        0
+    } else {
+        120
+    })
 }
 
 fn failed(message: &str) -> u8 {
-    write_stream(false, &format!("backup failed: {message}\n"));
+    let _ = write_stream(false, &format!("backup failed: {message}\n"));
     1
 }
 
@@ -333,14 +336,15 @@ fn glob_matches(name: &str, prefix: &str, suffix: &str) -> bool {
     }
 }
 
+/// CPython's float `st_mtime`: floored seconds plus non-negative nanoseconds * 1e-9.
 fn seconds(time: SystemTime) -> f64 {
-    match time.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => since.as_secs() as f64 + f64::from(since.subsec_nanos()) * 1e-9,
-        Err(before) => {
-            let before = before.duration();
-            -(before.as_secs() as f64 + f64::from(before.subsec_nanos()) * 1e-9)
-        }
-    }
+    let nanos = match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(since) => since.as_nanos() as i128,
+        Err(before) => -(before.duration().as_nanos() as i128),
+    };
+    let whole = nanos.div_euclid(1_000_000_000);
+    let fraction = nanos.rem_euclid(1_000_000_000);
+    whole as f64 + fraction as f64 * 1e-9
 }
 
 /// `_rotate`: this tool's own files older than `keep_days`, dumps only when

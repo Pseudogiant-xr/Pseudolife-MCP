@@ -13,37 +13,78 @@ const EXE: &str = if cfg!(windows) {
     "pg_dump"
 };
 
-/// The lite tier's bundled pg_dump (newest version directory first), then PATH.
-pub(super) fn find(home: &Path) -> Option<PathBuf> {
+/// A stat error Python 3.11's `Path.is_dir()`/`exists()` treats as "no";
+/// any other error raises there, so it defers here.
+fn ignorable(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || ignorable_code(error.raw_os_error())
+}
+
+#[cfg(unix)]
+fn ignorable_code(code: Option<i32>) -> bool {
+    matches!(code, Some(libc::ENOTDIR | libc::EBADF | libc::ELOOP))
+}
+
+#[cfg(windows)]
+fn ignorable_code(code: Option<i32>) -> bool {
+    // ERROR_NOT_READY, ERROR_INVALID_NAME, ERROR_CANT_RESOLVE_FILENAME.
+    matches!(code, Some(21 | 123 | 1921))
+}
+
+fn is_dir(path: &Path) -> Option<bool> {
+    match fs::metadata(path) {
+        Ok(meta) => Some(meta.is_dir()),
+        Err(error) if ignorable(&error) => Some(false),
+        Err(_) => None,
+    }
+}
+
+fn exists(path: &Path) -> Option<bool> {
+    match fs::metadata(path) {
+        Ok(_) => Some(true),
+        Err(error) if ignorable(&error) => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// The lite tier's bundled pg_dump (newest version directory first), then
+/// PATH. `None` defers: Python would raise while looking.
+pub(super) fn find(home: &Path) -> Option<Option<PathBuf>> {
     let install_root = home.join(".pg0").join("installation");
-    if install_root.is_dir()
-        && let Ok(entries) = fs::read_dir(&install_root)
-    {
-        let mut versions: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    if is_dir(&install_root)? {
+        let mut versions = Vec::new();
+        for entry in fs::read_dir(&install_root).ok()? {
+            versions.push(entry.ok()?.path());
+        }
         versions.sort_by_key(|path| {
             super::path_sort_key(&path.file_name().unwrap_or_default().to_string_lossy())
         });
         for version in versions.into_iter().rev() {
             let candidate = version.join("bin").join(EXE);
-            if candidate.exists() {
-                return Some(candidate);
+            if exists(&candidate)? {
+                return Some(Some(candidate));
             }
         }
     }
-    which()
+    Some(which())
 }
 
-/// Python 3.11 `shutil.which("pg_dump")`.
+/// Python 3.11 `shutil.which("pg_dump")`: PATH split on the separator as
+/// text (quotes and empty entries kept), `None` for an empty PATH.
 fn which() -> Option<PathBuf> {
     let path = match std::env::var_os("PATH") {
-        Some(path) => path,
+        Some(path) => path.into_string().ok()?,
         None if cfg!(windows) => ".;C:\\bin".into(),
+        None if cfg!(target_os = "macos") => "/usr/bin:/bin:/usr/sbin:/sbin".into(),
         None => "/bin:/usr/bin".into(),
     };
-    let mut directories: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    if path.is_empty() {
+        return None;
+    }
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    let mut directories: Vec<&str> = path.split(separator).collect();
     let files: Vec<String> = if cfg!(windows) {
-        if !directories.iter().any(|dir| dir.as_os_str() == ".") {
-            directories.insert(0, PathBuf::from("."));
+        if !directories.contains(&".") {
+            directories.insert(0, ".");
         }
         let pathext = std::env::var("PATHEXT")
             .ok()
@@ -60,19 +101,16 @@ fn which() -> Option<PathBuf> {
     let mut seen = Vec::new();
     for directory in directories {
         let key = if cfg!(windows) {
-            directory
-                .to_string_lossy()
-                .replace('/', "\\")
-                .to_lowercase()
+            directory.replace('/', "\\").to_lowercase()
         } else {
-            directory.to_string_lossy().into_owned()
+            directory.to_owned()
         };
         if seen.contains(&key) {
             continue;
         }
         seen.push(key);
         for file in &files {
-            let candidate = directory.join(file);
+            let candidate = Path::new(directory).join(file);
             if executable(&candidate) {
                 return Some(candidate);
             }
@@ -101,40 +139,47 @@ fn python_strip(text: &str) -> &str {
 pub(super) fn write(dsn: &str, pg_dump: &Path, bdir: &Path, ts: &str) -> Result<PathBuf, String> {
     let target = bdir.join(format!("{}{ts}.sql.gz", super::DUMP_PREFIX));
     let partial = bdir.join(format!("{}{ts}.sql.gz.part", super::DUMP_PREFIX));
-    let outcome = (|| -> io::Result<Result<(), String>> {
-        let mut child = Command::new(pg_dump)
-            .args(["--no-owner", "--no-acl", "--dbname", dsn])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let mut stderr = child.stderr.take().expect("piped stderr");
-        let reader = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stderr.read_to_end(&mut bytes);
-            bytes
-        });
+    // Python starts pg_dump before its cleanup scope: a spawn failure leaves
+    // any existing partial file alone.
+    let mut child = Command::new(pg_dump)
+        .args(["--no-owner", "--no-acl", "--dbname", dsn])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let copied = (|| -> io::Result<()> {
         let mut gz = GzEncoder::new(fs::File::create(&partial)?, Compression::best());
-        let copied = io::copy(child.stdout.as_mut().expect("piped stdout"), &mut gz);
-        let finished = copied.and_then(|_| gz.finish().map(drop));
-        let status = child.wait()?;
-        let stderr = reader.join().unwrap_or_default();
-        finished?;
-        if !status.success() {
-            let text = String::from_utf8_lossy(&stderr);
-            return Ok(Err(format!("pg_dump failed: {}", python_strip(&text))));
-        }
-        Ok(Ok(()))
+        io::copy(&mut stdout, &mut gz)?;
+        gz.finish()?;
+        Ok(())
     })();
-    match outcome {
-        Ok(Ok(())) => {}
-        Ok(Err(message)) => {
-            let _ = fs::remove_file(&partial);
-            return Err(message);
-        }
+    drop(stdout);
+    if let Err(error) = copied {
+        // A pg_dump still writing would block on the full pipe forever.
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_file(&partial);
+        return Err(error.to_string());
+    }
+    let stderr = reader.join().unwrap_or_default();
+    let status = match child.wait() {
+        Ok(status) => status,
         Err(error) => {
             let _ = fs::remove_file(&partial);
             return Err(error.to_string());
         }
+    };
+    if !status.success() {
+        let _ = fs::remove_file(&partial);
+        let text = String::from_utf8_lossy(&stderr);
+        return Err(format!("pg_dump failed: {}", python_strip(&text)));
     }
     fs::rename(&partial, &target).map_err(|error| error.to_string())?;
     Ok(target)

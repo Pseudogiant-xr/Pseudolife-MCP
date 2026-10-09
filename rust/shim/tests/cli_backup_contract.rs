@@ -234,15 +234,59 @@ fn outputs_that_would_archive_themselves_defer() {
     assert_deferred(&home, &["--data-dir", &parent]);
 }
 
-#[cfg(unix)]
 #[test]
 fn hard_links_in_the_tree_defer() {
     let home = Home::new("hardlink");
     let bank = home.path().join("bank");
-    fs::create_dir(&bank).unwrap();
-    fs::write(bank.join("a"), "x").unwrap();
-    fs::hard_link(bank.join("a"), bank.join("b")).unwrap();
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    fs::write(bank.join("sub").join("a"), "x").unwrap();
+    fs::hard_link(bank.join("sub").join("a"), bank.join("b")).unwrap();
     assert_deferred(&home, &["--data-dir", &text(&bank)]);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_loops_and_aliased_outputs_defer() {
+    let home = Home::new("symlink");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    std::os::unix::fs::symlink("loop", bank.join("loop")).unwrap();
+    assert_deferred(&home, &["--data-dir", &text(&bank)]);
+    fs::remove_file(bank.join("loop")).unwrap();
+    // An output reached through an outside alias of an archived child.
+    std::os::unix::fs::symlink(bank.join("sub"), home.path().join("alias")).unwrap();
+    let out = text(&home.path().join("alias").join("bk"));
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &out]);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_tz_override_defers_on_windows() {
+    let home = Home::new("tz");
+    fs::create_dir(home.path().join("bank")).unwrap();
+    let mut command = command(home.path());
+    command
+        .env("TZ", "UTC")
+        .args(["--data-dir", &text(&home.path().join("bank"))]);
+    let before = home.listing();
+    let output = command.output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(home.listing(), before);
+}
+
+#[cfg(windows)]
+#[test]
+fn non_ascii_names_in_the_backups_dir_defer_on_windows() {
+    let home = Home::new("glob");
+    let backups = home.path().join("bank").join("backups");
+    fs::create_dir_all(&backups).unwrap();
+    fs::write(
+        backups.join("pseudolıfe_lite_state-20200101-000000.tar.gz"),
+        "x",
+    )
+    .unwrap();
+    assert_deferred(&home, &["--data-dir", &text(&home.path().join("bank"))]);
 }
 
 fn members(archive: &Path) -> Vec<(String, Vec<u8>)> {
@@ -273,8 +317,10 @@ fn file_mode_archives_state_and_rotates_only_its_own_state_files() {
     fs::create_dir_all(bank.join("embedded_pg")).unwrap();
     fs::create_dir_all(&backups).unwrap();
     fs::write(bank.join("config.yaml"), "name: ✓\n").unwrap();
-    fs::write(bank.join("notes-ü").join("b.txt"), "b").unwrap();
-    fs::write(bank.join("notes-ü").join("A.txt"), "a").unwrap();
+    fs::write(bank.join("B-top.txt"), "B").unwrap();
+    fs::write(bank.join("a-top.txt"), "a").unwrap();
+    fs::write(bank.join("notes-ü").join("a.txt"), "a").unwrap();
+    fs::write(bank.join("notes-ü").join("B.txt"), "B").unwrap();
     fs::write(bank.join("embedded_pg").join("postmaster.opts"), "x").unwrap();
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 86400);
     for name in [
@@ -323,11 +369,20 @@ fn file_mode_archives_state_and_rotates_only_its_own_state_files() {
         .into_iter()
         .map(|(name, data)| (name, String::from_utf8(data).unwrap()))
         .collect();
+    // Top level sorts as Python sorts Path objects (case-folded on Windows);
+    // inside a directory, sorted(os.listdir()) is code-point order everywhere.
+    let top: [(&str, &str); 2] = if cfg!(windows) {
+        [("a-top.txt", "a"), ("B-top.txt", "B")]
+    } else {
+        [("B-top.txt", "B"), ("a-top.txt", "a")]
+    };
     let expected = [
+        top[0],
+        top[1],
         ("config.yaml", "name: ✓\n"),
         ("notes-ü/", ""),
-        ("notes-ü/A.txt", "a"),
-        ("notes-ü/b.txt", "b"),
+        ("notes-ü/B.txt", "B"),
+        ("notes-ü/a.txt", "a"),
     ];
     let names: Vec<(&str, &str)> = names
         .iter()

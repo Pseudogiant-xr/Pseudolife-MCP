@@ -6,7 +6,7 @@
 use flate2::{Compression, write::GzEncoder};
 use std::{
     fs::{self, Metadata},
-    io,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 use tar::{Builder, EntryType, Header};
@@ -29,6 +29,22 @@ fn excluded(name: &str, path: &Path, bdir: Option<&Path>) -> bool {
         || bdir.is_some_and(|bdir| fs::canonicalize(path).ok() == fs::canonicalize(bdir).ok())
 }
 
+/// The file's link count; Python's `os.lstat` reports it on Windows too.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn link_count(path: &Path) -> Option<u32> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let file = fs::File::open(path).ok()?;
+    // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid plain-data value.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle stays open for the call and `info` is a valid out pointer.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) };
+    (ok != 0).then_some(info.nNumberOfLinks)
+}
+
 /// Every tree shape this port archives exactly; anything else defers first.
 fn supported(path: &Path, meta: &Metadata) -> Option<()> {
     let kind = meta.file_type();
@@ -37,6 +53,10 @@ fn supported(path: &Path, meta: &Metadata) -> Option<()> {
         use std::os::windows::fs::MetadataExt;
         // Reparse points (symlinks, junctions, placeholders) have Windows-only stat rules.
         if meta.file_attributes() & 0x400 != 0 || kind.is_symlink() {
+            return None;
+        }
+        // A second link to the same file would become a tar hard-link member.
+        if kind.is_file() && link_count(path)? > 1 {
             return None;
         }
     }
@@ -67,14 +87,62 @@ fn supported(path: &Path, meta: &Metadata) -> Option<()> {
     Some(())
 }
 
-/// Admit the data dir's tree before any effect.
+/// `Path.resolve()` for an output dir that may not exist yet: the deepest
+/// existing ancestor canonicalized, the remaining names appended.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut tail = Vec::new();
+    let mut cursor = absolute.as_path();
+    loop {
+        match fs::canonicalize(cursor) {
+            Ok(mut base) => {
+                for part in tail.iter().rev() {
+                    base.push(part);
+                }
+                return Some(base);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                tail.push(cursor.file_name()?.to_owned());
+                cursor = cursor.parent()?;
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Admit the data dir's tree before any effect. Defers when the output dir
+/// would be the data dir or sit inside an archived child (Python would
+/// archive its own partial file), when a child cannot be resolved the way
+/// `Path.resolve()` resolves it (a symlink loop), and for unsupported shapes.
 pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
-    let bdir = bdir.exists().then_some(bdir);
+    let out = resolved(bdir)?;
+    if fs::canonicalize(data_dir).ok()? == out {
+        return None;
+    }
     for (name, path) in top_children(data_dir)? {
-        if excluded(&name, &path, bdir) {
+        if EXCLUDE.contains(&name.as_str()) {
             continue;
         }
-        supported(&path, &fs::symlink_metadata(&path).ok()?)?;
+        let meta = fs::symlink_metadata(&path).ok()?;
+        let target = match fs::canonicalize(&path) {
+            Ok(target) => Some(target),
+            Err(error) if error.kind() == io::ErrorKind::NotFound && meta.is_symlink() => None,
+            Err(_) => return None,
+        };
+        if target.as_ref() == Some(&out) {
+            continue;
+        }
+        if target
+            .as_ref()
+            .is_some_and(|target| out.starts_with(target))
+        {
+            return None;
+        }
+        supported(&path, &meta)?;
     }
     Some(())
 }
@@ -93,14 +161,13 @@ fn mode(path: &Path, meta: &Metadata) -> u32 {
         return if readonly { 0o555 } else { 0o777 };
     }
     let mut mode = if readonly { 0o444 } else { 0o666 };
-    let executable = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            ["exe", "bat", "cmd", "com"]
-                .iter()
-                .any(|x| ext.eq_ignore_ascii_case(x))
-        });
+    // CPython compares everything after the path's last '.', dotfiles included.
+    let text = path.to_string_lossy();
+    let executable = text.rfind('.').is_some_and(|dot| {
+        [".exe", ".bat", ".cmd", ".com"]
+            .iter()
+            .any(|ext| text[dot..].eq_ignore_ascii_case(ext))
+    });
     if executable {
         mode |= 0o111;
     }
@@ -144,6 +211,27 @@ fn ascii_field(field: &mut [u8], text: &str) {
         } else {
             b'?'
         };
+    }
+}
+
+/// Exactly the stat size, as `tarfile.addfile` copies it: a file that grew is
+/// cut at its stat size, one that shrank fails the archive.
+struct Exact {
+    file: io::Take<fs::File>,
+    remaining: u64,
+}
+
+impl Read for Exact {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let read = self.file.read(buffer)?;
+        if read == 0 && self.remaining > 0 && !buffer.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of data",
+            ));
+        }
+        self.remaining -= read as u64;
+        Ok(read)
     }
 }
 
@@ -195,7 +283,14 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     header.set_mtime(mtime.round_ties_even().max(0.0) as u64);
     header.set_cksum();
     if member.kind == EntryType::Regular {
-        tar.append(&header, fs::File::open(member.path)?)
+        let file = fs::File::open(member.path)?.take(size);
+        tar.append(
+            &header,
+            Exact {
+                file,
+                remaining: size,
+            },
+        )
     } else {
         tar.append(&header, io::empty())
     }

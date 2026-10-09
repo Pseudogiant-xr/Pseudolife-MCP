@@ -2,19 +2,21 @@
 
 Canonical argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
 space-separated values, each option at most once, P a canonical path
-(``str(Path(P)) == P``, no ``..``) and N a plain decimal; plus ``--help`` at
-COLUMNS=80. The bank is the explicit ``PSEUDOLIFE_MCP_DATABASE_URL``; without
-one, a data dir holding no embedded bank is archived in file mode. Every case
-that would need the lite tier's embedded instance defers (Rust tests cover the
-deferrals; this row compares only answered cases).
+(``str(Path(P)) == P``, no ``..``) and N a plain decimal of at least a
+minute; plus ``--help`` at COLUMNS=80. The bank is the explicit
+``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
+bank is archived in file mode. Every case that would need the lite tier's
+embedded instance defers (Rust tests cover the deferrals; this row compares
+only answered cases).
 
 Contract per arm: exit code, both streams byte-exact (the timestamp in the
-two file names is normalized against the arm's own clock window), every file
-under the home, the state archive read back member by member (name, type,
-mode, uid, gid, uname, gname, mtime, size, link target, content hash), the
-dump decompressed (pg_dump's per-run ``\\restrict`` key normalized), and the
-source bank unchanged. Container bytes (tar header layout, gzip headers,
-compression) are free.
+two new file names is normalized against the arm's own clock window), every
+file under the home, the state archive read back member by member (name,
+type, mode, uid, gid, mtime, size, link target, content hash; uname and gname
+on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
+normalized only when the ``\\restrict`` and ``\\unrestrict`` keys agree),
+and the source bank unchanged. Container bytes (tar header layout, gzip
+headers, compression) are free.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tarfile
 import time
 from pathlib import Path
@@ -79,7 +82,16 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
         _write(root / "chromadb" / "chroma.sqlite3", bytes(range(256)) * 64)
         _write(root / "notes-ü" / "日本語.txt", "text\r\nwith crlf\n")
         _write(root / "notes-ü" / ("long-" + "x" * 120 + ".txt"), "long name")
+        # Case-folded order at the top level on Windows, code points below it.
+        _write(root / "B-top.txt", "upper")
+        _write(root / "a-top.txt", "lower")
+        _write(root / "notes-ü" / "B.txt", "upper")
+        _write(root / "notes-ü" / "a.txt", "lower")
         _write(root / "run.cmd", "@echo off\n")
+        _write(root / ".cmd", "dotfile named like an executable suffix\n")
+        _write(root / "locked" / "inner.txt", "inside a read-only dir")
+        _write(root / "locked.txt", "read-only file")
+        os.chmod(root / "locked.txt", stat.S_IREAD)
         (root / "empty").mkdir()
         _write(root / "embedded_pg" / "postmaster.opts", "excluded, no PG_VERSION")
         if bdir_rel is not None:
@@ -98,10 +110,11 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
             ]:
                 _write(bdir / name, b"old", mtime)
         for directory in [root / "memory_state", root / "chromadb", root / "notes-ü",
-                          root / "empty", root / "embedded_pg", root / "backups"]:
-            if not directory.exists():
-                continue
-            os.utime(directory, (FIXED, FIXED))
+                          root / "empty", root / "embedded_pg", root / "backups",
+                          root / "locked"]:
+            if directory.exists():
+                os.utime(directory, (FIXED, FIXED))
+        os.chmod(root / "locked", stat.S_IREAD | stat.S_IEXEC)
     return setup
 
 
@@ -117,6 +130,13 @@ def with_pg0(inner=None):
             if item.is_file():
                 os.link(item, target / item.name)
     return setup
+
+
+def with_symlink(arm):
+    tree()(arm)
+    link = arm.home / "bank" / "link"
+    os.symlink("config.yaml", link)
+    os.utime(link, (FIXED, FIXED), follow_symlinks=False)
 
 
 def drop_pg0(arm, _obs):
@@ -162,18 +182,28 @@ def _tar_view(data: bytes) -> bytes:
     return json.dumps(members, indent=1, ensure_ascii=False).encode()
 
 
-_RESTRICT = re.compile(rb"^(\\(?:un)?restrict )[A-Za-z0-9]+(?=\r?$)", re.M)
+_RESTRICT = re.compile(rb"^\\restrict ([A-Za-z0-9]+)(?=\r?$)", re.M)
 
 
 def _dump_view(data: bytes) -> bytes:
+    """Decompressed SQL; the per-run key becomes <key> only when exactly one
+    \\restrict and one \\unrestrict carry the same key."""
     text = gzip.decompress(data)
-    return _RESTRICT.sub(rb"\1<key>", text)
+    keys = _RESTRICT.findall(text)
+    if len(keys) == 1:
+        key = keys[0]
+        pair = (b"\\restrict " + key, b"\\unrestrict " + key)
+        if all(text.count(token) == 1 for token in pair):
+            text = text.replace(pair[0], b"\\restrict <key>").replace(
+                pair[1], b"\\unrestrict <key>")
+    return text
 
 
 @normalize.rule("backup-files")
 def backup_files(obs: dict) -> None:
-    """Timestamps in the two new file names (validated against the arm's own
-    window), archives read back by member, dumps decompressed."""
+    """Timestamps in the new file names (validated against the arm's own
+    window), archives read back by member, dumps decompressed. Two files that
+    normalize to one name stay distinct, so an extra file still shows."""
     window = obs["window"]
     for field in ("stdout", "stderr"):
         obs[field] = base64.b64encode(
@@ -185,8 +215,25 @@ def backup_files(obs: dict) -> None:
             data = base64.b64decode(value[5:])
             view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
             value = "file:" + base64.b64encode(view).decode()
+        while new_rel in files:
+            new_rel += " <normalized-collision>"
         files[new_rel] = value
     obs["files"] = files
+
+
+_SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
+                             rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+@normalize.rule("backup-stdout-closed")
+def backup_stdout_closed(obs: dict) -> None:
+    """Declared substitution ``backup-stdout-closed``: CPython reports its
+    failed shutdown flush of a closed stdout with an ignored-exception trailer
+    and exit 120; the native leaf exits 120 without the interpreter trailer.
+    Only that exact trailer with exit 120 is removed."""
+    stderr = base64.b64decode(obs["stderr"])
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        obs["stderr"] = base64.b64encode(_SHUTDOWN_FLUSH.sub(b"", stderr)).decode()
 
 
 # ---------------------------------------------------------------- cases
@@ -194,18 +241,27 @@ def backup_files(obs: dict) -> None:
 RULES = ("backup-files",)
 
 
+def _have_pg0() -> bool:
+    return PG0.is_dir() and any((p / "bin").is_dir() for p in PG0.iterdir())
+
+
 def cases() -> list[Case]:
-    dsn = _source()
-    absent = _bank.url(ABSENT_DB)
-    pg0_bin = str(_pg0_version() / "bin")
-    data = ["--data-dir", "{HOME}/bank"] if not WINDOWS else ["--data-dir", "{HOME}\\bank"]
+    # DSN cases need the bundled pg_dump this host's home carries.
+    have_pg0 = _have_pg0()
+    dsn = _source() if have_pg0 else "postgresql://unused"
+    absent = _bank.url(ABSENT_DB) if have_pg0 else "postgresql://unused"
+    pg0_bin = str(_pg0_version() / "bin") if have_pg0 else ""
+    dsn_platforms = ("windows", "linux") if have_pg0 else ()
     sep = "\\" if WINDOWS else "/"
+    data = ["--data-dir", f"{{HOME}}{sep}bank"]
+    no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
     return [
         Case("help", ["backup", "--help"]),
         Case("missing-absolute", ["backup", "--data-dir", f"{{HOME}}{sep}absent-µ"]),
         Case("missing-relative", ["backup", "--data-dir", "absent-µ"]),
         Case("file-mode", ["backup", *data], setup=tree(), rules=RULES),
-        Case("file-mode-env-data-dir", ["backup"], env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
+        Case("file-mode-env-data-dir", ["backup"],
+             env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
              setup=tree(), rules=RULES),
         Case("file-mode-cwd-data", ["backup"], setup=tree("cwd/data"), rules=RULES),
         Case("file-mode-out-absolute-keep-half-day",
@@ -213,24 +269,28 @@ def cases() -> list[Case]:
              setup=tree(bdir_rel="elsewhere"), rules=RULES),
         Case("file-mode-out-relative", ["backup", *data, "--out", "bk"],
              setup=tree(bdir_rel="cwd/bk"), rules=RULES),
-        Case("file-mode-out-direct-child", ["backup", *data, "--out", f"{{HOME}}{sep}bank{sep}mybk"],
+        Case("file-mode-out-direct-child",
+             ["backup", *data, "--out", f"{{HOME}}{sep}bank{sep}mybk"],
              setup=tree(bdir_rel="bank/mybk"), rules=RULES),
         Case("file-mode-keep-one-minute", ["backup", *data, "--keep-days", "0.0007"],
              setup=tree(), rules=RULES),
         Case("file-mode-empty-data-dir", ["backup", *data],
              setup=lambda arm: (arm.home / "bank").mkdir(), rules=RULES),
+        Case("file-mode-stdout-closed", ["backup", *data], setup=tree(), stdout_closed=True,
+             rules=RULES + ("backup-stdout-closed",)),
         Case("dsn-pg0-bundle", ["backup", *data], env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn},
-             setup=with_pg0(tree()), after=check_bank, rules=RULES, timeout=120),
+             setup=with_pg0(tree()), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120),
         Case("dsn-path", ["backup", *data, "--keep-days", "10"],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn,
-                  "PATH": pg0_bin + os.pathsep + os.environ.get("PATH", "")},
-             setup=tree(), after=check_bank, rules=RULES, timeout=120),
-        Case("dsn-pg-dump-missing", ["backup", *data], env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn},
-             setup=tree(), rules=RULES),
-        Case("dsn-pg-dump-fails", ["backup", *data], env={"PSEUDOLIFE_MCP_DATABASE_URL": absent},
-             setup=with_pg0(tree()), after=drop_pg0, rules=RULES, timeout=60),
-        Case("posix-symlink-member", ["backup", *data],
-             setup=lambda arm: (tree()(arm), os.symlink("config.yaml", arm.home / "bank" / "link")),
+                  "PATH": pg0_bin + os.pathsep + f"{{HOME}}{sep}no-bin"},
+             setup=tree(), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120),
+        Case("dsn-pg-dump-missing", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
+             setup=tree(), platforms=dsn_platforms, rules=RULES),
+        Case("dsn-pg-dump-fails", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": absent, **no_pg_dump},
+             setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60),
+        Case("posix-symlink-member", ["backup", *data], setup=with_symlink,
              platforms=("linux",), rules=RULES),
     ]
 
@@ -247,15 +307,39 @@ MUTANTS = [
     Mutant("backup-rotation-order", "backup", B + "mod.rs",
            "names.sort_by_key(|name| path_sort_key(name));",
            "names.sort_by_key(|name| std::cmp::Reverse(path_sort_key(name)));", ("file-mode",)),
+    Mutant("backup-nested-member-order", "backup", B + "archive.rs",
+           "        names.sort();\n",
+           "        names.sort_by_key(|name| name.to_lowercase());\n", ("file-mode",)),
     Mutant("backup-dump-keeps-owner", "backup", B + "dump.rs",
            '.args(["--no-owner", "--no-acl", "--dbname", dsn])',
            '.args(["--no-acl", "--dbname", dsn])', ("dsn-path",)),
-    Mutant("backup-member-mode", "backup", B + "archive.rs",
-           "let mut mode = if readonly { 0o444 } else { 0o666 };",
-           "let mut mode = if readonly { 0o444 } else { 0o644 };", ("file-mode",)),
     Mutant("backup-skipped-wording", "backup", B + "mod.rs",
            "file-mode state archived only", "file mode state archived only", ("file-mode",)),
     Mutant("backup-pg-dump-failure-strip", "backup", B + "dump.rs",
            'format!("pg_dump failed: {}", python_strip(&text))',
            'format!("pg_dump failed: {}", text)', ("dsn-pg-dump-fails",)),
+    Mutant("backup-stdout-failure-exit", "backup", B + "mod.rs",
+           "    } else {\n        120\n    })",
+           "    } else {\n        0\n    })",
+           ("file-mode-stdout-closed",)),
 ]
+if WINDOWS:
+    MUTANTS += [
+        Mutant("backup-member-mode-windows", "backup", B + "archive.rs",
+               "let mut mode = if readonly { 0o444 } else { 0o666 };",
+               "let mut mode = if readonly { 0o444 } else { 0o644 };", ("file-mode",)),
+        Mutant("backup-dotfile-suffix-windows", "backup", B + "archive.rs",
+               "let text = path.to_string_lossy();",
+               "let text = path.extension().map(|ext| format!(\".{}\", ext.to_string_lossy()))"
+               ".unwrap_or_default();",
+               ("file-mode",)),
+        Mutant("backup-top-order-windows", "backup", B + "archive.rs",
+               "children.sort_by_key(|(name, _)| super::path_sort_key(name));",
+               "children.sort();", ("file-mode",)),
+    ]
+else:
+    MUTANTS += [
+        Mutant("backup-member-mode-posix", "backup", B + "archive.rs",
+               "meta.permissions().mode() & 0o7777", "meta.permissions().mode() & 0o7700",
+               ("file-mode",)),
+    ]
