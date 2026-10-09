@@ -69,6 +69,7 @@ class Case:
     rules: tuple[str, ...] = ()
     platforms: tuple[str, ...] = ("windows", "linux")
     stdout_closed: bool = False
+    stderr_closed: bool = False  # the arm's stderr is a pipe whose reader closed
     daemon: Callable[[], Any] | None = None
     skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
     # Needs real oracle daemons on disposable banks: live local acceptance
@@ -333,13 +334,20 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             closed_reader, writer = os.pipe()
             os.close(closed_reader)
             stdout_target = writer
+        stderr_target = subprocess.PIPE
+        if case.stderr_closed:
+            closed_reader, writer = os.pipe()
+            os.close(closed_reader)
+            stderr_target = writer
         arm.started = time.time()
         proc = subprocess.Popen(target.command + argv, cwd=arm.cwd, env=env,
                                 stdin=subprocess.PIPE, stdout=stdout_target,
-                                stderr=subprocess.PIPE, creationflags=creation,
+                                stderr=stderr_target, creationflags=creation,
                                 bufsize=0 if case.before_capture else -1)
         if case.stdout_closed:
             os.close(stdout_target)
+        if case.stderr_closed:
+            os.close(stderr_target)
         deadline = time.monotonic() + case.timeout
         stderr_prefix = b""
         if case.before_capture:
@@ -376,9 +384,9 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             proc.kill()
             out, err = proc.communicate()
             raise RuntimeError(f"{case.id}/{target.name}: no exit within {case.timeout}s; "
-                               f"stderr={err[-400:]!r}") from None
+                               f"stderr={(err or b'')[-400:]!r}") from None
         ended = time.time()
-        err = stderr_prefix + err
+        err = stderr_prefix + (err or b"")
         if worker:
             worker.join(10)
             if worker.is_alive():

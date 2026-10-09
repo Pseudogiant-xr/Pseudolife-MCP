@@ -41,6 +41,7 @@ NYC = "pl_cf_w1c_transfer_nyc"
 NYC_EMPTY = "pl_cf_w1c_transfer_nyc_empty"
 OLD54 = "pl_cf_w1c_transfer_old54"
 FUTURE = "pl_cf_w1c_transfer_future"
+TIES = "pl_cf_w1c_transfer_ties"
 _CREATED: set[str] = set()
 _ARCHIVES: dict[str, bytes] = {}
 _EOL = "\r\n" if core.WINDOWS else "\n"
@@ -145,6 +146,35 @@ def _seed_tricky(name: str) -> None:
         conn.commit()
 
 
+# Binary64 values whose shortest repr is an exact decimal tie: CPython keeps
+# the even digit (David Gay's mode 0), Rust's shortest formatting may not.
+# The first three are the ties in rust/shim/tests/cli_audit_float_repr.tsv
+# that `format!("{:e}")` spelled with the odd digit; the last is 2**49 + 0.25.
+FLOAT_TIES = (float.fromhex("0x1.526daef896bc8p+46"),   # 93026504287663.12
+              float.fromhex("0x1.c6bf526340002p+49"),   # 1000000000000000.2
+              float.fromhex("-0x1.8130f222a4572p+49"),  # -847044394961070.2
+              2.0 ** 49 + 0.25)                         # 562949953421312.2
+
+
+def _seed_ties(name: str) -> None:
+    """The tie values as the daemon writes a meta value (jsonb), through the
+    oracle's own ``PostgresStorage.set_meta``."""
+    from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415
+    _seed(name)
+    storage = PostgresStorage(_bank.url(name))
+    try:
+        storage.set_meta("w1c_float_ties", {"ties": list(FLOAT_TIES),
+                                            "nested": [{"v": FLOAT_TIES[0]}]})
+    finally:
+        storage.close()
+    # Opening the storage seeds the built-in relations stamped with the wall
+    # clock: pinned, so the bank and its archive (and the goldens) are the
+    # same on every run.
+    with _bank.connect(name) as conn:
+        conn.execute("UPDATE relations SET created_at = 1000.0 WHERE created_at > 1000.0")
+        conn.commit()
+
+
 def _sources() -> None:
     """Both source banks and the oracle's archives, built once per process."""
     if _ARCHIVES:
@@ -162,6 +192,8 @@ def _sources() -> None:
     _create(NYC)
     _seed(NYC)
     _create(NYC_EMPTY)
+    _create(TIES)
+    _seed_ties(TIES)
     with _bank.connect(INF) as conn:
         conn.execute("INSERT INTO chronicle_events (occurred_at, recorded_at, actor, "
                      "actor_norm, description, description_norm) VALUES "
@@ -189,13 +221,13 @@ def _sources() -> None:
         for name in (NYC, NYC_EMPTY):
             conn.execute(f'ALTER DATABASE "{name}" SET timezone = \'America/New_York\'')
     with tempfile.TemporaryDirectory() as tmp:
-        for key, name in (("current", SRC), ("tricky", TRICKY)):
+        for key, name in (("current", SRC), ("tricky", TRICKY), ("ties", TIES)):
             path = Path(tmp) / f"{key}.zip"
             perform_export(_bank.url(name), path)
-            _ARCHIVES[key] = path.read_bytes()
+            _ARCHIVES[key] = _rewrite(path.read_bytes(), _pin_created_at)
     for key, mutate in _VARIANTS.items():
         _ARCHIVES[key] = _rewrite(_ARCHIVES["current"], mutate)
-    for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY, OLD54, FUTURE):
+    for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY, OLD54, FUTURE, TIES):
         _wait_idle(name)
 
 
@@ -209,6 +241,17 @@ def _rewrite(blob: bytes, mutate) -> bytes:
         for name, data in blobs.items():
             zf.writestr(name, data)
     return out.getvalue()
+
+
+# The export's own clock, pinned in the oracle-built input archives: import
+# never reads it, and goldens replay only with the same input members.
+_PINNED_CREATED_AT = b"2026-01-01T00:00:00+00:00"
+
+
+def _pin_created_at(blobs):
+    blobs["manifest.json"] = re.sub(rb'("created_at": ")[^"]+(")',
+                                    rb"\g<1>" + _PINNED_CREATED_AT + rb"\g<2>",
+                                    blobs["manifest.json"], count=1)
 
 
 def _manifest_edit(**changes):
@@ -367,8 +410,10 @@ def transfer_zip(obs: dict) -> None:
 _DEFAULT_NAME = re.compile(rb"pseudolife-export-([0-9]{8}-[0-9]{6})\.zip")
 
 
-def _local_stamp_in_window(stamp: str, window) -> bool:
-    return any(time.strftime("%Y%m%d-%H%M%S", time.localtime(t)) == stamp
+def _local_stamp_in_window(stamp: str, window, offset=None) -> bool:
+    def local(t):
+        return time.localtime(t) if offset is None else time.gmtime(t + offset)
+    return any(time.strftime("%Y%m%d-%H%M%S", local(t)) == stamp
                for t in range(int(window[0]) - 1, int(window[1]) + 2))
 
 
@@ -378,7 +423,8 @@ def transfer_default_name(obs: dict) -> None:
     arm's window, in stdout and in the file paths."""
     def swap(data: bytes) -> bytes:
         def one(match: re.Match) -> bytes:
-            if _local_stamp_in_window(match.group(1).decode(), obs["window"]):
+            if _local_stamp_in_window(match.group(1).decode(), obs["window"],
+                                      obs.get("utc_offset")):
                 return b"pseudolife-export-<ts>.zip"
             return match.group(0)
         return _DEFAULT_NAME.sub(one, data)
@@ -585,9 +631,12 @@ def _export(cid, argv, bank=SRC, rules=("transfer-zip",), note="", existing=(),
 
 
 def _import(cid, archive, argv=(), rules=(), note="", **setup):
+    # The input archive stays in the home: it compares as members, like an
+    # exported one (rule transfer-zip), since its container bytes and the
+    # oracle's version string are the setup's, not the CLI's.
     return core.Case(cid, ["import", "bank.zip", *argv], env=_dsn(TGT),
                      setup=_import_setup(archive, **setup), after=_import_after,
-                     rules=rules, timeout=120, note=note)
+                     rules=(*rules, "transfer-zip"), timeout=120, note=note)
 
 
 def cases() -> list[core.Case]:
@@ -613,6 +662,9 @@ def cases() -> list[core.Case]:
                 note="float4/float8 repr incl. NaN/inf/-0/1e16, jsonb re-serialisation, "
                      "timestamptz isoformat, control and astral text, meta skip keys, "
                      "used_ids dropped"),
+        _export("export-float-ties", ["--out", "t.zip"], bank=TIES,
+                note="float repr ties (even digit kept) in a jsonb meta value written by "
+                     "PostgresStorage.set_meta"),
         _export("export-overwrites", ["--out", "bank.zip"], existing=("bank.zip",),
                 note="an existing archive is replaced"),
         _export("export-connection-defers", ["--out", _SEP.join(["{CWD}", "d", "x.zip"])], bank=TGT + "_absent",
@@ -620,6 +672,8 @@ def cases() -> list[core.Case]:
                 note="unreachable database: native generic deferral, no directory made"),
         _import("import-seeded", "current"),
         _import("import-tricky", "tricky", note="tricky values round-trip through import"),
+        _import("import-float-ties", "ties",
+                note="the tie values re-encoded into jsonb: the exact meta post-state"),
         _import("import-nonempty-refused", "current", seed=_seed_target),
         _import("import-other-connection-refused", "current", holder=True),
         _import("import-force-with-holder", "current", argv=("--force",), holder=True),
@@ -709,6 +763,15 @@ MUTANTS = [
     Mutant("transfer-float-window", ROW, "shim/src/cli/transfer/json.rs",
            "if !(-4..16).contains(&power) {", "if !(-4..15).contains(&power) {",
            ("export-tricky",)),
+    # Review of #678 (2026-10-10): Rust's shortest digits instead of repr's
+    # half-to-even choice on an exact tie.
+    Mutant("transfer-float-ties", ROW, "shim/src/cli/transfer/json.rs",
+           "    let (significant, power) = shortest_digits(value.abs());\n"
+           "    let significant = significant.as_str();\n",
+           "    let text = format!(\"{:e}\", value.abs());\n"
+           "    let (mantissa, power) = scientific(&text);\n"
+           "    let significant = mantissa.trim_end_matches('0');\n",
+           ("export-float-ties", "import-float-ties")),
     Mutant("transfer-meta-skip", ROW, "shim/src/cli/transfer.rs",
            '"active_session_pointer",', '"active_session_pointer_x",', ("export-seeded",)),
     Mutant("transfer-nonempty-wording", ROW, "shim/src/cli/transfer/import.rs",

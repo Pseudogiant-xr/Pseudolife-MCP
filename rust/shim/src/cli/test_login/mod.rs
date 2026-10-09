@@ -16,6 +16,7 @@ mod sql;
 use exec::Executor;
 use serde_json::Value;
 use std::{
+    cell::Cell,
     collections::HashMap,
     ffi::OsString,
     fmt::Write as _,
@@ -29,6 +30,9 @@ const EXIT_OK: u8 = 0;
 const EXIT_FAILED: u8 = 1;
 const EXIT_USAGE: u8 = 2;
 const EXIT_REFUSED: u8 = 4;
+/// CPython's exit when a print raised and its interpreter-shutdown flush of
+/// stdout fails too.
+const EXIT_STDOUT_REFUSED: u8 = 120;
 
 const POSTGRES_CONTAINER: &str = "pseudolife-mcp-postgres";
 const DEFAULT_ROLE: &str = "pseudolife_test";
@@ -212,20 +216,51 @@ struct Report {
     json: bool,
     lines: Vec<String>,
     data: Vec<(&'static str, Value)>,
+    /// Set just before the login file is staged: from here on the run has
+    /// changed something, so it can no longer defer.
+    effects: bool,
+    /// A stdout write or flush failed.
+    stdout_failed: Cell<bool>,
 }
 
 impl Report {
-    fn print(text: &str) {
+    /// `print(text, file=out, flush=True)`: false when stdout refused the
+    /// bytes or the flush, where the oracle's print raises.
+    fn print(&self, text: &str) -> bool {
         let mut out = io::stdout().lock();
-        let _ = out.write_all(&super::text_bytes(&format!("{text}\n")));
-        let _ = out.flush();
+        let written = out
+            .write_all(&super::text_bytes(&format!("{text}\n")))
+            .and_then(|()| out.flush());
+        if written.is_err() {
+            self.stdout_failed.set(true);
+        }
+        written.is_ok()
     }
 
-    fn say(&mut self, line: String) {
-        if !self.json {
-            Self::print(&line);
+    /// `_Report.say`: a refused print raises in the oracle, which stops the
+    /// run there (its handler's own print raises again), so no later step
+    /// runs.
+    fn say(&mut self, line: String) -> Result<(), Failure> {
+        if !self.json && !self.print(&line) {
+            return Err(Failure::Stdout);
         }
         self.lines.push(line);
+        Ok(())
+    }
+
+    /// The process exit for a run that ended with `code`. A refused stdout
+    /// makes the oracle's print raise and its handler's print raise again:
+    /// a traceback and CPython's exit 120. Before any change that traceback
+    /// is the oracle's own to print, so the run defers; after one it cannot
+    /// be undone, so the run ends with 120 and nothing on stderr.
+    fn exit(&self, code: u8) -> Option<ExitCode> {
+        if !self.stdout_failed.get() {
+            Some(ExitCode::from(code))
+        } else if self.effects {
+            Some(ExitCode::from(EXIT_STDOUT_REFUSED))
+        } else {
+            None
+        }
     }
 
     fn finish(&self, code: u8, error: Option<&str>) -> u8 {
@@ -233,7 +268,7 @@ impl Report {
         if let Some(error) = &error
             && !self.json
         {
-            Self::print(&format!("test-login: {error}"));
+            self.print(&format!("test-login: {error}"));
         }
         if self.json {
             let mut map = serde_json::Map::new();
@@ -248,7 +283,7 @@ impl Report {
             }
             let mut text = String::new();
             py_json(&Value::Object(map), &mut text);
-            Self::print(&text);
+            self.print(&text);
         }
         code
     }
@@ -455,25 +490,27 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         json: args.json,
         lines: Vec::new(),
         data: Vec::new(),
+        effects: false,
+        stdout_failed: Cell::new(false),
     };
     if !role_name_ok(&args.role) {
-        return Some(ExitCode::from(report.finish(
+        return report.exit(report.finish(
             EXIT_USAGE,
             Some(&format!(
                 "role name {} must match {ROLE_PATTERN}",
                 super::mode_repr(&args.role)
             )),
-        )));
+        ));
     }
     if let Some(named) = args
         .banks
         .iter()
         .find(|bank| NOT_BANKS.contains(&bank.as_str()))
     {
-        return Some(ExitCode::from(report.finish(
+        return report.exit(report.finish(
             EXIT_USAGE,
             Some(&format!("{named} is not a bank and stays open")),
-        )));
+        ));
     }
     let path = match &args.file {
         Some(value) => PathBuf::from(value),
@@ -523,13 +560,13 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     } else if docker_on_path()? {
         Executor::Container { name: container }
     } else {
-        return Some(ExitCode::from(report.finish(
+        return report.exit(report.finish(
             EXIT_REFUSED,
             Some(&format!(
                 "no superuser connection: run this on the Docker host, where the \
                  {container} container runs, or give --admin-url with a superuser URL"
             )),
-        )));
+        ));
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -562,9 +599,11 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
                     executor.description()
                 )),
             ),
+            // The oracle's handler prints again, which raises again.
+            Err(Failure::Stdout) => EXIT_FAILED,
         }
     });
-    Some(ExitCode::from(code))
+    report.exit(code)
 }
 
 struct Context<'a> {
@@ -582,6 +621,8 @@ enum Failure {
     Database(String),
     Write(String),
     Answer,
+    /// stdout refused a report line.
+    Stdout,
 }
 
 async fn query_json(
@@ -813,8 +854,9 @@ async fn create(
         "test-login: on {}, as {} (superuser)",
         executor.description(),
         py_str(who.get("who"))
-    ));
+    ))?;
 
+    report.effects = true;
     let staged = file::write_private(
         path,
         &format!("{FILE_HEADER}{USER_KEY}={role_name}\n{PASSWORD_KEY}={password}\n"),
@@ -864,17 +906,17 @@ async fn create(
         "  role {role_name}: {}: LOGIN CREATEDB, not superuser, no CREATEROLE, REPLICATION or \
          BYPASSRLS; {how}",
         if role.is_some() { "reset" } else { "created" }
-    ));
+    ))?;
     for granted in strings(before.get("member_of")) {
         report.say(format!(
             "  role {role_name}: membership in {granted} revoked"
-        ));
+        ))?;
     }
     for name in &leftovers {
         report.say(format!(
             "  database {name}: a leftover test database, handed to {role_name} so the suite's \
              prune can drop it"
-        ));
+        ))?;
     }
     for bank in &present {
         let info = &before_banks[bank];
@@ -886,22 +928,22 @@ async fn create(
         report.say(format!(
             "  database {bank}: {state}; its owner {} keeps CONNECT",
             py_str(info.get("owner"))
-        ));
+        ))?;
     }
     for bank in &banks {
         if !present.contains(bank) {
-            report.say(format!("  database {bank}: not on this server"));
+            report.say(format!("  database {bank}: not on this server"))?;
         }
     }
     if let Some(line) = daemon_line {
-        report.say(line);
+        report.say(line)?;
     }
     for entry in &connected {
         report.say(format!(
             "  role {}, connected to {} now, keeps CONNECT as owner, superuser or by grant",
             py_str(entry.get("user")),
             py_str(entry.get("db"))
-        ));
+        ))?;
     }
     report.say(format!(
         "  template1: {}; CREATE DATABASE still copies it",
@@ -910,7 +952,7 @@ async fn create(
         } else {
             "already closed to PUBLIC"
         }
-    ));
+    ))?;
 
     let answer = executor
         .query(Some("template1"), &sql::extension_statements())
@@ -920,11 +962,11 @@ async fn create(
     if old_ext.is_empty() {
         report.say(format!(
             "  template1: installed {new_ext}, so every database the test login creates has it"
-        ));
+        ))?;
     } else if old_ext != new_ext {
-        report.say(format!("  template1: updated {old_ext} to {new_ext}"));
+        report.say(format!("  template1: updated {old_ext} to {new_ext}"))?;
     } else {
-        report.say(format!("  template1: already has {new_ext}"));
+        report.say(format!("  template1: already has {new_ext}"))?;
     }
 
     let after = query_json(
@@ -937,7 +979,7 @@ async fn create(
     report.say(format!(
         "  wrote {} (owner-only): {USER_KEY}, {PASSWORD_KEY}",
         context.shown_path
-    ));
+    ))?;
     let others = match after.get("others") {
         Some(value) if truthy(Some(value)) => value.clone(),
         _ => Value::Array(Vec::new()),
@@ -948,7 +990,7 @@ async fn create(
             "  other databases PUBLIC may connect to (the test login holds no table privileges \
              there; close them with --bank): {}",
             other_names.join(", ")
-        ));
+        ))?;
     }
     report.data = vec![
         ("role", Value::String(role_name.to_owned())),
@@ -976,7 +1018,7 @@ async fn create(
         "done: the test suite on this account logs in as {role_name}, which cannot connect to \
          {closed}. Copy the file to another account's ~/.pseudolife-mcp/ to give its sessions \
          the same login."
-    ));
+    ))?;
     Ok(report.finish(EXIT_OK, None))
 }
 

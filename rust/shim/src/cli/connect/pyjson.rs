@@ -462,6 +462,68 @@ pub(super) fn py_value_repr(value: &J) -> String {
     }
 }
 
+/// Mantissa digits and decimal exponent of `format!("{:e}")`.
+fn scientific(text: &str) -> (String, i32) {
+    let (mantissa, power) = text.split_once('e').unwrap_or((text, "0"));
+    (
+        mantissa.chars().filter(|c| *c != '.').collect(),
+        power.parse().unwrap_or(0),
+    )
+}
+
+/// The significant digits (no trailing zeros) and decimal exponent of
+/// CPython's repr of a positive finite `value` (David Gay's mode 0): the
+/// shortest digit string that reads back as `value` and, among those, the
+/// one nearest to it, an exact tie going to the even digit. Rust's shortest
+/// formatting fixes the digit count but may pick the other neighbour on a
+/// tie (`562949953421312.25` is `.2` in Python, `.3` in Rust); the digits
+/// here are the correctly rounded (half to even) prefix of the exact binary
+/// value whenever that prefix reads back, else Rust's own. Same algorithm
+/// as the pairing leaf's `pyjson::float_repr`, verified against the same
+/// CPython tables.
+fn shortest_digits(value: f64) -> (String, i32) {
+    let (rust, rust_exponent) = scientific(&format!("{value:e}"));
+    let rust = rust.trim_end_matches('0').to_owned();
+    let count = rust.len().max(1);
+    // Every binary64 has a finite decimal expansion of at most 767
+    // significant digits: this precision prints it exactly.
+    let (exact, exponent) = scientific(&format!("{value:.800e}"));
+    let exact = exact.as_bytes();
+    let mut kept: Vec<u8> = exact[..count].to_vec();
+    let rest = &exact[count..];
+    let up = match rest.first() {
+        Some(b'6'..=b'9') => true,
+        Some(b'5') => rest[1..].iter().any(|d| *d != b'0') || kept[count - 1] % 2 == 1,
+        _ => false,
+    };
+    let mut exponent = exponent;
+    if up {
+        let mut index = count;
+        loop {
+            if index == 0 {
+                kept.insert(0, b'1');
+                kept.pop();
+                exponent += 1;
+                break;
+            }
+            index -= 1;
+            if kept[index] == b'9' {
+                kept[index] = b'0';
+            } else {
+                kept[index] += 1;
+                break;
+            }
+        }
+    }
+    let nearest = String::from_utf8(kept).unwrap_or_default();
+    let candidate = format!("{}.{}e{exponent}", &nearest[..1], &nearest[1..]);
+    if candidate.parse::<f64>().ok() == Some(value) {
+        (nearest.trim_end_matches('0').to_owned(), exponent)
+    } else {
+        (rust, rust_exponent)
+    }
+}
+
 /// Python float repr (`float_repr_style == 'short'`).
 pub(super) fn float_repr(value: f64) -> String {
     let mut out = String::new();
@@ -479,19 +541,10 @@ pub(super) fn float_repr(value: f64) -> String {
         }
         .to_owned();
     }
-    // The same reshaping as sent_json.rs: Rust's shortest round-trip digits
-    // placed in repr's exponent window.
-    let text = format!("{:e}", value.abs());
-    let (mantissa, power) = text.split_once('e').unwrap_or((text.as_str(), "0"));
-    let power: i32 = power.parse().unwrap_or(0);
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let significant = digits.trim_end_matches('0');
-    let significant = if significant.is_empty() {
-        "0"
-    } else {
-        significant
-    };
-    let exponent = power;
+    // CPython's shortest digits (ties to even), placed in repr's exponent
+    // window.
+    let (digits, exponent) = shortest_digits(value.abs());
+    let significant = digits.as_str();
     if value.is_sign_negative() {
         out.push('-');
     }
@@ -634,9 +687,38 @@ mod tests {
             (0.1, "0.1"),
             (123456.789, "123456.789"),
             (1.5e300, "1.5e+300"),
+            // 2^49 + 0.25: an exact tie at sixteen digits, even digit kept.
+            (562_949_953_421_312.0 + 0.25, "562949953421312.2"),
         ] {
             assert_eq!(float_repr(value), expected);
         }
+    }
+
+    /// CPython 3.11's repr of binary64 values whose exact decimal expansion
+    /// ties at the shortest length (the pairing leaf's table), plus master's
+    /// random and boundary table.
+    #[test]
+    fn float_repr_matches_cpython_tables() {
+        let mut wrong = Vec::new();
+        let mut checked = 0;
+        for table in [
+            include_str!("../pairing/float_repr_ties.tsv"),
+            include_str!("../../../tests/cli_audit_float_repr.tsv"),
+        ] {
+            for line in table
+                .lines()
+                .filter(|l| !l.starts_with('#') && !l.is_empty())
+            {
+                let (bits, expected) = line.split_once('\t').expect("bits TAB repr");
+                let value = f64::from_bits(u64::from_str_radix(bits, 16).unwrap());
+                checked += 1;
+                if float_repr(value) != expected {
+                    wrong.push(format!("{bits}: {} != {expected}", float_repr(value)));
+                }
+            }
+        }
+        assert!(checked > 7000, "{checked} rows");
+        assert!(wrong.is_empty(), "{} of {checked}: {wrong:?}", wrong.len());
     }
 
     #[test]

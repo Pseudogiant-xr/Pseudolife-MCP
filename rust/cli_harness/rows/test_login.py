@@ -292,6 +292,47 @@ def driver_error_rule(obs: dict) -> None:
     obs["stdout"] = base64.b64encode(text).decode()
 
 
+# A refused stdout: the oracle's flushed print raises, its handler's print
+# raises again, and the traceback ends with CPython's shutdown-flush trailer.
+_TRACEBACK = re.compile(
+    rb"\ATraceback \(most recent call last\):\r?\n(?:.*\r?\n)*?"
+    rb"(?:BrokenPipeError|OSError): [^\r\n]*\r?\n"
+    rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'[^\r\n]*\r?\n"
+    rb"(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+_DEFERRAL = "pseudolife-stdio: mode 'test-login' is deferred in this candidate\n"
+
+
+def _oracle_stdout_traceback(obs: dict) -> bool:
+    stderr = base64.b64decode(obs["stderr"])
+    return (obs.get("arm") == "python" and obs["exit"] == 120
+            and not base64.b64decode(obs["stdout"])
+            and b"test_login_cli.py" in stderr and bool(_TRACEBACK.match(stderr)))
+
+
+@normalize.rule("test-login-stdout-deferral")
+def stdout_deferral_rule(obs: dict) -> None:
+    """A stdout that refuses the first report line, before any change: the
+    oracle's print raises and its handler's print raises again (a traceback,
+    exit 120), and nothing was written. The candidate defers there: the
+    oracle arm's exit and stderr become the deferral line and exit 1, only
+    after validating that traceback. Files and the server compare as
+    observed, so a candidate that went on to write fails the case."""
+    if _oracle_stdout_traceback(obs):
+        obs["exit"] = 1
+        stderr = _DEFERRAL.replace("\n", "\r\n") if WINDOWS else _DEFERRAL
+        obs["stderr"] = base64.b64encode(stderr.encode()).decode()
+
+
+@normalize.rule("test-login-stdout-traceback")
+def stdout_traceback_rule(obs: dict) -> None:
+    """A stdout that refuses the report after the change (``--json`` prints
+    only at the end): the oracle's traceback, validated, is dropped; the
+    candidate keeps exit 120 and prints nothing. Everything the run changed
+    compares exactly."""
+    if _oracle_stdout_traceback(obs):
+        obs["stderr"] = ""
+
+
 # ── cases ────────────────────────────────────────────────────────────────────
 
 def _login_path(arm, rel: str = LOGIN_REL) -> Path:
@@ -335,7 +376,8 @@ def server_exec(server, statements: list[str], dbname: str = "postgres") -> None
 
 
 def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
-                login_rel: str = LOGIN_REL, hold=None, note: str = "") -> Case:
+                login_rel: str = LOGIN_REL, hold=None, note: str = "",
+                stdout_closed: bool = False) -> Case:
     def setup(arm):
         server = _cluster.fresh()
         arm.state["server"] = server
@@ -346,6 +388,7 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
         arm.state["before"] = _password_before(arm, login_rel)
 
     def after(arm, obs):
+        obs["arm"] = arm.name
         server = arm.state.pop("server")
         held = arm.state.pop("held", None)
         try:
@@ -359,7 +402,8 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
     base_env = {"PGPASSWORD": _cluster.SUPERUSER_PASSWORD}
     base_env.update(env or {})
     return Case(id, ["test-login", "create", *argv], env=base_env, setup=setup, after=after,
-                rules=("test-login-password", *rules), timeout=120, note=note)
+                rules=("test-login-password", *rules), timeout=120, note=note,
+                stdout_closed=stdout_closed)
 
 
 _DOCKER: list[bool] = []
@@ -563,6 +607,15 @@ def cases() -> list[Case]:
                     login_rel="cwd/rel.env"),
         _admin_case("admin-file-option", [*admin, "--file", "{HOME}" + SEP + "x" + SEP + "y.env"],
                     login_rel="x/y.env"),
+        # A stdout that refuses the report (review of #678, 2026-10-10). Text
+        # mode: the first line refused, before the file or the role change.
+        # JSON: the one report line, after every change.
+        _admin_case("admin-fresh-stdout-closed", admin, _shapes, stdout_closed=True,
+                    rules=("test-login-stdout-deferral",)),
+        _admin_case("admin-reapply-stdout-closed", admin, lambda arm, s: _seed_login(arm, s),
+                    stdout_closed=True, rules=("test-login-stdout-deferral",)),
+        _admin_case("admin-fresh-json-stdout-closed", [*admin, "--json"], _shapes,
+                    stdout_closed=True, rules=("test-login-stdout-traceback",)),
         _admin_case("admin-bad-password", admin, env={"PGPASSWORD": "wrong"},
                     rules=("test-login-driver-error",)),
         _admin_case("admin-bad-password-json", [*admin, "--json"], env={"PGPASSWORD": "wrong"},
@@ -693,6 +746,13 @@ MUTANTS = [
     Mutant("tl-reapply-draws-new", "test_login", _MOD,
            "let password = if reuse {", "let password = if reuse && false {",
            ("admin-reapply-generated",)),
+    # Review of #678 (2026-10-10): a refused stdout stops the run.
+    Mutant("tl-stdout-refusal-ignored", "test_login", _MOD,
+           "if !self.json && !self.print(&line) {", "if !self.json && !self.print(&line) && false {",
+           ("admin-fresh-stdout-closed",)),
+    Mutant("tl-stdout-exit-ignored", "test_login", _MOD,
+           "if !self.stdout_failed.get() {", "if true || !self.stdout_failed.get() {",
+           ("admin-fresh-json-stdout-closed",)),
     Mutant("tl-json-compact-colon", "test_login", _MOD,
            'out.push_str(": ");', 'out.push_str(":");', ("admin-bad-password-json",)),
 ]

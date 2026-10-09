@@ -38,6 +38,15 @@ never starting with `-`. Everything else defers before any effect.
   container's `str()` being its `repr`; a remote target with `auth: false`
   exits 4; `daemon` = `{version, auth}`; plain-HTTP warning for a remote
   `http://` target (stderr, `warnings`).
+- A stderr that refuses a warning or the failure line: the oracle's
+  line-buffered stderr raises at that print, and CPython exits 120 with
+  nothing written after it (the plain-HTTP warning comes before the plan,
+  the verification warnings after the plan and before the writes; a token
+  file `--read-token` already wrote stays). The native leaf stops at the
+  same print with exit 120. A refused stdout is not a stop: the oracle's
+  stdout is block-buffered on a pipe and raises only at its exit, after
+  every step, so the native leaf carries on too. Cases
+  `apply-remote-stderr-closed`, `apply-board-off-stderr-closed`.
 - Remote = not `_is_loopback_url` (`daemon_url.py` 58-71).
 - Discovery (667-677): Claude Code user scope (460-494) with the settings
   copy inserted after a writable registration (497-518), project scopes in

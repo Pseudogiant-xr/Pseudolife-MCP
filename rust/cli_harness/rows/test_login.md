@@ -19,6 +19,7 @@ own options (`_parser`, 456-482).
 |---|---|
 | Exit codes 0 done, 1 database/write failed, 2 usage, 4 refused before any change | 76-79 |
 | All report text on stdout, LF translated on Windows; nothing on stderr | `_Report.say` / `finish` 441-453 |
+| A stdout that refuses a report line (`print(..., flush=True)` raises): the run stops at that line, so nothing after it runs. Refused before the login file is staged, the native leaf defers (nothing was written; the oracle's answer is its own traceback). Refused after, it exits 120 with nothing on stderr and no later step. Cases `admin-fresh-stdout-closed`, `admin-reapply-stdout-closed`, `admin-fresh-json-stdout-closed` | 441-453, 514-523, 637-640 |
 | `--json`: one `json.dumps` line, keys `exit, error, changes` then `role, file, banks, template1, others, password_reused` once known | 446-453, 697-698 |
 | Every error passes `redacted` (URL userinfo, `password=`, percent-encoded token) | 149-183, 447 |
 | Role name `[a-z_][a-z0-9_]{0,62}`, refusal with Python `repr`, exit 2 | 103, 492-494 |
@@ -65,6 +66,14 @@ own options (`_parser`, 456-482).
 - The staged file's pid (never observable after a successful rename).
 - The DACL's auto-inherited control bit (SDDL `AI`), which grants nothing.
 - The SQL text itself (ported verbatim, compared through its effects).
+- A refused stdout: the oracle's traceback. Before any change the leaf
+  defers, and rule `test-login-stdout-deferral` replaces the oracle arm's
+  exit and stderr with the deferral line only after validating its
+  traceback (exit 120, empty stdout, a `test_login_cli.py` frame, the
+  closed-stdout error and CPython's shutdown-flush trailer); files and the
+  server compare as observed. After the change (`--json`), rule
+  `test-login-stdout-traceback` drops that validated traceback; the leaf
+  exits 120 with empty stderr, and everything the run changed compares.
 
 ## Deferred (before any connection or file change)
 

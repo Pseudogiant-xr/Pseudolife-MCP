@@ -48,6 +48,9 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_NOTHING: u8 = 3;
 const EXIT_REFUSED: u8 = 4;
 const EXIT_UNVERIFIED: u8 = 5;
+/// CPython's exit when a print to stderr raised: the traceback cannot reach
+/// stderr either, and the interpreter-shutdown flush fails.
+const EXIT_STDERR_REFUSED: u8 = 120;
 
 const BOARD_HINT: &str = "to admit this principal, list it under coordination.allowed_principals in the daemon's config.yaml, or invite this machine with `pseudolife-mcp invite <machine>` on the daemon host (an invited principal is admitted to the board)";
 
@@ -58,9 +61,12 @@ pub(super) enum Cred {
     None,
 }
 
-fn emit(stream: &mut dyn std::io::Write, line: &str) {
-    let _ = stream.write_all(&super::text_bytes(&format!("{line}\n")));
-    let _ = stream.flush();
+/// `line` and a newline, flushed; false when the stream refused either.
+fn emit(stream: &mut dyn std::io::Write, line: &str) -> bool {
+    stream
+        .write_all(&super::text_bytes(&format!("{line}\n")))
+        .and_then(|()| stream.flush())
+        .is_ok()
 }
 
 struct Report {
@@ -96,17 +102,25 @@ impl Report {
         }
     }
 
+    /// `print(line)`. The oracle's stdout is block-buffered on a pipe, so a
+    /// refused stdout raises only at its exit, after every step has run:
+    /// this run carries on too.
     fn say(&self, line: &str) {
         if !self.json {
-            emit(&mut std::io::stdout().lock(), line);
+            let _ = emit(&mut std::io::stdout().lock(), line);
         }
     }
 
-    fn warn(&mut self, line: String) {
-        if !self.json {
-            emit(&mut std::io::stderr().lock(), &line);
+    /// `print(line, file=sys.stderr)`. The oracle's stderr is line-buffered,
+    /// so a refused stderr raises right here, before any later step; false
+    /// tells the caller to stop at once with `EXIT_STDERR_REFUSED`.
+    #[must_use]
+    fn warn(&mut self, line: String) -> bool {
+        if !self.json && !emit(&mut std::io::stderr().lock(), &line) {
+            return false;
         }
         self.warnings.push(line);
+        true
     }
 
     fn note(&mut self, line: String) {
@@ -115,8 +129,8 @@ impl Report {
     }
 
     fn fail(&mut self, code: u8, line: String) -> u8 {
-        if !self.json {
-            emit(&mut std::io::stderr().lock(), &format!("connect: {line}"));
+        if !self.json && !emit(&mut std::io::stderr().lock(), &format!("connect: {line}")) {
+            return EXIT_STDERR_REFUSED;
         }
         self.error = Some(line);
         self.finish(code)
@@ -145,7 +159,7 @@ impl Report {
                 ("error".into(), text(&self.error)),
                 ("exit".into(), J::Int(code.to_string())),
             ]);
-            emit(&mut std::io::stdout().lock(), &pyjson::dumps(&data, true));
+            let _ = emit(&mut std::io::stdout().lock(), &pyjson::dumps(&data, true));
         }
         code
     }
@@ -790,10 +804,13 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
 
     // ---- from here on the run prints, and never defers ----
     report.daemon = Some((version.unwrap_or(J::Null), auth.clone().unwrap_or(J::Null)));
-    if remote && url.starts_with("http://") {
-        report.warn(format!(
+    if remote
+        && url.starts_with("http://")
+        && !report.warn(format!(
             "WARNING: {url} is plain HTTP: the link itself is unencrypted, so it must be a private network such as a tailnet, or a TLS reverse proxy must front the daemon."
-        ));
+        ))
+    {
+        return Ok(EXIT_STDERR_REFUSED);
     }
     report.say(&format!(
         "connect: {url} ({}; daemon {version_shown}, auth {})",
@@ -894,7 +911,11 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     };
     report.verification = results.clone();
     for line in warnings {
-        report.warn(line);
+        if !report.warn(line) {
+            // The oracle stops here: nothing is written, and a token file
+            // this run created stays.
+            return Ok(EXIT_STDERR_REFUSED);
+        }
     }
 
     // ---- apply, all or nothing ----

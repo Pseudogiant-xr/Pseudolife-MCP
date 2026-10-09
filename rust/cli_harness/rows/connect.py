@@ -344,6 +344,15 @@ def entry(command, env=None, **extra) -> dict:
     return data
 
 
+# Binary64 values whose shortest repr is an exact decimal tie: CPython keeps
+# the even digit, Rust's shortest formatting may not (the ties in
+# rust/shim/tests/cli_audit_float_repr.tsv, then 2**49 + 0.25).
+FLOAT_TIES = (float.fromhex("0x1.526daef896bc8p+46"),   # 93026504287663.12
+              float.fromhex("0x1.c6bf526340002p+49"),   # 1000000000000000.2
+              float.fromhex("-0x1.8130f222a4572p+49"),  # -847044394961070.2
+              2.0 ** 49 + 0.25)                         # 562949953421312.2
+
+
 def claude_json(home: Path, server: dict | None = None, **extra) -> Path:
     """``~/.claude.json`` as Claude Code keeps it: unrelated state around
     the user-scope ``mcpServers`` entry."""
@@ -598,7 +607,7 @@ def _with_temp(setup):
 
 def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=None, after=None,
          env=None, stdin: bytes = b"", platforms=("windows", "linux"), timeout: float = 120,
-         **daemon) -> Case:
+         stderr_closed: bool = False, **daemon) -> Case:
     # With every client selected (no --client), the oracle reads the
     # unattended-update schedule: on Windows it runs this host's System32
     # schtasks /Query, which no PATH inside the home can hide.
@@ -606,6 +615,7 @@ def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=Non
     return Case(case_id, ["connect", *argv], env=_env(**(env or {})), stdin=stdin,
                 setup=_with_temp(setup), during=_arm_pid, real_programs=schedule,
                 after=_after(url, after), timeout=timeout, rules=RULES, platforms=platforms,
+                stderr_closed=stderr_closed,
                 daemon=_fixture(port, url, **daemon) if port is not None else None)
 
 
@@ -791,6 +801,19 @@ def cases() -> list[Case]:
     port, url = _target()
     add(case("apply-move-yes", [url, "--yes"], url=url, port=port, setup=claude_registered()))
     port, url = _target()
+
+    def float_ties(arm):
+        # Float state Claude Code keeps beside the entry, at exact repr ties:
+        # the rewrite must keep CPython's even digit.
+        claude_registered()(arm)
+        path = arm.home / ".claude.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["lastCost"] = FLOAT_TIES[0]
+        data["costHistory"] = list(FLOAT_TIES)
+        write_json(path, data)
+
+    add(case("apply-float-ties", [url, "--yes"], url=url, port=port, setup=float_ties))
+    port, url = _target()
     add(case("apply-move-json", [url, "--yes", "--json"], url=url, port=port,
              setup=desktop_and_gemini()))
     port, url = _target()
@@ -807,6 +830,17 @@ def cases() -> list[Case]:
     port, url = _target(remote=True)
     add(case("apply-remote", [url, "--yes"], url=url, port=port,
              setup=both(claude_registered(), desktop_and_gemini(msix=False, legacy=False))))
+    # A stderr that refuses a warning (review of #678, 2026-10-10): the
+    # oracle's line-buffered stderr raises there, before anything is written,
+    # and CPython exits 120. The plain-HTTP warning comes before the plan; the
+    # board warning after the plan and the verification, before the writes.
+    port, url = _target(remote=True)
+    add(case("apply-remote-stderr-closed", [url, "--yes"], url=url, port=port,
+             setup=claude_registered(), stderr_closed=True))
+    port, url = _target()
+    add(case("apply-board-off-stderr-closed", [url, "--yes", "--client", "claude-code"],
+             url=url, port=port, board="off; reason=principal_not_allowed",
+             setup=claude_registered(), stderr_closed=True))
     port, url = _target()
     add(case("apply-read-token",
              [url, "--client", "claude-code", "--token-file", "~/.pseudolife-mcp/new.token",
@@ -1036,6 +1070,17 @@ MUTANTS = [
            "out.extend(std::iter::repeat_n(' ', level * 2));",
            "out.extend(std::iter::repeat_n(' ', level * 4));",
            ("apply-move-yes",)),
+    # Review of #678 (2026-10-10): Rust's shortest digits on an exact tie.
+    Mutant("connect-stderr-warning-ignored", "connect", "shim/src/cli/connect/mod.rs",
+           "if !self.json && !emit(&mut std::io::stderr().lock(), &line) {",
+           "if !self.json && !emit(&mut std::io::stderr().lock(), &line) && false {",
+           ("apply-remote-stderr-closed", "apply-board-off-stderr-closed")),
+    Mutant("connect-float-ties", "connect", "shim/src/cli/connect/pyjson.rs",
+           "    let (digits, exponent) = shortest_digits(value.abs());\n"
+           "    let significant = digits.as_str();\n",
+           "    let (digits, exponent) = scientific(&format!(\"{:e}\", value.abs()));\n"
+           "    let significant = digits.trim_end_matches('0');\n",
+           ("apply-float-ties",)),
     Mutant("connect-backup-stamp-millis", "connect", "shim/src/cli/connect/files.rs",
            '"%Y%m%d-%H%M%S-%6f"', '"%Y%m%d-%H%M%S-%3f"', ("apply-move-yes",)),
     Mutant("connect-config-not-private", "connect", "shim/src/cli/connect/files.rs",

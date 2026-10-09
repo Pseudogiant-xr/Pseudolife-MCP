@@ -49,7 +49,10 @@ Export (`perform_export` 205-244, `_export_table` 247-276):
   of psycopg's text-format decoding (271-272): text/uuid/vector as JSON
   strings with Python escaping; int verbatim; float4/float8 parsed to a
   double then `float.__repr__` (`NaN`, `Infinity`, `-Infinity`, `-0.0`, the
-  1e-4 / 1e16 exponent window, two-digit exponents); bool; jsonb parsed and
+  1e-4 / 1e16 exponent window, two-digit exponents, and on an exact decimal
+  tie at the shortest length the even digit: `562949953421312.25` is
+  `562949953421312.2`; cases `export-float-ties`, `import-float-ties`, a
+  meta value written by `PostgresStorage.set_meta`); bool; jsonb parsed and
   re-serialized with Python's separators, key order as decoded, ints as
   `str(int)`, floats as repr (overflow to `Infinity`); timestamptz as
   `isoformat()` (6-digit micros when non-zero, `+00:00`); NULL as `null`.
@@ -115,7 +118,15 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
 - `manifest.created_at` (validated UTC within the arm's window) and
   `pseudolife_version` (the oracle reports its installed distribution, the
   candidate its crate version): rule `transfer-zip`.
-- The default archive name's timestamp: rule `transfer-default-name`.
+- The default archive name's timestamp: rule `transfer-default-name`,
+  validated with the arm's own recorded UTC offset, so a golden recorded in
+  one time zone replays in another.
+- An import case's input archive, which stays in the home, compares as
+  members too (rule `transfer-zip`): its container bytes and version string
+  are the setup's. The oracle-built input archives have `created_at` pinned
+  (import never reads it), and the tie bank's built-in relations, which
+  `PostgresStorage` stamps with the wall clock when it opens, are pinned to
+  1000.0, so every input is the same on every run and host.
 - Server-side cursor names, fetch batch sizes and statements per message.
 
 ## Declared limits
