@@ -186,7 +186,7 @@ class Container:
         _containers.add(self.name)
         _docker("run", "-d", "--name", self.name, "-e", f"POSTGRES_USER={OWNER}",
                 "-e", f"POSTGRES_PASSWORD={self.password}", "-e", f"POSTGRES_DB={self.db}",
-                IMAGE)
+                IMAGE, "postgres", "-c", "log_statement=all")
         deadline = time.monotonic() + 120
         # TCP answers only once the entrypoint's init server has made way for
         # the final one (the init server listens on the socket alone).
@@ -201,6 +201,14 @@ class Container:
     def remove(self) -> None:
         _docker("rm", "-f", "-v", self.name, check=False)
         _containers.discard(self.name)
+
+    def logs(self) -> bytes:
+        """The server's log so far, raw bytes (no newline translation)."""
+        if _LIVE_CONTAINER in self.name:
+            raise RuntimeError("refusing to touch the stack's own Postgres container")
+        proc = subprocess.run(["docker", "logs", self.name], capture_output=True, timeout=60,
+                              check=True)
+        return proc.stdout + proc.stderr
 
     def psql(self, sql: str, dbname: str = "postgres") -> str:
         proc = _docker("exec", "-i", self.name, "psql", "-X", "-q", "-tA", "-v",

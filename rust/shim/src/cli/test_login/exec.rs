@@ -134,6 +134,15 @@ fn database_error(error: tokio_postgres::Error) -> String {
     }
 }
 
+/// `Popen.returncode`: the exit code, or minus the signal that ended it.
+fn return_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return -signal;
+    }
+    status.code().unwrap_or(1)
+}
+
 /// Python's text-mode pipe: universal newlines on the way in.
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
@@ -177,7 +186,7 @@ async fn container_query(
                 Err(_) => (127, String::new(), "TimeoutExpired".to_owned()),
                 Ok(Err(error)) => (127, String::new(), exception_name(&error).to_owned()),
                 Ok(Ok(output)) => (
-                    output.status.code().unwrap_or(1),
+                    return_code(output.status),
                     text(&output.stdout),
                     text(&output.stderr),
                 ),

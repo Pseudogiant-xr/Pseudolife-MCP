@@ -213,6 +213,118 @@ fn shapes_this_port_cannot_answer_exactly_defer_before_connecting() {
     assert_deferred(&home, &["create", "--container", ABSENT], &[]);
 }
 
+/// A directory this process cannot add entries to, restored on drop.
+struct Locked(PathBuf);
+
+impl Locked {
+    fn new(path: PathBuf) -> Option<Self> {
+        fs::create_dir_all(&path).unwrap();
+        #[cfg(windows)]
+        {
+            // Everyone: no "add file" (WD) and no "add subdirectory" (AD).
+            let status = Command::new("icacls")
+                .arg(&path)
+                .args(["/deny", "*S-1-1-0:(WD,AD)"])
+                .output()
+                .unwrap()
+                .status;
+            assert!(status.success());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if rustix::process::geteuid().is_root() {
+                return None; // root writes anywhere: nothing to defer
+            }
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        Some(Self(path))
+    }
+}
+
+impl Drop for Locked {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        let _ = Command::new("icacls")
+            .arg(&self.0)
+            .args(["/remove:d", "*S-1-1-0"])
+            .output();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+#[test]
+fn write_failures_the_oracle_would_report_defer_before_connecting() {
+    let home = Home::new("unwritable");
+    let sep = std::path::MAIN_SEPARATOR;
+    if let Some(locked) = Locked::new(home.path().join("locked")) {
+        let inside = locked.0.join("x.env");
+        let nested = locked.0.join("sub").join("x.env");
+        for file in [&inside, &nested] {
+            assert_deferred(
+                &home,
+                &[
+                    "create",
+                    "--file",
+                    file.to_str().unwrap(),
+                    "--admin-url",
+                    CLOSED_URL,
+                ],
+                &[],
+            );
+        }
+        assert_deferred(
+            &home,
+            &["create", "--admin-url", CLOSED_URL],
+            &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", inside.to_str().unwrap())],
+        );
+        drop(locked);
+    }
+    // The staged name `.<name>.<pid>.new` would exceed a file name's limit.
+    let long = format!("{}.env", "n".repeat(244));
+    assert_deferred(
+        &home,
+        &["create", "--file", &long, "--admin-url", CLOSED_URL],
+        &[],
+    );
+    #[cfg(windows)]
+    {
+        // Past MAX_PATH, which a Python without long-path support cannot open.
+        let deep = format!("{}{sep}{}.env", "d".repeat(240), "e".repeat(20));
+        assert_deferred(
+            &home,
+            &["create", "--file", &deep, "--admin-url", CLOSED_URL],
+            &[],
+        );
+        // A read-only target: Windows refuses to replace it.
+        let target = home.path().join("readonly.env");
+        fs::write(&target, "PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n").unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&target, permissions).unwrap();
+        assert_deferred(
+            &home,
+            &[
+                "create",
+                "--file",
+                "readonly.env",
+                "--admin-url",
+                CLOSED_URL,
+            ],
+            &[],
+        );
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&target, permissions).unwrap();
+    }
+    let _ = sep;
+}
+
 #[test]
 fn an_unknown_home_defers() {
     let home = Home::new("nohome");

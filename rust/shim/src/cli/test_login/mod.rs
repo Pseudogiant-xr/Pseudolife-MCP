@@ -843,6 +843,7 @@ async fn create(
     }
     if let Err(error) = std::fs::rename(&staged, path) {
         let staged_shown = file::shown(&staged, context.home).unwrap_or_default();
+        let error = file::py_oserror(file::Call::Win32, &error, &[&staged, path]);
         return Ok(report.finish(
             EXIT_FAILED,
             Some(&format!(

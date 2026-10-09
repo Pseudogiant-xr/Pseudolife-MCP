@@ -45,11 +45,23 @@ own options (`_parser`, 456-482).
 ## Free items
 
 - The text after `the database refused: ` on the `--admin-url` path: the
-  client library's own message (psycopg/libpq for the oracle; the crate's
-  client, which deliberately prints no driver text, for Rust). Exit code,
-  prefix and every earlier line stay exact. Rule `test-login-driver-error`.
-- A newly drawn password (random by design), compared only after validation
-  against that arm's server. Rule `test-login-password`.
+  client library's own message. The oracle prints psycopg's
+  `<ExceptionClass>: <libpq text>`; Rust prints `DatabaseError: <the
+  server's primary message>` for a server error and `OperationalError:
+  <the shared client's category, e.g. PostgreSQL connection failed>`
+  otherwise (the shared client deliberately carries no driver text). Exit
+  code, prefix and every earlier line stay exact. Rule
+  `test-login-driver-error`: replaces only that substring of the raw stdout,
+  after checking the surrounding bytes (text: the message starts a line and
+  stdout ends with the platform newline; JSON: stdout is exactly Python's
+  `json.dumps` of the report plus the platform newline).
+- A newly drawn password (random by design), masked only after validation
+  against that arm's server and only when it is not the file's pre-run
+  password; whether the pre-run password was kept compares exactly. Rule
+  `test-login-password`.
+- A verifier echoed by the server's error CONTEXT when the role change fails
+  (its salt and keys come from a password drawn for that run and never
+  kept); the iteration count stays exact. Rule `test-login-verifier-echo`.
 - The staged file's pid (never observable after a successful rename).
 - The DACL's auto-inherited control bit (SDDL `AI`), which grants nothing.
 - The SQL text itself (ported verbatim, compared through its effects).
@@ -61,21 +73,37 @@ other than `--bank`, values starting with `-`, empty values other than
 `--role`, `--`, extra positionals); a `--file` or
 `PSEUDOLIFE_TEST_PG_LOGIN_FILE` value that does not print as written
 (`str(Path(p)) != p` or `..`); an undeterminable or non-canonical home; a
-login-file target that exists but is not a regular file, or an existing
-ancestor that is not a directory; a daemon DSN the shared PostgreSQL client
-cannot read or that psycopg and the standard library would read differently;
-an admin URL outside the shared client's grammar (no TCP host, other
-options, fragments); libpq environment controls the shared client refuses
-(`PGHOST`, `PGUSER`, `PGSSL*`, `PGPASSFILE`, `PGSERVICE`, ...); PATH unset or
-not UTF-8 on the container path.
+login file the oracle would fail to write after connecting: a target that
+exists but is not a regular file (or is read-only, on Windows), an existing
+ancestor that is not a directory, a nearest existing directory this process
+cannot add entries to (POSIX `access(W_OK|X_OK)`; on Windows a probe file
+the system deletes on close, or a probe directory removed at once), a staged
+name `.<name>.<pid>.new` past 255 units, or on Windows a path past MAX_PATH
+(260 for the staged file, 248 for its directory); a daemon DSN the shared
+PostgreSQL client cannot read or that psycopg and the standard library would
+read differently; an admin URL outside the shared client's grammar (no TCP
+host, other options, fragments); libpq environment controls the shared
+client refuses (`PGHOST`, `PGUSER`, `PGSSL*`, `PGPASSFILE`, `PGSERVICE`,
+...); PATH unset or not UTF-8 on the container path.
+
+## OS errors that remain possible
+
+A failure the checks above cannot foresee (a race, a full disk) prints
+`str(OSError)` as CPython 3.11 builds it: `[Errno N] <strerror>: '<file>'`
+on POSIX and for `os.open` and writes on Windows (the C runtime's
+`_dosmaperr` mapping and `strerror` texts), `[WinError N] <message>:
+'<file>'` (trailing dots and spaces dropped) for `os.mkdir`, `os.unlink`
+and `os.replace` on Windows, with ` -> '<dst>'` for a replace, file names in
+`repr` form. Unit-tested against the oracle interpreter's own texts.
 
 ## Declared divergences
 
 1. `--admin-url` failures: driver text after the fixed prefix (free, above).
-2. A failed final rename (after the role change) and OS-level write failures
-   print Rust's `io::Error` text inside the oracle's sentence; the
-   `PrivateStateError` sentences are reproduced. Shapes that predictably fail
-   defer instead.
+2. Windows `[WinError N]` texts: Rust asks FormatMessage for the system
+   default language, CPython for the user default; they differ only where an
+   account's display language differs from the system's. A Win32 code
+   outside the C runtime's `_dosmaperr` table maps to `EINVAL`, as the C
+   runtime does.
 3. Windows: the new file's DACL carries the auto-inherited bit (the crate's
    shared `make_private`); owner, protection and the single OWNER RIGHTS
    full-access ACE match.
@@ -85,3 +113,10 @@ not UTF-8 on the container path.
    traceback); the native leaf answers as the full install does.
 6. Unreachable: a server answer that is valid JSON but not an object makes
    the oracle raise `AttributeError`; Rust reads the missing keys as absent.
+7. Shared PostgreSQL client (`pg/tls.rs`): on Windows its default root
+   certificate directory comes from the `APPDATA` environment variable,
+   where libpq asks the shell for the roaming AppData folder; they differ
+   only when `APPDATA` is redirected. This leaf adds no TLS behaviour.
+8. Docker ended by a signal: `Popen.returncode` is minus the signal, so an
+   error with no output reads `exit -N`; the port reproduces that on POSIX
+   (Windows has no signals). Not exercised by a case.

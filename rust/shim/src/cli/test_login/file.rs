@@ -162,28 +162,200 @@ pub(super) fn read_file(path: &Path) -> HashMap<String, String> {
     values
 }
 
-/// Shapes whose write would fail with an OS error text this port does not
-/// reproduce: an ancestor that is not a directory, or a target that is not a
-/// regular file. Checked before any effect, so they defer.
+/// Shapes whose write the oracle would report as a failure after it has
+/// already connected: an ancestor that is not a directory, a target that is
+/// not a regular file (or, on Windows, is read-only), a directory this
+/// process cannot add entries to, or names past the platform's limits.
+/// Checked before any effect, so they defer.
 pub(super) fn writable_shape(path: &Path) -> bool {
-    if path.file_name().is_none() {
+    let Some(name) = path.file_name() else {
+        return false;
+    };
+    let name_units = if cfg!(windows) {
+        name.to_string_lossy().encode_utf16().count()
+    } else {
+        name.len()
+    };
+    // `.<name>.<pid>.new`: ten digits is the widest pid either arm can have.
+    if name_units + 16 > 255 {
         return false;
     }
     match fs::symlink_metadata(path) {
         Ok(meta) if !meta.file_type().is_file() => return false,
+        Ok(meta) if cfg!(windows) && meta.permissions().readonly() => return false,
         Ok(_) => {}
         Err(error) if error.kind() != io::ErrorKind::NotFound => return false,
         Err(_) => {}
     }
+    if cfg!(windows) && !within_max_path(path) {
+        return false;
+    }
     let mut ancestor = path.parent();
+    let mut missing = false;
     while let Some(dir) = ancestor.filter(|dir| !dir.as_os_str().is_empty()) {
         match fs::symlink_metadata(dir) {
-            Ok(meta) => return meta.is_dir(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => ancestor = dir.parent(),
+            Ok(meta) => return meta.is_dir() && can_add_entries(dir, missing),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing = true;
+                ancestor = dir.parent();
+            }
             Err(_) => return false,
         }
     }
-    true
+    can_add_entries(Path::new("."), missing)
+}
+
+/// Python 3.11 on Windows without long-path support: under MAX_PATH (260)
+/// for the staged file, under 248 for a directory CreateDirectoryW makes.
+fn within_max_path(path: &Path) -> bool {
+    let Ok(absolute) = std::path::absolute(path) else {
+        return false;
+    };
+    let units = |path: &Path| path.as_os_str().to_string_lossy().encode_utf16().count();
+    units(&absolute) + 16 < 260 && absolute.parent().is_none_or(|parent| units(parent) < 248)
+}
+
+/// Whether this process can create the file (and any missing directory) in
+/// `dir`. POSIX asks `access`; Windows creates a probe file the system deletes
+/// on close (or a probe directory, removed at once), leaving nothing behind.
+fn can_add_entries(dir: &Path, directory: bool) -> bool {
+    #[cfg(unix)]
+    {
+        let _ = directory;
+        rustix::fs::access(
+            dir,
+            rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
+        )
+        .is_ok()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let probe = dir.join(format!(
+            ".pl-test-login-probe-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        if directory {
+            return fs::create_dir(&probe).is_ok() && fs::remove_dir(&probe).is_ok();
+        }
+        // GENERIC_WRITE | DELETE, FILE_FLAG_DELETE_ON_CLOSE, no sharing.
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .access_mode(0x4000_0000 | 0x0001_0000)
+            .custom_flags(0x0400_0000)
+            .share_mode(0)
+            .open(&probe)
+            .is_ok()
+    }
+}
+
+/// Which Python call raised, which decides the Windows form of `str(OSError)`:
+/// `os.open` and file writes go through the C runtime (`[Errno N]`),
+/// `os.mkdir`, `os.unlink` and `os.replace` through Win32 (`[WinError N]`).
+#[derive(Clone, Copy)]
+pub(super) enum Call {
+    Crt,
+    Win32,
+}
+
+/// `str(OSError)` as CPython 3.11 builds it: `[Errno N] strerror`, or for a
+/// Win32 call on Windows `[WinError N] message` (trailing dots and spaces
+/// dropped), then `: 'file'` and ` -> 'file2'` in `repr` form.
+pub(super) fn py_oserror(call: Call, error: &io::Error, files: &[&Path]) -> String {
+    let names: Vec<String> = files
+        .iter()
+        .map(|file| super::super::mode_repr(&file.to_string_lossy()))
+        .collect();
+    let suffix = match names.as_slice() {
+        [] => String::new(),
+        [one] => format!(": {one}"),
+        [one, two, ..] => format!(": {one} -> {two}"),
+    };
+    let Some(code) = error.raw_os_error() else {
+        return format!("{error}{suffix}");
+    };
+    let text = error.to_string();
+    let message = text
+        .strip_suffix(&format!(" (os error {code})"))
+        .unwrap_or(&text);
+    if cfg!(windows) {
+        return match call {
+            Call::Crt => {
+                let (errno, text) = crt_errno(code);
+                format!("[Errno {errno}] {text}{suffix}")
+            }
+            Call::Win32 => {
+                let message = message.trim_end_matches(|c: char| c <= ' ' || c == '.');
+                format!("[WinError {code}] {message}{suffix}")
+            }
+        };
+    }
+    format!("[Errno {code}] {message}{suffix}")
+}
+
+/// The Windows C runtime's `_dosmaperr` (Win32 error to errno) and its
+/// `strerror` texts.
+fn crt_errno(code: i32) -> (i32, &'static str) {
+    let errno = match code {
+        2 | 3 | 15 | 18 | 53 | 67 | 161 | 206 => 2,
+        4 => 24,
+        5 | 16 | 19..=36 | 65 | 82 | 83 | 108 | 132 | 158 => 13,
+        6 | 114 | 130 => 9,
+        7..=9 | 1816 => 12,
+        10 => 7,
+        11 | 188..=202 => 8,
+        17 => 18,
+        80 | 183 => 17,
+        89 | 164 | 215 => 11,
+        109 => 32,
+        112 => 28,
+        128 | 129 => 10,
+        145 => 41,
+        _ => 22,
+    };
+    let text = match errno {
+        2 => "No such file or directory",
+        7 => "Arg list too long",
+        8 => "Exec format error",
+        9 => "Bad file descriptor",
+        10 => "No child processes",
+        11 => "Resource temporarily unavailable",
+        12 => "Not enough space",
+        13 => "Permission denied",
+        17 => "File exists",
+        18 => "Cross-device link",
+        24 => "Too many open files",
+        28 => "No space left on device",
+        32 => "Broken pipe",
+        41 => "Directory not empty",
+        _ => "Invalid argument",
+    };
+    (errno, text)
+}
+
+/// `Path.mkdir(parents=True, exist_ok=True)`: the missing ancestors first; an
+/// existing directory is fine; the error names the level that failed.
+fn py_mkdir(dir: &Path) -> Result<(), String> {
+    match fs::create_dir(dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = dir
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty() && *parent != dir);
+            let Some(parent) = parent else {
+                return Err(py_oserror(Call::Win32, &error, &[dir]));
+            };
+            py_mkdir(parent)?;
+            match fs::create_dir(dir) {
+                Err(error) if !dir.is_dir() => Err(py_oserror(Call::Win32, &error, &[dir])),
+                _ => Ok(()),
+            }
+        }
+        Err(_) if dir.is_dir() => Ok(()),
+        Err(error) => Err(py_oserror(Call::Win32, &error, &[dir])),
+    }
 }
 
 /// `PrivateStateError` texts, as `open_private` raises them.
@@ -205,8 +377,12 @@ fn open_private(staged: &Path) -> Result<fs::File, String> {
         // Read/write sharing only, plus WRITE_DAC | WRITE_OWNER to secure it.
         options.share_mode(3).access_mode(0x0012019f | 0x000c0000);
     }
-    let file = options.open(staged).map_err(|error| error.to_string())?;
-    let meta = file.metadata().map_err(|error| error.to_string())?;
+    let file = options
+        .open(staged)
+        .map_err(|error| py_oserror(Call::Crt, &error, &[staged]))?;
+    let meta = file
+        .metadata()
+        .map_err(|error| py_oserror(Call::Crt, &error, &[]))?;
     if !meta.is_file() {
         return Err(NOT_REGULAR.into());
     }
@@ -218,7 +394,9 @@ fn open_private(staged: &Path) -> Result<fs::File, String> {
         }
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|_| NOT_SECURED.to_owned())?;
-        let meta = file.metadata().map_err(|error| error.to_string())?;
+        let meta = file
+            .metadata()
+            .map_err(|error| py_oserror(Call::Crt, &error, &[]))?;
         if meta.uid() != rustix::process::geteuid().as_raw() || meta.mode() & 0o077 != 0 {
             return Err(NOT_PRIVATE.into());
         }
@@ -235,19 +413,24 @@ fn open_private(staged: &Path) -> Result<fs::File, String> {
 
 /// `_write_private`: `text` in a new owner-only file beside `path`.
 pub(super) fn write_private(path: &Path, text: &str) -> Result<PathBuf, String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        py_mkdir(parent)?;
     }
     let name = path.file_name().ok_or("no file name")?.to_string_lossy();
     let staged = path.with_file_name(format!(".{name}.{}.new", std::process::id()));
     match fs::remove_file(&staged) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.to_string()),
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            return Err(py_oserror(Call::Win32, &error, &[&staged]));
+        }
         _ => {}
     }
     let mut file = open_private(&staged)?;
     if let Err(error) = file.write_all(text.as_bytes()) {
         drop(file);
-        return Err(error.to_string());
+        return Err(py_oserror(Call::Crt, &error, &[]));
     }
     Ok(staged)
 }
@@ -255,6 +438,59 @@ pub(super) fn write_private(path: &Path, text: &str) -> Result<PathBuf, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each expected text is CPython 3.11's `str(OSError)` for the same call
+    /// on the same missing path (captured from the oracle's interpreter).
+    #[test]
+    fn os_errors_read_as_python_prints_them() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let (a, b) = (
+            PathBuf::from(format!("pl-tl-missing{sep}a")),
+            PathBuf::from(format!("pl-tl-missing{sep}b")),
+        );
+        let rename = fs::rename(&a, &b).unwrap_err();
+        let mkdir = fs::create_dir(&a).unwrap_err();
+        let open = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&a)
+            .unwrap_err();
+        let replaced = py_oserror(Call::Win32, &rename, &[&a, &b]);
+        let made = py_oserror(Call::Win32, &mkdir, &[&a]);
+        let opened = py_oserror(Call::Crt, &open, &[&a]);
+        if cfg!(windows) {
+            assert_eq!(
+                replaced,
+                r"[WinError 3] The system cannot find the path specified: 'pl-tl-missing\\a' -> 'pl-tl-missing\\b'"
+            );
+            assert_eq!(
+                made,
+                r"[WinError 3] The system cannot find the path specified: 'pl-tl-missing\\a'"
+            );
+            assert_eq!(
+                opened,
+                r"[Errno 2] No such file or directory: 'pl-tl-missing\\a'"
+            );
+            assert_eq!(crt_errno(5), (13, "Permission denied"));
+            assert_eq!(crt_errno(80), (17, "File exists"));
+            assert_eq!(crt_errno(112), (28, "No space left on device"));
+        } else {
+            assert_eq!(
+                replaced,
+                "[Errno 2] No such file or directory: 'pl-tl-missing/a' -> 'pl-tl-missing/b'"
+            );
+            assert_eq!(
+                made,
+                "[Errno 2] No such file or directory: 'pl-tl-missing/a'"
+            );
+            assert_eq!(
+                opened,
+                "[Errno 2] No such file or directory: 'pl-tl-missing/a'"
+            );
+        }
+        let plain = io::Error::other("not an OS error");
+        assert_eq!(py_oserror(Call::Crt, &plain, &[]), "not an OS error");
+    }
 
     #[test]
     fn splitlines_and_strip_follow_python() {
