@@ -120,6 +120,9 @@ def default_cases() -> list[dict]:
         case("slot channel: jacque top_k 1", q(q="is jacque female", top_k=1), auth),
         case("slot channel: staging migration top_k 1", q(q="staging migration", top_k=1), auth),
         case("slot channel: superseded endpoint top_k 1", q(q="extractor endpoint old gpu box", top_k=1), auth),
+        # Review finding (Codex, 2026-10-09): the cortex block encodes the raw
+        # `q`; only the entry search strips it.
+        case("padded query (cortex sees the raw q)", q(q="   what os does the homelab box run  "), auth),
         case("slot channel under explicit floor", q(q="is jacque female", top_k=1, min_score="0.7"), auth),
         case("two session headers", q(q="bearer token"),
              auth + [("X-PL-Session", "sess-a"), ("X-PL-Session", "sess-b")]),

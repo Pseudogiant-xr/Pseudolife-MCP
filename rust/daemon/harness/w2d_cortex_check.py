@@ -302,12 +302,17 @@ def run_python(mode: str, py_dsn: str, work: Path, frozen: float,
     time.time = lambda: frozen
     try:
         for q, evt in zip(QUERIES, events):
-            vec = svc._embedder.encode_query(q).detach().cpu().float().reshape(-1).tolist()
+            emb = svc._embedder.encode_query(q)
+            vec = emb.detach().cpu().float().reshape(-1).tolist()
+            # The dense ranking before pinning, so coverage can tell a pin
+            # that rescued an unranked constraint from one already ranked.
+            ranked_slots = sorted({(r.entity, r.attribute) for r, _ in
+                                   svc._cortex.search(emb, top_k=5, min_score=cc.guard_min_score)})
             facts = svc.cortex_search(q, top_k=5, min_score=cc.guard_min_score)["entries"]
             if facts and evt is not None:
                 svc.attach_served_facts(evt, facts)
             cases.append({"query": q, "vec": vec, "event_id": evt, "top_k": 5,
-                          "min_score": cc.guard_min_score,
+                          "min_score": cc.guard_min_score, "ranked_slots": ranked_slots,
                           "entries": json.loads(json.dumps(facts))})
     finally:
         time.time = real_time
@@ -424,7 +429,7 @@ def coverage(cases: list[dict]) -> dict[str, int]:
             out["quarantined"] += "last_known_value" in e
             out["stance"] += "stance" in e
             out["source_entries"] += bool(e.get("source_entries"))
-        ranked = {(e["entity"], e["attribute"]) for e in c["entries"] if not e.get("pinned")}
+        ranked = {tuple(s) for s in c.get("ranked_slots", [])}
         out["pinned_unranked"] += sum(1 for e in c["entries"] if e.get("pinned")
                                       and (e["entity"], e["attribute"]) not in ranked)
     return out
