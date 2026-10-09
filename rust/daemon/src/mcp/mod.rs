@@ -261,38 +261,46 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
 }
 
 /// `RequestBodyLimitMiddleware`: a declared Content-Length over the limit is
-/// refused, as is a body that grows past it. uvicorn keeps reading what the
-/// client sends, so the refusal reaches a client still writing; the rest of
-/// the body is drained (up to `DRAIN_LIMIT`) before answering.
+/// refused at once, and a body that grows past it as soon as it does. uvicorn
+/// keeps reading what a client sends after such a refusal, so the client can
+/// finish writing and read the 413; here the rest of the body is drained in
+/// the background (bounded in size and time) for the same reason.
 async fn read_body(headers: &HeaderMap, body: Body) -> Result<Bytes, Response> {
     use futures::StreamExt;
-    const DRAIN_LIMIT: usize = 64 * 1024 * 1024;
+    let too_large = || plain(413, "Request body too large");
+    let mut stream = body.into_data_stream();
     let declared_over = latin1(headers, "content-length")
         .and_then(|v| v.trim().parse::<i128>().ok())
         .is_some_and(|d| d > BODY_LIMIT as i128);
-    let mut stream = body.into_data_stream();
+    if declared_over {
+        tokio::spawn(drain(stream));
+        return Err(too_large());
+    }
     let mut buf: Vec<u8> = Vec::new();
-    let mut seen = 0usize;
-    let mut over = declared_over;
     while let Some(chunk) = stream.next().await {
         let Ok(chunk) = chunk else { break };
-        seen += chunk.len();
-        if seen > BODY_LIMIT {
-            over = true;
+        if buf.len() + chunk.len() > BODY_LIMIT {
+            tokio::spawn(drain(stream));
+            return Err(too_large());
         }
-        if over {
-            buf = Vec::new();
-            if seen > DRAIN_LIMIT {
-                break;
-            }
-        } else {
-            buf.extend_from_slice(&chunk);
-        }
-    }
-    if over {
-        return Err(plain(413, "Request body too large"));
+        buf.extend_from_slice(&chunk);
     }
     Ok(Bytes::from(buf))
+}
+
+/// Reads and discards what is left of a refused body: at most 64 MiB, and
+/// nothing after 30 s of silence.
+async fn drain(mut stream: axum::body::BodyDataStream) {
+    use futures::StreamExt;
+    let mut seen = 0usize;
+    while let Ok(Some(Ok(chunk))) =
+        tokio::time::timeout(Duration::from_secs(30), stream.next()).await
+    {
+        seen += chunk.len();
+        if seen > 64 * 1024 * 1024 {
+            break;
+        }
+    }
 }
 
 /// Entry for `/mcp` and `/mcp/*` once the gate has named the principal
