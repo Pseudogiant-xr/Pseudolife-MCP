@@ -3,7 +3,7 @@
 ## Backup help and missing-directory first slice
 
 The native backup leaf admits `backup --help` at `COLUMNS=80` and
-`backup --data-dir PATH` for an explicit absolute UTF-8 path that does not
+`backup --data-dir PATH` for a canonical absolute UTF-8 path that does not
 exist. The help payload comes from genuine public Python module captures at
 `ce0960ba188669eea67028f1c1eba7f5ef90bf44`; it is not constructed from parser
 constants. The missing-directory branch checks the filesystem before bank
@@ -15,7 +15,7 @@ Only canonical absolute spellings, where Python's `str(Path(value)) == value`,
 are admitted and echoed verbatim. Every other spelling defers under the
 canonical-shapes rule: relative paths, empty or `.` components, trailing or
 repeated separators, a POSIX `//` root, and on Windows forward slashes,
-extended-length `\?\` and UNC forms.
+extended-length `\\?\` and UNC forms.
 
 ## Stream D retained cell scope (2026-10-08)
 
