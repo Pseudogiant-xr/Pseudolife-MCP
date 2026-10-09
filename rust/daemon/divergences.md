@@ -61,6 +61,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust |
 |---|---|---|
+| Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
+| A directory's index linked outside the static root | no containment check after the index append | `directory-index-containment`: Rust rechecks the appended child and returns 403 with exact refusal headers/body |
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
 | Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |

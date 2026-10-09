@@ -22,6 +22,7 @@ RUST_CHECKS = (
     "Check formatting", "Check all targets", "Clippy", "Nextest",
     "Check all targets without default features", "Clippy without default features",
     "Nextest without default features",
+    "Daemon override build configurations",
 )
 PARITY_CHECKS = {
     "Install checkout and test dependencies": None,
@@ -31,6 +32,7 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "Daemon static HTTP parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -103,6 +105,18 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    static = commands(parity["Daemon static HTTP parity"]["run"])
+    for mode in ("live", "golden"):
+        require_command(static, ("python", "rust/daemon/harness/run.py", mode),
+                        ("--rust-bin", "--only", "static-build", "static-paths", "static-missing", "static-root-link", "--out"),
+                        ("--record", "--mutants"))
+    require_command(static, ("python", "-m", "pytest"), ("rust/daemon/harness/test_static.py",), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in static)
+    override = commands(rust["Daemon override build configurations"]["run"])
+    for release in (False, True):
+        required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
+        required += ("--release", "--features", "mutants") if release else ()
+        require_command(override, ("cargo", "+1.94.0", "test"), required, () if release else ("--release", "--features"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -142,7 +156,7 @@ def test_shards_cover_both_systems_and_build_once():
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
     assert len(builds) == 1
-    assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio -j 4"
+    assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3"
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -174,7 +188,7 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     permission = next(s for s in job["steps"] if s.get("name") == "Restore executable permission")
     assert permission["if"] == "runner.os == 'Linux'"
-    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio"
+    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon"
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])

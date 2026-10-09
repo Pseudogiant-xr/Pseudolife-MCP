@@ -28,3 +28,18 @@ def test_production_capability_switch_does_not_replace_startup(tmp_path):
     # Without a DSN ordinary startup refuses; it never prints capabilities.
     assert result.returncode == 2
     assert result.stdout == b""
+
+
+@pytest.mark.parametrize("kind,cache", [(None, "no-store"), ("image/webp", "max-age=86400")])
+def test_platform_golden_checks_mime_and_cache_without_changing_bytes(kind, cache):
+    c = {"path": "/ui/assets/logo.webp"}
+    response = {"status": 200, "bytes": "exact", "headers": {
+        "content-type": "image/webp", "cache-control": "max-age=86400", "content-length": "5"}}
+    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(kind, None)):
+        run.platform_static_type(c, response)
+    assert response["headers"]["content-type"] == (kind or "application/octet-stream")
+    assert response["headers"]["cache-control"] == cache
+    assert response["bytes"] == "exact"
+    assert response["headers"]["content-length"] == "5"
+    wrong = {**response, "headers": {**response["headers"], "cache-control": "wrong"}}
+    assert run.compare_case({**c, "name": "mapping", "method": "GET", "declared": None}, response, wrong)["diffs"]

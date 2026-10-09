@@ -1039,6 +1039,10 @@ class StaticPaths(StaticBuild):
             for c in out:
                 if c["path"] == "/ui/C:index.html":
                     c["refusal_policy"] = "lexical-outside-root"
+        else:
+            for c in out:
+                if c["path"] == "/ui/linked-index":
+                    c["refusal_policy"] = "directory-index-containment"
         return out
 
     def cleanup_home(self, home):
@@ -1142,13 +1146,13 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
-    if c.get("refusal_policy") == "lexical-outside-root":
+    if c.get("refusal_policy") in {"lexical-outside-root", "directory-index-containment"}:
         sys.path.insert(0, str(REPO))
         from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
         headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}
         headers.update({"content-type": "text/plain", "cache-control": "no-store", "content-length": "9"})
         want = {"status": 403, "headers": headers, "bytes": "forbidden"}
-        row["substitution"] = "lexical-outside-root"
+        row["substitution"] = c["refusal_policy"]
         row["diffs"] = diff_values(want, rs)
         return row
     if c["declared"]:
@@ -1334,7 +1338,25 @@ def run_refusals(binary: Path, root: Path) -> list[dict]:
 
 
 def load_golden(name: str) -> dict:
-    return json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    data = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    if name.startswith("static-build-"):
+        for c, response in zip(StaticBuild().cases(), data["responses"], strict=True):
+            platform_static_type(c, response)
+    return data
+
+
+def platform_static_type(c: dict, response: dict) -> None:
+    """Replay the oracle's two platform MIME mappings, leaving bytes exact."""
+    if response["status"] != 200 or not c["path"].endswith((".webp", ".md")):
+        return
+    sys.path.insert(0, str(REPO))
+    from pseudolife_memory.web.api import mimetypes
+    kind = mimetypes.guess_type(c["path"])[0] or "application/octet-stream"
+    if kind.startswith("text/") and "charset" not in kind:
+        kind += "; charset=utf-8"
+    response["headers"]["content-type"] = kind
+    response["headers"]["cache-control"] = ("max-age=86400" if kind.startswith(("font/", "image/"))
+                                             else "no-store")
 
 
 def _machine_paths() -> list[str]:

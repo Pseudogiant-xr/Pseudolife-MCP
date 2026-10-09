@@ -48,12 +48,15 @@ starts empty, since a seeded template carries run-specific values. `gen_schema_s
 to the Python source.
 
 `--only static-build static-paths static-missing static-root-link` exercises the static layer
-without loading models: both daemons use an unreachable loopback DSN, and the
-empty disposable banks are compared afterwards. Set `PL_HARNESS_SLICE=http`
+without loading models: both daemons use an unreachable loopback DSN to
+isolate asset serving from bank startup. Set `PL_HARNESS_SLICE=http`
 for the HTTP slice's isolated database prefix. Static build and path goldens
 are platform-specific because Python's MIME database and path resolution
-differ between Windows and Linux. The five `static-*` source mutants check
-redirects, CSP, containment, content types and exact JSON file bytes.
+differ between Windows and Linux. The six `static-*` source mutants check
+redirects, CSP, containment, component boundaries, content types and exact JSON file bytes.
+Golden replay gets WebP/Markdown MIME/cache expectations from the local Python
+MIME database; headers and file bytes are still compared exactly. Rust also
+refuses a directory index linked outside the static root, a named divergence.
 
 The existing `trust-bind` scenario requires a debug `--features mutants` binary.
 Its configured non-loopback host still passes through each daemon's original

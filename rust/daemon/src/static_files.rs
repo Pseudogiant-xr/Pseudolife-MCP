@@ -24,13 +24,28 @@ pub struct Served {
 }
 
 /// Types of the committed Console build, including its vendor notice.
-/// Python obtains Markdown's Linux type from `/etc/mime.types`; without
-/// that file (including the supported Windows oracle), it is octet-stream.
+/// Python obtains optional mappings from the platform MIME database.
 fn guess_type(path: &Path) -> Option<String> {
+    #[cfg(windows)]
+    let platform = registry_type;
+    #[cfg(not(windows))]
+    let platform = |ext: &str| {
+        if ext == "webp" {
+            Some("image/webp".into())
+        } else {
+            #[cfg(target_os = "linux")]
+            return markdown_type(Path::new("/etc/mime.types"));
+            #[cfg(not(target_os = "linux"))]
+            None
+        }
+    };
+    guess_type_with(path, platform)
+}
+
+fn guess_type_with(path: &Path, platform: impl Fn(&str) -> Option<String>) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    #[cfg(target_os = "linux")]
-    if ext == "md" {
-        return markdown_type(Path::new("/etc/mime.types"));
+    if matches!(ext.as_str(), "md" | "webp") {
+        return platform(&ext);
     }
     Some(
         match ext.as_str() {
@@ -43,7 +58,6 @@ fn guess_type(path: &Path) -> Option<String> {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
             "gif" => "image/gif",
-            "webp" => "image/webp",
             "avif" => "image/avif",
             "ico" => "image/vnd.microsoft.icon",
             "txt" => "text/plain",
@@ -54,6 +68,54 @@ fn guess_type(path: &Path) -> Option<String> {
         }
         .to_string(),
     )
+}
+
+/// The Windows oracle reads REG_SZ Content Type values under HKCR.
+/// WebP and Markdown have no built-in mapping in the supported Python.
+#[cfg(windows)]
+fn registry_type(ext: &str) -> Option<String> {
+    use windows_sys::Win32::System::Registry::{HKEY_CLASSES_ROOT, RRF_RT_REG_SZ, RegGetValueW};
+    let key: Vec<u16> = format!(".{ext}\0").encode_utf16().collect();
+    let value: Vec<u16> = "Content Type\0".encode_utf16().collect();
+    let mut size = 0;
+    // SAFETY: terminated key/value strings and a valid output length;
+    // null data queries the required size without copying a value.
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CLASSES_ROOT,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut size,
+        )
+    };
+    if result != 0 || size == 0 || size % 2 != 0 {
+        return None;
+    }
+    let mut data = vec![0u16; size as usize / 2];
+    // SAFETY: the u16 buffer has the queried byte capacity, and size is
+    // passed back to the API. A changed or missing value returns an error.
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CLASSES_ROOT,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            data.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if result != 0 {
+        return None;
+    }
+    data.truncate(size as usize / 2);
+    let end = data.iter().position(|c| *c == 0).unwrap_or(data.len());
+    String::from_utf16(&data[..end])
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 /// Only the shipped vendor notice needs the system MIME table. Preserve
@@ -197,6 +259,10 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
     }
     if metadata(&target)?.is_some_and(|m| m.is_dir()) {
         target = target.join("index.html");
+        let child = resolve_path(&target, &mut HashSet::new())?;
+        if !contained(&child, &root) && !crate::mutants::active("static-traversal-open") {
+            return Ok(forbidden());
+        }
     }
     if !metadata(&target)?.is_some_and(|m| m.is_file()) {
         let index = root.join("index.html");
@@ -249,6 +315,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn webp_mapping_can_be_absent() {
+        let path = Path::new("logo.webp");
+        assert_eq!(guess_type_with(path, |_| None), None);
+        assert_eq!(
+            guess_type_with(path, |_| Some("image/webp".into())),
+            Some("image/webp".into())
+        );
+    }
+
+    #[test]
     fn lexical_escape_is_refused_before_an_invalid_root_is_resolved() {
         let root = std::env::temp_dir().join("pl-static-invalid\0root");
         assert_eq!(serve(&root, "/ui/../outside").unwrap().status, 403);
@@ -280,14 +356,6 @@ mod tests {
         );
         let s = serve(&root, "/ui/assets/sub").unwrap();
         assert_eq!(s.body, b"sub");
-        #[cfg(windows)]
-        {
-            std::fs::write(root.join("README.md"), b"vendor notice").unwrap();
-            assert_eq!(
-                serve(&root, "/ui/README.md").unwrap().content_type,
-                "application/octet-stream"
-            );
-        }
         let s = serve(&root, "/ui/nope/route").unwrap();
         assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
         let s = serve(&root, "/ui/../../etc/passwd").unwrap();
