@@ -99,7 +99,7 @@ jobs:
     # every tracked file and pin the release docs, so a Rust-only PR is still
     # checked for maintainer identifiers, stray control bytes, CHANGELOG and
     # release pins, and uncommitted evidence claims. Measured 2026-10-09 on
-    # Windows: these ten files run in about 65 s with no PostgreSQL service
+    # Windows: these files run in about 65 s with no PostgreSQL service
     # or model download.
     needs: scope
     if: needs.scope.outputs.python == 'false'
@@ -121,7 +121,10 @@ jobs:
           pip install -e .[dev]
 
       - name: Tree-wide guards
-        # Every test file that reads CHANGELOG.md, plus the tracked-tree scan.
+        # Every test file that reads CHANGELOG.md, plus the tracked-tree
+        # scans. The disposable-database guard scans every tracked .py file,
+        # rust/cli_harness/ included: #660 and #662 landed an unguarded reap
+        # there on 2026-10-09 because this job did not run it.
         run: >-
           python -m pytest -q
           tests/test_release_ux.py tests/test_eval_evidence.py
@@ -130,6 +133,7 @@ jobs:
           tests/test_merge_queue.py tests/test_plugin_packaging.py
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
           tests/test_changelog_fragments.py
+          "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
 
   test:
     needs: scope
