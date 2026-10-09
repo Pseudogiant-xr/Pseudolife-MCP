@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 use tokio_postgres::Client;
 
+#[cfg(test)]
 pub const DIM: usize = 1024;
 
 pub struct Entry {
@@ -28,8 +29,9 @@ pub struct Entry {
 }
 
 pub struct Bank {
+    pub dim: usize,
     pub entries: Vec<Entry>,
-    /// Row-major, L2-normalized, `entries.len() * DIM`.
+    /// Row-major, L2-normalized, `entries.len() * dim`.
     pub matrix: Vec<f32>,
 }
 
@@ -44,7 +46,7 @@ fn normalize(v: &mut [f32]) {
 /// stale stamp is then written back (`update_entry(id, band=...)`, one
 /// transaction each; a failed write is logged, never fatal). Capacity
 /// rebalancing on hydration is not ported (declared divergence).
-pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
+pub async fn hydrate(client: &Client, bands: &[String], dim: usize) -> Result<Bank> {
     let rows = client
         .query(
             "SELECT id, band, text, embedding::real[], surprise, ts, access_count, source, \
@@ -54,7 +56,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         )
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
-    let mut matrix = Vec::with_capacity(rows.len() * DIM);
+    let mut matrix = Vec::with_capacity(rows.len() * dim);
     let mut stale: Vec<usize> = Vec::new();
     for r in rows {
         // A NULL vector fails hydration (torch.as_tensor(None) in Python):
@@ -62,7 +64,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
             anyhow::bail!("entry {} has no embedding", r.get::<_, i64>(0));
         };
-        if emb.len() == DIM {
+        if emb.len() == dim {
             normalize(&mut emb);
             matrix.extend_from_slice(&emb);
         } else {
@@ -70,7 +72,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
             // write-back (`_refuse_on_stale_hydrated_dims` runs after
             // `hydrate_cms`).
             stale.push(emb.len());
-            matrix.extend(std::iter::repeat_n(0.0, DIM));
+            matrix.extend(std::iter::repeat_n(0.0, dim));
         }
         let tags: Option<Value> = r.get(12);
         let slots: Option<Value> = r.get(13);
@@ -134,7 +136,11 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         stale.dedup();
         return Err(anyhow::Error::new(StaleDims { count, dims: stale }));
     }
-    Ok(Bank { entries, matrix })
+    Ok(Bank {
+        dim,
+        entries,
+        matrix,
+    })
 }
 
 /// Hydrated rows whose vectors do not fit the embedder: the caller records
@@ -156,7 +162,3 @@ impl std::fmt::Display for StaleDims {
 }
 
 impl std::error::Error for StaleDims {}
-
-pub fn normalize_query(v: &mut [f32]) {
-    normalize(v)
-}
