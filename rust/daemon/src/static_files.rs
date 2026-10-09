@@ -137,8 +137,9 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
     }
-    let root = resolve_path(&std::env::current_dir()?.join(root), &mut HashSet::new())?;
-    let mut target = resolve_path(&root.join(rel), &mut HashSet::new())?;
+    let original_root = std::env::current_dir()?.join(root);
+    let root = resolve_path(&original_root, &mut HashSet::new())?;
+    let mut target = resolve_path(&original_root.join(rel), &mut HashSet::new())?;
     if !target.starts_with(&root) && !crate::mutants::active("static-traversal-open") {
         return Ok(Served {
             status: 403,
@@ -184,9 +185,13 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
     } else {
         "no-store"
     };
+    let mut body = std::fs::read(&target)?;
+    if crate::mutants::active("static-json-whitespace") && body == b"{\"a\": 1}" {
+        body = b"{\"a\":1 }".to_vec();
+    }
     Ok(Served {
         status: 200,
-        body: std::fs::read(&target)?,
+        body,
         content_type: ctype,
         cache,
     })
@@ -222,12 +227,14 @@ mod tests {
         );
         let s = serve(&root, "/ui/assets/sub").unwrap();
         assert_eq!(s.body, b"sub");
-        std::fs::write(root.join("README.md"), b"vendor notice").unwrap();
-        let s = serve(&root, "/ui/README.md").unwrap();
-        #[cfg(target_os = "linux")]
-        assert_eq!(s.content_type, "text/markdown; charset=utf-8");
         #[cfg(windows)]
-        assert_eq!(s.content_type, "application/octet-stream");
+        {
+            std::fs::write(root.join("README.md"), b"vendor notice").unwrap();
+            assert_eq!(
+                serve(&root, "/ui/README.md").unwrap().content_type,
+                "application/octet-stream"
+            );
+        }
         let s = serve(&root, "/ui/nope/route").unwrap();
         assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
         let s = serve(&root, "/ui/../../etc/passwd").unwrap();
@@ -273,5 +280,22 @@ mod tests {
         }
         std::fs::remove_dir_all(&root).unwrap();
         std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_table_missing_unmapped_and_last_mapping() {
+        let root = tree("mime");
+        let table = root.join("mime.types");
+        assert_eq!(markdown_type(&table), None);
+        std::fs::write(&table, "text/plain txt # md\n").unwrap();
+        assert_eq!(markdown_type(&table), None);
+        std::fs::write(
+            &table,
+            "text/markdown md markdown\ntext/x-markdown md # last\n",
+        )
+        .unwrap();
+        assert_eq!(markdown_type(&table).as_deref(), Some("text/x-markdown"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -14,7 +14,9 @@ References are to `pseudolife_memory/web/api.py` at `3b4de2c5`.
 Free fields: server/date headers. Root redirect framing excludes Content-Length:
 uvicorn sends its empty entity chunked, while hyper sends length zero. Static
 asset Content-Length is compared exactly, including HEAD. No body, content type, security header,
-redirect location or status is normalized. The existing harness compares raw
+redirect location or status is normalized. Static responses use a bytes-only
+comparison even for application/json; equal-length JSON whitespace changes
+must fail both live and golden mode. The existing harness compares raw
 bytes live and records large bodies using its existing digest rule. Linux and
 Windows goldens are separate for the platform MIME type of the shipped
 Markdown notice. Static requests do not write a bank; the harness compares
@@ -23,7 +25,10 @@ scenario. Goldens record the checked unchanged-state invariant, so fixture
 server template extensions do not become a static-serving contract.
 
 Fixture-only paths exercise directory indexes, missing indexes, links inside
-and outside the root, link/parent resolution, and percent-decoded traversal.
+and outside the root, link/parent resolution, junction-backed roots, and percent-decoded traversal.
+Resolve the requested path against the original static root independently
+of the resolved containment root; Windows normalizes parent components before
+resolving junctions.
 The oracle fixture changes only `STATIC_DIR`, leaving its serving code intact.
 Windows uses directory junctions; Linux also exercises file links, loops and
 read failures. Preserve the oracle's directory-index behavior: containment is

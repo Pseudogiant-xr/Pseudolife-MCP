@@ -106,17 +106,15 @@
    "status": 200
   },
   {
+   "bytes": "{\"a\": 1}",
    "headers": {
     "cache-control": "no-store",
-    "content-length": "7",
+    "content-length": "8",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     "content-type": "application/json; charset=utf-8",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY"
-   },
-   "json": {
-    "a": 1
    },
    "status": 200
   },

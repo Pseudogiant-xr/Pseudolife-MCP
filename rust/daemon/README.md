@@ -47,13 +47,13 @@ starts empty, since a seeded template carries run-specific values. `gen_schema_s
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
 
-`--only static-build static-paths static-missing` exercises the static layer
+`--only static-build static-paths static-missing static-root-link` exercises the static layer
 without loading models: both daemons use an unreachable loopback DSN, and the
 empty disposable banks are compared afterwards. Set `PL_HARNESS_SLICE=http`
 for the HTTP slice's isolated database prefix. Static build and path goldens
 are platform-specific because Python's MIME database and path resolution
-differ between Windows and Linux. The four `static-*` source mutants check
-redirects, CSP, containment and content types.
+differ between Windows and Linux. The five `static-*` source mutants check
+redirects, CSP, containment, content types and exact JSON file bytes.
 
 The existing `trust-bind` scenario requires a debug `--features mutants` binary.
 Its configured non-loopback host still passes through each daemon's original

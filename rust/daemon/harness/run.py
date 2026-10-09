@@ -61,7 +61,8 @@ HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_err
 NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
-           "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type"]
+           "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
+           "static-json-whitespace"]
 
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
@@ -71,7 +72,7 @@ T_COLON = "tok:with:colons-0003"
 # ---- HTTP ---------------------------------------------------------------------------
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
-         timeout: float = 120.0, compare_length: bool = False) -> dict:
+         timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False) -> dict:
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
@@ -85,7 +86,7 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
             or (compare_length and k.lower() == "content-length")}
     ctype = hdrs.get("content-type", "")
-    if ctype.startswith("application/json"):
+    if ctype.startswith("application/json") and not body_bytes:
         try:
             payload = {"json": json.loads(raw), "raw": raw.decode("utf-8")}
         except ValueError:
@@ -986,7 +987,7 @@ class StaticPaths(StaticBuild):
         (root / "sub").mkdir(parents=True)
         for name, body in {"index.html": b"shell", "notice.txt": b"notice",
                            "sub/index.html": b"directory", "image.svg": b"<svg/>",
-                           "data.json": b'{"a":1}', "unknown.pl_http_unknown": b"opaque"}.items():
+                           "data.json": b'{"a": 1}', "unknown.pl_http_unknown": b"opaque"}.items():
             (root / name).write_bytes(body)
         outside = home / "outside"
         outside.mkdir()
@@ -1032,10 +1033,32 @@ class StaticMissing(StaticPaths):
         return [case("no index " + p, "GET", p) for p in ("/ui", "/ui/", "/ui/missing", "/ui/sub")]
 
 
+class StaticRootLink(StaticPaths):
+    name = "static-root-link"
+
+    def prepare_home(self, home):
+        super().prepare_home(home)
+        (home / "serve").mkdir()
+        alias = home / "serve" / "console"
+        if os.name == "nt":
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(alias), str(home / "static")],
+                           check=True, capture_output=True)
+        else:
+            alias.symlink_to(home / "static", target_is_directory=True)
+        return {"PL_HARNESS_STATIC_DIR": str(alias), "PSEUDOLIFE_DAEMON_STATIC_DIR": str(alias)}
+
+    def cases(self):
+        return [case("linked root " + p, "GET", p) for p in
+                ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
+                 "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
+
+
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
-                                  MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing)}
+                                  MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
+                                  StaticRootLink)}
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -1155,9 +1178,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"))
         rows = []
         golden_name = scn.name
-        if scn.name == "static-build":
-            golden_name += "-windows" if os.name == "nt" else "-linux"
-        if scn.name == "static-paths":
+        if scn.name in {"static-build", "static-paths", "static-root-link"}:
             golden_name += "-windows" if os.name == "nt" else "-linux"
         golden = load_golden(golden_name) if mode == "golden" else None
         cases = scn.timeline(procs, holders) or scn.cases()
@@ -1169,9 +1190,9 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                 # by hyper. Static entities use fixed lengths in both arms.
                 compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
-                            compare_length=compare_length) if "python" in procs else golden["responses"][i]
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild)) if "python" in procs else golden["responses"][i]
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
-                            compare_length=compare_length)
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
                     if type(scn).prepare_template is not Scenario.prepare_template:

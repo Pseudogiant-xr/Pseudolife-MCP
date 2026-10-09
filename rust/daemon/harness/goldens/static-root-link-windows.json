@@ -54,142 +54,12 @@
    "status": 200
   },
   {
-   "bytes": "directory",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/html; charset=utf-8",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "directory",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/html; charset=utf-8",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "shell",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "5",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/html; charset=utf-8",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "<svg/>",
-   "headers": {
-    "cache-control": "max-age=86400",
-    "content-length": "6",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "image/svg+xml; charset=utf-8",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "{\"a\": 1}",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "8",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "application/json; charset=utf-8",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "opaque",
+   "bytes": "notice",
    "headers": {
     "cache-control": "no-store",
     "content-length": "6",
     "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "application/octet-stream",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 200
-  },
-  {
-   "bytes": "forbidden",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/plain",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 403
-  },
-  {
-   "bytes": "forbidden",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/plain",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 403
-  },
-  {
-   "bytes": "forbidden",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/plain",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 403
-  },
-  {
-   "bytes": "forbidden",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "9",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/plain",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY"
-   },
-   "status": 403
-  },
-  {
-   "bytes": "shell",
-   "headers": {
-    "cache-control": "no-store",
-    "content-length": "5",
-    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-    "content-type": "text/html; charset=utf-8",
+    "content-type": "text/plain; charset=utf-8",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY"
@@ -208,6 +78,45 @@
     "x-frame-options": "DENY"
    },
    "status": 200
+  },
+  {
+   "bytes": "forbidden",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "9",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 403
+  },
+  {
+   "bytes": "forbidden",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "9",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 403
+  },
+  {
+   "bytes": "forbidden",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "9",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 403
   }
  ]
 }
