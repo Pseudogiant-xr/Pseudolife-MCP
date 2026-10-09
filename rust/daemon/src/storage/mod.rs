@@ -443,7 +443,11 @@ async fn seed_relations(client: &Client) -> Result<(), OpenError> {
                     ON CONFLICT (name) DO NOTHING
                     ";
         for (name, desc, transitive, inverse) in BUILTIN_RELATIONS {
-            let now = wall_clock();
+            let now = if crate::mutants::active("seed-clock-zero") {
+                0.0
+            } else {
+                wall_clock()
+            };
             client
                 .execute(stmt, &[&name, &desc, &transitive, &inverse, &now])
                 .await?;

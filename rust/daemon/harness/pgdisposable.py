@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 import psycopg
 from psycopg import sql
+from pseudolife_memory.storage.schema import assert_disposable_database, refuse_production_database
 
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
@@ -20,8 +21,8 @@ LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
 # Each port slice keeps its own prefix (PL_HARNESS_SLICE, default w1a), so
 # parallel slices running this harness never share a database.
 SLICE = os.environ.get("PL_HARNESS_SLICE", "w1a")
-if not re.fullmatch(r"w[0-9][a-z]|http", SLICE):
-    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g or http")
+if not re.fullmatch(r"w[0-9][a-z]|http|pgs", SLICE):
+    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g, http or pgs")
 PREFIX = f"pl_cf_{SLICE}_"
 DISPOSABLE_NAME = re.compile(re.escape(PREFIX) + r"[a-z0-9_]{1,40}")
 
@@ -40,6 +41,7 @@ def _login() -> tuple[str, str]:
 
 
 def _check(name: str) -> str:
+    refuse_production_database(name)
     if not DISPOSABLE_NAME.fullmatch(name):
         raise ValueError(f"refusing non-disposable database name {name!r}")
     return name
@@ -63,6 +65,7 @@ def create(name: str, template: str | None = None) -> str:
     """Drop and recreate ``name`` (optionally as a copy of ``template``)."""
     drop(name)
     with _admin() as conn:
+        assert_disposable_database(conn)
         if template is None:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(_check(name))))
         else:
@@ -78,6 +81,7 @@ def drop(name: str, attempts: int = 10) -> None:
     for i in range(attempts):
         try:
             with _admin() as conn:
+                assert_disposable_database(conn)
                 conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
                     sql.Identifier(_check(name))))
             return
