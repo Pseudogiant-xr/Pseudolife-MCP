@@ -10,7 +10,7 @@ whose seeded rows are copied verbatim from the seed (DML only: this row runs
 no reap, TRUNCATE, DROP or DDL of its own, and calls
 ``assert_disposable_database`` before every write).
 
-Every arm runs with no tailscale or docker CLI reachable (``PATH`` filtered,
+Every arm runs with no tailscale or docker CLI reachable (``PATH`` inside the home,
 the Program Files default moved into the home) and a data dir that holds no
 ``config.yaml``, so the oracle's ``exposed_url``, Docker path and
 ``_listed_note`` read nothing from this host. The fixture daemon serves
@@ -239,19 +239,16 @@ def health(**over) -> dict:
 
 # ── the environment ─────────────────────────────────────────────────────────
 
-def _tool_dirs_removed() -> str:
-    """This host's PATH without any directory that holds a tailscale or
-    docker CLI candidate: the oracle must reach neither."""
-    exts = [e for e in (os.environ.get("PATHEXT") or "").split(";") if e] if core.WINDOWS else []
-    names = [f"{tool}{ext}" for tool in ("tailscale", "docker") for ext in ["", *exts]]
-    kept = [d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d and not any(os.path.lexists(os.path.join(d.strip('"'), n)) for n in names)]
-    return os.pathsep.join(kept)
+# The oracle looks up tailscale (expose's exposed_url) and docker
+# (docker_available): PATH stays inside the home, and core's preflight proves
+# neither resolves outside it.
+PROGRAMS = ("tailscale", "docker")
+NO_BIN = "{HOME}" + SEP + "no-bin"
 
 
 def env(dsn_kind: str | None = "arm", **extra) -> dict:
     out = {
-        "PATH": _tool_dirs_removed(),
+        "PATH": NO_BIN,
         "ProgramW6432": "{HOME}" + SEP + "no-programs",
         "ProgramFiles": "{HOME}" + SEP + "no-programs",
         "PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "no-bank",
@@ -423,7 +420,8 @@ def read_case(case_id, kind, argv, *, daemon=None, extra_env=None, rules=(), fil
         obs["db"] = "unchanged" if dump == _BASELINE[name] else dump
 
     return core.Case(case_id, ["invite", *argv], env=env(kind, **(extra_env or {})),
-                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60)
+                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60,
+                     programs=PROGRAMS)
 
 
 def write_case(case_id, kind, argv, *, daemon=None, extra_env=None, ttl=900,
@@ -446,7 +444,8 @@ def write_case(case_id, kind, argv, *, daemon=None, extra_env=None, ttl=900,
         obs["db"] = "unchanged" if dump == arm.state["seed"] else dump
 
     return core.Case(case_id, ["invite", *argv], env=env("arm", **(extra_env or {})),
-                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60)
+                     setup=setup, after=after, rules=rules, daemon=daemon, timeout=60,
+                     programs=PROGRAMS)
 
 
 def cases() -> list[core.Case]:
@@ -600,7 +599,7 @@ def cases() -> list[core.Case]:
     deferral("defer-list-no-dsn", ["--list"], extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": ""})
     tailscale = "tailscale.exe" if core.WINDOWS else "tailscale"
     deferral("defer-tailscale-present", ["laptop"],
-             extra_env={"PATH": "{HOME}" + SEP + "tools" + os.pathsep + _tool_dirs_removed()},
+             extra_env={"PATH": "{HOME}" + SEP + "tools"},
              files={"tools/" + tailscale: b"not a program\n"})
     deferral("defer-config-yaml", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},

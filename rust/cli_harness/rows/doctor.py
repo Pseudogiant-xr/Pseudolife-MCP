@@ -620,11 +620,18 @@ def claude_registration(env: dict) -> str:
 BOARD_ON = Route(200, raw=b"## Agent board\n", headers={"X-PL-Board": "on"})
 MAINTAINER_UNSET = Route(409, {"error": "maintainer_https_required", "config_problem": "unset"})
 TOKEN = {"PSEUDOLIFE_MCP_TOKEN": "fixture-token"}
+# What the oracle looks up but never runs: `pseudolife-mcp` (path_resolution),
+# codex (the doorbell, on PATH or under LOCALAPPDATA) and, on Windows, git and
+# bash (git_bash_report). PATH defaults inside the home; core's preflight
+# proves none of them resolves outside it.
+PROGRAMS = ("pseudolife-mcp", "codex") + (("git", "bash") if core.WINDOWS else ())
+NO_BIN = "{HOME}" + os.sep + "no-bin"
 
 
 def case(id: str, argv=(), *, routes=None, steps=(), env=None, rules=RULES, daemon=True,
          timeout=60.0, **options) -> Case:
-    return Case(id, ["doctor", *argv], env=dict(env or {}),
+    return Case(id, ["doctor", *argv], env={"PATH": NO_BIN, **(env or {})},
+                programs=PROGRAMS,
                 setup=setup(*steps), rules=rules, timeout=timeout, after=tag_arm,
                 daemon=fixture(routes, **options) if daemon else None)
 
@@ -993,7 +1000,7 @@ def cases() -> list[Case]:
              steps=[write("bin/" + launcher_name, "launcher")], daemon=False))
     add(case("launcher-on-path", env={"PSEUDOLIFE_SHIM_RUNTIMES": "{HOME}/runtimes",
                                       "PSEUDOLIFE_SHIM_LAUNCHER": "{HOME}/bin/" + launcher_name,
-                                      "PATH": "{HOME}/bin" + os.pathsep + os.environ.get("PATH", "")},
+                                      "PATH": "{HOME}/bin"},
              steps=[write("bin/" + launcher_name, "launcher")], daemon=False))
     add(case("default-launcher", steps=[write(
         ("AppData/Local/pseudolife-mcp/bin/" if core.WINDOWS else ".local/share/pseudolife-mcp/bin/")

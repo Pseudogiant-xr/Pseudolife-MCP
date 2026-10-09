@@ -599,8 +599,12 @@ def _with_temp(setup):
 def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=None, after=None,
          env=None, stdin: bytes = b"", platforms=("windows", "linux"), timeout: float = 120,
          **daemon) -> Case:
+    # With every client selected (no --client), the oracle reads the
+    # unattended-update schedule: on Windows it runs this host's System32
+    # schtasks /Query, which no PATH inside the home can hide.
+    schedule = ("schtasks",) if WINDOWS and "--client" not in argv else ()
     return Case(case_id, ["connect", *argv], env=_env(**(env or {})), stdin=stdin,
-                setup=_with_temp(setup), during=_arm_pid,
+                setup=_with_temp(setup), during=_arm_pid, real_programs=schedule,
                 after=_after(url, after), timeout=timeout, rules=RULES, platforms=platforms,
                 daemon=_fixture(port, url, **daemon) if port is not None else None)
 
