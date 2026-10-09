@@ -506,13 +506,16 @@ took 143 CUDA OOMs.
 - **Every review pass also runs a Codex second review, alongside it, not
   instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
   effort, started in the background over the same diff —
-  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o <scratchpad>/codex-review.md`
-  (`--uncommitted` or `--commit <sha>` for other targets). Pin the model and
-  effort on the command line, and check the log header names both. Verify
-  its findings against the code like a subagent's, and record both reviews
-  in the PR, each finding labelled by source with its verdict. A missing,
-  signed-out or failed Codex run is stated in the PR as a single-reviewer
-  pass, never skipped silently.
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1`,
+  with `$OUT` a per-pass path outside the working tree (the session
+  scratchpad, named by the reviewed short sha so a rerun does not
+  overwrite it). Use `--uncommitted` for a pre-commit pass and
+  `--commit <sha>` for a single commit. Pin the model and effort on the
+  command line, and check the log's header names both. Verify its findings
+  against the code like a subagent's, and record both reviews in the PR
+  (or the commit body when there is no PR yet), each finding labelled by
+  source with its verdict. A missing, signed-out or failed Codex run is
+  recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
