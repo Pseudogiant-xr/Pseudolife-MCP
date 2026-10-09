@@ -215,12 +215,12 @@ jobs:
         run: |
           python -m pytest -q rust/daemon/harness/test_static.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3
+          cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
-          cargo test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 loopback_bind_override_is_absent_from_production_build
           $result = $LASTEXITCODE
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           if ($result -ne 0) { exit $result }
