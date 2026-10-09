@@ -31,6 +31,7 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "Graph store differential and recorded oracle": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -103,6 +104,13 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+
+    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    for mode in ("live", "golden"):
+        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
+                        ("--candidate", "--out"), ("--record",))
+    require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)

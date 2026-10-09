@@ -141,6 +141,15 @@ jobs:
           shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Build graph store candidate
+        run: cargo build --locked -p pseudolife-daemon --bin graph-contract --features graph-harness -j 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-graph-store-bin-${{ runner.os }}
+          path: |
+            rust/target/debug/graph-contract
+            rust/target/debug/graph-contract.exe
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -241,13 +250,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - uses: actions/download-artifact@v4
+        if: matrix.suite == 'cli'
+        with:
+          name: rust-graph-store-bin-${{ runner.os }}
+          path: rust/target/debug
+      - name: Restore graph store executable permission
+        if: matrix.suite == 'cli' && runner.os == 'Linux'
+        run: chmod +x rust/target/debug/graph-contract
       - name: Graph store differential and recorded oracle
         if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
-          cargo build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --bin graph-contract --features graph-harness -j 3
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
           python rust/daemon/harness/gen_graph_unicode.py --check
