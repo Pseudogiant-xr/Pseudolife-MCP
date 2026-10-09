@@ -18,6 +18,7 @@ ROWS = {
     "maintainer": "CLI-MAINTAINER",
     "invite": "CLI-PAIRING",
     "pair": "CLI-PAIRING",
+    "move": "CLI-MOVE-REFUSALS",
 }
 
 

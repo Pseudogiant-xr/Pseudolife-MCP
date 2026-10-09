@@ -14,6 +14,7 @@ mod hook_http;
 mod hook_json;
 pub mod lease;
 pub mod maintainer;
+mod move_cli;
 mod pairing;
 mod test_login;
 mod transfer;
@@ -165,6 +166,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
         && let Some(code) = pairing::run(mode)
     {
         return Some(code);
+    }
+    if mode == "move"
+        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (
