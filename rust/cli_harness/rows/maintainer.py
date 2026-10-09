@@ -516,7 +516,7 @@ WRITES = ("maintainer-host-write",)
 
 
 def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
-         stdout_closed=False, skip_if=None, prepare=(), note=""):
+         stdout_closed=False, skip_if=None, prepare=(), note="", programs=()):
     """``maintainer <argv>`` on this arm's own copy of a seeded bank;
     ``prepare`` statements run on that copy first (test instruments)."""
 
@@ -546,7 +546,8 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
     environment.update(env or {})
     return core.Case(case_id, ["maintainer", *argv], env=environment, setup=setup,
                      during=during, after=after, rules=rules, timeout=60,
-                     stdout_closed=stdout_closed, skip_if=skip_if, note=note)
+                     stdout_closed=stdout_closed, skip_if=skip_if, note=note,
+                     programs=programs)
 
 
 LISTING = WRITES + ("maintainer-list-guard",)
@@ -628,7 +629,11 @@ def cases() -> list[core.Case]:
         defer("defer-enrol-poll", "fresh", ["enrol-code", "--poll", "0.01", "--no-wait"]),
         defer("defer-confirm-double-dash", "pending", ["confirm", "--", pending[:9]]),
         defer("defer-reset-repeated-yes", "rich", ["reset", "--yes", "--yes"]),
-        defer("defer-no-dsn", "rich", ["list"], dsn=False),
+        # No DSN: the oracle would re-run in the daemon container through
+        # docker (daemon_exec), which GUARDS already block; a PATH inside the
+        # home finds none either (core's preflight).
+        defer("defer-no-dsn", "rich", ["list"], dsn=False,
+              env={"PATH": "{HOME}" + os.sep + "no-bin"}, programs=("docker",)),
         defer("defer-dsn-option", "rich", ["list"], env={
             "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(ARM_DB) + "?application_name=x"}),
     ]

@@ -27,6 +27,7 @@ from __future__ import annotations
 import atexit
 import base64
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -119,13 +120,19 @@ def _guard_selftest() -> None:
 
 # --- the stub oracle for argv the real one must never run ----------------------
 
+# Named when the cases are built (each case's environment is fixed then, for
+# core's program preflight), made and checked on first use.
+_STUB_ROOT = Path(tempfile.gettempdir()) / f"pl-move-stub-{os.getpid()}-{secrets.token_hex(4)}"
+
+
 def _stub_dir() -> str:
     """A ``pseudolife_memory`` package whose ``cli`` prints a marker and
     exits 0, checked before first use: if PYTHONPATH did not put it ahead of
     every installed copy, the row refuses to run."""
     if "stub" in _CHECKED:
         return _CHECKED["stub"]  # type: ignore[return-value]
-    root = Path(tempfile.mkdtemp(prefix="pl-move-stub-"))
+    root = _STUB_ROOT
+    root.mkdir()
     atexit.register(shutil.rmtree, root, True)
     package = root / "pseudolife_memory"
     package.mkdir()
@@ -207,15 +214,19 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
           oracle: bool = True, platforms: tuple[str, ...] = ("windows", "linux")) -> Case:
     env: dict[str, str | None] = {"PATH": "{CWD}", "COLUMNS": columns, "PSEUDOLIFE_DOCKER": None,
                                   "NO_PROXY": None, "no_proxy": None}
+    # Every proxy names this arm's recorder (_Recorder.url, by port).
+    env.update({key: "http://127.0.0.1:{DAEMON_PORT}" for key in _PROXY_KEYS})
+    if not oracle:
+        env["PYTHONPATH"] = str(_STUB_ROOT)
+    # Only valid argv reaches docker or ssh, and the stub answers those; core's
+    # preflight proves PATH finds neither outside the home anyway.
     case = Case(case_id, ["move", *argv], env=env, daemon=_Recorder, rules=rules,
-                platforms=platforms)
+                platforms=platforms, programs=("docker", "ssh"))
 
     def setup(arm) -> None:
         _guard_selftest()
-        for key in _PROXY_KEYS:
-            case.env[key] = arm.daemon.url
         if not oracle:
-            case.env["PYTHONPATH"] = _stub_dir()
+            _stub_dir()
 
     def during(arm, proc) -> None:
         # Compared field: the oracle arm's is empty by definition.

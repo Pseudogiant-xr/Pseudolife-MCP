@@ -401,7 +401,7 @@ def tunnel_dpapi_key(obs: dict) -> None:
 
 
 def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux"),
-         skip_if=None, note=""):
+         skip_if=None, note="", programs=()):
     original = ["tunnel", *argv]
 
     def setup(arm):
@@ -432,7 +432,7 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
     environment.update(env or {})
     made = core.Case(case_id, list(original), env=environment, setup=setup, after=after,
                      rules=rules, platforms=platforms, daemon=Listener, skip_if=skip_if,
-                     note=note)
+                     note=note, programs=programs)
     return made
 
 
@@ -638,7 +638,9 @@ def cases() -> list[core.Case]:
                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),
         defer("defer-status-dpapi-key", ["status", "--profile-dir", DIR], ready(), key(),
               platforms=("windows",)),
-        defer("defer-update-ready-key", ["update", "--profile-dir", DIR], ready(), key()),
+        # update asks PATH for pseudolife-mcp (empty here: core's preflight).
+        defer("defer-update-ready-key", ["update", "--profile-dir", DIR], ready(), key(),
+              programs=("pseudolife-mcp",)),
         defer("defer-verify-dpapi-key", ["verify", "--profile-dir", DIR], ready(), key(),
               platforms=("windows",)),
         defer("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),

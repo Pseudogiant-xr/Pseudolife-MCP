@@ -406,7 +406,7 @@ def _container_case(id: str, argv: list[str], db: str, prepare=None, rules=()) -
 
     return Case(id, ["test-login", "create", "--container", name, *argv], setup=setup,
                 after=after, rules=("test-login-password", *rules), timeout=180,
-                skip_if=_no_docker)
+                skip_if=_no_docker, real_programs=("docker",))
 
 
 def _shapes(arm, server) -> None:
@@ -452,31 +452,36 @@ def cases() -> list[Case]:
     peer_locked, hold_locked = _hold_peer(False)
     peer_keeps, hold_keeps = _hold_peer(True)
     nobin = {"PATH": "{HOME}" + SEP + "nobin"}
+    # Without --admin-url the oracle asks PATH for docker: core's preflight
+    # proves the nobin cases find none; the container cases run the host's.
+    docker = ("docker",)
     away = ["--container", absent]
     out = [
         # Refusals before any connection. Each still names an absent container
         # and has no docker on PATH: a regression in either arm reaches
         # nothing (the stack's own container is the executor's default).
         Case("role-name-invalid", ["test-login", "create", "--role", "Bad-Name", *away],
-             env=nobin),
+             env=nobin, programs=docker),
         Case("role-name-invalid-json", ["test-login", "create", "--role", "9x", "--json", *away],
-             env=nobin),
-        Case("role-name-empty", ["test-login", "create", "--role", "", *away], env=nobin),
+             env=nobin, programs=docker),
+        Case("role-name-empty", ["test-login", "create", "--role", "", *away], env=nobin,
+             programs=docker),
         Case("role-name-unicode", ["test-login", "create", "--role",
-                                   "r" + chr(0xF4) + "le" + chr(0x200B), *away], env=nobin),
+                                   "r" + chr(0xF4) + "le" + chr(0x200B), *away], env=nobin,
+             programs=docker),
         Case("bank-not-a-bank", ["test-login", "create", "--bank", "x", "--bank", "postgres",
-                                 *away], env=nobin),
+                                 *away], env=nobin, programs=docker),
         Case("bank-template-json", ["test-login", "create", "--bank", "template1", "--json",
-                                    *away], env=nobin),
+                                    *away], env=nobin, programs=docker),
         Case("no-docker", ["test-login", "create", "--container", absent],
-             env={"PATH": "{HOME}" + SEP + "nobin"}),
+             env={"PATH": "{HOME}" + SEP + "nobin"}, programs=docker),
         Case("no-docker-json", ["test-login", "create", "--json", "--container", absent],
-             env={"PATH": "{HOME}" + SEP + "nobin"}),
+             env={"PATH": "{HOME}" + SEP + "nobin"}, programs=docker),
         # The container path's failure, with no container: docker's own text.
         Case("container-absent", ["test-login", "create", "--container", absent], timeout=60,
-             skip_if=_no_docker),
+             skip_if=_no_docker, real_programs=docker),
         Case("container-absent-json", ["test-login", "create", "--json", "--container", absent],
-             timeout=60, skip_if=_no_docker),
+             timeout=60, skip_if=_no_docker, real_programs=docker),
         # The --admin-url path on a throwaway cluster.
         _admin_case("admin-fresh", admin, _shapes),
         _admin_case("admin-fresh-json", [*admin, "--json"], _shapes),
