@@ -8,6 +8,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A stdout whose read end is closed before the child starts: dropping the
+/// child's piped stdout after spawn races the child's first write on a
+/// loaded runner (the help can land in the still-open pipe).
+fn closed_stdout() -> Stdio {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    Stdio::from(writer)
+}
+
 fn parser_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
     command
@@ -189,14 +198,12 @@ fn public_health_payload_and_redirect_headers_keep_their_scopes() {
             .starts_with("GET /api/briefing?max_unsure=3&max_lessons=3&max_world=3 HTTP/1.1\r\n")
     );
     for (index, request) in requests.iter().enumerate() {
+        // urllib's request fields (the native client writes Title-Case names).
+        assert!(request.contains("\r\nUser-Agent: Python-urllib/3.11\r\n"));
+        assert!(request.contains("\r\nAccept-Encoding: identity\r\n"));
+        assert!(request.contains("\r\nConnection: close\r\n"));
         let headers = request.to_ascii_lowercase();
-        assert!(headers.contains("\r\nuser-agent: python-urllib/3.11\r\n"));
-        assert!(headers.contains("\r\naccept: */*\r\n"));
-        assert!(
-            !headers.contains("\r\nreferer:")
-                && !headers.contains("\r\naccept-encoding:")
-                && !headers.contains("\r\nconnection:")
-        );
+        assert!(!headers.contains("\r\nreferer:") && !headers.contains("\r\naccept:"));
         assert_eq!(
             headers.contains("\r\nauthorization: bearer synthetic-hook\r\n"),
             index == 2
@@ -284,13 +291,12 @@ fn public_help_closed_output_has_native_failure_contract() {
         let mut command = parser_command();
         command
             .args(["briefing", "--help"])
-            .stdout(Stdio::piped())
+            .stdout(closed_stdout())
             .stderr(Stdio::piped());
         if unbuffered {
             command.env("PYTHONUNBUFFERED", "1");
         }
         let mut child = command.spawn().unwrap();
-        drop(child.stdout.take());
         let deadline = Instant::now() + Duration::from_secs(8);
         while child.try_wait().unwrap().is_none() {
             if Instant::now() >= deadline {
@@ -418,13 +424,14 @@ fn prompt_leaf(closed_output: bool, existing: bool) {
         .env("PSEUDOLIFE_MCP_PYTHON", "missing-fixture-interpreter")
         .env("PATH", "")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(if closed_output {
+            closed_stdout()
+        } else {
+            Stdio::piped()
+        })
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    if closed_output {
-        drop(child.stdout.take());
-    }
     child
         .stdin
         .take()

@@ -30,9 +30,12 @@ class Mutant:
     old: str
     new: str
     cases: tuple[str, ...] = ()  # run only these (default: the whole row)
+    # Where the break is observable (a resolver order, a store) at all.
+    platforms: tuple[str, ...] = ("windows", "linux")
 
 
 # Each row module owns its list as ``MUTANTS``; see rows.mutants().
+SKIP_BANK = False
 
 
 def _target() -> Path:
@@ -78,7 +81,8 @@ def run_mutant(mutant: Mutant, oracle: core.Target, verbose: bool,
     candidate = core.rust_target(binary)
     caught: list[str] = []
     for case in rows.load(mutant.row):
-        if not case.runs_here() or (mutant.cases and case.id not in mutant.cases):
+        if (not case.runs_here() or (mutant.cases and case.id not in mutant.cases)
+                or (case.bank and SKIP_BANK)):
             continue
         want, got = core.run_case(case, oracle, candidate)
         if compare.diff(want, got, case.rules):
@@ -88,7 +92,8 @@ def run_mutant(mutant: Mutant, oracle: core.Target, verbose: bool,
 
 def main(row_names: list[str], only: list[str], oracle: core.Target, verbose: bool) -> int:
     pool = [m for row in rows.ROWS for m in rows.mutants(row)]
-    selected = [m for m in pool if m.row in row_names and (not only or m.id in only)]
+    selected = [m for m in pool if m.row in row_names and (not only or m.id in only)
+                and core.PLATFORM in m.platforms]
     if not selected:
         raise SystemExit("no mutants selected")
     escaped = []
