@@ -141,14 +141,16 @@ jobs:
           shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
-      - name: Build graph store candidate
-        run: cargo build --locked -p pseudolife-daemon --bin graph-contract --features graph-harness -j 3
+      - name: Build daemon candidates
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features graph-harness,mutants -j 3
       - uses: actions/upload-artifact@v4
         with:
-          name: rust-graph-store-bin-${{ runner.os }}
+          name: rust-daemon-${{ runner.os }}
           path: |
-            rust/target/debug/graph-contract
-            rust/target/debug/graph-contract.exe
+            rust/target/release/pseudolife-daemon
+            rust/target/release/pseudolife-daemon.exe
+            rust/target/release/graph-contract
+            rust/target/release/graph-contract.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -253,18 +255,18 @@ jobs:
       - uses: actions/download-artifact@v4
         if: matrix.suite == 'cli'
         with:
-          name: rust-graph-store-bin-${{ runner.os }}
-          path: rust/target/debug
+          name: rust-daemon-${{ runner.os }}
+          path: rust/target/release
       - name: Restore graph store executable permission
         if: matrix.suite == 'cli' && runner.os == 'Linux'
-        run: chmod +x rust/target/debug/graph-contract
+        run: chmod +x rust/target/release/graph-contract
       - name: Graph store differential and recorded oracle
         if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
-          $candidate = (Resolve-Path (Join-Path 'rust/target/debug' $binaryName)).Path
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           python rust/daemon/harness/gen_graph_unicode.py --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/test_graph_store_harness.py

@@ -185,6 +185,31 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio"
 
 
+def test_daemon_artifact_is_built_once_and_shared_with_graph():
+    jobs = workflow()["jobs"]
+    builds = [step for job in jobs.values() for step in job.get("steps", [])
+              if "cargo build" in step.get("run", "") and
+              "-p pseudolife-daemon" in step["run"]]
+    assert len(builds) == 1
+    assert builds[0] in jobs["candidate"]["steps"]
+    words = commands(builds[0]["run"])[0]
+    assert {"--locked", "--release", "--bins"} <= set(words)
+    assert {"graph-harness", "mutants"} <= set(words[words.index("--features") + 1].split(","))
+    upload = next(s for s in jobs["candidate"]["steps"]
+                  if s.get("with", {}).get("name") == "rust-daemon-${{ runner.os }}")
+    for binary in ("pseudolife-daemon", "graph-contract"):
+        for suffix in ("", ".exe"):
+            assert f"rust/target/release/{binary}{suffix}" in upload["with"]["path"].splitlines()
+    steps = jobs["parity-checks"]["steps"]
+    download = next(s for s in steps if s.get("uses") == "actions/download-artifact@v4"
+                    and s.get("with", {}).get("name") == upload["with"]["name"])
+    assert download["if"] == "matrix.suite == 'cli'"
+    assert download["with"]["path"] == "rust/target/release"
+    permission = next(s for s in steps if s.get("name") == "Restore graph store executable permission")
+    assert permission["if"] == "matrix.suite == 'cli' && runner.os == 'Linux'"
+    assert permission["run"] == "chmod +x rust/target/release/graph-contract"
+
+
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
 def test_required_parity_gate_fails_closed(result):
     gate = workflow()["jobs"]["parity"]
@@ -225,6 +250,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 @pytest.mark.parametrize("name, old, new", [
     ("CLI differential harness", "--row hook", ""),
+    ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
     ("CLI differential harness", "--golden", ""),
     ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),
     ("Run unchanged candidates and differential judges", "& $oraclePython -c $judgeBootstrap", "# & $oraclePython -c $judgeBootstrap"),
