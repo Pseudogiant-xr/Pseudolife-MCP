@@ -15,6 +15,7 @@ ROWS = {
     "test_login": "CLI-TEST-LOGIN",
     "doctor": "CLI-DOCTOR",
     "connect": "CLI-CONNECT",
+    "maintainer": "CLI-MAINTAINER",
 }
 
 
