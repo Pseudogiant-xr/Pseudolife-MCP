@@ -682,7 +682,7 @@ MUTANTS = [
            "            1,\n        ),\n        Outcome::SchemaDeferred",
            "            2,\n        ),\n        Outcome::SchemaDeferred", ("import-format-9",)),
     Mutant("transfer-drop-inverses", ROW, "shim/src/cli/transfer/import.rs",
-           "    send(client, &inverses).await?;", "    let _ = &inverses;",
+           "    send(pass, &inverses).await?;", "    let _ = &inverses;",
            ("import-reversed-relations",)),
     Mutant("transfer-order-flip", ROW, "shim/src/cli/transfer/export.rs",
            '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1"',
