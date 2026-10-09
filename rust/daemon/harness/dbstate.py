@@ -7,9 +7,10 @@ when a table has none). ``diff`` compares two dumps after the declared
 normalizers, which replace nondeterministic values by rule, never by hand:
 
 * ``NONDETERMINISTIC`` names ``(table, column)`` pairs whose values are
-  wall-clock times or random identifiers. Each value becomes a token that
-  keeps only its shape (null or not, and equality with other values in the
-  same dump), so a write that changes WHICH rows share a value still shows.
+  wall-clock times or random identifiers. A rule ``"clock"`` keeps only
+  null-or-not (two inserts may share a clock tick on one side and not the
+  other); any other rule also keeps equality between values in the same
+  dump, so a write that changes WHICH rows share an identifier still shows.
 """
 from __future__ import annotations
 
@@ -134,9 +135,13 @@ def normalize(state: dict, rules: dict[tuple[str, str], str] | None = None) -> d
             if (name, col) not in rules:
                 continue
             seen: dict[str, str] = {}
+            clock = rules[(name, col)].startswith("clock")
             for row in table["rows"]:
                 value = row[idx]
                 if value is None:
+                    continue
+                if clock:
+                    row[idx] = f"<{col}>"
                     continue
                 key = json.dumps(value, sort_keys=True)
                 row[idx] = seen.setdefault(key, f"<{col}#{len(seen)}>")

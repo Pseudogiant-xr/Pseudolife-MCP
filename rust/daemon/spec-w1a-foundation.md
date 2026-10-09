@@ -89,7 +89,7 @@ read); the `db` error text; the `memory` byte counts; key order.
 | P4 | Seed the 11 builtin relations in one transaction, `ON CONFLICT (name) DO NOTHING`, `created_at` = wall clock. | `storage/postgres.py:191-211, 754-766` |
 | P5 | Bump `meta.writer_lease_epoch` with the COALESCE upsert (non-numbers restart at 1). | `storage/postgres.py:482-498` |
 | P6 | No newer-schema guard: a bank stamped above 55 is rewritten to 55 (matched, not fixed). | `storage/schema.py:1657-1662` |
-| P7 | After the constructor, `SHOW search_path` must contain `public` and not list `$user` before it, else `init_refusal`. | `service.py:1260-1265, 1047-1065` |
+| P7 | After the constructor, `SHOW search_path` must contain `public` and not list `$user` before it; otherwise the session is closed and the call fails, recording nothing (amended: the first draft said `init_refusal`; `_ensure_postgres_storage` catches only the lease and constructor refusals). | `service.py:1250-1265, 1047-1065` |
 
 Proven by database-state equality (`harness/dbstate.py`): catalog and every
 row, with `relations.created_at` normalized (wall clock).
