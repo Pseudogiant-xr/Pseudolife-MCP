@@ -389,7 +389,11 @@ def sanity(data, diffs):
     }
     if "stored" in data:
         st = data["stored"]
-        want_stored = [10, 24, 38, 24, 24]  # dave, erin, frank, writer=dave, writer=frank
+        # dave, erin, frank, then the default principal with X-PL-Writer naming
+        # dave (dave's own expand/collapse left an override in the shared
+        # writer-id bucket: minimal) and frank (no override, and a stored
+        # tier applies to its own bearer only: the default, core).
+        want_stored = [10, 24, 38, 10, 24]
         got = [ntools(st[i * 6]) for i in range(5)]
         if got != want_stored:
             diffs.append(f"sanity stored: tool counts {got} != {want_stored}")
@@ -400,7 +404,8 @@ def sanity(data, diffs):
                 diffs.append(f"sanity {case}: tool counts {got} != {counts}")
     if "rebinding" in data:
         statuses = sorted({r["status"] for r in data["rebinding"]})
-        if statuses != [200, 403, 421]:
+        # 400: a POST's Content-Type is checked before Host.
+        if statuses != [200, 400, 403, 421]:
             diffs.append(f"sanity rebinding: statuses {statuses}")
 
 
