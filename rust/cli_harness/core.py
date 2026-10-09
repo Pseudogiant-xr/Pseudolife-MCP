@@ -180,19 +180,54 @@ def snapshot(root: Path) -> dict[str, str]:
     return files
 
 
+# Windows: a file a scanner or indexer opened a moment ago refuses deletion
+# with a sharing violation (WinError 32) or access denied (5) until it lets
+# go; observed on hosted runners. Every arm's process and helper thread has
+# exited before a reset, so these are retried for a bounded time, not ignored.
+_SHARING = (32, 5)
+_RETRY_SECONDS = 10.0
+
+
+def _transient(error: OSError) -> bool:
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in _SHARING
+
+
+def _remove(home: Path) -> None:
+    def retry(func, path, exc_info):
+        error = exc_info[1]
+        if isinstance(error, FileNotFoundError):
+            return
+        if func not in (os.unlink, os.remove, os.rmdir):
+            # A failed directory scan or open cannot be resumed by calling it
+            # again: unlock the directory and remove that subtree afresh.
+            os.chmod(path, 0o700)
+            shutil.rmtree(path, onerror=retry)
+            return
+        deadline = time.monotonic() + _RETRY_SECONDS
+        while True:
+            try:
+                os.chmod(path, 0o700)
+                func(path)
+                return
+            except FileNotFoundError:
+                return
+            except OSError as again:
+                if not _transient(again) or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.1)
+    # chmod-000 stat cases leave a directory a plain rmtree cannot enter.
+    for dirpath, dirnames, _ in os.walk(home):
+        for name in dirnames:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(home, onerror=retry)
+
+
 def _reset(home: Path) -> None:
     if home.exists():
-        def unlock(func, path, _exc):
-            os.chmod(path, 0o700)
-            func(path)
-        # chmod-000 stat cases leave a directory a plain rmtree cannot enter.
-        for dirpath, dirnames, _ in os.walk(home):
-            for name in dirnames:
-                try:
-                    os.chmod(os.path.join(dirpath, name), 0o700)
-                except OSError:
-                    pass
-        shutil.rmtree(home, onerror=unlock)
+        _remove(home)
     home.mkdir(parents=True)
 
 
@@ -268,6 +303,10 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         err = stderr_prefix + err
         if worker:
             worker.join(10)
+            if worker.is_alive():
+                # A helper still touching the home would race the snapshot
+                # and the next arm's reset; fail the case instead.
+                raise RuntimeError(f"{case.id}/{target.name}: helper thread still running")
         observation = {
             "home": str(home),
             # Local clock offset, so a golden's clocks validate where recorded.
@@ -306,11 +345,19 @@ def _home_root() -> Path:
 def run_case(case: Case, oracle: Target, candidate: Target) -> tuple[dict, dict]:
     root = _home_root()
     home = root / "h"
+    finished = False
     try:
         python = run_arm(case, oracle, home)
         rust = run_arm(case, candidate, home)
+        finished = True
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        if root.exists():
+            try:
+                _remove(root)
+            except OSError:
+                # Never let teardown replace the case's own failure.
+                if finished:
+                    raise
     return python, rust
 
 
