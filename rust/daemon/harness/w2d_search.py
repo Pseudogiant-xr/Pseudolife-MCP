@@ -112,6 +112,12 @@ def default_cases() -> list[dict]:
         case("rerank on", q(q="how do I back up the bank", rerank="1"), auth),
         case("rerank on, top_k 30 (over budget)", q(q="how do I back up the bank", rerank="1", top_k=30), auth),
         case("session header", q(q="deploy the daemon"), auth + [("X-PL-Session", "sess-w2d-1")]),
+        case("open-episode session header", q(q="failed deploy incident"),
+             auth + [("X-PL-Session", "sess-w2d-seed")]),
+        case("slot channel: jacque top_k 1", q(q="is jacque female", top_k=1), auth),
+        case("slot channel: staging migration top_k 1", q(q="staging migration", top_k=1), auth),
+        case("slot channel: superseded endpoint top_k 1", q(q="extractor endpoint old gpu box", top_k=1), auth),
+        case("slot channel under explicit floor", q(q="is jacque female", top_k=1, min_score="0.7"), auth),
         case("two session headers", q(q="bearer token"),
              auth + [("X-PL-Session", "sess-a"), ("X-PL-Session", "sess-b")]),
     ]
@@ -142,7 +148,10 @@ class Timeline(Scenario):
         auth = [bearer(TOKEN)]
         return [case(f"temporal {i}", q(q=t, top_k=8), auth) for i, t in enumerate(
             ["when did we deploy the release", "what happened first", "in what order did we update",
-             "the timeline of the migration", "since the migration what changed", "deploy the daemon"])]
+             "the timeline of the migration", "since the migration what changed", "deploy the daemon"])] + [
+            case(f"temporal top_k 2 {i}", q(q=t, top_k=2), auth) for i, t in enumerate(
+                ["when did the session step happen", "what happened before the deploy runbook",
+                 "in what order did the session steps go"])]
 
 
 class Contiguity(Scenario):
@@ -152,7 +161,8 @@ class Contiguity(Scenario):
     def cases(self):
         auth = [bearer(TOKEN)]
         return [case(f"neighbours {i}", q(q=t, top_k=4), auth) for i, t in enumerate(
-            ["first we backed up the bank", "clients were updated", "bearer token", "deploy the daemon"])]
+            ["first we backed up the bank", "clients were updated", "bearer token", "deploy the daemon",
+             "restarting the bench Postgres"])]
 
 
 class RrfPool(Scenario):

@@ -37,6 +37,15 @@ CRAFTED = [
     ("process_chunk_v2 raised a KeyError when the cursor was empty.", "tool_result", ["bug"]),
     ("The error code PLX-4471 means the writer lease is held by another daemon.", "tool_result", ["bug"]),
 ]
+# Stored inside one session episode, so contiguity's same-episode path and the
+# event's episode attribution are exercised.
+EPISODE_KEY = "sess-w2d-seed"
+EPISODE_TEXTS = [
+    "Session step one: we opened the incident for the failed deploy.",
+    "Session step two: the health check showed the daemon could not reach Postgres.",
+    "Session step three: restarting the bench Postgres fixed the deploy.",
+    "Session step four: we wrote the deploy runbook note afterwards.",
+]
 SUPERSEDED = ("The extractor endpoint is http://10.0.0.5:1234/v1 on the old GPU box.",
               "The extractor endpoint moved to http://10.0.0.7:1234/v1 on the new GPU box.")
 EVENTS = [
@@ -81,6 +90,10 @@ def main() -> int:
         stored += bool(svc.store(text, source="docs").get("stored"))
     for text, source, tags in CRAFTED:
         stored += bool(svc.store(text, source=source, tags=tags).get("stored"))
+    ep = svc.episode_start_session(EPISODE_KEY, "W2-D seed session")
+    handle = ep.get("id") or ep.get("episode_id")
+    for text in EPISODE_TEXTS:
+        stored += bool(svc.store(text, source="session-notes", episode=handle).get("stored"))
     svc.store(SUPERSEDED[0], source="conversation")
     svc.supersede(old_text=SUPERSEDED[0], new_text=SUPERSEDED[1])
     for entity, attribute, value, conf, tol in FACTS:
