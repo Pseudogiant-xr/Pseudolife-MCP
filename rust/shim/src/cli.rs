@@ -11,6 +11,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_json;
 pub mod lease;
+pub mod maintainer;
 mod version;
 pub mod wait_mail;
 
