@@ -149,7 +149,8 @@ class Timeline(Scenario):
         return [case(f"temporal {i}", q(q=t, top_k=8), auth) for i, t in enumerate(
             ["when did we deploy the release", "what happened first", "in what order did we update",
              "the timeline of the migration", "since the migration what changed", "deploy the daemon"])] + [
-            case(f"temporal top_k 2 {i}", q(q=t, top_k=2), auth) for i, t in enumerate(
+            case(f"temporal top_k 2 {i}", q(q=t, top_k=2, bm25=b), auth)
+            for b in ("auto", "false") for i, t in enumerate(
                 ["when did the session step happen", "what happened before the deploy runbook",
                  "in what order did the session steps go"])]
 
