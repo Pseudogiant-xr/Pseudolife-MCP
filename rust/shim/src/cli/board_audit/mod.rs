@@ -40,6 +40,8 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
                         ) => {}
                     Err(_) => return deferred(),
                 }
+            } else if !stdout_present() {
+                return deferred();
             }
             with_bank(|dsn| async move { bank::export(&dsn, &export).await })
         }
@@ -137,21 +139,44 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
     }
 }
 
-/// `print(json.dumps(value))`: one line on stdout, the given exit code.
+/// `print(json.dumps(value))` before any effect: one line on stdout and the
+/// given exit code. A stdout that refuses the line defers: CPython's answer
+/// there (a buffered print, then a failed flush at interpreter shutdown,
+/// exit 120 and an ignored-exception trailer) is not reproduced.
 fn report(value: Json, code: u8) -> u8 {
-    let Ok(bytes) = sent_json::encode(&value) else {
-        return deferred();
-    };
+    match print_line(&value) {
+        Ok(()) => code,
+        Err(()) => deferred(),
+    }
+}
+
+/// One `print(json.dumps(value))` line; `Err` when stdout refused it (or the
+/// value holds something the encoder refuses, which nothing here builds).
+fn print_line(value: &Json) -> Result<(), ()> {
+    let bytes = sent_json::encode(value).map_err(|_| ())?;
     let mut text = String::from_utf8(bytes).expect("report is UTF-8");
     text.push('\n');
-    if io::stdout()
-        .lock()
+    let mut stdout = io::stdout().lock();
+    stdout
         .write_all(&super::text_bytes(&text))
-        .is_ok()
+        .and_then(|()| stdout.flush())
+        .map_err(|_| ())
+}
+
+/// Whether file descriptor 1 exists at all. On POSIX, CPython then has no
+/// `sys.stdout` (`None`), so `export` to stdout fails with its generic
+/// line, while Rust's stdout would silently discard the lines. On Windows a
+/// process started without a stdout handle still gets a `sys.stdout` that
+/// discards writes (observed: export exits 0 with nothing written), as
+/// Rust's does, so nothing is detected there.
+fn stdout_present() -> bool {
+    #[cfg(unix)]
     {
-        code
-    } else {
-        1
+        rustix::io::fcntl_getfd(io::stdout()).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 

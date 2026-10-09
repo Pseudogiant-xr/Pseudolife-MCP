@@ -228,6 +228,21 @@ pub(super) fn ascii_compact(value: &Value, out: &mut String) -> Option<()> {
 mod tests {
     use super::*;
 
+    /// Random and boundary binary64 values against CPython's own repr,
+    /// recorded once from the oracle interpreter.
+    #[test]
+    fn finite_float_matches_cpython_repr_table() {
+        let table = include_str!("../../../tests/cli_audit_float_repr.tsv");
+        let mut checked = 0;
+        for line in table.lines().filter(|line| !line.starts_with('#')) {
+            let (bits, expected) = line.split_once('\t').expect("bits TAB repr");
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).expect("hex bits"));
+            assert_eq!(finite_float(value).unwrap(), expected, "bits {bits}");
+            checked += 1;
+        }
+        assert!(checked > 5000, "{checked}");
+    }
+
     #[test]
     fn scalar_bytes_and_number_token_classes() {
         let mut value: Value = serde_json::from_str(

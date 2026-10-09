@@ -334,6 +334,21 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     write_lines(args, Outcome::Lines(text))
 }
 
+/// `OSError.strerror` of a failed file write in CPython. POSIX: the C
+/// library's `strerror` text, which std prints before ` (os error N)`.
+/// Windows: CPython writes through the C runtime's `_write`, which maps the
+/// Win32 error to an errno and names it with the runtime's own table; only
+/// a full disk (`ERROR_DISK_FULL` -> `ENOSPC`) is pinned here.
+fn write_strerror(error: &std::io::Error) -> Option<String> {
+    let code = error.raw_os_error()?;
+    if cfg!(windows) {
+        return (code == 112).then(|| "No space left on device".to_owned());
+    }
+    let text = error.to_string();
+    text.strip_suffix(&format!(" (os error {code})"))
+        .map(str::to_owned)
+}
+
 /// Python creates `--out` before resolving `--agent`, so a refused agent
 /// leaves that new empty file behind; stdout gets nothing.
 fn write_refusal(args: &Export, message: String) -> Ending {
@@ -354,14 +369,20 @@ fn write_lines(args: &Export, outcome: Outcome) -> Ending {
         else {
             return Ending::Deferred;
         };
-        if file
-            .write_all(text.as_bytes())
-            .and_then(|()| file.flush())
-            .is_err()
-        {
+        if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.flush()) {
+            // As `_export`: the file this run created is removed, then
+            // `cannot write PATH: <strerror>`, exit 2.
             drop(file);
             let _ = std::fs::remove_file(out);
-            return Ending::Deferred;
+            return match write_strerror(&error) {
+                Some(text) => {
+                    crate::stderrln!("board-audit: cannot write {out}: {text}");
+                    Ending::Exit(2)
+                }
+                // Declared: a Windows error the C runtime's mapping is not
+                // pinned for. The created file is already removed again.
+                None => Ending::Deferred,
+            };
         }
     } else if !text.is_empty() {
         let mut stdout = std::io::stdout().lock();
@@ -384,6 +405,28 @@ fn write_lines(args: &Export, outcome: Outcome) -> Ending {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_failures_name_cpython_strerror() {
+        let full = std::io::Error::from_raw_os_error(if cfg!(windows) { 112 } else { 28 });
+        assert_eq!(
+            write_strerror(&full).as_deref(),
+            Some("No space left on device")
+        );
+        if cfg!(windows) {
+            // ERROR_IO_DEVICE: the C runtime's errno for it is not pinned.
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(1117)),
+                None
+            );
+        } else {
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(5)).as_deref(),
+                Some("Input/output error")
+            );
+        }
+        assert_eq!(write_strerror(&std::io::Error::other("no code")), None);
+    }
 
     #[test]
     fn prefixes_follow_the_producer() {

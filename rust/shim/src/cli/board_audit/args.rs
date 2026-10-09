@@ -106,6 +106,20 @@ fn path_value(value: &str) -> bool {
     if cfg!(windows) && value.contains('/') {
         return false;
     }
+    // A colon is admitted only as the drive of a drive-absolute path
+    // (`X:\...`): pathlib rewrites drive-relative spellings (`C:.\a` prints
+    // as `C:a`), and every other colon placement is left to the oracle.
+    if cfg!(windows) && value.contains(':') {
+        let bytes = value.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || bytes[2] != b'\\'
+            || value[2..].contains(':')
+        {
+            return false;
+        }
+    }
     let mut parts = value.split(separators);
     let first = parts.next().unwrap_or_default();
     let rest: Vec<_> = parts.collect();
@@ -246,6 +260,31 @@ mod tests {
             vec!["--help"],
         ] {
             assert!(parse(&argv(&deferred)).is_none(), "{deferred:?}");
+        }
+    }
+
+    #[test]
+    fn only_pathlib_stable_paths_are_admitted() {
+        assert!(path_value("archive.jsonl"));
+        assert!(path_value("-"));
+        assert!(!path_value("./a"));
+        assert!(!path_value("a//b"));
+        if cfg!(windows) {
+            assert!(path_value("C:\\x\\a.jsonl"));
+            for spelling in [
+                "C:.\\a",
+                "C:a",
+                "C:",
+                "a\\b:c",
+                "C:\\a:b",
+                "C:/a",
+                "\\\\host\\s",
+            ] {
+                assert!(!path_value(spelling), "{spelling}");
+            }
+        } else {
+            assert!(path_value("/tmp/a:b"));
+            assert!(!path_value("a/"));
         }
     }
 

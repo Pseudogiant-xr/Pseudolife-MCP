@@ -19,7 +19,9 @@ import atexit
 import base64
 import json
 import os
+import re
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -134,12 +136,47 @@ def seed_rich(conn) -> dict:
     to_redact = store.send(*_creds(a), to=c["agent_id"], text="redact me later",
                            request_id="later")["message_id"]
     later()
+    # Sent at seeding's wall clock, so it expires a day after any run and a
+    # redaction's LEAST(expires_at, now) moves it to the arm's own clock.
+    # (The store caps expiry at a day after its clock.) Later rows keep it.
+    tick[0] = max(tick[0], time.time())
+    future = store.send(*_creds(a), to=c["agent_id"], text="lives past the run",
+                        request_id="future")["message_id"]
+    later()
+    # Ids sharing a prefix, so prefix resolution is ambiguous. uuid4 is the
+    # writers' only source of ids; the rows are still the store's own.
+    with _chosen_uuids(AGENT_TWINS):
+        twins = [store.register("carol", label="twin")["agent_id"] for _ in AGENT_TWINS]
+    with _chosen_uuids(MESSAGE_TWINS):
+        twin_mail = [store.send(*_creds(a), to=c["agent_id"], text=f"twin {n}",
+                                request_id=f"twin-{n}")["message_id"]
+                     for n in range(len(MESSAGE_TWINS))]
+    if twins != AGENT_TWINS or twin_mail != MESSAGE_TWINS:
+        raise RuntimeError(f"chosen ids not used: {twins} {twin_mail}")
+    later()
     store.update(*_creds(c, "bob"), status="after the prune")
     return {"a": a["agent_id"], "b": b["agent_id"], "c": c["agent_id"],
             "direct": direct["message_id"], "legacy": legacy, "v45": v45,
-            "redacted": redacted, "to_redact": to_redact,
+            "redacted": redacted, "to_redact": to_redact, "future": future,
             "burst": [r["message_id"] for r in burst["receipts"]],
             "hello": [r["message_id"] for r in hello["receipts"]]}
+
+
+AGENT_TWINS = ["ab12cd34ef56000000000000000000a1", "ab12cd34ef57000000000000000000a2"]
+MESSAGE_TWINS = ["cd34ef56ab1200000000000000000001", "cd34ef56ab1300000000000000000002"]
+
+
+@contextmanager
+def _chosen_uuids(hexes):
+    """``uuid.uuid4`` returns these, in order, then the real thing again."""
+    import uuid  # noqa: PLC0415
+    queue = [uuid.UUID(value) for value in hexes]
+    real = uuid.uuid4
+    uuid.uuid4 = lambda: queue.pop(0) if queue else real()
+    try:
+        yield
+    finally:
+        uuid.uuid4 = real
 
 
 def seed_pruned(conn) -> dict:
@@ -188,7 +225,7 @@ def _name(kind: str) -> str:
 def _drop_all() -> None:
     for name in sorted(_CREATED):
         try:
-            _bank.drop(name)
+            _drop(name)
         except Exception:  # noqa: BLE001 (best-effort cleanup at exit)
             pass
 
@@ -196,9 +233,24 @@ def _drop_all() -> None:
 atexit.register(_drop_all)
 
 
+def _drop(name: str) -> None:
+    """``_bank.drop``, waiting out an autovacuum worker on the database: the
+    test login may not terminate one (the redactions' VACUUM/ANALYZE and
+    row churn can start one), and it finishes on its own."""
+    import psycopg  # noqa: PLC0415
+    for attempt in range(60):
+        try:
+            _bank.drop(name)
+            return
+        except (psycopg.errors.InsufficientPrivilege, psycopg.errors.ObjectInUse):
+            if attempt == 59:
+                raise
+            time.sleep(0.5)
+
+
 def _copy(source: str, target: str) -> None:
     _bank.url(target)  # validates the name
-    _bank.drop(target)
+    _drop(target)
     _CREATED.add(target)
     with _bank._admin() as conn:
         conn.execute(f'CREATE DATABASE "{target}" TEMPLATE "{source}"')
@@ -218,6 +270,12 @@ def ensure(kind: str) -> str:
         _copy(ensure("rich"), name)
         with _bank.connect(name, autocommit=True) as conn:
             conn.execute("UPDATE coordination_events SET task='elsewhere' WHERE seq=2")
+    elif kind == "prev46":
+        # A restored v42-v45 bank read before any v46 daemon started, made
+        # as test_board_audit_cli.test_a_bank_before_v46_... makes it.
+        _copy(ensure("legacy"), name)
+        with _bank.connect(name, autocommit=True) as conn:
+            conn.execute("ALTER TABLE coordination_events DROP COLUMN body")
     else:
         _bank.create(name)
         with _bank.connect(name, autocommit=True) as conn:
@@ -281,6 +339,17 @@ def archive(variant: str) -> bytes:
     raw = export_bytes("rich")
     if variant == "rich":
         return raw
+    first = raw.split(b"\n", 1)[0] + b"\n"
+    digits = b"9" * 4301
+    if variant == "duplicate-truncated":
+        # The repeated key's object never closes: Python says "not JSON".
+        return first + b'{"seq":1,"seq":2\n'
+    if variant == "duplicate-then-long-int":
+        # The long integer is refused while scanning, before the close.
+        return first + b'{"a":1,"a":2,"n":' + digits + b"}\n"
+    if variant == "duplicate-nested-then-long-int":
+        # The inner object closes, and its repeated key is refused, first.
+        return first + b'{"a":{"x":1,"x":2},"n":' + digits + b"}\n"
     if variant == "rich-crlf":
         return raw.replace(b"\n", b"\r\n")
     if variant == "rich-cr-blank":
@@ -363,7 +432,12 @@ def audit_redact_clock(obs: dict) -> None:
     is hashed. Validated, then tokenized: the newest event must be a redact
     whose created_at lies inside this arm's run window and whose hash is the
     oracle's ``audit_hash`` of that row; its created_at and hash become
-    tokens, and so does that hash wherever stdout or stderr print it."""
+    tokens. Every printed hash reference must be this arm's own validated
+    hash before it is replaced: stdout's ``redact_hash`` and ``expect_head``
+    (when stdout carries the result), the stderr ``--expect-head SEQ:HASH``
+    note, and no other 64-hex string or literal token anywhere. The live
+    message row's ``expires_at``, when a redaction's ``LEAST(expires_at,
+    now)`` moved it to exactly that clock, is tokenized the same way."""
     from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
     db = obs.get("db")
     if not isinstance(db, dict):
@@ -378,13 +452,49 @@ def audit_redact_clock(obs: dict) -> None:
     if (row["event"] != "redact" or not start - 1 <= row["created_at"] <= end + 1
             or audit_hash(row["prev_hash"], row) != row["hash"]):
         return
-    digest = row["hash"]
+    digest, head = row["hash"], f"{row['seq']}:{row['hash']}"
+    stdout, stderr = base64.b64decode(obs["stdout"]), base64.b64decode(obs["stderr"])
+    if b"<redact-hash>" in stdout + stderr:
+        return
+    if stdout.strip():
+        try:
+            result = json.loads(stdout)
+        except ValueError:
+            return
+        if result.get("redact_hash") != digest or result.get("expect_head") != head:
+            return
+    if f"--expect-head {head}`".encode() not in stderr:
+        return
+    if any(found.decode() != digest for found in re.findall(rb"[0-9a-f]{64}", stdout + stderr)):
+        return
+    clock = row["created_at"]
     row["created_at"] = "<redact-clock>"
     row["hash"] = "<redact-hash>"
     rows[newest] = json.dumps(row)
-    for field in ("stdout", "stderr"):
-        data = base64.b64decode(obs[field]).replace(digest.encode(), b"<redact-hash>")
-        obs[field] = base64.b64encode(data).decode()
+    messages = db["tables"].get("coordination_messages", [])
+    for index, text in enumerate(messages):
+        message = json.loads(text)
+        if message["message_id"] == row["message_id"] and message["expires_at"] == clock:
+            message["expires_at"] = "<redact-clock>"
+            messages[index] = json.dumps(message)
+    for field, data in (("stdout", stdout), ("stderr", stderr)):
+        obs[field] = base64.b64encode(data.replace(digest.encode(), b"<redact-hash>")).decode()
+
+
+_TRAILER = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
+                      rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+@normalize.rule("audit-stdout-closed-trailer")
+def audit_stdout_closed_trailer(obs: dict) -> None:
+    """Declared substitution ``audit-stdout-closed-trailer``: after a
+    committed redaction whose result line stdout refused, CPython's
+    interpreter-shutdown flush fails, prints an ignored-exception trailer
+    and exits 120. The native CLI keeps exit 120 and prints no synthetic
+    trailer. Only that exact trailer, with exit 120, is removed."""
+    stderr = base64.b64decode(obs["stderr"])
+    if obs["exit"] == 120 and _TRAILER.search(stderr):
+        obs["stderr"] = base64.b64encode(_TRAILER.sub(b"", stderr)).decode()
 
 
 # --- cases -----------------------------------------------------------------------
@@ -454,7 +564,8 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     return case
 
 
-def file_case(case_id, argv, *, files=None, rules=(), note=""):
+def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
+              platforms=("windows", "linux"), note=""):
     """A file-only action (no bank in the environment)."""
     original = ["board-audit", *argv]
 
@@ -464,27 +575,33 @@ def file_case(case_id, argv, *, files=None, rules=(), note=""):
         _stash(arm)
 
     case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
-                     rules=rules, note=note)
+                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note)
     return case
 
 
-def archive_case(case_id, variant, *extra, rules=()):
+def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
     return file_case(case_id, ["verify", "--input", _home("archive.jsonl"), *extra],
-                     files={"archive.jsonl": lambda: archive(variant)}, rules=rules)
+                     files={"archive.jsonl": lambda: archive(variant)}, rules=rules,
+                     stdout_closed=stdout_closed)
 
 
 REDACT_DB = PREFIX + "rd"
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
-                hold=False, note=""):
-    """A redaction on this arm's own TEMPLATE copy of a seeded bank."""
+                hold=False, prepare=(), stdout_closed=False, note=""):
+    """A redaction on this arm's own TEMPLATE copy of a seeded bank;
+    ``prepare`` statements run on that copy first (test instruments only)."""
     original = ["board-audit", "redact", "--message-id",
                 message if isinstance(message, _Lazy) or isinstance(message, str)
                 else _Lazy(message), "--reason", reason]
 
     def setup(arm):
         _copy(ensure(source), REDACT_DB)
+        if prepare:
+            with _bank.connect(REDACT_DB, autocommit=True) as conn:
+                for statement in prepare:
+                    conn.execute(statement.replace("{DB}", REDACT_DB))
         _resolve_argv(case, original)
         if hold:
             import psycopg  # noqa: PLC0415
@@ -505,8 +622,23 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
 
     case = core.Case(case_id, list(original),
                      env={**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(REDACT_DB)},
-                     setup=setup, after=after, rules=rules, timeout=60, note=note)
+                     setup=setup, after=after, rules=rules, timeout=60,
+                     stdout_closed=stdout_closed, note=note)
     return case
+
+
+# Test instrument for the vacuum-skip path (the test login owns every table,
+# so Postgres never skips a step for it): ANALYZE evaluates an expression
+# index on each sampled row, and this expression raises a WARNING there,
+# which `_vacuum` collects exactly as it collects a permission skip. The
+# database default also hides warnings, as a role or database setting can.
+VACUUM_WARNING = (
+    "CREATE FUNCTION audit_test_warning(text) RETURNS text IMMUTABLE LANGUAGE plpgsql "
+    "AS $$BEGIN RAISE WARNING 'audit test warning'; RETURN $1; END$$",
+    "CREATE INDEX audit_test_warning_idx ON coordination_messages "
+    "(audit_test_warning(message_id))",
+    'ALTER DATABASE "{DB}" SET client_min_messages = error',
+)
 
 
 def _rich(key, index=None, cut=None):
@@ -637,6 +769,40 @@ def cases() -> list[core.Case]:
                   files={"archive.jsonl": b"not JSON\n"}, rules=("rust-deferral",)),
         redact_case("defer-reason-format-char", "rich", _rich("to_redact"),
                     "zero​width", rules=("rust-deferral",)),
+        # review round 1 (O1): a repeated key is reported when its object closes
+        archive_case("input-duplicate-nested-then-long-int", "duplicate-nested-then-long-int"),
+        archive_case("defer-input-duplicate-truncated", "duplicate-truncated",
+                     rules=("rust-deferral",)),
+        archive_case("defer-input-duplicate-then-long-int", "duplicate-then-long-int",
+                     rules=("rust-deferral",)),
+        # (C3) pathlib reprints a drive-relative spelling: defer it
+        file_case("defer-input-drive-relative",
+                  ["verify", "--input", "C:.\\missing-audit-archive.jsonl"],
+                  rules=("rust-deferral",), platforms=("windows",)),
+        # (O2) a stdout that refuses the report
+        archive_case("defer-input-stdout-closed", "rich", rules=("rust-deferral",),
+                     stdout_closed=True),
+        read_case("defer-bank-verify-stdout-closed", "rich", ["verify"],
+                  rules=("rust-deferral",), stdout_closed=True),
+        redact_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
+                    rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
+                    stdout_closed=True),
+        redact_case("defer-redact-refusal-stdout-closed", "rich", _rich("redacted"), "again",
+                    rules=("rust-deferral",), stdout_closed=True),
+        # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
+        # the vacuum-skip path with warnings hidden by default
+        redact_case("redact-future-expiry", "rich", _rich("future"), "wrong paste"),
+        read_case("export-agent-ambiguous", "rich", ["export", "--agent", "ab12cd34"]),
+        read_case("export-agent-ambiguous-out", "rich",
+                  ["export", "--agent", "ab12cd34ef5", "--out", _home("out.jsonl")]),
+        read_case("export-agent-twin", "rich", ["export", "--agent", "ab12cd34ef57"]),
+        redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
+        redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
+        read_case("bank-verify-prev46", "prev46", ["verify"]),
+        read_case("export-prev46", "prev46", ["export"]),
+        redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why"),
+        redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
+                    prepare=VACUUM_WARNING),
     ]
     return out
 
@@ -671,4 +837,36 @@ MUTANTS = [
     Mutant("audit-siblings-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
            "            siblings.push(row.try_get::<_, String>(0)?);",
            "            let _ = row;", ("redact-fanout-siblings",)),
+    # review round 1
+    Mutant("audit-duplicate-eager", "audit", "shim/src/cli/board_audit/archive.rs",
+           "            repeated |= !keys.insert(key);",
+           "            if !keys.insert(key) {\n                self.0.set(true);\n"
+           "                return Err(de::Error::custom(\"duplicate decoded key\"));\n"
+           "            }",
+           ("defer-input-duplicate-truncated", "defer-input-duplicate-then-long-int")),
+    Mutant("audit-drive-relative-admitted", "audit", "shim/src/cli/board_audit/args.rs",
+           "    if cfg!(windows) && value.contains(':') {",
+           "    if cfg!(windows) && value.contains(':') && false {",
+           ("defer-input-drive-relative",)),
+    Mutant("audit-verify-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/mod.rs",
+           "        Err(()) => deferred(),", "        Err(()) => 1,",
+           ("defer-input-stdout-closed", "defer-bank-verify-stdout-closed")),
+    Mutant("audit-redact-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/redact.rs",
+           "    } else {\n        120\n    };", "    } else {\n        1\n    };",
+           ("redact-stdout-closed",)),
+    Mutant("audit-printed-hash-token", "audit", "shim/src/cli/board_audit/redact.rs",
+           'let expect_head = format!("{}:{}", redacted.redact_seq, redacted.redact_hash);',
+           'let expect_head = format!("{}:<redact-hash>", redacted.redact_seq);',
+           ("redact-removed",)),
+    Mutant("audit-least-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
+           "        cleared = text.is_some();\n        tx.execute(\n            \"UPDATE "
+           "coordination_messages SET text=NULL,fingerprint='redacted',expires_at=LEAST("
+           "expires_at,$1) WHERE message_id=$2\",",
+           "        cleared = text.is_some();\n        tx.execute(\n            \"UPDATE "
+           "coordination_messages SET text=NULL,fingerprint='redacted',expires_at=expires_at"
+           "+0*$1 WHERE message_id=$2\",",
+           ("redact-future-expiry",)),
+    Mutant("audit-vacuum-warnings-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
+           "Some(tokio_postgres::error::Severity::Warning)",
+           "Some(tokio_postgres::error::Severity::Notice)", ("redact-vacuum-warning",)),
 ]

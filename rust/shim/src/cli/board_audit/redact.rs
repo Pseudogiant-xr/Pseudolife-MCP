@@ -422,12 +422,16 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
                 "already_redacted" => "this message's body is already redacted",
                 other => other,
             };
-            let code = super::report(line, 1);
+            // Nothing was changed (rolled back), so a stdout that refuses
+            // the refusal line defers.
+            if super::print_line(&line).is_err() {
+                return bank::Ending::Deferred;
+            }
             match detail {
                 Some(detail) => crate::stderrln!("board-audit: {explained}: {detail}"),
                 None => crate::stderrln!("board-audit: {explained}"),
             }
-            return bank::Ending::Exit(code);
+            return bank::Ending::Exit(1);
         }
     };
     let (skipped, vacuumed) = match vacuum(session).await {
@@ -472,7 +476,16 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
         ));
     }
     fields.push(("vacuumed".into(), Json::Bool(vacuumed)));
-    let code = super::report(Json::Object(fields), 0);
+    // The redaction is committed. CPython's print is buffered, so a stdout
+    // that refuses it fails only in the interpreter's shutdown flush, after
+    // every note below: exit 120 (its ignored-exception trailer is the
+    // declared substitution `audit-stdout-closed-trailer`). Never exit 1,
+    // which would read as a refusal.
+    let code = if super::print_line(&Json::Object(fields)).is_ok() {
+        0
+    } else {
+        120
+    };
     if redacted.audit_copy == "kept" {
         crate::stderrln!(
             "board-audit: the live copy is blanked and out of delivery, but this message was sent before schema v46: the audit log keeps its body until audit retention removes the send event"
