@@ -143,12 +143,13 @@ fn missing_input_and_incomplete_argv_defer_without_creating_a_bank() {
         .arg(home.join("missing"))
         .output()
         .unwrap();
-    assert_eq!(missing.status.code(), Some(1));
+    // Named as the oracle names it (`cannot read PATH`, exit 2).
+    assert_eq!(missing.status.code(), Some(2));
     assert!(missing.stdout.is_empty());
     assert!(
         String::from_utf8(missing.stderr)
             .unwrap()
-            .contains("deferred")
+            .contains("cannot read")
     );
     let incomplete = command(&home).args(["verify", "--input"]).output().unwrap();
     assert_eq!(incomplete.status.code(), Some(1));
