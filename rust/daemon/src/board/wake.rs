@@ -264,7 +264,7 @@ pub async fn wake_decision(
         return Ok(obj_map(json!({"decision": "not_needed", "reason": "no_park"})));
     }
     let counts_urgent = how == "urgent" || (done && how == "clearer");
-    if counts_urgent {
+    if counts_urgent && !crate::mutants::active("board-urgent-cap-off") {
         let sent = count(
             &c.query_one(
                 "SELECT count(*) AS n FROM coordination_wakes WHERE \

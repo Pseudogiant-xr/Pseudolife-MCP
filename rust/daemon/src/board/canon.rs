@@ -104,7 +104,7 @@ fn write(value: &Value, sort: bool, out: &mut String) {
         Value::Object(map) => {
             out.push('{');
             let mut keys: Vec<&String> = map.keys().collect();
-            if sort {
+            if sort && !crate::mutants::active("board-canonical-unsorted") {
                 // Python sorts str keys by code point; UTF-8 byte order agrees.
                 keys.sort();
             }

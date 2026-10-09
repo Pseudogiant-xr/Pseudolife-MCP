@@ -193,7 +193,11 @@ fn receipt(row: &MessageRow) -> Map<String, Value> {
 /// `_wake`: `live` when the recipient's attached adapter opted into wake.
 fn path_for(agent: &AgentRow, now: f64) -> &'static str {
     let attached = agent.attachment_id.is_some() && agent.lease_until.unwrap_or(0.0) > now;
-    if attached && agent.wake_enabled { "live" } else { "pull" }
+    if (attached && agent.wake_enabled) || crate::mutants::active("board-receipt-path-live") {
+        "live"
+    } else {
+        "pull"
+    }
 }
 
 /// `_send_result`.
@@ -1030,7 +1034,7 @@ impl Store {
             .filter(|r| r.first_read_at.is_none())
             .map(|r| r.message_id.clone())
             .collect();
-        if !unread.is_empty() {
+        if !unread.is_empty() && !crate::mutants::active("board-no-read-event") {
             let tx = client.transaction().await?;
             tx.query(
                 "SELECT 1 FROM coordination_agents WHERE agent_id=$1 FOR UPDATE",

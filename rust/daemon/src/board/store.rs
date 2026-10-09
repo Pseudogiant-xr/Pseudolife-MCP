@@ -1013,7 +1013,12 @@ impl Store {
                 set(&mut fields, "park_set_at", float_value(now));
                 let standing = if parked { row.park_expires } else { None };
                 if !has(&fields, "park_expires") && standing.is_none() {
-                    fields.push(("park_expires".into(), float_value(now + PARK_DEFAULT_TTL)));
+                    let ttl = if crate::mutants::active("board-park-default-ttl") {
+                        PARK_DEFAULT_TTL / 2.0
+                    } else {
+                        PARK_DEFAULT_TTL
+                    };
+                    fields.push(("park_expires".into(), float_value(now + ttl)));
                 }
                 let expires = fields
                     .iter()
