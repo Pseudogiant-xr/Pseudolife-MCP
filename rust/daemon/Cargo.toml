@@ -11,6 +11,10 @@ description = "Contract-first Rust port of the Pseudolife memory daemon"
 name = "pseudolife-daemon"
 path = "src/main.rs"
 
+[features]
+# Deliberate breaks for the harness mutant control; never in a release build.
+mutants = []
+
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1", "with-chrono-0_4"] }
@@ -19,6 +23,7 @@ chrono.workspace = true
 sha2.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true
+yaml-rust2.workspace = true
 # Crate-local pins: the versions the 2026-10-09 contract-first spike was proven with.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"
