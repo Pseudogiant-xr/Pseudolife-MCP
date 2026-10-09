@@ -661,8 +661,9 @@ hook GETs now use `hook_http::get`: hyper's HTTP/1 client over a socket
 whose every read and write must progress within the timeout, as
 `socket.settimeout` bounds each recv, with each resolved address tried in
 order, urllib's request fields and `HTTPRedirectHandler`'s limits (a URL at
-most four times, ten distinct targets), with http.client's Title-Case field
-names. https verifies against the system trust store loaded by
+most four times, ten distinct targets). Field names go out in Title-Case;
+urllib spells some with one capital (`User-agent`), and field-name case is
+not compared (HTTP names are case-insensitive). https verifies against the system trust store loaded by
 `rustls-native-certs` (honouring `SSL_CERT_FILE`/`SSL_CERT_DIR`) with
 rustls's webpki verifier, so no revocation lookup can block a probe; the
 handshake has one deadline and each TLS read must yield plaintext within the

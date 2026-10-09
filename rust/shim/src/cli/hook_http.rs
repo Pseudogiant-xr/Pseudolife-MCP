@@ -135,7 +135,8 @@ async fn once(
         Box::new(Inactivity::new(socket, timeout))
     };
     let (mut sender, connection) =
-        // http.client writes Title-Case field names.
+        // Conventional Title-Case names (urllib writes `User-agent`;
+        // field-name case carries no meaning in HTTP).
         hyper::client::conn::http1::Builder::new()
             .title_case_headers(true)
             .handshake(hyper_util::rt::TokioIo::new(stream))

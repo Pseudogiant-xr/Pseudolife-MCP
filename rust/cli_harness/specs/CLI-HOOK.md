@@ -41,7 +41,6 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 | Health redirects: a URL at most four times, at most ten distinct targets | `HTTPRedirectHandler.max_repeats/max_redirections` |
 | https origins verified against the system trust store or `SSL_CERT_FILE`, no revocation lookup; one handshake deadline; each TLS read yields plaintext within the timeout; ragged EOF reads as EOF | `ssl.create_default_context`, `_ssl.c` deadlines, `suppress_ragged_eofs` |
 | Payload requests rejected at a non-2xx head, body unread | `HTTPErrorProcessor` |
-| Title-Case request field names | `http.client.putheader` |
 | prompt-hook: session id `[A-Za-z0-9._-]{1,128}`; mark `<digest dir>/<sha256>.mark`, first line as `since` when it is `[0-9.]{1,22}`; one GET with session_id and since; cursor line validated before any write | `:153-209` |
 | prompt-hook output: the UserPromptSubmit hook JSON only for a non-empty note; mark rewritten as `cursor\n`; marks older than 30 days pruned on a session's first note | `:210-234` |
 | prompt-hook silence: exit 0 with no output on invalid input, transport failure or unwritable stdout | `:237-251` |
