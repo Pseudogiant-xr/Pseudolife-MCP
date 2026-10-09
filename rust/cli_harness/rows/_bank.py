@@ -57,8 +57,16 @@ def _admin():
 
 
 def drop(name: str) -> None:
+    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
     url(name)  # validates the name
     with _admin() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone()
+        if exists:
+            # Ask the server which database the name reaches before reaping
+            # anything on it (tests/test_disposable_database_guard.py).
+            with _connect(name) as target:
+                assert_disposable_database(target)
         # Only this login's sessions: an autovacuum worker is not ours to end,
         # and DROP ... WITH (FORCE) waits it out.
         conn.execute(
