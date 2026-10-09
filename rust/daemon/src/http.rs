@@ -47,13 +47,14 @@ impl App {
         store: Arc<auth::PrincipalStore>,
         static_dir: Option<PathBuf>,
     ) -> App {
+        let mcp = crate::mcp::McpState::from_env(env_tokens.configured());
         App {
             service,
             env_tokens,
             store,
             static_dir,
             pair_failures: Mutex::new(VecDeque::new()),
-            mcp: crate::mcp::McpState::from_env(env_tokens.configured()),
+            mcp,
         }
     }
 
