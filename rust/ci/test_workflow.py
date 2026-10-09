@@ -106,7 +106,7 @@ def check_executable_coverage(jobs):
                     ("python", "rust/cli_harness/lease_ci.py"))
     schema = commands(parity["Daemon schema startup parity"]["run"])
     require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
-                    ("--no-build", "--rust-test-bin", "--out"), ("--build-only", "--record-goldens"))
+                    ("--out",), ("--record-goldens",))
     assert not any(words[0] == "cargo" for words in schema)
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
@@ -148,12 +148,8 @@ def test_shards_cover_both_systems_and_build_once():
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
     assert len(builds) == 1
     assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio -j 4"
-    daemon = next(step for step in jobs["candidate"]["steps"]
-                  if step.get("name") == "Build daemon schema test executable")
-    require_command(commands(daemon["run"]), ("python", "daemon/harness/schema_ci.py"),
-                    ("--build-only", "--out"), ("--no-build", "--record-goldens"))
-    assert not any("--build-only" in words for step in jobs["parity-checks"]["steps"]
-                   for words in commands(step.get("run", "")))
+    assert not any("schema_ci.py" in step.get("run", "")
+                   for step in jobs["candidate"]["steps"])
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -185,7 +181,7 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     permission = next(s for s in job["steps"] if s.get("name") == "Restore executable permission")
     assert permission["if"] == "runner.os == 'Linux'"
-    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio rust/target/release/daemon-schema-test"
+    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio"
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
@@ -227,9 +223,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
-    ("Daemon schema startup parity", "--no-build", ""),
-    ("Daemon schema startup parity", "--rust-test-bin $candidate", ""),
-    ("Daemon schema startup parity", "--no-build", "--no-build --record-goldens"),
+    ("Daemon schema startup parity", "--out", "--record-goldens --out"),
+    ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
     ("CLI differential harness", "--golden", ""),
     ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),

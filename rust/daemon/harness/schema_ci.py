@@ -9,7 +9,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -50,12 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--record-goldens", action="store_true", help="record oracle post-state fixtures after a clean run")
-    parser.add_argument("--build-only", action="store_true", help="copy the built test executable to --out for another CI job")
     args = parser.parse_args(argv)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
-    if args.build_only and (args.no_build or args.record_goldens):
-        parser.error("--build-only cannot be combined with --no-build or --record-goldens")
 
     env = dict(os.environ, PL_HARNESS_SLICE="pgs")
     env["PYTHONPATH"] = str(REPO) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
@@ -65,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             [sys.executable, "-m", "unittest", "discover", "-s", str(HERE),
              "-p", "test_schema_*.py"],
         ]
-        for command in ([] if args.build_only else checks):
+        for command in checks:
             code = subprocess.run(command, cwd=REPO, env=env).returncode
             if code:
                 return code
@@ -95,10 +91,6 @@ def main(argv: list[str] | None = None) -> int:
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        if args.build_only:
-            shutil.copy2(binary, output)
-            print(f"daemon test executable: {output}", flush=True)
-            return 0
         command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
                    "--all-versions", "--refusals", "--mutants", "--out", str(output)]
         command.append("--record-goldens" if args.record_goldens else "--check-goldens")
