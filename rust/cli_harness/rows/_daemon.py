@@ -55,11 +55,20 @@ class RealDaemon:
             "USERPROFILE": str(self.data),
         })
         self._log = open(self.data / "daemon.log", "wb")
-        creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self.proc = subprocess.Popen(
-            [ORACLE["python"], "-P", "-m", "pseudolife_memory.cli", "serve"], env=env,
-            cwd=str(ORACLE["source"]), stdout=self._log, stderr=subprocess.STDOUT,
-            creationflags=creation)
+        self.proc = None
+        try:
+            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            self.proc = subprocess.Popen(
+                [ORACLE["python"], "-P", "-m", "pseudolife_memory.cli", "serve"],
+                env=env, cwd=str(ORACLE["source"]), stdout=self._log,
+                stderr=subprocess.STDOUT, creationflags=creation)
+            self._await_health()
+        except BaseException:
+            # Not yet in the pool, so nothing else would stop it or drop its bank.
+            self.shutdown()
+            raise
+
+    def _await_health(self) -> None:
         deadline = time.time() + 180
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -103,12 +112,13 @@ class RealDaemon:
         pass  # shared across the row; shutdown() at exit
 
     def shutdown(self) -> None:
-        self.proc.terminate()
-        try:
-            self.proc.wait(20)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            self.proc.wait(20)
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(20)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(20)
         self._log.close()
         _bank.drop(self.bank)
         shutil.rmtree(self.data, ignore_errors=True)

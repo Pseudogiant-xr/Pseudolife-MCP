@@ -39,7 +39,9 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 | Connection order: each resolved address in turn with its own timeout (a `localhost` URL reaches an IPv4-only daemon inside the 0.25 s probe) | urllib `socket.create_connection` |
 | Timeouts bound each receive and send, not the whole reply: a reply trickled inside the timeout completes, one that stalls past it fails; the same over https | `socket.settimeout` |
 | Health redirects: a URL at most four times, at most ten distinct targets | `HTTPRedirectHandler.max_repeats/max_redirections` |
-| https origins verified against the platform trust store | `ssl.create_default_context` |
+| https origins verified against the system trust store or `SSL_CERT_FILE`, no revocation lookup; one handshake deadline; each TLS read yields plaintext within the timeout; ragged EOF reads as EOF | `ssl.create_default_context`, `_ssl.c` deadlines, `suppress_ragged_eofs` |
+| Payload requests rejected at a non-2xx head, body unread | `HTTPErrorProcessor` |
+| Title-Case request field names | `http.client.putheader` |
 | prompt-hook: session id `[A-Za-z0-9._-]{1,128}`; mark `<digest dir>/<sha256>.mark`, first line as `since` when it is `[0-9.]{1,22}`; one GET with session_id and since; cursor line validated before any write | `:153-209` |
 | prompt-hook output: the UserPromptSubmit hook JSON only for a non-empty note; mark rewritten as `cursor\n`; marks older than 30 days pruned on a session's first note | `:210-234` |
 | prompt-hook silence: exit 0 with no output on invalid input, transport failure or unwritable stdout | `:237-251` |
@@ -58,9 +60,12 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 
 ## Declared divergences (not exercised by canonical cases)
 
-Not covered on Windows: https in the harness (the platform trust store cannot
-hold the test CA without changing the system; `hook_http` unit tests cover
-TLS, trickle and stall with injected roots on both OSes).
+Declared divergences: on Windows a set `SSL_CERT_FILE` replaces the system
+store where CPython unions the two; proxy settings (`HTTP(S)_PROXY`,
+`NO_PROXY`, the Windows registry) are not consulted (deferred by ruling: no
+shipped producer sets a proxy for the daemon URL); non-canonical redirect
+shapes (3xx without Location, a redirect-limit reply with a JSON body, the
+`URI` header, ftp targets) and 1xx replies other than 100 are not emulated.
 
 The PORTING.md hook substitutions stand: `hook-strict-json-refusal`,
 `hook-bounded-json-nesting`, `hook-typed-markdown`, `hook-ascii-numeric`,

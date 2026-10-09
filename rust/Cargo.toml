@@ -40,7 +40,6 @@ rustls-pemfile = "2"
 percent-encoding = "2"
 regex = "=1.13.1"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
-rustls-platform-verifier = "=0.7.1"
 hyper = { version = "=1.11.1", features = ["server", "client", "http1"] }
 hyper-util = { version = "=0.1.21", features = ["tokio"] }
 http-body-util = "=0.1.5"

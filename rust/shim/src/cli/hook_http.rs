@@ -37,7 +37,8 @@ pub(super) struct Reply {
 ///   `HTTPRedirectHandler`'s limits (a URL at most four times, at most ten
 ///   distinct targets); otherwise a 3xx comes back as the reply.
 ///
-/// https uses the platform's trust store, as reqwest did. `None` is a
+/// https verifies against the system trust store, as CPython's default
+/// context does; proxy settings are not consulted (declared deferral). `None` is a
 /// transport failure, a malformed or short reply, or a redirect past the
 /// limits.
 pub(super) async fn get(
@@ -61,7 +62,7 @@ async fn get_with(
     let mut url = format!("{origin}{target}");
     let mut visited: HashMap<String, u32> = HashMap::new();
     loop {
-        let (reply, location) = once(&url, authorization, timeout, tls.clone()).await?;
+        let (reply, location) = once(&url, authorization, timeout, follow, tls.clone()).await?;
         if !(follow && matches!(reply.status, 301 | 302 | 303 | 307 | 308)) {
             return Some(reply);
         }
@@ -86,6 +87,7 @@ async fn once(
     url: &str,
     authorization: Option<&[u8]>,
     timeout: Duration,
+    follow: bool,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<(Reply, Option<String>)> {
     let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
@@ -115,7 +117,7 @@ async fn once(
     let stream: Box<dyn Stream> = if secure {
         let config = match tls {
             Some(config) => config,
-            None => platform_tls()?,
+            None => system_tls()?,
         };
         let name = rustls::pki_types::ServerName::try_from(host).ok()?;
         // CPython bounds the whole handshake by the socket timeout, then each
@@ -133,7 +135,10 @@ async fn once(
         Box::new(Inactivity::new(socket, timeout))
     };
     let (mut sender, connection) =
-        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
+        // http.client writes Title-Case field names.
+        hyper::client::conn::http1::Builder::new()
+            .title_case_headers(true)
+            .handshake(hyper_util::rt::TokioIo::new(stream))
             .await
             .ok()?;
     let driver = tokio::spawn(connection);
@@ -157,7 +162,13 @@ async fn once(
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         if !follow && !(200..300).contains(&status) {
-            return Some((Reply { status, body: Vec::new() }, location));
+            return Some((
+                Reply {
+                    status,
+                    body: Vec::new(),
+                },
+                location,
+            ));
         }
         let body = response
             .into_body()
@@ -173,15 +184,19 @@ async fn once(
     reply
 }
 
-fn platform_tls() -> Option<Arc<rustls::ClientConfig>> {
-    use rustls_platform_verifier::BuilderVerifierExt;
+/// CPython's default context: the system trust store (or `SSL_CERT_FILE` /
+/// `SSL_CERT_DIR`), certificate and hostname verification, no revocation
+/// lookups. Declared gap: on Windows a set `SSL_CERT_FILE` replaces the
+/// system store here, where CPython unions the two.
+fn system_tls() -> Option<Arc<rustls::ClientConfig>> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
     let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
     .with_safe_default_protocol_versions()
     .ok()?
-    .with_platform_verifier()
-    .ok()?
+    .with_root_certificates(roots)
     .with_no_client_auth();
     // http.client offers ALPN http/1.1 on its default context.
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
@@ -432,7 +447,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_tls_reply_that_stalls_past_the_timeout_fails() {
         let (server_tls, client_tls) = tls_pair();
-        let (port, task) = server(OK.to_vec(), 20, Duration::from_millis(500), Some(server_tls)).await;
+        let (port, task) = server(
+            OK.to_vec(),
+            20,
+            Duration::from_millis(500),
+            Some(server_tls),
+        )
+        .await;
         let reply = get_with(
             &format!("https://localhost:{port}"),
             "/health",
@@ -448,27 +469,34 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn a_handshake_slower_than_the_timeout_fails_even_while_bytes_flow() {
-        // A relay forwards the server's handshake 16 bytes every 40 ms: each
-        // TCP read progresses, but the handshake as a whole takes far longer
-        // than 250 ms, which CPython's do_handshake deadline refuses.
+        // A relay forwards the server's first 768 bytes (its handshake flight)
+        // 16 bytes every 20 ms, then everything else at once: each TCP read
+        // progresses, but the handshake takes far longer than 250 ms, which
+        // CPython's do_handshake deadline refuses.
         let (server_tls, client_tls) = tls_pair();
         let (port, task) = server(OK.to_vec(), OK.len(), Duration::ZERO, Some(server_tls)).await;
         let relay = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let relay_port = relay.local_addr().unwrap().port();
         let relay_task = tokio::spawn(async move {
             let (client, _) = relay.accept().await.unwrap();
-            let upstream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let upstream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
             let (mut client_read, mut client_write) = client.into_split();
             let (mut up_read, mut up_write) = upstream.into_split();
             tokio::spawn(async move {
                 let _ = tokio::io::copy(&mut client_read, &mut up_write).await;
             });
             let mut buffer = [0u8; 16];
+            let mut forwarded = 0;
             while let Ok(read) = up_read.read(&mut buffer).await {
                 if read == 0 || client_write.write_all(&buffer[..read]).await.is_err() {
                     return;
                 }
-                tokio::time::sleep(Duration::from_millis(40)).await;
+                forwarded += read;
+                if forwarded < 768 {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
             }
         });
         let reply = get_with(

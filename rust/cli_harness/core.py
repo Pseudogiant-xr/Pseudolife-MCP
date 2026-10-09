@@ -72,6 +72,10 @@ class Case:
     # Needs real oracle daemons on disposable banks: live local acceptance
     # only, never golden replay (the candidate still needs the oracle daemon).
     bank: bool = False
+    # The case exists to show both arms succeed (a trickle, an https daemon):
+    # an arm with empty stdout makes the case differ instead of matching
+    # vacuously when both arms fail the same quiet way.
+    expect_output: bool = False
     note: str = ""
 
     def runs_here(self) -> bool:
@@ -244,6 +248,8 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         if daemon is not None:
             observation["daemon_url"] = daemon.url
             observation["requests"] = daemon.requests()
+        if case.expect_output and not out:
+            observation["vacuous"] = "no stdout where the case requires output"
         if case.after:
             case.after(arm, observation)
         if "listener" in arm.state:

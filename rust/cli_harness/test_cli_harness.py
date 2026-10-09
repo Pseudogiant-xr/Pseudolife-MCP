@@ -154,3 +154,9 @@ def test_episode_title_minute_rewrites_only_an_in_window_minute():
     renamed = {**body(inside), "body": body(inside)["body"].replace("proj", "other")}
     assert compare.diff(a, dict(obs(requests=[renamed]), utc_offset=offset),
                         ("episode-title-minute",))
+
+
+def test_a_vacuous_arm_is_a_difference_even_when_both_match():
+    quiet = dict(obs(), vacuous="no stdout where the case requires output")
+    assert compare.diff(quiet, dict(quiet), ())
+    assert compare.diff(obs(stdout=b"x"), dict(obs(stdout=b"x"), vacuous="v"), ())

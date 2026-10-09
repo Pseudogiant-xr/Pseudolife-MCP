@@ -189,14 +189,12 @@ fn public_health_payload_and_redirect_headers_keep_their_scopes() {
             .starts_with("GET /api/briefing?max_unsure=3&max_lessons=3&max_world=3 HTTP/1.1\r\n")
     );
     for (index, request) in requests.iter().enumerate() {
+        // urllib's request fields, with http.client's Title-Case names.
+        assert!(request.contains("\r\nUser-Agent: Python-urllib/3.11\r\n"));
+        assert!(request.contains("\r\nAccept-Encoding: identity\r\n"));
+        assert!(request.contains("\r\nConnection: close\r\n"));
         let headers = request.to_ascii_lowercase();
-        assert!(headers.contains("\r\nuser-agent: python-urllib/3.11\r\n"));
-        assert!(headers.contains("\r\naccept: */*\r\n"));
-        assert!(
-            !headers.contains("\r\nreferer:")
-                && !headers.contains("\r\naccept-encoding:")
-                && !headers.contains("\r\nconnection:")
-        );
+        assert!(!headers.contains("\r\nreferer:") && !headers.contains("\r\naccept:"));
         assert_eq!(
             headers.contains("\r\nauthorization: bearer synthetic-hook\r\n"),
             index == 2

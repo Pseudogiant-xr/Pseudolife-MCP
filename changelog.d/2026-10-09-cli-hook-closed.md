@@ -1,7 +1,7 @@
 ### Fixed (2026-10-09 — native briefing, prompt-hook and doorbell receipt closed)
 
 - The native `briefing`, `prompt-hook` and `doorbell-prompt-seen` match the
-  Python commands on all canonical cases (62 on Windows, 65 on Linux) on Windows and Linux, checked by
+  Python commands on all canonical cases (65 on Windows and on Linux) on Windows and Linux, checked by
   the CLI differential harness against a fixture daemon, including each
   request sent on the wire. Fixed on the way: `briefing --help` printed
   doubled carriage returns from a CRLF checkout, the Windows default (the help
