@@ -3,7 +3,6 @@
 //! (`codex_connection.installer_credential_valid`) through `urlopen`, which
 //! follows redirects. Environment proxies defer before any request (see
 //! `proxies_configured`).
-use super::Defer;
 use super::pyjson::{self, J};
 use std::time::Duration;
 
@@ -44,22 +43,27 @@ async fn read(response: &mut reqwest::Response, limit: Option<usize>) -> Result<
     Ok(body)
 }
 
+/// The oracle raised `RecursionError` reading the answer: past the read
+/// path's measured nesting limit.
+#[derive(Debug)]
+pub(super) struct TooDeep;
+
 /// `json.loads(body.decode("utf-8"))` as a dict, else `None` (a decode or
-/// JSON error, or another type). A value Python reads but no Rust string
-/// holds defers.
-fn dict(body: &[u8]) -> Result<Option<pyjson::Dict>, Defer> {
+/// JSON error, the digit-limit `ValueError`, or another type).
+fn dict(body: &[u8], limit: usize) -> Result<Option<pyjson::Dict>, TooDeep> {
     let Ok(text) = std::str::from_utf8(body) else {
         return Ok(None);
     };
-    Ok(match pyjson::loads(text)? {
-        Some(J::Dict(dict)) => Some(dict),
-        _ => None,
-    })
+    match pyjson::loads(text, limit) {
+        Ok(J::Dict(dict)) => Ok(Some(dict)),
+        Ok(_) | Err(pyjson::Refused::NotJson) => Ok(None),
+        Err(pyjson::Refused::TooDeep) => Err(TooDeep),
+    }
 }
 
 /// `pair_cli.probe_health(url)`: the body of any HTTP answer (a redirect's
 /// too: `_NoRedirectHandler` turns it into an `HTTPError`) as a dict.
-pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, Defer> {
+pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
     let Some(client) = client(Duration::from_secs(5), false) else {
         return Ok(None);
     };
@@ -69,12 +73,12 @@ pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, Defer
     let Ok(body) = read(&mut response, Some(MAX_RESPONSE_BYTES)).await else {
         return Ok(None);
     };
-    dict(&body)
+    dict(&body, pyjson::PAIR_DEPTH)
 }
 
 /// `expose_cli.probe_health(url, 3.0)`: a JSON object from any non-redirect
 /// answer, else `None`.
-pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, Defer> {
+pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
     let Some(client) = client(Duration::from_secs(3), false) else {
         return Ok(None);
     };
@@ -87,7 +91,7 @@ pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, Def
     let Ok(body) = read(&mut response, None).await else {
         return Ok(None);
     };
-    dict(&body)
+    dict(&body, pyjson::INVITE_DEPTH)
 }
 
 /// One `pair_cli.post_pair`: `Err` when no HTTP answer arrived (Python's
@@ -110,20 +114,12 @@ pub(super) async fn post_pair(url: &str, body: &str) -> Result<(u16, Option<pyjs
         Err(()) if success => return Err(()),
         Err(()) => return Ok((status, None)),
     };
-    Ok((status, payload(&text)))
-}
-
-/// The redemption answer as `_json` reads it. Past the effect nothing may
-/// defer: a lone surrogate reads as U+FFFF (neither is a principal name or
-/// printable, the only uses of the values), and the reader's other limits
-/// (nesting past 100, integers past 4300 digits) read as no payload, which
-/// is Python's answer for the digits and for nesting past its recursion
-/// limit (a declared band between the two).
-fn payload(body: &[u8]) -> Option<pyjson::Dict> {
-    let text = std::str::from_utf8(body).ok()?;
-    match pyjson::loads_lossy(text) {
-        Ok(Some(J::Dict(dict))) => Some(dict),
-        _ => None,
+    match dict(&text, pyjson::PAIR_DEPTH) {
+        Ok(payload) => Ok((status, payload)),
+        // `_json` lets RecursionError through: out of a 2xx's `with` block it
+        // is no answer; an HTTPError's body read catches it (no payload).
+        Err(TooDeep) if success => Err(()),
+        Err(TooDeep) => Ok((status, None)),
     }
 }
 

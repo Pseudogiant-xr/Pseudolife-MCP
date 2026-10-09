@@ -90,7 +90,20 @@ fn assert_output(output: &Output, code: i32, stdout: &str, stderr: &str) {
 #[test]
 fn invite_refusals_before_the_database_match_the_oracle() {
     let home = Home::new("invite-refusals");
-    let cases: [(&[&str], i32, &str, &str); 6] = [
+    let cases: [(&[&str], i32, &str, &str); 8] = [
+        // `target = args.name or args.revoke`: an empty --revoke is a target.
+        (
+            &["--list", "--revoke", ""],
+            2,
+            "",
+            "invite: '' is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
+        ),
+        (
+            &["", "--list", "--revoke", ""],
+            2,
+            "",
+            "invite: '' is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
+        ),
         (
             &[],
             2,
@@ -431,6 +444,45 @@ fn pair_refusals_before_any_change_match_the_oracle() {
         pair.args(&argv);
         assert_output(&run(pair, stdin), code, "", &stderr);
     }
+    assert!(token_files(&home.0).is_empty());
+}
+
+#[test]
+fn pair_answers_health_values_only_python_holds() {
+    let home = Home::new("pair-wtf");
+    // A lone surrogate, as json.dumps writes it back.
+    let fixture = daemon(r#"{"status": "ok", "auth": ["\ud800", 1e400]}"#, vec![]);
+    let mut pair = command(&home.0, "pair");
+    pair.args([fixture.url.as_str(), "abcd-efgh-jkmn"]);
+    assert_output(
+        &run(pair, b""),
+        4,
+        "",
+        &format!(
+            "pair: the daemon at {} does not report authentication (auth: [\"\\ud800\", Infinity]); pairing needs a daemon with a bearer token. Nothing was changed\n",
+            fixture.url
+        ),
+    );
+    // An integer past 4300 digits is int()'s ValueError: not JSON.
+    let body: &'static str = Box::leak(
+        format!(
+            "{{\"status\": \"ok\", \"auth\": true, \"x\": 1{}}}",
+            "0".repeat(4300)
+        )
+        .into_boxed_str(),
+    );
+    let fixture = daemon(body, vec![]);
+    let mut pair = command(&home.0, "pair");
+    pair.args([fixture.url.as_str(), "abcd-efgh-jkmn"]);
+    assert_output(
+        &run(pair, b""),
+        4,
+        "",
+        &format!(
+            "pair: the daemon at {} did not answer /health with status ok; nothing was changed\n",
+            fixture.url
+        ),
+    );
     assert!(token_files(&home.0).is_empty());
 }
 

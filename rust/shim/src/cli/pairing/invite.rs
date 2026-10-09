@@ -169,17 +169,29 @@ impl Report {
     }
 
     fn note(&mut self, line: &str) {
-        if let Some((_, J::List(notes))) = self.data.iter_mut().find(|(key, _)| key == "notes") {
+        if let Some((_, J::List(notes))) = self
+            .data
+            .iter_mut()
+            .find(|(key, _)| key.as_str() == Some("notes"))
+        {
             notes.push(J::Str(line.to_owned()));
         }
         self.say(line);
     }
 
     fn fail(&mut self, code: u8, line: &str) -> u8 {
-        self.set("error", J::Str(line.to_owned()));
+        self.fail_units(code, units(line))
+    }
+
+    /// `fail` for a line that may hold a lone surrogate: Python's stderr
+    /// writes it backslash-escaped, the JSON report as a `\u` escape.
+    fn fail_units(&mut self, code: u8, line: Vec<u16>) -> u8 {
         if !self.json {
-            super::eprint(&format!("invite: {line}"));
+            let mut text = units("invite: ");
+            text.extend(&line);
+            super::eprint(&pyjson::backslashreplace(&text));
         }
+        self.set("error", pyjson::text(line));
         self.finish(code)
     }
 
@@ -197,7 +209,10 @@ fn when(epoch: Option<f64>) -> Result<String, Defer> {
     let Some(epoch) = epoch.filter(|epoch| *epoch != 0.0) else {
         return Ok("-".to_owned());
     };
-    if !epoch.is_finite() {
+    // 1970-01-01 to 9999-12-31: glibc prints a year before 1000 unpadded
+    // where this formatting pads it, and Windows' gmtime refuses negative
+    // times; outside the range the oracle's own answer depends on the host.
+    if !(0.0..253_402_300_800.0).contains(&epoch) {
         return Err(Defer);
     }
     let moment = chrono::DateTime::from_timestamp(epoch.floor() as i64, 0).ok_or(Defer)?;
@@ -398,6 +413,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         return Ok(EXIT_OK);
     }
     let mut report = Report::new(args.json);
+    // Python truthiness: an empty value counts as no mode.
     let name = args.name.clone().filter(|name| !name.is_empty());
     let revoke = args.revoke.clone().filter(|name| !name.is_empty());
     let modes =
@@ -408,7 +424,13 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
             "give one of: a name to invite, --list, or --revoke NAME",
         ));
     }
-    if let Some(target) = name.as_ref().or(revoke.as_ref()) {
+    // `target = args.name or args.revoke`: an empty --revoke is a target.
+    let target = if name.is_some() {
+        name.clone()
+    } else {
+        args.revoke.clone()
+    };
+    if let Some(target) = target.as_ref() {
         if !super::valid_principal_name(target) {
             return Ok(report.fail(
                 EXIT_USAGE,
@@ -437,7 +459,6 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     let dsn = crate::pg::Dsn::parse(&dsn).map_err(|_| Defer)?;
     let url = args.url.clone().filter(|url| !url.is_empty());
     let port = args.port.unwrap_or(default_port);
-    let mut health = None;
     if name.is_some() {
         if url.is_none() && tailscale_maybe_present()? {
             return Err(Defer);
@@ -445,12 +466,39 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         if config_maybe_present()? {
             return Err(Defer);
         }
-        match daemon_check(port, &mut report).await? {
-            Ok(found) => health = Some(found),
-            Err(refusal) => return Ok(report.fail(EXIT_REFUSED, &refusal)),
+    }
+    // Everything that could still defer happens here, before an invite's
+    // only request: the connection (Python opens it after `/health`; a
+    // refusal of it is deferred instead), the session settings, and the
+    // checks that leave nothing to defer once the request went out.
+    let mut session = crate::pg::Session::open(&dsn).await.map_err(|_| Defer)?;
+    let ready = async {
+        invite_db::setup(session.client()).await?;
+        if name.is_some() {
+            invite_db::prepare(session.client()).await?;
+        }
+        Ok::<(), DbError>(())
+    }
+    .await;
+    if ready.is_err() {
+        let _ = session.close().await;
+        return Err(Defer);
+    }
+    let mut health = None;
+    if name.is_some() {
+        let checked = daemon_check(port, &mut report).await;
+        match checked {
+            Ok(Ok(found)) => health = Some(found),
+            Ok(Err(refusal)) => {
+                let _ = session.close().await;
+                return Ok(report.fail_units(EXIT_REFUSED, refusal));
+            }
+            Err(Defer) => {
+                let _ = session.close().await;
+                return Err(Defer);
+            }
         }
     }
-    let mut session = crate::pg::Session::open(&dsn).await.map_err(|_| Defer)?;
     let outcome = local(
         &args,
         &mut report,
@@ -466,34 +514,50 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     outcome
 }
 
+/// UTF-16 code units of a message (a refusal may quote a daemon value that
+/// holds a lone surrogate).
+fn units(text: &str) -> Vec<u16> {
+    text.encode_utf16().collect()
+}
+
+/// `f"{prefix}{value}{suffix}"` with `str(value)`.
+fn quoting(prefix: &str, value: &J, suffix: &str) -> Vec<u16> {
+    let mut out = units(prefix);
+    out.extend(value.py_str_units());
+    out.extend(units(suffix));
+    out
+}
+
 /// `_daemon_check(port, report, need_auth=True)`: the health, or the
-/// refusal; the report's `daemon` member is set as Python sets it.
+/// refusal; the report's `daemon` member is set as Python sets it. `Defer`
+/// only for a `/health` nested past CPython's recursion limit, where the
+/// oracle dies with a `RecursionError` traceback (declared).
 async fn daemon_check(
     port: u32,
     report: &mut Report,
-) -> Result<Result<pyjson::Dict, String>, Defer> {
+) -> Result<Result<pyjson::Dict, Vec<u16>>, Defer> {
     let local = format!("http://127.0.0.1:{port}");
-    let health = net::invite_health(&local).await?;
+    let health = net::invite_health(&local).await.map_err(|_| Defer)?;
     let Some(health) =
         health.filter(|h| pyjson::get(h, "status").and_then(J::as_str) == Some("ok"))
     else {
-        return Ok(Err(format!(
+        return Ok(Err(units(&format!(
             "no healthy daemon answers at {local}/health: start it (or pass --port), then re-run"
-        )));
+        ))));
     };
     let member = |key: &str| pyjson::get(&health, key).cloned().unwrap_or(J::Null);
     report.set(
         "daemon",
         J::Dict(vec![
-            ("auth".into(), member("auth")),
-            ("schema".into(), member("schema")),
-            ("bank".into(), member("bank")),
+            (J::Str("auth".into()), member("auth")),
+            (J::Str("schema".into()), member("schema")),
+            (J::Str("bank".into()), member("bank")),
         ]),
     );
     if pyjson::get(&health, "auth") != Some(&J::Bool(true)) {
-        return Ok(Err(format!(
+        return Ok(Err(units(&format!(
             "the daemon at {local} does not report \"auth\": true. Stored principals do not turn authentication on: give the daemon a token first (docs/guide/remote-bank.md)"
-        )));
+        ))));
     }
     let schema = member("schema");
     let old = match &schema {
@@ -504,36 +568,42 @@ async fn daemon_check(
         _ => true,
     };
     if old {
-        return Ok(Err(format!(
-            "the daemon runs schema {}, older than invite (v{MIN_SCHEMA}): update the daemon first",
-            schema.py_str()
+        return Ok(Err(quoting(
+            "the daemon runs schema ",
+            &schema,
+            &format!(", older than invite (v{MIN_SCHEMA}): update the daemon first"),
         )));
     }
     if !member("bank").truthy() {
-        return Ok(Err("the daemon has not reported which bank it serves yet (/health bank is null until its storage has started and the agent board has been used once): start a session against it, then re-run".to_owned()));
+        return Ok(Err(units(
+            "the daemon has not reported which bank it serves yet (/health bank is null until its storage has started and the agent board has been used once): start a session against it, then re-run",
+        )));
     }
     Ok(Ok(health))
 }
 
 /// `_bank_refusal`: `None` when the bank is the expected one.
-fn bank_refusal(bank: Option<&str>, expected: &J, what: &str) -> Option<String> {
+fn bank_refusal(bank: Option<&str>, expected: &J, what: &str) -> Option<Vec<u16>> {
     if matches!((bank, expected), (Some(bank), J::Str(expected)) if bank == expected)
         || (bank.is_none() && *expected == J::Null)
     {
         return None;
     }
-    Some(format!(
-        "this database holds bank {}, but {what} is bank {}: it is another database. Nothing was changed",
-        bank.unwrap_or("(none)"),
-        expected.py_str()
+    Some(quoting(
+        &format!(
+            "this database holds bank {}, but {what} is bank ",
+            bank.unwrap_or("(none)")
+        ),
+        expected,
+        ": it is another database. Nothing was changed",
     ))
 }
 
 const NO_TABLE: &str = "this bank has no principals table yet (schema v53): update the daemon and let it start, then re-run";
 
 /// `_local` after the daemon check: the database errors as Python reports
-/// them; an error whose psycopg class is not pinned defers (its statement
-/// or transaction changed nothing).
+/// them (`classify`); `Defer` remains only for a value this client cannot
+/// decode, which `prepare` rules out before an invite's request.
 #[allow(clippy::too_many_arguments)]
 async fn local(
     args: &Args,
@@ -546,7 +616,6 @@ async fn local(
     health: Option<pyjson::Dict>,
 ) -> Result<u8, Defer> {
     let result = async {
-        invite_db::setup(session.client()).await?;
         let bank_given = args.bank.clone().filter(|bank| !bank.is_empty());
         if name.is_some() || bank_given.is_some() {
             let bank = invite_db::bank_of(session.client()).await?;
@@ -611,7 +680,7 @@ async fn local(
             url,
             args.expires.unwrap_or(900),
         )),
-        Ok(Err(refusal)) => Ok(report.fail(EXIT_REFUSED, &refusal)),
+        Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
         Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
         Err(DbError::Refused(message)) => {
             Ok(report.fail(EXIT_REFUSED, &format!("{message}. Nothing was changed")))
@@ -852,6 +921,15 @@ mod tests {
         assert_eq!(when(Some(0.0)).unwrap(), "-");
         assert_eq!(when(Some(1_700_000_059.9)).unwrap(), "2023-11-14 22:14 UTC");
         assert!(when(Some(f64::NAN)).is_err());
+        // Outside 1970..=9999 the platforms disagree (glibc prints year 1
+        // unpadded, Windows' gmtime refuses negative times): deferred.
+        assert!(when(Some(-62_135_596_800.0)).is_err());
+        assert!(when(Some(-1.0)).is_err());
+        assert!(when(Some(253_402_300_800.0)).is_err());
+        assert_eq!(
+            when(Some(253_402_300_799.0)).unwrap(),
+            "9999-12-31 23:59 UTC"
+        );
     }
 
     #[test]
@@ -860,14 +938,19 @@ mod tests {
             bank_refusal(Some("ab"), &J::Str("ab".into()), "--bank"),
             None
         );
+        let text = |units: Vec<u16>| String::from_utf16(&units).unwrap();
         assert_eq!(
-            bank_refusal(None, &J::Str("ab".into()), "--bank").unwrap(),
+            text(bank_refusal(None, &J::Str("ab".into()), "--bank").unwrap()),
             "this database holds bank (none), but --bank is bank ab: it is another database. Nothing was changed"
         );
         assert!(
-            bank_refusal(Some("ab"), &J::Int("5".into()), "x")
-                .unwrap()
-                .contains("bank 5:")
+            text(bank_refusal(Some("ab"), &J::Int("5".into()), "x").unwrap()).contains("bank 5:")
+        );
+        // A lone surrogate in the daemon's value stays a code unit.
+        let message = bank_refusal(Some("ab"), &J::Wtf(vec![0xd800]), "x").unwrap();
+        assert_eq!(
+            pyjson::backslashreplace(&message),
+            "this database holds bank ab, but x is bank \\ud800: it is another database. Nothing was changed"
         );
     }
 }

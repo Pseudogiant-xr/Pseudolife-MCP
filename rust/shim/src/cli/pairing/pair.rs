@@ -323,7 +323,11 @@ async fn redeem(
             )),
         ));
     }
-    let health = net::pair_health(url).await?;
+    // Drawn before the first request, so nothing after it can defer on it.
+    let token = base64_urlsafe(&super::random_bytes(32)?);
+    // Declared: past the measured nesting limit the oracle dies with an
+    // uncaught RecursionError traceback (exit 1); this defers (exit 1).
+    let health = net::pair_health(url).await.map_err(|_| Defer)?;
     let Some(health) =
         health.filter(|health| pyjson::get(health, "status").and_then(J::as_str) == Some("ok"))
     else {
@@ -346,7 +350,6 @@ async fn redeem(
             )),
         ));
     }
-    let token = base64_urlsafe(&super::random_bytes(32)?);
     if let Err(failure) = token_file::write(&target, &token) {
         let error = match failure {
             Failure::Exists => format!(
@@ -367,10 +370,17 @@ async fn redeem(
         "{{\"code\": \"{code}\", \"token_sha256\": \"{}\"}}",
         super::sha256_hex(&token)
     );
+    // `target.unlink(missing_ok=True)`: any error but a missing file escapes
+    // the oracle as an uncaught traceback (exit 1, the file left in place).
+    // Declared: this leaves the file too and exits 1 with the deferral line.
     let refused = |mut report: Report, state: &'static str, error: String| {
-        let _ = std::fs::remove_file(&target);
-        report.token_file = None;
-        report.done(state, EXIT_REFUSED, Some(error))
+        match std::fs::remove_file(&target) {
+            Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => Err(Defer),
+            _ => {
+                report.token_file = None;
+                Ok(report.done(state, EXIT_REFUSED, Some(error)))
+            }
+        }
     };
     let mut answer = None;
     let mut uncertain = false;
@@ -396,26 +406,26 @@ async fn redeem(
             return Ok(report.done("unknown", EXIT_UNKNOWN, Some(error)));
         }
         if status == 400 {
-            return Ok(refused(report, "refused", "the daemon refused the pairing code (unknown, expired, already used or revoked); ask the operator for a new one (`pseudolife-mcp invite <machine>` on the daemon host)".to_owned()));
+            return refused(report, "refused", "the daemon refused the pairing code (unknown, expired, already used or revoked); ask the operator for a new one (`pseudolife-mcp invite <machine>` on the daemon host)".to_owned());
         }
         if status == 429 {
-            return Ok(refused(report, "rate_limited", RATE_LIMITED.to_owned()));
+            return refused(report, "rate_limited", RATE_LIMITED.to_owned());
         }
         if matches!(status, 401 | 404 | 405) {
-            return Ok(refused(
+            return refused(
                 report,
                 "refused",
                 format!(
                     "the daemon does not offer pairing (HTTP {status}); update the daemon first, then re-run with the same code"
                 ),
-            ));
+            );
         }
         if (300..500).contains(&status) {
-            return Ok(refused(
+            return refused(
                 report,
                 "refused",
                 format!("the daemon refused the pairing request (HTTP {status})"),
-            ));
+            );
         }
         uncertain = true;
     }

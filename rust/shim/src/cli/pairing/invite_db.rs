@@ -17,7 +17,8 @@ pub(super) enum DbError {
     Refused(String),
     /// Another `psycopg.Error`, by its class name.
     Failed(&'static str),
-    /// An error whose class is not pinned here; nothing was committed.
+    /// A client-side failure no server error explains (a value this client
+    /// cannot decode); `prepare` rules it out before an invite's request.
     Defer,
 }
 
@@ -27,8 +28,8 @@ impl From<Defer> for DbError {
     }
 }
 
-/// The psycopg class a server error raises (`psycopg.errors.lookup`), for
-/// the SQLSTATEs pinned here; an error with no SQLSTATE is a lost
+/// The psycopg class a server error raises (`psycopg.errors.lookup`, else
+/// its SQLSTATE class's base); an error with no SQLSTATE is a lost
 /// connection (`OperationalError`).
 fn classify(error: &tokio_postgres::Error) -> DbError {
     let Some(db) = error.as_db_error() else {
@@ -40,27 +41,67 @@ fn classify(error: &tokio_postgres::Error) -> DbError {
     };
     match db.code().code() {
         "42P01" => DbError::UndefinedTable,
-        code => [
-            ("57014", "QueryCanceled"),
-            ("40P01", "DeadlockDetected"),
-            ("40001", "SerializationFailure"),
-            ("42501", "InsufficientPrivilege"),
-            ("25006", "ReadOnlySqlTransaction"),
-            ("55P03", "LockNotAvailable"),
-            ("57P01", "AdminShutdown"),
-            ("57P02", "CrashShutdown"),
-            ("57P03", "CannotConnectNow"),
-            ("53100", "DiskFull"),
-            ("53200", "OutOfMemory"),
-            ("23502", "NotNullViolation"),
-            ("23514", "CheckViolation"),
-            ("42703", "UndefinedColumn"),
-            ("42883", "UndefinedFunction"),
-        ]
-        .iter()
-        .find(|(state, _)| *state == code)
-        .map_or(DbError::Defer, |(_, class)| DbError::Failed(class)),
+        code => DbError::Failed(super::sqlstate::class_name(code)),
     }
+}
+
+/// The latest database clock an invite may meet: its expiry (at most a day
+/// on) must still print as a four-digit year on every platform.
+const LAST_CLOCK: f64 = 253_402_300_800.0 - 2.0 * 86_400.0;
+
+/// Before an invite's request goes out: whatever this client could fail to
+/// decode afterwards is ruled out now (a `principals` or `meta` column of
+/// another type than the v53 DDL's, a database clock outside 1970..9999).
+/// Reads only; a missing table is left for the oracle's own refusal.
+pub(super) async fn prepare(client: &Client) -> Result<(), DbError> {
+    let rows = client
+        .query(
+            "SELECT c.relname::text, a.attname::text, format_type(a.atttypid, NULL) \
+             FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'public' AND c.relname IN ('principals', 'meta') \
+             AND a.attnum > 0 AND NOT a.attisdropped",
+            &[],
+        )
+        .await
+        .map_err(|_| DbError::Defer)?;
+    const EXPECTED: [(&str, &str, &str); 12] = [
+        ("meta", "key", "text"),
+        ("meta", "value", "jsonb"),
+        ("principals", "principal", "text"),
+        ("principals", "token_hash", "text"),
+        ("principals", "tier", "text"),
+        ("principals", "board", "boolean"),
+        ("principals", "code_hash", "text"),
+        ("principals", "code_expires_at", "double precision"),
+        ("principals", "paired_code_hash", "text"),
+        ("principals", "created_at", "double precision"),
+        ("principals", "paired_at", "double precision"),
+        ("principals", "revoked_at", "double precision"),
+    ];
+    for row in &rows {
+        let (table, column, kind): (String, String, String) = (
+            row.try_get(0).map_err(|_| DbError::Defer)?,
+            row.try_get(1).map_err(|_| DbError::Defer)?,
+            row.try_get(2).map_err(|_| DbError::Defer)?,
+        );
+        if let Some((_, _, wanted)) = EXPECTED
+            .iter()
+            .find(|(t, c, _)| *t == table && *c == column)
+            && *wanted != kind
+        {
+            return Err(DbError::Defer);
+        }
+    }
+    let now: f64 = client
+        .query_one(&format!("SELECT {NOW}"), &[])
+        .await
+        .and_then(|row| row.try_get(0))
+        .map_err(|_| DbError::Defer)?;
+    if !(0.0..LAST_CLOCK).contains(&now) {
+        return Err(DbError::Defer);
+    }
+    Ok(())
 }
 
 fn unique_violation(error: &tokio_postgres::Error) -> bool {
