@@ -85,13 +85,13 @@ def drop(name: str) -> None:
             if row[0] != -2 and row[1]:
                 raise
             refuse_production_database(name)
-        # Only this login's sessions: an autovacuum worker is not ours to end,
-        # and DROP ... WITH (FORCE) waits it out.
+        # Only this login's sessions: an autovacuum worker is not ours to
+        # signal. Plain DROP handles it without FORCE's signal privilege.
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
             "WHERE datname = %s AND pid <> pg_backend_pid() "
             "AND usename = current_user", (name,))
-        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
 
 
 def create(name: str, schema: bool = True) -> str:
@@ -119,23 +119,23 @@ def dump(name: str) -> dict:
     and the catalog shape (columns, indexes, constraints)."""
     out: dict = {"tables": {}, "sequences": {}, "columns": [], "indexes": [], "constraints": []}
     with _connect(name) as conn:
-        tables = [r[0] for r in conn.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1")]
+        tables = sorted(r[0] for r in conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
         for table in tables:
-            out["tables"][table] = [r[0] for r in conn.execute(
-                f'SELECT to_jsonb(t)::text AS j FROM public."{table}" t ORDER BY j')]
-        out["sequences"] = {r[0]: r[1] for r in conn.execute(
+            out["tables"][table] = sorted(r[0] for r in conn.execute(
+                f'SELECT to_jsonb(t)::text AS j FROM public."{table}" t')
+            )
+        out["sequences"] = {r[0]: r[1] for r in sorted(conn.execute(
             "SELECT sequencename, last_value FROM pg_sequences "
-            "WHERE schemaname = 'public' ORDER BY 1")}
-        out["columns"] = [list(r) for r in conn.execute(
+            "WHERE schemaname = 'public'"))}
+        out["columns"] = sorted(list(r) for r in conn.execute(
             "SELECT table_name, column_name, data_type, udt_name, is_nullable, "
             "column_default FROM information_schema.columns "
-            "WHERE table_schema = 'public' ORDER BY 1, 2")]
-        out["indexes"] = [list(r) for r in conn.execute(
+            "WHERE table_schema = 'public'"))
+        out["indexes"] = sorted(list(r) for r in conn.execute(
             "SELECT tablename, indexname, indexdef FROM pg_indexes "
-            "WHERE schemaname = 'public' ORDER BY 1, 2")]
-        out["constraints"] = [list(r) for r in conn.execute(
+            "WHERE schemaname = 'public'"))
+        out["constraints"] = sorted(list(r) for r in conn.execute(
             "SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) "
-            "FROM pg_constraint WHERE connamespace = 'public'::regnamespace "
-            "ORDER BY 1, 2")]
+            "FROM pg_constraint WHERE connamespace = 'public'::regnamespace"))
     return out

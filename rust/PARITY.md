@@ -247,7 +247,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
-| CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
+| CLI-LEASE-core | 2 | Native check/list/run: OS lock truth, FIFO/board acquisition and mirror cleanup, child status and scoped output policies. Phase 4 actions have their own row. | [CLI differential harness](cli_harness/README.md) `--row lease` ([spec](cli_harness/specs/CLI-LEASE-core.md)): 66-case live/golden corpus on Windows and Linux, coordination rows and sequences after every write, seven source mutants caught. Both hosted Parity jobs passed at `d5372952` in [run 37932590137](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37932590137). See [core closure](#cli-lease-core-closure-2026-10-09). | ported-with-substitution |
 | CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | [CLI differential harness](cli_harness/README.md) `--row mail` ([spec](cli_harness/specs/CLI-MAIL.md)): every canonical case exact on Windows (40) and Linux (42) apart from three named rules, 8/8 mutants caught, per-OS goldens, run live by both Parity jobs; see [CLI-MAIL closure](#cli-mail-closure-2026-10-09). The wait-mail producer substitutions stand | ported-with-substitution |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note and cursor, doorbell prompt-arrival receipt. `briefing_cli.py`, `codex_doorbell_state.py` | [CLI differential harness](cli_harness/README.md) `--row hook` ([spec](cli_harness/specs/CLI-HOOK.md)) against a fixture daemon: every canonical case exact on Windows and Linux apart from named rules, requests compared on the wire; see [CLI-HOOK closure](#cli-hook-closure-2026-10-09). The hook and doorbell substitutions stand | ported-with-substitution |
@@ -641,7 +641,7 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | episode-end | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
 | wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
 | doorbell-prompt-seen | 1/2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
-| lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
+| lease | 2/4 | deferred | CLI-LEASE-core verifies native check/list/run through the shared differential candidate; hosted acceptance and CLI-LEASE's hold/break/delegate/designate remainder remain pending. The original in-process lease/coordination tests remain Python baselines. |
 | invite | 2 | deferred | B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error`; direct-bank effect deferred Phase 4, process seam pending |
 | pair | 2 | deferred | B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it`; stdin and retry process fixtures pending |
 | expose | 2 | deferred | B Tailscale status/subprocess/HTTP (`expose_cli.py`); internal `test_expose_cli.py::test_success_runs_the_exact_command_and_prints_the_url`, `test_a_foreign_serve_on_the_port_is_never_replaced`; disposable executable equivalents pending |
@@ -1878,3 +1878,35 @@ retained rather than receiving a comparison waiver.
 the pending-policy description without rewriting Python observations.
 Non-JSON `/health` means quiet no-daemon, separately from the consumed payload
 scope of `hook-strict-json-refusal`; valid degraded JSON 503 remains available.
+
+## CLI-LEASE-core closure (2026-10-09)
+
+The shared CLI differential harness verifies native `lease check`,
+`lease list` and `lease run` over their canonical producer shapes. Its
+[66-case row](cli_harness/rows/lease.py) and
+[specification](cli_harness/specs/CLI-LEASE-core.md) compare live and golden
+observations on Windows and local WSL/Linux. Exit codes, both streams,
+filesystem bytes and modes, decoded HTTP JSON and intermediate coordination
+table rows and sequence positions remain exact except for the three named rules in the spec:
+`lease-http-json`, `lease-seeded-clock` and `lease-native-stdout`.
+
+Seven real source mutants are caught: lock-name hashing, child status, local
+lock truth, same-instance stale mirrors, timeout status, board mirror
+release and the named list filter. CI's existing Parity jobs run live and platform golden comparisons
+with their own disposable PostgreSQL and isolated test login. The original
+Python in-process lease tests remain oracle baselines, rather than being
+adapted to call a different implementation.
+
+Hosted replay at `58f6ad58` failed on schema-catalog ordering across server
+collations; `4e17a667` passed Linux but failed Windows PostgreSQL preparation.
+The repaired `d5372952` passed both complete hosted Parity jobs in
+[run 37932590137](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37932590137),
+including all 66 live and golden cases on each OS. The Windows fixture uses
+owned user-profile PGDATA and a standalone sanitized diagnostic. The shared
+observer sorts coordination rows and sequence positions in Python; historical
+seed clocks and actual lock-wait capture keep their declared bounds. This
+closes the core row with the named substitutions above. Earlier observations
+remain evidence for their own revisions.
+CLI-LEASE's phase 4 remainder and the daemon coordination
+`lease`/`release`/`leases` rows retain their separate acceptance boundaries.
+No per-row performance claim or installed-candidate claim is made.
