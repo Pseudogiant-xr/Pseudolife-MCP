@@ -283,7 +283,9 @@ def maintainer_host_write(obs: dict) -> None:
     - a passkey's ``active_from`` / ``revoked_at`` inside the window;
     - a bootstrap row whose ``expires_at`` is the window plus BOOTSTRAP_TTL
       and whose ``code_hash`` is sha256 of the one 10-symbol base32 code
-      stdout printed: ``expires_at``, ``code_hash`` and the printed code;
+      stdout printed: ``expires_at``, ``code_hash`` and the printed code.
+      When stdout is empty (a refused stdout: the code was never shown),
+      the one such unused row's 64-hex ``code_hash`` and ``expires_at``;
     - the secret, when it differs from the seed's and is 64 lowercase hex.
     """
     from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
@@ -318,6 +320,9 @@ def maintainer_host_write(obs: dict) -> None:
     stdout = base64.b64decode(obs["stdout"])
     printed = _CODE_LINE.findall(stdout)
     codes = [json.loads(text) for text in tables.get("maintainer_bootstrap", [])]
+    unshown = [row for row in codes
+               if not stdout and row["used_at"] is None and _in(row["expires_at"], window, 600.0)
+               and re.fullmatch(r"[0-9a-f]{64}", row["code_hash"])]
     for row in codes:
         if (len(printed) == 1 and _in(row["expires_at"], window, 600.0)
                 and row["code_hash"] == hashlib.sha256(printed[0][0]).hexdigest()):
@@ -325,6 +330,9 @@ def maintainer_host_write(obs: dict) -> None:
             row["code_hash"] = "<code-hash>"
             obs["stdout"] = base64.b64encode(
                 _CODE_LINE.sub(rb"One-time enrolment code: <code>\2", stdout)).decode()
+        elif len(unshown) == 1 and row is unshown[0]:
+            row["expires_at"] = "<clock+600>"
+            row["code_hash"] = "<unshown-code-hash>"
     if codes:
         tables["maintainer_bootstrap"] = sorted(json.dumps(r, sort_keys=True) for r in codes)
     meta = [json.loads(text) for text in tables.get("meta", [])]
@@ -351,6 +359,48 @@ def maintainer_stdout_closed_trailer(obs: dict) -> None:
     stderr = base64.b64decode(obs["stderr"])
     if obs["exit"] == 120 and _TRAILER.search(stderr):
         obs["stderr"] = base64.b64encode(_TRAILER.sub(b"", stderr)).decode()
+
+
+LAST_SHOWN = 253_402_300_799.0
+TWO_DAYS = 2 * 86_400
+
+
+def native_list_defers(dump) -> bool:
+    """Whether the native listing defers its local times on this host, by
+    the rule ``display.rs`` states, computed here with CPython's own
+    ``time.localtime``: TZ set, a shown value outside 0..9999-12-31 UTC or
+    whose local year is outside 1970-9999, and on Windows a shown value that,
+    with two days either side, leaves the current local year or changes its
+    UTC offset (near New Year or a DST change)."""
+    if "TZ" in os.environ:
+        return True
+    year = time.localtime().tm_year
+    for text in dump["tables"].get("maintainer_passkeys", []):
+        row = json.loads(text)
+        for value in (row["active_from"], row["last_used_at"]):
+            if value is None:
+                continue
+            if not 0 <= value <= LAST_SHOWN:
+                return True
+            seconds = int(value // 1)
+            shown = time.localtime(seconds)
+            if not 1970 <= shown.tm_year <= 9999:
+                return True
+            if core.WINDOWS:
+                for near in (seconds - TWO_DAYS, seconds, seconds + TWO_DAYS):
+                    local = time.localtime(near)
+                    if local.tm_year != year or local.tm_gmtoff != shown.tm_gmtoff:
+                        return True
+    return False
+
+
+@normalize.rule("maintainer-list-guard")
+def maintainer_list_guard(obs: dict) -> None:
+    """A listing the native rule defers on this host (``native_list_defers``
+    over the seeded bank): the oracle arm's result is replaced by the
+    deferral expectation, so the branch is checked rather than skipped."""
+    if obs.get("native_list_defers"):
+        maintainer_deferral(obs)
 
 
 # --- the waiting form's harness side ---------------------------------------------
@@ -408,6 +458,51 @@ def burn_during(arm, proc) -> None:
                     raise
 
 
+def terminate_during(arm, proc) -> None:
+    """End the waiting CLI's backend from the server side (the oracle then
+    reports psycopg's class for SQLSTATE 57P01). Only this login's other
+    sessions on this arm's own disposable copy."""
+    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
+    with _bank.connect(ARM_DB, autocommit=True) as conn:
+        if _live_code(conn, proc) is None:
+            return
+        # Past the first poll, so the CLI is between polls.
+        time.sleep(0.5)
+        assert_disposable_database(conn)
+        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                     "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                     "AND usename = current_user")
+
+
+def lock_during(arm, proc) -> None:
+    """Hold the code table while the CLI waits: its next poll meets the
+    session's 5 s lock timeout (SQLSTATE 55P03)."""
+    import psycopg  # noqa: PLC0415
+    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
+    with _bank.connect(ARM_DB, autocommit=True) as conn:
+        if _live_code(conn, proc) is None:
+            return
+        assert_disposable_database(conn)
+        with conn.transaction():
+            conn.execute("LOCK TABLE maintainer_bootstrap IN ACCESS EXCLUSIVE MODE")
+            deadline = time.monotonic() + 30
+            while proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.1)
+            raise psycopg.Rollback
+
+
+def refuse_at_commit(table: str, errcode: str) -> tuple[str, ...]:
+    """Test instrument: a deferred constraint trigger that fails the change's
+    COMMIT with ``errcode``, after every statement before it succeeded."""
+    return (
+        "CREATE FUNCTION harness_refuse_at_commit() RETURNS trigger LANGUAGE plpgsql AS "
+        f"$$BEGIN RAISE EXCEPTION 'refused at commit' USING ERRCODE = '{errcode}'; END$$",
+        "CREATE CONSTRAINT TRIGGER harness_refuse_at_commit AFTER INSERT OR UPDATE ON "
+        f"{table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+        "EXECUTE FUNCTION harness_refuse_at_commit()",
+    )
+
+
 # --- cases -----------------------------------------------------------------------
 
 GUARDS = {
@@ -421,17 +516,28 @@ WRITES = ("maintainer-host-write",)
 
 
 def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
-         stdout_closed=False, skip_if=None, note=""):
-    """``maintainer <argv>`` on this arm's own copy of a seeded bank."""
+         stdout_closed=False, skip_if=None, prepare=(), note=""):
+    """``maintainer <argv>`` on this arm's own copy of a seeded bank;
+    ``prepare`` statements run on that copy first (test instruments)."""
 
     def setup(arm):
         _copy(ensure(kind), ARM_DB)
+        if prepare:
+            from pseudolife_memory.storage.schema import (  # noqa: PLC0415
+                assert_disposable_database,
+            )
+            with _bank.connect(ARM_DB, autocommit=True) as conn:
+                assert_disposable_database(conn)
+                for statement in prepare:
+                    conn.execute(statement)
+        arm.state["prepared"] = _bank.dump(ARM_DB) if prepare else _BASELINE[_name(kind)]
 
     def after(arm, obs):
         obs["arm"] = arm.name
         dump = _bank.dump(ARM_DB)
-        baseline = _BASELINE[_name(kind)]
+        baseline = arm.state["prepared"]
         obs["seed_secret"] = _secret(baseline)
+        obs["native_list_defers"] = native_list_defers(baseline)
         obs["db"] = "unchanged" if dump == baseline else dump
 
     environment = dict(GUARDS)
@@ -443,9 +549,8 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
                      stdout_closed=stdout_closed, skip_if=skip_if, note=note)
 
 
-def _tz_set() -> bool:
-    """The native listing defers its local times while TZ is set."""
-    return "TZ" in os.environ
+LISTING = WRITES + ("maintainer-list-guard",)
+CLOSED = WRITES + ("maintainer-stdout-closed-trailer",)
 
 
 def defer(case_id, kind, argv, **kwargs):
@@ -457,8 +562,8 @@ def cases() -> list[core.Case]:
     return [
         # list
         case("list-empty", "empty", ["list"]),
-        case("list-pending", "pending", ["list"], skip_if=_tz_set),
-        case("list-rich", "rich", ["list"], skip_if=_tz_set),
+        case("list-pending", "pending", ["list"], rules=LISTING),
+        case("list-rich", "rich", ["list"], rules=LISTING),
         # the bank has no maintainer tables (schema before v54)
         case("no-tables-list", "notables", ["list"]),
         case("no-tables-enrol-code", "notables", ["enrol-code", "--no-wait"]),
@@ -496,9 +601,25 @@ def cases() -> list[core.Case]:
         case("reset-rich", "rich", ["reset", "--yes"]),
         case("reset-pending", "pending", ["reset", "--yes"]),
         case("reset-empty", "empty", ["reset", "--yes"]),
+        # a COMMIT that fails after every statement succeeded: Python's error
+        # path with psycopg's class for the SQLSTATE (exact, then the class
+        # prefix fallback), never a deferral
+        case("commit-refused-confirm", "pending", ["confirm", pending[:9]],
+             prepare=refuse_at_commit("maintainer_passkeys", "P0001")),
+        case("commit-refused-reset", "rich", ["reset", "--yes"],
+             prepare=refuse_at_commit("maintainer_passkeys", "XX999")),
+        case("commit-refused-enrol-code", "fresh", ["enrol-code", "--no-wait"],
+             prepare=refuse_at_commit("maintainer_bootstrap", "57P01")),
+        # the bank fails while the committed code waits
+        case("enrol-code-wait-terminated", "fresh", ["enrol-code"], during=terminate_during),
+        case("enrol-code-wait-lock-timeout", "fresh", ["enrol-code"], during=lock_during),
         # a refused stdout after a committed change
         case("confirm-stdout-closed", "pending", ["confirm", pending[:9]], stdout_closed=True,
-             rules=WRITES + ("maintainer-stdout-closed-trailer",)),
+             rules=CLOSED),
+        case("enrol-code-no-wait-stdout-closed", "fresh", ["enrol-code", "--no-wait"],
+             stdout_closed=True, rules=CLOSED),
+        case("enrol-code-wait-stdout-closed", "fresh", ["enrol-code"], stdout_closed=True,
+             rules=CLOSED),
         # deferred before any effect (the oracle arm writes; the candidate must not)
         defer("defer-list-stdout-closed", "rich", ["list"], stdout_closed=True),
         defer("defer-list-tz-set", "rich", ["list"], env={"TZ": "UTC"}),
@@ -544,4 +665,20 @@ MUTANTS = [
     Mutant("maint-unused-codes-kept", "maintainer", "shim/src/cli/maintainer/bank.rs",
            '"DELETE FROM maintainer_bootstrap WHERE used_at IS NULL"',
            '"DELETE FROM maintainer_bootstrap WHERE false"', ("enrol-code-replaces-unused",)),
+    # review round 1
+    Mutant("maint-commit-failure-deferred", "maintainer", "shim/src/cli/maintainer/bank.rs",
+           ".map_err(|error| Stop::Failed(sqlstate_of(&error)))", ".map_err(|_| Stop::Deferred)",
+           ("commit-refused-confirm", "commit-refused-enrol-code")),
+    Mutant("maint-exact-classes-dropped", "maintainer", "shim/src/cli/maintainer/sqlstate.rs",
+           "        return CODES[index].1;\n", "        let _ = index;\n",
+           ("commit-refused-confirm", "enrol-code-wait-lock-timeout")),
+    Mutant("maint-class-fallback-dropped", "maintainer", "shim/src/cli/maintainer/sqlstate.rs",
+           '.map_or("DatabaseError", |(_, class)| class)', '.map_or("DatabaseError", |_| "DatabaseError")',
+           ("commit-refused-reset",)),
+    Mutant("maint-ending-error-ignored", "maintainer", "shim/src/cli/maintainer/bank.rs",
+           ".or_else(|| session.ended_with())", ".or_else(|| None::<SqlState>)",
+           ("enrol-code-wait-terminated",)),
+    Mutant("maint-waiting-stdout-error-dropped", "maintainer", "shim/src/cli/maintainer/bank.rs",
+           '            "error: {}; check PSEUDOLIFE_MCP_DATABASE_URL",\n',
+           '            "error: {}; check the database",\n', ("enrol-code-wait-stdout-closed",)),
 ]

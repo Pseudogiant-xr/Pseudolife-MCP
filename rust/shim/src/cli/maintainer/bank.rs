@@ -3,7 +3,10 @@
 //! `bootstrap_redeemed`, `bootstrap_burned`, `confirm`, `revoke`, `reset`,
 //! `passkeys`) with their statements, clock reads and transaction
 //! boundaries, and `_key_change`'s audit append.
-use super::{Action, STDOUT_REFUSED, display, print, refused};
+use super::{
+    Action, STDOUT_REFUSED, Written, display, print, refused, sqlstate, stdout_error_class,
+    write_unbuffered,
+};
 use crate::{
     board::identity::hex_hash,
     cli::lease::operator::store::audit_timestamp,
@@ -11,6 +14,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+use tokio_postgres::error::SqlState;
 
 const NO_TABLES: &str = "this bank has no maintainer tables yet (schema older than v54); start a v54 daemon once to create them";
 /// `BOOTSTRAP_TTL`: the one-time code's life, and how long the host waits.
@@ -23,16 +27,50 @@ const SECRET_META_KEY: &str = "maintainer_secret_v1";
 const LIVE_KEYS: &str =
     "SELECT count(*) AS n FROM maintainer_passkeys WHERE state IN ('pending','active')";
 
-/// Where an action stops: deferred (before any effect), or a refusal code.
+/// The most a listing may hold and still reach CPython's stdout in one piece
+/// at exit: a pipe's text stream buffers up to `io.DEFAULT_BUFFER_SIZE`
+/// (8192) bytes before its first write, so a refused stdout fails only in
+/// the shutdown flush (exit 120). A longer listing would be written, and
+/// could be refused, part way through the prints: deferred.
+const LISTING_BUFFER: usize = 8192;
+
+/// Where an action stops: deferred (before any effect), a refusal code, or
+/// a failed COMMIT, whose change may have been made durable and so takes
+/// Python's generic error path instead of a deferral.
 enum Stop {
     Deferred,
     Refused(&'static str),
+    /// The SQLSTATE the failure carried, if any.
+    Failed(Option<SqlState>),
 }
 
 impl From<tokio_postgres::Error> for Stop {
     fn from(_: tokio_postgres::Error) -> Self {
         Self::Deferred
     }
+}
+
+fn sqlstate_of(error: &tokio_postgres::Error) -> Option<SqlState> {
+    error.as_db_error().map(|error| error.code().clone())
+}
+
+/// `print(f"error: {type(exc).__name__}; check PSEUDOLIFE_MCP_DATABASE_URL")`
+/// for the psycopg exception: by the failure's SQLSTATE, else by the server
+/// error that ended the connection, else `OperationalError` (a lost
+/// connection with no server error).
+fn failed(session: &pg::Session, code: Option<SqlState>) -> u8 {
+    let class = code
+        .or_else(|| session.ended_with())
+        .map_or("OperationalError", |code| sqlstate::class_name(code.code()));
+    crate::stderrln!("error: {class}; check PSEUDOLIFE_MCP_DATABASE_URL");
+    2
+}
+
+/// COMMIT, whose failure is never a deferral.
+async fn commit(tx: Transaction<'_>) -> Result<(), Stop> {
+    tx.commit()
+        .await
+        .map_err(|error| Stop::Failed(sqlstate_of(&error)))
 }
 
 /// The exit code, or `None` to defer. Nothing is printed before an outcome
@@ -85,6 +123,7 @@ async fn act(session: &mut pg::Session, action: Action) -> Option<u8> {
             STDOUT_REFUSED
         }),
         Err(Stop::Refused(code)) => Some(refused(code)),
+        Err(Stop::Failed(code)) => Some(failed(session, code)),
         Err(Stop::Deferred) => None,
     }
 }
@@ -139,18 +178,30 @@ async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
     match store_code(session, &hash).await {
         Ok(()) => {}
         Err(Stop::Refused(code)) => return Some(refused(code)),
+        Err(Stop::Failed(code)) => return Some(failed(session, code)),
         Err(Stop::Deferred) => return None,
     }
     let minutes = BOOTSTRAP_TTL / 60;
-    let mut shown = print(&format!(
+    let shown = format!(
         "One-time enrolment code: {code}\nValid for {minutes} minutes. Enter it in the Console with a label, then register your passkey.\n"
-    ));
-    if !wait || shown.is_err() {
-        return Some(if shown.is_ok() { 0 } else { STDOUT_REFUSED });
+    );
+    if !wait {
+        // Buffered by CPython until exit, where a refused stdout exits 120.
+        return Some(if print(&shown).is_ok() {
+            0
+        } else {
+            STDOUT_REFUSED
+        });
     }
     let deadline = Instant::now() + Duration::from_secs(BOOTSTRAP_TTL);
-    shown = print("Waiting for the Console to redeem it...\n");
-    if shown.is_err() {
+    // `print(..., flush=True)` sends the code lines with this one; a refused
+    // flush raises into `main`'s generic handler (its class, exit 2), and
+    // the still-buffered lines then fail CPython's shutdown flush: 120.
+    if let Err(error) = print(&format!("{shown}Waiting for the Console to redeem it...\n")) {
+        crate::stderrln!(
+            "error: {}; check PSEUDOLIFE_MCP_DATABASE_URL",
+            stdout_error_class(&error)
+        );
         return Some(STDOUT_REFUSED);
     }
     let client = session.client();
@@ -158,21 +209,22 @@ async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
         if Instant::now() >= deadline {
             break ("The code expired unredeemed.\n".to_owned(), 1);
         }
-        let Ok(redeemed) = client
+        let redeemed = match client
             .query(
                 "SELECT b.credential_id,p.label,p.state FROM maintainer_bootstrap b JOIN maintainer_passkeys p ON p.credential_id=b.credential_id WHERE b.code_hash=$1",
                 &[&hash],
             )
             .await
-        else {
-            return Some(lost());
+        {
+            Ok(rows) => rows,
+            Err(error) => return Some(failed(session, sqlstate_of(&error))),
         };
         if let Some(row) = redeemed.first() {
             let (Ok(id), Ok(label)) = (
                 row.try_get::<_, String>("credential_id"),
                 row.try_get::<_, String>("label"),
             ) else {
-                return Some(lost());
+                return Some(failed(session, None));
             };
             let prefix = display::key_prefix(&id);
             break (
@@ -182,20 +234,21 @@ async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
                 0,
             );
         }
-        let Ok(burned) = client
+        let burned = match client
             .query(
                 "SELECT failed_attempts FROM maintainer_bootstrap WHERE code_hash=$1 AND used_at IS NULL",
                 &[&hash],
             )
             .await
-        else {
-            return Some(lost());
+        {
+            Ok(rows) => rows,
+            Err(error) => return Some(failed(session, sqlstate_of(&error))),
         };
         if let Some(row) = burned.first() {
-            let Ok(failed) = row.try_get::<_, i32>("failed_attempts") else {
-                return Some(lost());
+            let Ok(attempts) = row.try_get::<_, i32>("failed_attempts") else {
+                return Some(failed(session, None));
             };
-            if failed >= BOOTSTRAP_MAX_FAILURES {
+            if attempts >= BOOTSTRAP_MAX_FAILURES {
                 break (
                     "The code was burned after too many wrong guesses in the Console. If they were not yours, someone else is trying to enrol: check `pseudolife-mcp maintainer list`, then run enrol-code again.\n".to_owned(),
                     1,
@@ -209,13 +262,6 @@ async fn enrol_code(session: &mut pg::Session, wait: bool) -> Option<u8> {
     } else {
         STDOUT_REFUSED
     })
-}
-
-/// The bank stopped answering while the committed code waited: what the
-/// generic handler prints for psycopg's connection-loss class.
-fn lost() -> u8 {
-    crate::stderrln!("error: OperationalError; check PSEUDOLIFE_MCP_DATABASE_URL");
-    2
 }
 
 /// `bootstrap_code`'s transaction: refused while any key is pending or
@@ -244,13 +290,13 @@ async fn store_code(session: &mut pg::Session, hash: &str) -> Result<(), Stop> {
     }
     .await;
     match result {
-        Ok(()) => Ok(tx.commit().await?),
+        Ok(()) => commit(tx).await,
         Err(stop) => Err(rollback(tx, stop).await),
     }
 }
 
-/// `_by_prefix`'s argument check, made inside the transaction in Python
-/// and before any statement here (it reads nothing).
+/// `_by_prefix`'s argument check, made inside the transaction as Python
+/// makes it, before the transaction's first statement (it reads nothing).
 fn checked_prefix(prefix: &str) -> Result<String, Stop> {
     if prefix.chars().count() < 6
         || !prefix
@@ -373,10 +419,7 @@ async fn reset(session: &mut pg::Session) -> Result<u64, Stop> {
 
 async fn finish<T>(tx: Transaction<'_>, result: Result<T, Stop>) -> Result<T, Stop> {
     match result {
-        Ok(value) => {
-            tx.commit().await?;
-            Ok(value)
-        }
+        Ok(value) => commit(tx).await.map(|()| value),
         Err(stop) => Err(rollback(tx, stop).await),
     }
 }
@@ -481,13 +524,39 @@ async fn list(session: &mut pg::Session) -> Option<u8> {
         text.push_str(&display::line(&key, &clock)?);
         text.push('\n');
     }
-    // Read-only: a stdout that refuses the listing defers.
-    print(&text).ok().map(|()| 0)
+    listing_exit(write_unbuffered, &super::super::text_bytes(&text))
+}
+
+/// The listing's exit once written: CPython holds it all until its exit
+/// flush, which a refused stdout fails (exit 120). Deferred when it is too
+/// long for that buffer, or when stdout refused it before any byte left.
+fn listing_exit(write: impl FnOnce(&[u8]) -> Written, bytes: &[u8]) -> Option<u8> {
+    if bytes.len() >= LISTING_BUFFER {
+        return None;
+    }
+    match write(bytes) {
+        Written::All => Some(0),
+        Written::Nothing => None,
+        Written::Part => Some(STDOUT_REFUSED),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_listing_defers_unless_python_would_hold_it_whole() {
+        let short = vec![b'x'; LISTING_BUFFER - 1];
+        assert_eq!(listing_exit(|_| Written::All, &short), Some(0));
+        assert_eq!(listing_exit(|_| Written::Part, &short), Some(120));
+        assert_eq!(listing_exit(|_| Written::Nothing, &short), None);
+        let long = vec![b'x'; LISTING_BUFFER];
+        assert_eq!(
+            listing_exit(|_| panic!("a long listing is never written"), &long),
+            None
+        );
+    }
 
     #[test]
     fn audit_material_matches_python_audit_hash() {

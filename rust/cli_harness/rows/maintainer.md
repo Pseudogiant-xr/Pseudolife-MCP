@@ -36,7 +36,8 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
 | Key-change event: `event='maintainer_key'`, `actor='operator'`, empty principal/agent/project/task/hlc, NULL recipient and message id, payload `_canonical({change, credential_id, label, by: 'host', path: 'host', revoked})`, its own clock read after the change's; chain lock `pg_advisory_xact_lock(hashtextextended('coordination-audit-chain', 0))`, head `ORDER BY seq DESC LIMIT 1` (genesis 64 zeros), `audit_hash` over the compact UTF-8 material with `float(created_at)` in CPython repr | `_key_change` 220-231, `_event` coordination.py:1223, `_chain_head` 1235, `_append` 1248, `audit_hash` 957-971 |
 | `list`: `ORDER BY created_at, credential_id`; `No passkeys.` when empty; per key `<12>  <state:8> <repr(label)>  enrolled_by=<12>  active_from=<when>  last_used=<when>` and `  FLAGGED (sign count went backwards)` when `flagged_at` is truthy (0.0 is not, NaN is); `when` is `-` for NULL else `time.strftime("%Y-%m-%d %H:%M", time.localtime(value))` (floored seconds) | 181-190, `_when` 89-90, `key_prefix` storage/maintainer.py:164 |
 | Text streams: UTF-8, LF translated to CRLF on Windows (stdout and stderr) | `print` |
-| A committed change whose report stdout refuses: exit 120 (CPython's failed shutdown flush) | `main` 162-191 |
+| A committed change whose report stdout refuses: exit 120 (CPython's failed shutdown flush); the waiting form's code and `Waiting...` lines go out in one `flush=True` print, whose refusal first prints `error: <OSError on Windows, BrokenPipeError on POSIX>; check PSEUDOLIFE_MCP_DATABASE_URL` | `main` 162-191, 204-206, `_enrol_code` 96-102 |
+| A failed COMMIT (the change may be durable) and any bank error while the committed code waits: `error: <class>; check PSEUDOLIFE_MCP_DATABASE_URL`, exit 2, never a deferral. `<class>` is psycopg 3.3.4's for the error's SQLSTATE (`_sqlcodes`, then the `_base_exc_map` prefix fallback, then `DatabaseError`); for a closed connection, the SQLSTATE of the server error that ended it (a FATAL such as 57P01 `AdminShutdown` that arrived between polls), else `OperationalError` | `main` 204-206, `_Storage._txn` 50-54, psycopg `errors._class_for_state` |
 
 ## Free items (not contract)
 
@@ -46,12 +47,29 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
   `prev_hash`: tokenized by the named rule `maintainer-host-write` after
   validating each against this arm's run window, sha256 of the printed code,
   the seed's secret, and the oracle's `audit_hash` recomputed over the row.
+  With a refused stdout the code is never shown, so the one unused code row
+  in the window has only its 64-hex shape checked.
 - CPython's ignored-exception trailer after a refused stdout (exit 120 kept):
   named substitution `maintainer-stdout-closed-trailer`.
 - Statement texts (`SELECT credential_id,label` instead of `SELECT *` under
-  the same `FOR UPDATE`), the prefix check made before `BEGIN` instead of just
-  after it, the code drawn as random bytes masked to five bits (uniform, as
-  `secrets.choice`), the order of the code's generation and the connection.
+  the same `FOR UPDATE`), the code drawn as random bytes masked to five bits
+  (uniform, as `secrets.choice`), the order of the code's generation and the
+  connection. The prefix check is made inside the transaction, as Python
+  makes it, before the transaction's first statement.
+
+## Harness instruments (test-only, on each arm's own disposable copy)
+
+- `commit-refused-*`: a deferred constraint trigger raising SQLSTATE P0001,
+  XX999 (unknown: prefix fallback) or 57P01 at COMMIT, after every statement
+  succeeded.
+- `enrol-code-wait-terminated`: `pg_terminate_backend` of this login's other
+  sessions on the arm's copy while the CLI waits between polls (guarded by
+  `assert_disposable_database` on the same connection).
+- `enrol-code-wait-lock-timeout`: `LOCK TABLE maintainer_bootstrap IN ACCESS
+  EXCLUSIVE MODE` held while the CLI polls (55P03 after the 5 s lock timeout).
+- `list-*` on Windows: `maintainer-list-guard` computes the native local-time
+  rule with CPython's `time.localtime` over the seeded values, and when it
+  trips (near New Year or a DST change) expects the deferral instead.
 
 ## Deferred (the dispatcher's `mode 'maintainer' is deferred` line, exit 1, before any effect)
 
@@ -66,22 +84,29 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
   `PSEUDOLIFE_MCP_DATABASE_URL`), including Python's `no bank found` error;
   DSNs or ambient PG controls the shared client refuses; a server that does
   not answer (Python: `error: OperationalError; ...`, exit 2).
-- Any SQL failure before the change commits (Python: `error: <class>; ...`,
+- Any SQL failure before the change's COMMIT (Python: `error: <class>; ...`,
   exit 2); the transaction rolls back, so nothing changed.
-- `list` when stdout refuses the listing, or when any shown time is outside
-  1970-9999, `TZ` is set, or (Windows) the time, or a time two days either
-  side of it, is outside the current local year or has another UTC offset:
-  CPython's C runtime applies the zone's current rules to every year, Chrono
-  asks Windows for each year's.
+- `list` when stdout refuses it before any byte left (CPython: exit 120 with
+  the trailer), when the encoded listing is 8192 bytes or longer (CPython
+  would write it part way through the prints, where a refused stdout takes a
+  different path), or when any shown time is negative, past 9999-12-31 UTC,
+  or has a local year outside 1970-9999, `TZ` is set, or (Windows) the time,
+  or a time two days either side of it, is outside the current local year
+  or has another UTC offset: CPython's C runtime applies the zone's current
+  rules to every year, Chrono asks Windows for each year's. A listing that
+  stdout refuses after some bytes left exits 120, as CPython's shutdown
+  flush does.
 
-## Declared divergences (after a commit, so not deferrable)
+## Declared divergences and uncovered paths
 
-- The waiting form when the bank stops answering mid-wait prints
-  `error: OperationalError; check PSEUDOLIFE_MCP_DATABASE_URL`, exit 2: the
-  class psycopg raises for a lost connection, not observed in the harness.
-- The waiting form when stdout refuses a line: exit 120 with nothing on
-  stderr. CPython raises inside the wait, prints `error: <BrokenPipeError on
-  POSIX, OSError on Windows>; check ...`, and its shutdown flush then exits
-  120 with the trailer.
+- A lost connection with no server error (I/O failure, no FATAL received)
+  prints `OperationalError`, psycopg's class there; not run by the harness.
+- A refused stdout is classed `OSError` except a POSIX broken pipe
+  (`BrokenPipeError`); other POSIX classes CPython would name for other
+  write errors (for example `PermissionError`) are not reproduced.
+- CPython buffering assumptions: the report and listing paths assume
+  CPython's default block buffering of a non-terminal stdout; with
+  `PYTHONUNBUFFERED` set the oracle writes per print and fails differently.
 - The 600 s expiry of the waiting form is implemented but not run by the
-  harness (it would hold each arm for ten minutes).
+  harness (it would hold each arm for ten minutes). The Linux run of the
+  new cases is pending.
