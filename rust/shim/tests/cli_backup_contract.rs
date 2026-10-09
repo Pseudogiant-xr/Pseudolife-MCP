@@ -78,10 +78,7 @@ fn missing_directory_refusal_uses_the_real_filesystem() {
     assert!(still_absent);
     assert_eq!(remaining, 0);
     assert_eq!(existing.status.code(), Some(1));
-    assert_eq!(
-        existing.stderr,
-        cli::native_text(DEFERRED)
-    );
+    assert_eq!(existing.stderr, cli::native_text(DEFERRED));
 }
 
 const DEFERRED: &str = "pseudolife-stdio: mode 'backup' is deferred in this candidate\n";
