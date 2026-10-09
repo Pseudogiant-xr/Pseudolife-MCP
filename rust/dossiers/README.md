@@ -53,6 +53,12 @@ maps were removed from this public batch and handed to those owners.
 |---|---|---|---|
 | 1 | PG-HYDRATE | [PG-HYDRATE.md](PG-HYDRATE.md) | Source map; current schema/catalog/recovery |
 | 1 | CONFIG-LOAD | [CONFIG-LOAD.md](CONFIG-LOAD.md) | Source map; peripheral reader census incomplete |
+| 2 | DISPOSABLE-GUARDS | [DISPOSABLE-GUARDS.md](DISPOSABLE-GUARDS.md) | Production-name refusal and reset ordering |
+| 2 | STORAGE-COMPAT | [STORAGE-COMPAT.md](STORAGE-COMPAT.md) | Legacy import/checkpoints; embedded/Chroma deferrals |
+| 3 | HTTP-WRITES | [HTTP-WRITES.md](HTTP-WRITES.md) | Full POST registry; transitive owned storage gaps named |
+| 3 | HOOKS | [HOOKS.md](HOOKS.md) | Eight wrappers and producer wiring; launcher gaps named |
+| 4 | PLUGIN-COMMANDS | [PLUGIN-COMMANDS.md](PLUGIN-COMMANDS.md) | Command/guard workflows; backend dependencies named |
+| 5 | OPS-MAINTENANCE | [OPS-MAINTENANCE.md](OPS-MAINTENANCE.md) | Six distinct operator contracts; no live execution |
 
 Excluded owned scopes: Wave 2 retrieval/read service, writes (including
 CONTRADICTION), board/delivery/principals/mail-ring and MCP projections
