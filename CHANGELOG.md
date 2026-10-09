@@ -14,6 +14,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks the filesystem before any bank resolution. Other argument forms,
   existing paths and backup creation remain deferred.
 
+### Added (2026-10-09 — contract-first Rust daemon crate skeleton)
+
+- The experimental workspace crate `rust/daemon/` (`pseudolife-daemon`)
+  carries the contract-first spike forward so later port slices can build
+  on it: `GET /health`, the bearer gate with env tokens and stored
+  principals, read-only hydration of a schema-55 bank, ONNX query
+  embedding and `GET /api/search` with the slot pool and BM25. Its spec
+  and differential harness move with it. Nothing installs or runs it, and
+  the spike's declared divergences still stand.
+
 ### Added (2026-10-09 — native register audit archive verification)
 
 - The experimental native `board-audit verify --input PATH` computes chained
