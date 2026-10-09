@@ -94,6 +94,9 @@ def main() -> int:
     handle = ep.get("id") or ep.get("episode_id")
     for text in EPISODE_TEXTS:
         stored += bool(svc.store(text, source="session-notes", episode=handle).get("stored"))
+    # Identity tier 3: searches without an X-PL-Session header attribute their
+    # event to this pointer (and its open episode) while it is fresh.
+    svc.set_active_session(EPISODE_KEY)
     svc.store(SUPERSEDED[0], source="conversation")
     svc.supersede(old_text=SUPERSEDED[0], new_text=SUPERSEDED[1])
     for entity, attribute, value, conf, tol in FACTS:

@@ -171,7 +171,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
         if !band_ok(name) {
             continue;
         }
-        let (boost, half_life) = if n == 1 || p.disable_recency_boost || !p.recency_boost_enabled {
+        let (boost, half_life) = if n == 1
+            || p.disable_recency_boost
+            || !p.recency_boost_enabled
+            || crate::mutants::active("search-recency-off")
+        {
             (0.0, f64::INFINITY)
         } else {
             let frac = depth as f64 / (n - 1) as f64;
@@ -827,7 +831,10 @@ pub fn temporal_neighbors(
     let cmp = |x: &usize, y: &usize| key(*x).0.total_cmp(&key(*y).0).then(x.cmp(y));
     before.sort_by(cmp);
     after.sort_by(cmp);
-    let before = before[before.len().saturating_sub(n_each)..].to_vec();
+    let mut before = before[before.len().saturating_sub(n_each)..].to_vec();
+    if crate::mutants::active("search-neighbours-reversed") {
+        before.reverse();
+    }
     after.truncate(n_each);
     (before, after)
 }

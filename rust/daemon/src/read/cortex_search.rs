@@ -342,33 +342,21 @@ async fn trace_invalidations_for_slots(
     Ok(out)
 }
 
-/// `bump_slot_reads` (`storage/postgres.py:4253`): one upsert per slot, in
-/// one transaction, stamped `now`.
+/// `bump_slot_reads` (`storage/postgres.py:4253`): every slot upserted
+/// together, stamped `now`.
 async fn bump_slot_reads(db: &Client, slots: &[SlotKey], now: f64) -> Result<()> {
     if slots.is_empty() {
         return Ok(());
     }
-    db.batch_execute("BEGIN").await?;
-    let write = async {
-        let stmt = db
-            .prepare(
-                "INSERT INTO slot_reads \
-                 (entity_norm, attribute_norm, read_count, last_read_at) \
-                 VALUES ($1, $2, 1, $3) \
-                 ON CONFLICT (entity_norm, attribute_norm) DO UPDATE SET \
-                 read_count = slot_reads.read_count + 1, \
-                 last_read_at = EXCLUDED.last_read_at",
-            )
-            .await?;
-        for (e, a) in slots {
-            db.execute(&stmt, &[e, a, &now]).await?;
-        }
-        db.batch_execute("COMMIT").await
-    };
-    if let Err(e) = write.await {
-        let _ = db.batch_execute("ROLLBACK").await;
-        return Err(e.into());
-    }
+    // One statement (the slots are distinct), so the write is atomic without
+    // an open transaction on the shared session that a cancel could strand.
+    let ents: Vec<&str> = slots.iter().map(|(e, _)| e.as_str()).collect();
+    let attrs: Vec<&str> = slots.iter().map(|(_, a)| a.as_str()).collect();
+    db.execute(
+        "INSERT INTO slot_reads (entity_norm, attribute_norm, read_count, last_read_at)          SELECT e, a, 1, $3 FROM unnest($1::text[], $2::text[]) AS u(e, a)          ON CONFLICT (entity_norm, attribute_norm) DO UPDATE SET          read_count = slot_reads.read_count + 1,          last_read_at = EXCLUDED.last_read_at",
+        &[&ents, &attrs, &now],
+    )
+    .await?;
     Ok(())
 }
 

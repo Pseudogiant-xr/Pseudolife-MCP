@@ -13,11 +13,16 @@ banks and diffs every table; ``retrieval_events`` rows are compared field by
 field with the float rule. Exit status 0 only when nothing differs.
 
 Declared rules, never applied by hand:
-* SCORE_TOL: an entry or fact ``score`` and every float inside
-  ``retrieval_events.served``/``params`` may differ by 2e-4 (torch and ONNX
-  embeddings differ in the last bits; spec "Free").
+* SCORE_TOL: the float leaves named in FLOAT_KEYS (scores and fusion
+  inputs) may differ by 2e-4 (torch and ONNX embeddings differ in the last
+  bits; spec "Free"). Every other value, and every value's JSON type
+  (bool, int, float, string), must match exactly.
 * Tie order: two entries may swap places only when their scores are within
-  SCORE_TOL of each other (spec "Free": tie order).
+  SCORE_TOL of each other (spec "Free": tie order), and never in a list that
+  is ordered by stream position (contiguity or timeline entries present).
+  A swap renumbers only the swapped rows' ``rank`` in the event.
+* Coverage: each scenario names the channels it must exercise (REQUIRE); a
+  run where the oracle did not exercise them fails.
 * ``retrieval_events.created_at`` and other wall-clock columns: null-or-not.
 * ``age`` (``_relative_time`` of the wall clock): equal, or the same unit
   one step apart, since the two daemons answer moments apart.
@@ -34,6 +39,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -47,6 +53,7 @@ from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F
 REPO = HERE.parents[2]
 GOLDENS = HERE / "goldens" / "w2d"
 SCORE_TOL = 2e-4
+FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
 AGE_RE = re.compile(r"(\d+) (\w+?)s? ago")
 TOKEN = "tok-w2d-search-0001"
 # Python-only init writes owned by other slices (W1-A's list, minus the
@@ -63,7 +70,9 @@ CLOCK_COLUMNS = {
 MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "default",
            "search-timeline-unsorted": "timeline", "search-chronicle-limit": "default",
            "search-no-contiguity": "contiguity", "search-rrf-off": "rrf-pool",
-           "search-no-cortex": "default", "search-rerank-unfused": "margin-gate"}
+           "search-no-cortex": "default", "search-rerank-unfused": "margin-gate",
+           "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
+           "search-cortex-stripped-q": "default"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -126,6 +135,11 @@ def default_cases() -> list[dict]:
         case("slot channel under explicit floor", q(q="is jacque female", top_k=1, min_score="0.7"), auth),
         case("two session headers", q(q="bearer token"),
              auth + [("X-PL-Session", "sess-a"), ("X-PL-Session", "sess-b")]),
+        # Review finding (Opus, 2026-10-09): a client that hangs up must not
+        # cut the search's writes short (Python finishes in its executor).
+        dict(case("client disconnects mid-search", q(q="what services run on the homelab box"), auth),
+             disconnect=True),
+        case("after the disconnect", q(q="what os does the homelab box run"), auth),
     ]
     return out
 
@@ -137,6 +151,9 @@ def case(name, path, headers=(), declared=None):
 class Scenario:
     name = ""
     config_yaml: str | None = None
+    env: dict[str, str] = {}
+    # Coverage the oracle must show: dotted path into coverage() -> minimum.
+    require: dict[str, int] = {}
 
     def cases(self) -> list[dict]:
         return default_cases()
@@ -144,6 +161,10 @@ class Scenario:
 
 class Default(Scenario):
     name = "default"
+    require = {"with_entries": 40, "with_events": 3, "with_cortex": 30, "channels.dense": 1,
+               "channels.bm25": 1, "channels.slot": 1, "rerank_fired": 1,
+               "rerank_skips.candidate_budget_exceeded": 1, "sessions": 2, "episodes": 1,
+               "disconnects": 1}
 
 
 class Timeline(Scenario):
@@ -151,6 +172,7 @@ class Timeline(Scenario):
     # A high default floor thins the dense pool, so the timeline's low
     # `0.3 x norm` injections survive the cut to top_k.
     config_yaml = "memory:\n  search:\n    timeline_channel: true\n    min_score: 0.6\n"
+    require = {"via.timeline": 1, "timeline_fired": 1, "with_events": 1}
 
     def cases(self):
         auth = [bearer(TOKEN)]
@@ -166,6 +188,7 @@ class Timeline(Scenario):
 class Contiguity(Scenario):
     name = "contiguity"
     config_yaml = "memory:\n  search:\n    contiguity_neighbors: 2\n"
+    require = {"via.contiguity": 1, "channels.contiguity": 1}
 
     def cases(self):
         auth = [bearer(TOKEN)]
@@ -178,6 +201,7 @@ class RrfPool(Scenario):
     name = "rrf-pool"
     config_yaml = ("memory:\n  search:\n    fusion: rrf\n    candidate_pool_multiplier: 3\n"
                    "  reranker:\n    enabled: true\n    top_n: 40\n")
+    require = {"rerank_fired": 1, "channels.bm25": 1}
 
     def cases(self):
         auth = [bearer(TOKEN)]
@@ -187,6 +211,7 @@ class RrfPool(Scenario):
 class MarginGate(Scenario):
     name = "margin-gate"
     config_yaml = "memory:\n  reranker:\n    enabled: true\n    skip_margin: 0.05\n"
+    require = {"rerank_fired": 1, "rerank_skips.unambiguous_margin": 1}
 
     def cases(self):
         auth = [bearer(TOKEN)]
@@ -211,8 +236,60 @@ class LogOffControl(Scenario):
         return [case(f"logged {i}", q(q=t), auth) for i, t in enumerate(CRAFTED[:3])]
 
 
+class Continuum(Scenario):
+    """Review finding (Opus, 2026-10-09): multi-band presets with depth
+    recency. The flat-seeded rows are reseated into the first band."""
+    name = "continuum"
+    config_yaml = "memory:\n  recency_boost_enabled: true\n  miras:\n    preset: continuum\n"
+    require = {"recency_boost": 1, "with_entries": 4}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"continuum {i}", q(q=t, top_k=6), auth) for i, t in enumerate(CRAFTED[:5])] + [
+            case("band working", q(q="deploy the daemon", band="working"), auth),
+            case("band forever (empty)", q(q="deploy the daemon", band="forever"), auth),
+            case("recency off", q(q="deploy the daemon", disable_recency_boost="1"), auth),
+            case("band flat (not in preset)", q(q="deploy", band="flat"), auth)]
+
+
+class HideSuperseded(Scenario):
+    """Review finding (Opus): hide_superseded across dense, BM25, neighbours."""
+    name = "hide-superseded"
+    config_yaml = "memory:\n  hide_superseded: true\n  search:\n    contiguity_neighbors: 2\n"
+    require = {"with_entries": 3}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"hidden {i}", q(q=t, top_k=4), auth) for i, t in enumerate(
+            ["extractor endpoint old gpu box", "where is the extractor endpoint",
+             "the extractor endpoint moved", "staging database host"])]
+
+
+class ConfidenceFloor(Scenario):
+    name = "confidence-floor"
+    config_yaml = "memory:\n  search_confidence_floor: 0.6\n"
+    require = {"low_confidence_true": 1, "low_confidence_false": 1}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"floor {i}", q(q=t), auth) for i, t in enumerate(
+            ["PLX-4471", "zebra crossing", "My cat is named Jacque and she is a Ragdoll."])]
+
+
+class PointerExpired(Scenario):
+    """The active-session pointer past its TTL attributes nothing."""
+    name = "pointer-expired"
+    env = {"PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS": "1"}
+    require = {"events_rows": 2}
+
+    def cases(self):
+        auth = [bearer(TOKEN)]
+        return [case(f"stale pointer {i}", q(q=t), auth) for i, t in enumerate(CRAFTED[:2])]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
-                                  LogOffControl)}
+                                  LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
+                                  PointerExpired)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -227,10 +304,10 @@ def kind(v) -> str:
     return type(v).__name__
 
 
-def diff(a, b, path="", tol_keys=("score",), tol_all=False) -> list[str]:
-    """Strict by-value diff: types must match (True is not 1), floats exact
-    except under the declared tolerance."""
-    if kind(a) != kind(b) and not (tol_all and {kind(a), kind(b)} <= {"int", "float"}):
+def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
+    """Strict by-value diff: types must match (True is not 1, 1 is not 1.0),
+    floats exact except the declared float leaves."""
+    if kind(a) != kind(b):
         return [f"{path}: python {kind(a)} {json.dumps(a)[:160]} vs rust {kind(b)} {json.dumps(b)[:160]}"]
     if isinstance(a, dict):
         out = []
@@ -240,12 +317,12 @@ def diff(a, b, path="", tol_keys=("score",), tol_all=False) -> list[str]:
             elif k not in a:
                 out.append(f"{path}.{k}: only in rust")
             else:
-                out += diff(a[k], b[k], f"{path}.{k}", tol_keys, tol_all)
+                out += diff(a[k], b[k], f"{path}.{k}", tol_keys)
         return out
     if isinstance(a, list):
         if len(a) != len(b):
             return [f"{path}: length python {len(a)} vs rust {len(b)}"]
-        return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff(x, y, f"{path}[{i}]", tol_keys, tol_all)]
+        return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff(x, y, f"{path}[{i}]", tol_keys)]
     if path.endswith(".age") and isinstance(a, str) and isinstance(b, str) and a != b:
         ma, mb = AGE_RE.fullmatch(a), AGE_RE.fullmatch(b)
         if ma and mb and ma.group(2) == mb.group(2) and abs(int(ma.group(1)) - int(mb.group(1))) <= 1:
@@ -253,16 +330,20 @@ def diff(a, b, path="", tol_keys=("score",), tol_all=False) -> list[str]:
         return [f"{path}: python {a!r} vs rust {b!r}"]
     if isinstance(a, float) or isinstance(b, float):
         leaf = path.rsplit(".", 1)[-1]
-        if tol_all or leaf in tol_keys:
+        if leaf in tol_keys:
             return [] if abs(float(a) - float(b)) <= SCORE_TOL else [f"{path}: python {a} vs rust {b}"]
     return [] if a == b else [f"{path}: python {json.dumps(a)[:160]} vs rust {json.dumps(b)[:160]}"]
 
 
 def align_ties(py_list: list, rs_list: list, key: str = "id") -> tuple[list, list[str]]:
     """Reorder the Rust list to Python's where the only difference is a swap
-    among entries whose scores are within SCORE_TOL; report each swap."""
+    among entries whose scores are within SCORE_TOL; report each swap. Lists
+    ordered by stream position (any contiguity or timeline entry) are never
+    reordered: their order is exact."""
     notes = []
     if len(py_list) != len(rs_list):
+        return rs_list, notes
+    if any(isinstance(x, dict) and x.get("via") in ("contiguity", "timeline") for x in py_list + rs_list):
         return rs_list, notes
     rs = list(rs_list)
     for i, want in enumerate(py_list):
@@ -334,12 +415,13 @@ def bank_diff(py_state: dict, rs_state: dict) -> list[str]:
                         out.append(f"{ev}[{ra[0]}].{c}: null on one side")
                     continue
                 if c == "served" and isinstance(x, list) and isinstance(y, list):
-                    y, notes = align_ties(x, y, "entry_id")
+                    aligned, notes = align_ties(x, y, "entry_id")
                     if notes:
-                        # A tie swap renumbers `rank` (the served position).
-                        x = [{k: v for k, v in r.items() if k != "rank"} for r in x]
-                        y = [{k: v for k, v in r.items() if k != "rank"} for r in y]
-                out += diff(x, y, f"{ev}[{ra[0]}].{c}", tol_all=c in ("served", "params", "served_facts"))
+                        # A tie swap renumbers `rank` for the swapped rows only.
+                        moved = {i for i, (u, v) in enumerate(zip(y, aligned)) if u is not v}
+                        y = [dict(r, rank=x[i]["rank"]) if i in moved and isinstance(r, dict) else r
+                             for i, r in enumerate(aligned)]
+                out += diff(x, y, f"{ev}[{ra[0]}].{c}", tol_keys=FLOAT_KEYS)
     out += dbstate.diff(py_state, rs_state)
     return out
 
@@ -374,7 +456,9 @@ def seed_template(name: str, paragraphs: int) -> None:
 def coverage(responses: list[dict], state: dict) -> dict:
     """What the oracle actually exercised, so a green run cannot be vacuous."""
     cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
-           "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0}
+           "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
+           "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
+           "low_confidence_false": 0, "disconnects": 0}
     for r in responses:
         body = r.get("json") or {}
         if not isinstance(body, dict):
@@ -382,6 +466,9 @@ def coverage(responses: list[dict], state: dict) -> dict:
         cov["with_entries"] += bool(body.get("entries"))
         cov["with_events"] += bool(body.get("events"))
         cov["with_cortex"] += bool(body.get("cortex"))
+        cov["disconnects"] += bool(r.get("disconnected"))
+        if "low_confidence" in body and body.get("query"):
+            cov["low_confidence_true" if body["low_confidence"] else "low_confidence_false"] += 1
         for e in body.get("entries") or []:
             if e.get("via"):
                 cov["via"][e["via"]] = cov["via"].get(e["via"], 0) + 1
@@ -399,7 +486,30 @@ def coverage(responses: list[dict], state: dict) -> dict:
             if rr.get("skip_reason"):
                 cov["rerank_skips"][rr["skip_reason"]] = cov["rerank_skips"].get(rr["skip_reason"], 0) + 1
             cov["timeline_fired"] += bool(((rec.get("params") or {}).get("timeline") or {}).get("fired"))
+            cov["recency_boost"] += bool((rec.get("params") or {}).get("recency_boost"))
+            cov["sessions"] += rec.get("session_id") is not None
+            cov["episodes"] += rec.get("episode_id") is not None
     return cov
+
+
+def unmet(cov: dict, require: dict[str, int]) -> list[str]:
+    out = []
+    for path, minimum in require.items():
+        v = cov
+        for part in path.split("."):
+            v = v.get(part, 0) if isinstance(v, dict) else 0
+        if v < minimum:
+            out.append(f"coverage {path}: {v} < {minimum}")
+    return out
+
+
+def disconnect(port: int, path: str, headers) -> None:
+    """Send the request and hang up without reading the answer."""
+    import socket
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as s_:
+        lines = [f"GET {path} HTTP/1.1", f"Host: 127.0.0.1:{port}"] + [f"{k}: {v}" for k, v in headers]
+        s_.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
+        time.sleep(0.05)
 
 
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
@@ -413,10 +523,12 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         if "python" in sides:
             home = daemons.make_home(root, f"w2d-{tag}-py", scn.config_yaml)
             procs["python"] = daemons.python_daemon(home, daemons.free_port(),
-                                                    daemons.base_env(home, common_env(dsns["python"])))
+                                                    daemons.base_env(home, dict(common_env(dsns["python"]),
+                                                                                **scn.env)))
         home = daemons.make_home(root, f"w2d-{tag}-rs", scn.config_yaml)
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
-                                            daemons.base_env(home, rust_env(common_env(dsns["rust"]))))
+                                            daemons.base_env(home, rust_env(dict(common_env(dsns["rust"]),
+                                                                                 **scn.env))))
         for d in procs.values():
             d.start(300)
         wait_settled([d.port for d in procs.values()], timeout=900)
@@ -424,6 +536,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         rows = []
         py_seen = []
         for i, c in enumerate(scn.cases()):
+            if c.get("disconnect"):
+                for d in procs.values():
+                    disconnect(d.port, c["path"], c["headers"])
+                time.sleep(15)  # both finish (or abandon) the search before the next case
+                py_seen.append({"disconnected": True})
+                rows.append({"case": c["name"], "path": c["path"][:140], "python_status": None,
+                             "rust_status": None, "diffs": [], "notes": [], "_python": None})
+                continue
             py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
                     else golden["responses"][i])
             rs_r = call(procs["rust"].port, "GET", c["path"], c["headers"])
@@ -446,6 +566,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     else:
         py_state = states["python"]
     cov = coverage(py_seen, py_state)
+    cov_fail = unmet(cov, scn.require)
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
@@ -453,12 +574,13 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             "rules": {"score_tol": SCORE_TOL, "clock_columns": sorted(f"{t}.{c}" for t, c in CLOCK_COLUMNS),
                       "declared": [d[3] for d in DECLARED]},
             "responses": [r.pop("_python") for r in rows],
+            "coverage": cov,
             "db_state": states["python"]}, indent=1, sort_keys=True), encoding="utf-8")
     for r in rows:
         r.pop("_python", None)
     for side in sides:
         pg.drop(dbs[side])
-    return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared": declared,
+    return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs + cov_fail, "declared": declared,
             "coverage": cov}
 
 

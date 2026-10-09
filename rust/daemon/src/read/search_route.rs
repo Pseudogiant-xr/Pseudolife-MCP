@@ -397,10 +397,10 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
             return json_response(400, &json!({"error": msg}));
         }
     }
-    let query = q
-        .get("q")
-        .map(|s| py_strip(s).to_string())
-        .unwrap_or_default();
+    // `_s(q, "q", "")`: the cortex block encodes this raw value; only the
+    // entry search strips its own copy (service.py:1963).
+    let raw_q = q.get("q").cloned().unwrap_or_default();
+    let query = py_strip(&raw_q).to_string();
     if query.is_empty() {
         return json_response(
             200,
@@ -413,7 +413,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         .next_back()
         .map(|v| v.as_bytes().iter().map(|&b| b as char).collect::<String>());
     let req = Request {
-        query: query.clone(),
+        query,
         top_k: q
             .get("top_k")
             .filter(|s| !s.is_empty())
@@ -432,17 +432,34 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         count_access: true,
         header_session,
     };
+    // The work runs in its own task: a client that disconnects mid-search
+    // must not cancel it halfway through its writes. Python finishes the
+    // handler in the executor regardless (web/api.py:790-812).
+    let svc = app.service.clone();
+    let task = tokio::spawn(async move { finish(svc, ready, req, raw_q).await });
+    match task.await {
+        Ok(resp) => resp,
+        Err(e) => json_response(500, &json!({"error": e.to_string()})),
+    }
+}
+
+/// The search and the cortex-first block, under the service lock.
+async fn finish(svc: Arc<Service>, ready: Arc<Ready>, req: Request, raw_q: String) -> Response {
     // Held across the search and the cortex block, as `service._lock` is.
     let _guard = crate::read::db_guard().lock().await;
-    let mut out = match run(&app.service, &ready, req).await {
+    let mut out = match run(&svc, &ready, req).await {
         Ok(s) => s,
         Err(e) => return json_response(500, &json!({"error": e.to_string()})),
     };
-    let knobs = cortex_search::CortexKnobs::from_config(&app.service.config);
+    let knobs = cortex_search::CortexKnobs::from_config(&svc.config);
     if knobs.enabled && knobs.search_first && !crate::mutants::active("search-no-cortex") {
         let r2 = ready.clone();
-        let cache_size = app.service.config.embedding.cache_size;
-        let q2 = query.clone();
+        let cache_size = svc.config.embedding.cache_size;
+        let q2 = if crate::mutants::active("search-cortex-stripped-q") {
+            py_strip(&raw_q).to_string()
+        } else {
+            raw_q.clone()
+        };
         let qv = tokio::task::spawn_blocking(move || {
             embed_cache::encode_query(&r2.embedder, &q2, cache_size)
         })
@@ -453,7 +470,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
                     &ready.cortex,
                     ready.storage.client(),
                     &qv,
-                    &query,
+                    &raw_q,
                     5,
                     knobs.guard_min_score,
                     &knobs,

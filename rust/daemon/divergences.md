@@ -48,11 +48,10 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
-| Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
+| Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back, the cortex (W2-D) and the warmup search (W2-D) | W2-D, W2-E, W3-H |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
 | Session reaper | closes idle session episodes every `PSEUDOLIFE_SESSION_REAP_SECONDS`, after `_ensure_init` | only the `_ensure_init` retry runs on that cadence | W2-E (episodes) |
-| Search knobs `memory.search.{fusion: rrf, candidate_pool_multiplier > 1, contiguity_neighbors, timeline_channel}`, `memory.reranker.enabled`, `?rerank=`, the recency boost on multi-band presets | change `/api/search` | parsed and validated, ignored by search | W2-D (search) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)
@@ -77,3 +76,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` |
 | Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory only | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer |
 | Telemetry failure counters (`_retrieval_log_errors`, slot-read failures) | counted for `stats()` | logged to stderr | `/api/stats` (W2-D, a later PR) |
+| Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
+| Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
+| An integer `memory.reranker.fusion_weight` (`fusion_weight: 1`) | logged in `params.reranker` as written (`1`) | logged as a float (`1.0`) | a canonical config writes the default `0.7` |
