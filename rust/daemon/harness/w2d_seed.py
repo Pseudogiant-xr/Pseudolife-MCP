@@ -2,7 +2,8 @@
 write paths only (``MemoryService.store`` / ``supersede`` / ``cortex_write``
 / ``set_add`` and ``PostgresStorage.add_chronicle_event``).
 
-usage: python w2d_seed.py <dsn> [paragraphs]
+usage: python w2d_seed.py [paragraphs]   (bank DSN in PSEUDOLIFE_MCP_DATABASE_URL,
+never on the command line, so it stays out of process listings)
 
 The corpus is paragraphs of this repository's public docs, plus crafted
 entries for every search channel: an assistant-sourced note, tagged notes,
@@ -68,8 +69,8 @@ def paragraphs(limit: int) -> list[str]:
 
 
 def main() -> int:
-    dsn = sys.argv[1]
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+    dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
+    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 150
     data = Path(os.environ["PSEUDOLIFE_MCP_DATA_DIR"])
     data.mkdir(parents=True, exist_ok=True)
     from pseudolife_memory.service import MemoryService

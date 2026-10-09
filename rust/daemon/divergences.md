@@ -56,3 +56,13 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
 | Static types for `.md`, `.csv` and other extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## W2-D: GET /api/search
+
+| Item | Python | Rust | Why / owner |
+|---|---|---|---|
+| Reference pool (Chroma documents from `document_ingest`, `ref_top_k` 3) | queried on every search once `<data_dir>/chromadb` holds a store | never queried: no reference hits, no `reference` components | the store is a private chromadb 1.5.9 on-disk format (HNSW segments); its Rust form is a delegate/maintainer decision (W3-J). A bank with no documents matches. |
+| Cross-encoder model | `memory.reranker.model_name` from the Hugging Face cache, lazily | the ONNX export in `PSEUDOLIFE_DAEMON_RERANK_DIR` (same checkpoint; `model_name` is only logged) | model packaging is cutover work (W3-J); parity of the export is proven by `harness/w2d_rerank_check.py` |
+| Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
+| `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
+| Tie order among equal scores | `torch.topk` (unspecified) and stable sorts | stable sorts, resident order | free (spec) |

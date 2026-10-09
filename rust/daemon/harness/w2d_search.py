@@ -340,7 +340,7 @@ def seed_template(name: str, paragraphs: int) -> None:
     dsn = pg.create(name)
     home = daemons.make_home(daemons.scratch_root(), "w2d-seed", None)
     env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), dsn, str(paragraphs)],
+    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), str(paragraphs)],
                        env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=3600)
     if r.returncode != 0:
         raise RuntimeError(f"seeding failed: {r.stderr[-3000:]}")
