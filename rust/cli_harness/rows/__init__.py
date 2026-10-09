@@ -10,6 +10,8 @@ ROWS = {
     "backup": "CLI-BACKUP-DSN",
     "hook": "CLI-HOOK",
     "transfer": "CLI-TRANSFER-DSN",
+    "test_login": "CLI-TEST-LOGIN",
+    "backup": "CLI-BACKUP-DSN",
 }
 
 
