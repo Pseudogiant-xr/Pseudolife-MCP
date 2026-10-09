@@ -431,7 +431,7 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
     calls = []
     # The named installer resolvers bind these executable variables to the installed CLI.
     # Restrict to command position (line/start, substitution, separator, then/try), never argv.
-    pattern = r'(?:"\$SHIM_PATH"|&[ \t]+\$(?:script:shimInstallPath|shim))[ \t]+([a-z][a-z-]*)([^\n]*)'
+    pattern = r'(?:"\$SHIM_PATH"|&[ \t]+\$(?:script:shimInstallPath|shim))[ \t]+([a-z][a-z-]*)'
     for match in re.finditer(pattern, text, re.M):
         prefix = text[text.rfind("\n", 0, match.start()) + 1:match.start()].strip()
         tokens = shell_tokens(prefix)
@@ -439,9 +439,25 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
         command_position = (not prefix or prefix.endswith(("$(", "{", "|", ";"))
                             or re.search(r"\bthen$", prefix)
                             or (match[0].startswith("&") and prefix.endswith("=")) or env_prefix)
+        if match[0].startswith('"') and prefix.endswith("="):
+            command_position = False
         if not command_position:
             continue
-        snippet = "pseudolife-mcp " + match[1] + match[2]
+        tail, quote, escaped = [], None, False
+        for char in text[match.end():]:
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\" and quote == '"':
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char in ";|\n":
+                break
+            tail.append(char)
+        snippet = "pseudolife-mcp " + match[1] + "".join(tail)
         extracted = cli_calls(snippet, path)
         for call in extracted:
             call["location"] = f"{path}:{text.count(chr(10), 0, match.start()) + 1}"

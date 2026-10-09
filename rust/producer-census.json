@@ -1571,11 +1571,11 @@
           "evidence": "static",
           "location": "ops/install.ps1:1892",
           "shape": {
-            "argv_source": "connect $DaemonUrl --token-file $TokenFile --client $names --yes | Out-Host",
+            "argv_source": "connect $DaemonUrl --token-file $TokenFile --client $names --yes",
             "channel": "argv",
             "complete": false,
             "executable_expression": "& $shim",
-            "expression": "$DaemonUrl --token-file $TokenFile --client $names --yes | Out-Host",
+            "expression": "$DaemonUrl --token-file $TokenFile --client $names --yes",
             "omitted_optional": null,
             "parameters": {
               "--client": {
@@ -1635,11 +1635,11 @@
           "evidence": "static",
           "location": "ops/install.sh:1886",
           "shape": {
-            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null) || connect_rc=$?",
+            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null)",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null) || connect_rc=$?",
+            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null)",
             "omitted_optional": null,
             "parameters": {
               "--client": {
@@ -1688,11 +1688,11 @@
           "evidence": "static",
           "location": "ops/install.sh:1915",
           "shape": {
-            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --yes </dev/null || connect_rc=$?",
+            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --yes </dev/null",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --yes </dev/null || connect_rc=$?",
+            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --yes </dev/null",
             "omitted_optional": null,
             "parameters": {
               "--client": {
@@ -2694,11 +2694,11 @@
           "evidence": "static",
           "location": "ops/install.sh:480",
           "shape": {
-            "argv_source": "expose tailscale || expose_rc=$?",
+            "argv_source": "expose tailscale",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "tailscale || expose_rc=$?",
+            "expression": "tailscale",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -3790,11 +3790,11 @@
           "evidence": "static",
           "location": "ops/install.sh:1960",
           "shape": {
-            "argv_source": "pair \"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json) || pair_rc=$?",
+            "argv_source": "pair \"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json)",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "\"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json) || pair_rc=$?",
+            "expression": "\"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json)",
             "omitted_optional": null,
             "parameters": {
               "--read-code": {
@@ -55627,11 +55627,11 @@
       "location": "ops/install.sh:497",
       "name": "maintainer",
       "shape": {
-        "argv_source": "maintainer setup --check >/dev/null 2>&1; then",
+        "argv_source": "maintainer setup --check >/dev/null 2>&1",
         "channel": "argv",
         "complete": false,
         "executable_expression": "\"$SHIM_PATH\"",
-        "expression": "setup --check >/dev/null 2>&1; then",
+        "expression": "setup --check >/dev/null 2>&1",
         "parameters": {
           "--check": {
             "literal": true
@@ -55674,11 +55674,11 @@
       "location": "ops/install.sh:520",
       "name": "maintainer",
       "shape": {
-        "argv_source": "maintainer setup --yes || setup_rc=$?",
+        "argv_source": "maintainer setup --yes",
         "channel": "argv",
         "complete": false,
         "executable_expression": "\"$SHIM_PATH\"",
-        "expression": "setup --yes || setup_rc=$?",
+        "expression": "setup --yes",
         "parameters": {
           "--yes": {
             "literal": true
@@ -55693,11 +55693,11 @@
       "location": "ops/install.sh:522",
       "name": "maintainer",
       "shape": {
-        "argv_source": "maintainer setup --yes || setup_rc=$?",
+        "argv_source": "maintainer setup --yes",
         "channel": "argv",
         "complete": false,
         "executable_expression": "\"$SHIM_PATH\"",
-        "expression": "setup --yes || setup_rc=$?",
+        "expression": "setup --yes",
         "parameters": {
           "--yes": {
             "literal": true

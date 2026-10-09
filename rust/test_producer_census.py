@@ -186,6 +186,21 @@ def test_installer_alias_does_not_match_arguments_assignments_or_next_line():
     assert calls[0]["location"] == "ops/install.sh:5"
 
 
+def test_installer_alias_after_rejected_same_line_candidate_is_retained():
+    calls = census.installer_cli_calls('echo "$SHIM_PATH" x; "$SHIM_PATH" connect "$URL" --json', "ops/install.sh")
+    assert [call["name"] for call in calls] == ["connect"]
+
+
+def test_shell_assignment_to_shim_path_is_not_an_invocation():
+    assert not census.installer_cli_calls('X="$SHIM_PATH" connect', "ops/install.sh")
+
+
+def test_installer_arguments_stop_at_the_next_command():
+    calls = census.installer_cli_calls('"$SHIM_PATH" connect "$URL"; "$SHIM_PATH" expose tailscale --yes', "ops/install.sh")
+    assert [call["name"] for call in calls] == ["connect", "expose"]
+    assert "--yes" not in calls[0]["shape"]["parameters"]
+
+
 def test_powershell_assignment_and_shell_env_prefix_retain_installer_call():
     ps = census.installer_cli_calls('$planOutput = & $shim connect $URL --dry-run --json', "ops/install.ps1")
     sh = census.installer_cli_calls('PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" maintainer setup --yes', "ops/install.sh")
