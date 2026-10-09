@@ -192,7 +192,13 @@ fn respond(
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    // Read through a borrow, never a `try_clone`: on Windows the clone is an
+    // inheritable handle, so a child spawned by a concurrent test can hold
+    // this connection past our close. Measured 2026-10-10 (Rust 1.94): with
+    // the clone, clients saw ConnectionReset after a full reply in 7 of 10
+    // parallel runs; without it, 0 of 40. That the reset comes from the
+    // inheriting child's exit is inferred, not traced.
+    let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
