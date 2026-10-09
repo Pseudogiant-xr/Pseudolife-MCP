@@ -1,0 +1,974 @@
+{
+ "row": "CLI-EPISODE",
+ "platform": "windows",
+ "oracle_commit": "6b07588a16c505fbc66c055a2ea6b9410f87c7e6",
+ "cases": {
+  "start-plain-dir": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534083.670649,
+    1791534083.8104668
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-git-subdir": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534084.310573,
+    1791534084.483207
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "66",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir",
+    "cwd/proj": "dir",
+    "cwd/proj/.git": "dir",
+    "cwd/proj/src": "dir",
+    "cwd/proj/src/deep": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-home": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534084.980672,
+    1791534085.1538253
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "69",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-missing": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534085.6520174,
+    1791534085.8309996
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "69",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-null": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534086.3175166,
+    1791534086.485397
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "69",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-non-ascii": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534086.9873848,
+    1791534087.2165086
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "92",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj\\u00e9 \\u2713 \\ud83d\\ude80 - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir",
+    "cwd/proj\u00e9 \u2713 \ud83d\ude80": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-system-dir": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534087.6891227,
+    1791534087.9151733
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "69",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-windows-project": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534088.4183772,
+    1791534088.631821
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "72",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"client-app - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-token": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534089.1020553,
+    1791534089.2674787
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "end-plain": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534089.7754326,
+    1791534089.9374716
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/end",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "30",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "end-token": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534090.4416058,
+    1791534090.6051471
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/end",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "content-length": "30",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-no-session": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534091.1105387,
+    1791534091.2428622
+   ],
+   "requests": [],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-empty-session": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534091.624039,
+    1791534091.7751167
+   ],
+   "requests": [],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-not-json": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534092.1348152,
+    1791534092.2704957
+   ],
+   "requests": [],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-empty-stdin": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534092.654189,
+    1791534092.7862482
+   ],
+   "requests": [],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-daemon-down": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534093.1614997,
+    1791534093.559715
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-health-degraded": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534093.562237,
+    1791534093.699185
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-health-html": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534094.1954455,
+    1791534094.3385544
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-post-500": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534094.8341277,
+    1791534094.9978034
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-post-redirect": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534095.4681861,
+    1791534095.6062164
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-trailing-args": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534096.1060019,
+    1791534096.2445908
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-localhost": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534096.7435286,
+    1791534099.1993332
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-health-trickle": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534099.6906729,
+    1791534101.3777757
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "end-post-trickle": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534101.8637304,
+    1791534106.4204574
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/end",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "30",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-https": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534106.615293,
+    1791534109.1241164
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer w1b-fixture-token",
+      "connection": "close",
+      "content-length": "65",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-health-redirect-loop": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791534109.6289191,
+    1791534109.7792034
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  }
+ }
+}

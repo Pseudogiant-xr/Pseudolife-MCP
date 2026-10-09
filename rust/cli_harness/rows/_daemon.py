@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 
 from . import _bank
+from ..core import PLATFORM
 
 ORACLE: dict = {"python": None, "source": None}
 _POOL: dict[str, "RealDaemon"] = {}
@@ -129,7 +130,9 @@ def shared(row: str):
     def factory(arm: str) -> RealDaemon:
         key = f"{row}_{arm}"
         if key not in _POOL:
-            _POOL[key] = RealDaemon(f"pl_cf_w1b_{key}")
+            # Per host and process: two harness runs (say Windows and WSL)
+            # share the bench server and must never drop each other's banks.
+            _POOL[key] = RealDaemon(f"pl_cf_w1b_{key}_{PLATFORM[:3]}{os.getpid()}")
         _POOL[key].settle()
         return _POOL[key]
     factory.per_arm = True

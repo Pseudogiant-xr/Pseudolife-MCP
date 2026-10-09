@@ -219,7 +219,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | [CLI differential harness](cli_harness/README.md) `--row mail` ([spec](cli_harness/specs/CLI-MAIL.md)): every canonical case exact on Windows (40) and Linux (42) apart from three named rules, 8/8 mutants caught, per-OS goldens, run live by both Parity jobs; see [CLI-MAIL closure](#cli-mail-closure-2026-10-09). The wait-mail producer substitutions stand | ported-with-substitution |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note and cursor, doorbell prompt-arrival receipt. `briefing_cli.py`, `codex_doorbell_state.py` | [CLI differential harness](cli_harness/README.md) `--row hook` ([spec](cli_harness/specs/CLI-HOOK.md)) against a fixture daemon: every canonical case exact on Windows and Linux apart from named rules, requests compared on the wire; see [CLI-HOOK closure](#cli-hook-closure-2026-10-09). The hook and doorbell substitutions stand | ported-with-substitution |
-| CLI-EPISODE | 2 | Episode start/end CLI exit/output and the POSTed body (session key, cwd, title). `episode_cli.py`, `session_title.py` | `test_episode_cli.py` I; split from CLI-HOOK on 2026-10-09; source-vote pairs out of scope until their producer lands on master | deferred |
+| CLI-EPISODE | 2 | Episode start/end CLI exit/output and the POSTed body (session key, cwd, title). `episode_cli.py`, `session_title.py` | [CLI differential harness](cli_harness/README.md) `--row episode` ([spec](cli_harness/specs/CLI-EPISODE.md)): 26 wire cases against a fixture daemon plus 7 bank cases against real oracle daemons on disposable banks, exact on Windows and Linux apart from named rules; see [CLI-EPISODE closure](#cli-episode-closure-2026-10-09). Source-vote titles stay out of scope until their producer lands on master | ported-with-substitution |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
 | CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
 | CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
@@ -602,8 +602,8 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | backup | 2 | deferred | C Phase 3/4; `backup_cli.py` imports embedded_pg, resolves direct DSN and runs pg_dump; `test_backup_cli.py::test_file_mode_backup_archives_state_only`, `test_dumpless_run_never_rotates_dumps`, `test_backup_roundtrip_embedded`; file-only coverage cannot accept whole mode |
 | export | 2 | deferred | C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
 | import | 2 | deferred | C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
-| episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |
-| episode-end | 2 | deferred | A HTTP POST `/api/episode/end` in `episode_cli.py`; same `test_episode_cli.py` nodes as episode-start; action-specific process fixtures pending |
+| episode-start | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
+| episode-end | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
 | wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
 | doorbell-prompt-seen | 1/2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
 | lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
@@ -631,6 +631,36 @@ and exit code match, except pinned lines. Timing within bounds, identities,
 entropy and clock fields are semantic. Exit codes, consumed stdout, shared files,
 help at COLUMNS=80 and argv acceptance remain contract surfaces; this additive
 note does not rewrite historical comparisons or discard failed receipts.
+
+## CLI-EPISODE closure (2026-10-09)
+
+The [CLI differential harness](cli_harness/README.md) closes CLI-EPISODE. The
+canonical inputs are the mode-only legacy hook commands with the host's
+SessionStart/SessionEnd JSON on stdin ([spec](cli_harness/specs/CLI-EPISODE.md)).
+Twenty-six wire cases run both CLIs against a fixture daemon and compare exit,
+streams and each request exactly, the POSTed JSON body byte for byte, with the
+`episode-title-minute` rule letting only the title's minute vary inside each
+arm's own window. They cover titles from git roots, plain directories, home,
+system and Windows paths and non-ASCII names, silence on missing or invalid
+input, down, degraded, non-JSON and redirecting daemons, and the transport
+(localhost, trickled health and POST replies, https through the test CA, the
+health redirect limit). Seven bank cases run both CLIs against two real
+oracle daemons, one per arm on its own disposable bank (test login,
+`pl_cf_` names), and compare the episodes and client-session rows each case's
+keys own after every case: first start, idempotent repeat, a second session,
+end of an empty session (episode deleted, client session ended), a repeated
+and an unknown end, and a restart opening a new root. Episode ids, wall-clock
+seconds and title minutes are symbolized after validation
+(`normalize.episode_rows`). Every case matches on Windows and Linux (33 live,
+26 wire cases also against goldens). The episode leaf now uses the CLI-HOOK
+transport (`hook_http`, gaining a JSON POST) for its health probe and POST,
+which brings urllib's connection order, per-receive timeouts and redirect
+limits to episode too. Four source mutants (start path, body spacing, system
+directory title, default name) are each caught. The bank cases need live
+oracle daemons and run locally; CI runs the wire cases live and against
+goldens. Source-vote session titles remain out of scope until their producer
+lands on master; the `http-forbidden-input-refused` bearer refusal and the
+transport deferrals (proxy settings) stand.
 
 ## CLI-HOOK closure (2026-10-09)
 
