@@ -138,11 +138,24 @@ fn missing_directory_spelling_preserves_exactly_two_leading_slashes() {
 
 #[cfg(windows)]
 #[test]
-fn missing_directory_spelling_preserves_extended_drive_prefix() {
+fn noncanonical_extended_drive_path_defers_without_effects() {
     let home = std::env::temp_dir().join(format!("backup-prefix-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let argument = format!("\\\\?\\{}\\\\missing-µ\\", home.display());
-    let expected = format!("\\\\?\\{}\\missing-µ", home.display());
-    assert_missing_spelling(&home, &argument, &expected);
+    let output = command(&home)
+        .arg("--data-dir")
+        .arg(&argument)
+        .output()
+        .unwrap();
+    let remaining = fs::read_dir(&home).unwrap().count();
+    let still_absent = !Path::new(&argument).exists();
     fs::remove_dir_all(&home).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        cli::native_text("pseudolife-stdio: mode 'backup' is deferred in this candidate\n")
+    );
+    assert!(still_absent);
+    assert_eq!(remaining, 0);
 }
