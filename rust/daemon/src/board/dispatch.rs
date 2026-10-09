@@ -585,7 +585,7 @@ impl Board {
 
     /// A send's HLC stamp and the writer epoch it must see, seeding the
     /// clock first (`_ensure_tier(full=True)`; see the declared divergence).
-    async fn tick(&self) -> Result<(String, i64)> {
+    pub(crate) async fn tick(&self) -> Result<(String, i64)> {
         let storage = self
             .service
             .storage_tier()

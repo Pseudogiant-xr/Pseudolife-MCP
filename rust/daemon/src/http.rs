@@ -460,6 +460,15 @@ async fn api(
     if method == "GET" && path == "/api/search" {
         return search_route(app, raw_query).await;
     }
+    if method == "GET"
+        && path == "/api/agents"
+        && params.get("view").map(String::as_str) == Some("coordination")
+    {
+        return crate::board::http::console(app, h, &params).await;
+    }
+    if method == "POST" && path == "/api/daemon-notice" {
+        return crate::board::http::daemon_notice(app, h, parsed_body).await;
+    }
     not_implemented(path)
 }
 

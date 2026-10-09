@@ -122,6 +122,31 @@ pub async fn coordination(app: &App, path: &str, h: &HeaderMap, body: Map<String
     }
 }
 
+/// `GET /api/agents?view=coordination` after W1-A's gate (tokenless
+/// already refused): the Console snapshot, refusals as the board's.
+pub async fn console(app: &App, h: &HeaderMap, params: &HashMap<String, String>) -> Response {
+    let headers = header_dict(h);
+    let principal = match authenticated_principal(app, &headers) {
+        Ok(p) => p,
+        Err(e) => return refusal(&e),
+    };
+    match app.board.console(&principal, params).await {
+        Ok(result) => json(200, &result),
+        Err(e) => refusal(&e),
+    }
+}
+
+/// `POST /api/daemon-notice` after W1-A's gate (stored principals already
+/// refused): a ValueError is a 400 with its text, as `web/api.py` answers.
+pub async fn daemon_notice(app: &App, h: &HeaderMap, body: Map<String, Value>) -> Response {
+    let headers = header_dict(h);
+    let principal = authenticated_principal(app, &headers).unwrap_or_default();
+    match app.board.daemon_notice_route(&principal, &body).await {
+        Ok(result) => json(200, &result),
+        Err(message) => json(400, &serde_json::json!({"error": message})),
+    }
+}
+
 /// `unavailable_reason`: why this caller cannot use the board, without
 /// storage I/O.
 pub fn unavailable_reason(app: &App, headers: &HashMap<String, String>) -> Option<String> {

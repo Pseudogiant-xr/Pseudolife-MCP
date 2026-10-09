@@ -4,6 +4,7 @@
 //! `POST /api/coordination/<action>` and the board hooks.
 
 pub mod canon;
+pub mod console;
 pub mod db;
 pub mod dispatch;
 pub mod error;
@@ -12,6 +13,7 @@ pub mod http;
 pub mod hub;
 pub mod lease;
 pub mod mail;
+pub mod notice;
 pub mod store;
 pub mod text;
 pub mod wake;
@@ -44,6 +46,8 @@ pub struct Board {
     pub(crate) hub: hub::Hub,
     pub(crate) service: Arc<Service>,
     pub(crate) principals: Arc<PrincipalStore>,
+    /// The daemon's own board address, registered by its first notice.
+    pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
 }
 
 type StoreCall<'a> =
@@ -77,6 +81,7 @@ impl Board {
             hub: hub::Hub::default(),
             service,
             principals,
+            daemon_identity: Mutex::new(None),
         }
     }
 

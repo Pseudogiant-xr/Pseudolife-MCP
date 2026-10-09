@@ -37,6 +37,8 @@ TIME_KEYS = {
 DIGEST_KEYS = {"credential_hash", "hash", "prev_hash", "fingerprint", "text_commitment",
                "proof", "through_hash"}
 SALT_KEYS = {"body_salt"}
+# Lists both producers sort by raw random ids; compared as sets.
+UNORDERED_KEYS = {"participants"}
 
 
 class Windows:
@@ -102,7 +104,9 @@ class Normalizer:
         if isinstance(v, dict):
             return {k: self.value(v[k], k) for k in v}
         if isinstance(v, list):
-            return [self.value(x, key) for x in v]
+            out = [self.value(x, key) for x in v]
+            # Sorted by raw random id on both arms: its order is free.
+            return sorted(out, key=json.dumps) if key in UNORDERED_KEYS else out
         if key in DIGEST_KEYS and isinstance(v, str):
             return "<sha256>" if HEX64.fullmatch(v) else f"<bad digest {v[:12]}>"
         if key in SALT_KEYS and isinstance(v, str):

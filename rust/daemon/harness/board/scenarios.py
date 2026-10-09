@@ -12,12 +12,14 @@ from __future__ import annotations
 import json
 
 TOK = {"default": "tok-w2f-default-0001", "alice": "tok-w2f-alice-0002",
-       "bob": "tok-w2f-bob-0003", "carol": "tok-w2f-carol-0004", "boss": "tok-w2f-boss-0005"}
+       "bob": "tok-w2f-bob-0003", "carol": "tok-w2f-carol-0004", "boss": "tok-w2f-boss-0005",
+       "notifier": "tok-w2f-notifier-0006"}
 TOKEN_ENV = {"PSEUDOLIFE_MCP_TOKEN": TOK["default"],
-             "PSEUDOLIFE_MCP_TOKENS": ",".join(f"{TOK[p]}:{p}" for p in ("alice", "bob", "carol", "boss"))}
+             "PSEUDOLIFE_MCP_TOKENS": ",".join(f"{TOK[p]}:{p}" for p in ("alice", "bob", "carol", "boss", "notifier"))}
 BASE_CONFIG = """coordination:
-  allowed_principals: [default, alice, bob, boss]
+  allowed_principals: [default, alice, bob, boss, notifier]
   maintainer_principals: [boss]
+  daemon_notice_principals: [notifier]
   wake:
     active_seconds: 1
     per_recipient_per_hour: 6
@@ -532,6 +534,43 @@ class Disabled(Scenario):
         ]
 
 
+class Console(Scenario):
+    name = "console"
+
+    def steps(self):
+        view = "/api/agents?view=coordination"
+        return [
+            hook("console before any board call", "GET", view, write=False),
+            reg("register A", "A", label="codex", project="p1", status="reviewing"),
+            reg("register B", "B", token="alice", label="claude-code", project="p1"),
+            act("attach B", "attach", token="alice", agent="B", body={"attachment_id": "att-b"}),
+            act("attach A", "attach", agent="A", body={"attachment_id": "att-a"}),
+            msg("A to B", "A", "B", "for B"),
+            msg("B to A", "B", "A", "for A", token="alice", save_as="m_ba"),
+            act("A takes lock", "lease", agent="A", body={"name": "suite", "ttl": 60}),
+            act("receive A", "receive", agent="A"),
+            act("ack A", "ack", agent="A", body=lambda c: {"message_id": c.vals.get("m_ba", "0" * 32)}),
+            hook("console default", "GET", view, write=False),
+            hook("console alice", "GET", view, token="alice", write=False),
+            hook("console limit 1", "GET", view + "&limit=1", write=False),
+            hook("console limit junk", "GET", view + "&limit=x", write=False),
+            hook("console limit 0", "GET", view + "&limit=0", write=False),
+            hook("console not allowed", "GET", view, token="carol", write=False),
+            hook("console bad bearer", "GET", view, token="tok-nope", write=False),
+            Step("notice by notifier", path="/api/daemon-notice", token="notifier",
+                 body={"text": "  daemon updated to 9.9.9  "}),
+            Step("notice again (same identity)", path="/api/daemon-notice", token="notifier",
+                 body={"text": "second notice"}),
+            Step("notice by default", path="/api/daemon-notice", token="default", body={"text": "x"}),
+            Step("notice blank", path="/api/daemon-notice", token="notifier", body={"text": "  "}),
+            Step("notice control char", path="/api/daemon-notice", token="notifier", body={"text": "a\u0007"}),
+            Step("notice too long", path="/api/daemon-notice", token="notifier", body={"text": "x" * 4001}),
+            act("receive B sees notice", "receive", token="alice", agent="B"),
+            act("agents shows daemon", "agents", token="alice", agent="B", write=False),
+            hook("console after notice", "GET", view, write=False),
+        ]
+
+
 class Mixed(Scenario):
     name = "mixed"
 
@@ -551,4 +590,5 @@ class Mixed(Scenario):
 
 
 MIXED = Mixed()
-SCENARIOS = {s.name: s for s in (Identity, Mail, Wake, Leases, Hooks, Prune, Tokenless, Disabled)}
+SCENARIOS = {s.name: s for s in (Identity, Mail, Wake, Leases, Hooks, Prune, Tokenless, Disabled,
+                                  Console)}
