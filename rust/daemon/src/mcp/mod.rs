@@ -2,9 +2,9 @@
 //! its tiers, and dispatch into the tool bodies. See spec.md, section "MCP
 //! surface (W2-G)", for the contract each item answers to.
 //!
-//! The Python daemon forwards every authenticated request that no Console or
-//! API route claims to the MCP SDK's Starlette app, so `handle` serves any
-//! such path: `/mcp` itself, the trailing-slash redirect and the plain 404.
+//! The Python daemon forwards `/mcp` and `/mcp/*` to the MCP SDK's Starlette
+//! app once the bearer gate has passed; `handle` answers for that app: the
+//! body-size limit, the trailing-slash redirect, the plain 404 and `/mcp`.
 
 mod catalogue;
 mod difflib;
@@ -33,8 +33,9 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 /// Terminated session ids remembered for the "has been terminated" answer.
 /// Python keeps every terminated transport for the process lifetime.
 const TERMINATED_KEPT: usize = 10_000;
-/// Request body cap; Python reads unbounded bodies.
-const BODY_LIMIT: usize = 64 * 1024 * 1024;
+/// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
+/// `RequestBodyLimitMiddleware` around the whole MCP app.
+const BODY_LIMIT: usize = 4 * 1024 * 1024;
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -50,10 +51,18 @@ pub struct McpState {
     sessions: Mutex<Sessions>,
 }
 
+/// One registered transport. `ready` is the SDK runner's initialization
+/// gate: until an `initialize` succeeds or `notifications/initialized`
+/// arrives, every request but `ping` is refused.
+#[derive(Default)]
+struct Entry {
+    stream: Option<mpsc::UnboundedSender<Bytes>>,
+    ready: bool,
+}
+
 #[derive(Default)]
 struct Sessions {
-    /// Live session id -> its standalone (GET) stream, when one is open.
-    live: HashMap<String, Option<mpsc::UnboundedSender<Bytes>>>,
+    live: HashMap<String, Entry>,
     terminated: HashSet<String>,
     terminated_order: VecDeque<String>,
 }
@@ -114,13 +123,25 @@ impl McpState {
         }
     }
 
-    /// Registers a session at `initialize`. A session terminated meanwhile
-    /// (a DELETE racing a re-initialize) stays terminated.
-    fn open(&self, sid: &str) {
+    /// The SDK manager registers a transport for every request that arrives
+    /// without a session id, whatever happens to that request afterwards.
+    fn register(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
-        if !s.terminated.contains(sid) {
-            s.live.entry(sid.to_string()).or_insert(None);
+        s.live.entry(sid.to_string()).or_default();
+    }
+
+    /// Opens the initialization gate. A session terminated meanwhile (a
+    /// DELETE racing this request) stays terminated.
+    fn mark_ready(&self, sid: &str) {
+        let mut s = self.sessions.lock().expect("sessions lock");
+        if let Some(e) = s.live.get_mut(sid) {
+            e.ready = true;
         }
+    }
+
+    fn is_ready(&self, sid: &str) -> bool {
+        let s = self.sessions.lock().expect("sessions lock");
+        s.live.get(sid).is_some_and(|e| e.ready)
     }
 
     fn terminate(&self, sid: &str) {
@@ -140,7 +161,7 @@ impl McpState {
     /// Server-initiated message to the session's standalone stream, if open.
     fn notify(&self, sid: &str, message: &Value) {
         let s = self.sessions.lock().expect("sessions lock");
-        if let Some(Some(tx)) = s.live.get(sid) {
+        if let Some(Entry { stream: Some(tx), .. }) = s.live.get(sid) {
             let _ = tx.send(sse_event(&message.to_string()));
         }
     }
@@ -239,6 +260,19 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
     None
 }
 
+/// `RequestBodyLimitMiddleware`: a declared Content-Length over the limit is
+/// refused before anything is read; a longer body is refused while reading.
+async fn read_body(headers: &HeaderMap, body: Body) -> Result<Bytes, Response> {
+    let too_large = || plain(413, "Request body too large");
+    if let Some(declared) = latin1(headers, "content-length")
+        .and_then(|v| v.trim().parse::<i128>().ok())
+        && declared > BODY_LIMIT as i128
+    {
+        return Err(too_large());
+    }
+    axum::body::to_bytes(body, BODY_LIMIT).await.map_err(|_| too_large())
+}
+
 /// Entry for `/mcp` and `/mcp/*` once the gate has named the principal
 /// (`web/api.py` forwards them to the SDK's Starlette app).
 pub async fn handle(
@@ -250,18 +284,23 @@ pub async fn handle(
     raw_query: Option<&str>,
     body: Body,
 ) -> Response {
-    if path == "/mcp/" {
-        // Starlette's redirect_slashes: same scheme and Host, path stripped.
-        let host = latin1(&headers, "host").unwrap_or_default();
-        let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
-        let mut r = Response::new(Body::empty());
-        *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
-        if let Ok(v) = HeaderValue::from_str(&format!("http://{host}/mcp{query}")) {
-            r.headers_mut().insert(header::LOCATION, v);
-        }
-        return r;
-    }
+    let body = match read_body(&headers, body).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
     if path != "/mcp" {
+        if path.trim_end_matches('/') == "/mcp" {
+            // Starlette's redirect_slashes: same scheme and Host, the path
+            // with its trailing slashes stripped.
+            let host = latin1(&headers, "host").unwrap_or_default();
+            let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+            let mut r = Response::new(Body::empty());
+            *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+            if let Ok(v) = HeaderValue::from_str(&format!("http://{host}/mcp{query}")) {
+                r.headers_mut().insert(header::LOCATION, v);
+            }
+            return r;
+        }
         let mut r = Response::new(Body::from("Not Found"));
         *r.status_mut() = StatusCode::NOT_FOUND;
         r.headers_mut().insert(
@@ -279,7 +318,7 @@ pub async fn handle(
     if let Some(pv) = latin1(&headers, "mcp-protocol-version")
         && !HANDSHAKE_VERSIONS.contains(&pv.as_str())
     {
-        return modern_era_refusal(body).await;
+        return modern_era_refusal(&body);
     }
 
     let supplied = latin1(&headers, "mcp-session-id");
@@ -298,14 +337,16 @@ pub async fn handle(
                 );
             }
             Lookup::Unknown => {
-                let mut r = rpc_http_error(404, INVALID_REQUEST, "Session not found", None);
-                r.headers_mut()
-                    .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                return r;
+                return rpc_http_error(404, INVALID_REQUEST, "Session not found", None);
             }
         },
-        // A new transport, with a fresh id the SDK reports even on refusals.
-        None => (uuid::Uuid::new_v4().simple().to_string(), false),
+        None => {
+            // A new transport under a fresh id, registered before its first
+            // request is even checked (the manager's new-session path).
+            let sid = uuid::Uuid::new_v4().simple().to_string();
+            state.register(&sid);
+            (sid, false)
+        }
     };
     if let Some(r) = security(state, &method, &headers) {
         return r;
@@ -332,9 +373,8 @@ pub async fn handle(
 /// The modern era's answer to a legacy-shaped request with no `_meta`
 /// envelope (recorded from the oracle); every other modern request is a
 /// declared divergence.
-async fn modern_era_refusal(body: Body) -> Response {
-    let body = axum::body::to_bytes(body, BODY_LIMIT).await.unwrap_or_default();
-    let id = serde_json::from_slice::<Value>(&body)
+fn modern_era_refusal(body: &[u8]) -> Response {
+    let id = serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|v| v.get("id").cloned())
         .unwrap_or(Value::Null);
@@ -358,8 +398,12 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
     let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
     {
         let mut s = state.sessions.lock().expect("sessions lock");
-        let slot = s.live.entry(sid.to_string()).or_insert(None);
-        if slot.as_ref().is_some_and(|t| !t.is_closed()) {
+        let Some(entry) = s.live.get_mut(sid) else {
+            // Terminated between the lookup and here.
+            drop(s);
+            return rpc_http_error(404, INVALID_REQUEST, "Not Found: Session has been terminated", Some(sid));
+        };
+        if entry.stream.as_ref().is_some_and(|t| !t.is_closed()) {
             drop(s);
             return rpc_http_error(
                 409,
@@ -368,7 +412,7 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
                 Some(sid),
             );
         }
-        *slot = Some(tx);
+        entry.stream = Some(tx);
     }
     let stream = async_stream(move |yield_tx| async move {
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
@@ -402,31 +446,60 @@ where
 }
 
 enum Message {
-    Request { id: Value, method: String, params: Value },
-    /// Notifications and client responses: answered 202, then dropped.
-    Other,
+    Request { id: Value, method: String, params: Map<String, Value> },
+    /// Notifications and client responses: answered 202, then handled or
+    /// dropped. Holds the method for notifications.
+    Other(Option<String>),
 }
 
-/// The JSON-RPC shapes `jsonrpc_message_adapter` accepts, for the
-/// canonical producers (single messages; ids are integers or strings).
+/// A JSON-RPC request id as pydantic's `int | str` takes it: strings,
+/// integers, and floats with no fractional part (coerced to the integer).
+fn request_id(v: &Value) -> Option<Value> {
+    match v {
+        Value::String(_) => Some(v.clone()),
+        Value::Number(n) if n.is_i64() || n.is_u64() => Some(v.clone()),
+        Value::Number(n) => {
+            let f = n.as_f64()?;
+            (f.fract() == 0.0 && f.abs() < 9.007_199_254_740_992e15).then(|| json!(f as i64))
+        }
+        _ => None,
+    }
+}
+
+/// `jsonrpc_message_adapter`: request, then notification (any id is
+/// ignored), then response, then error; `params` must be an object when
+/// present, `result` an object, `error` an object with code and message.
 fn classify(v: &Value) -> Option<Message> {
     let o = v.as_object()?;
     if o.get("jsonrpc")? != "2.0" {
         return None;
     }
-    let id_ok = |id: &Value| id.is_string() || id.is_i64() || id.is_u64();
-    match (o.get("id"), o.get("method")) {
-        (Some(id), Some(Value::String(m))) if id_ok(id) => Some(Message::Request {
-            id: id.clone(),
-            method: m.clone(),
-            params: o.get("params").cloned().unwrap_or(Value::Null),
-        }),
-        (None, Some(Value::String(_))) => Some(Message::Other),
-        (Some(id), None) if id_ok(id) && (o.contains_key("result") || o.contains_key("error")) => {
-            Some(Message::Other)
+    let params_ok = match o.get("params") {
+        None | Some(Value::Null) | Some(Value::Object(_)) => true,
+        Some(_) => false,
+    };
+    if let Some(Value::String(m)) = o.get("method") {
+        if !params_ok {
+            return None;
         }
-        _ => None,
+        let params = o.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+        if let Some(id) = o.get("id").and_then(request_id) {
+            return Some(Message::Request { id, method: m.clone(), params });
+        }
+        return Some(Message::Other(Some(m.clone())));
     }
+    let id_ok = o.get("id").and_then(request_id).is_some();
+    if id_ok && o.get("result").is_some_and(Value::is_object) {
+        return Some(Message::Other(None));
+    }
+    let error_ok = o.get("error").and_then(Value::as_object).is_some_and(|e| {
+        e.get("code").is_some_and(|c| request_id(c).is_some_and(|c| c.is_number()))
+            && e.get("message").is_some_and(Value::is_string)
+    });
+    if (id_ok || o.get("id").is_some_and(Value::is_null)) && error_ok {
+        return Some(Message::Other(None));
+    }
+    None
 }
 
 async fn post(
@@ -435,7 +508,7 @@ async fn post(
     sid: &str,
     known: bool,
     headers: HeaderMap,
-    body: Body,
+    body: Bytes,
 ) -> Response {
     let (json_ok, sse_ok) = accepts(&headers);
     if !(json_ok && sse_ok) {
@@ -461,10 +534,6 @@ async fn post(
             Some(sid),
         );
     }
-    let body = match axum::body::to_bytes(body, BODY_LIMIT).await {
-        Ok(b) => b,
-        Err(_) => return rpc_http_error(500, -32603, "Error handling POST request", Some(sid)),
-    };
     let raw: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -483,17 +552,28 @@ async fn post(
     if !is_init && !known {
         return rpc_http_error(400, INVALID_REQUEST, "Bad Request: Missing session ID", Some(sid));
     }
-    let Message::Request { id, method, params } = message else {
-        return json_bytes(202, Vec::new(), Some(sid));
+    let (id, method, params) = match message {
+        Message::Request { id, method, params } => (id, method, params),
+        Message::Other(m) => {
+            if m.as_deref() == Some("notifications/initialized") {
+                app.mcp.mark_ready(sid);
+            }
+            return json_bytes(202, Vec::new(), Some(sid));
+        }
     };
-    if is_init {
-        app.mcp.open(sid);
-    }
-    let app = app.clone();
-    let principal = principal.to_string();
-    let sid_owned = sid.to_string();
+    // The call runs as its own task, so a client that drops the connection
+    // does not cancel a tool body mid-write (Python runs bodies on worker
+    // threads that a disconnect does not stop).
+    let work = tokio::spawn(respond(
+        app.clone(),
+        principal.to_string(),
+        sid.to_string(),
+        headers,
+        id,
+        method,
+        params,
+    ));
     let stream = async_stream(move |tx| async move {
-        let work = respond(&app, &principal, &sid_owned, &headers, id, &method, params);
         tokio::pin!(work);
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
         let data = loop {
@@ -502,7 +582,9 @@ async fn post(
                 _ = ping.tick() => if tx.send(Ok(sse_ping())).await.is_err() { return },
             }
         };
-        let _ = tx.send(Ok(sse_event(&data))).await;
+        if let Ok(data) = data {
+            let _ = tx.send(Ok(sse_event(&data))).await;
+        }
     });
     let mut r = Response::new(Body::from_stream(stream));
     sse_headers(&mut r, sid);
@@ -522,54 +604,89 @@ fn invalid_params(id: &Value) -> String {
     rpc_error(id, INVALID_PARAMS, "Invalid request parameters", json!(""))
 }
 
+/// `validate_client_request` for the parameter shapes canonical clients and
+/// the listed methods use: `_meta` an object, `cursor` a string, required
+/// names present. `false` means -32602.
+fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
+    let opt = |key: &str, ok: fn(&Value) -> bool| p.get(key).is_none_or(|v| v.is_null() || ok(v));
+    if !opt("_meta", Value::is_object) {
+        return false;
+    }
+    let string = |key: &str| p.get(key).is_some_and(Value::is_string);
+    match method {
+        "tools/list" | "prompts/list" | "resources/list" | "resources/templates/list" => {
+            opt("cursor", Value::is_string)
+        }
+        "tools/call" => string("name") && opt("arguments", Value::is_object),
+        "prompts/get" => string("name") && opt("arguments", Value::is_object),
+        "resources/read" | "resources/subscribe" | "resources/unsubscribe" => string("uri"),
+        _ => true,
+    }
+}
+
 async fn respond(
-    app: &Arc<crate::http::App>,
-    principal: &str,
-    sid: &str,
-    headers: &HeaderMap,
+    app: Arc<crate::http::App>,
+    principal: String,
+    sid: String,
+    headers: HeaderMap,
     id: Value,
-    method: &str,
-    params: Value,
+    method: String,
+    params: Map<String, Value>,
 ) -> String {
     let state = &app.mcp;
-    match method {
-        "initialize" => match initialize_result(&params) {
-            Some(r) => rpc_result(&id, &r),
+    if !params_valid(&method, &params) {
+        return invalid_params(&id);
+    }
+    if method == "initialize" {
+        return match initialize_result(&params) {
+            Some(r) => {
+                state.mark_ready(&sid);
+                rpc_result(&id, &r)
+            }
             None => invalid_params(&id),
-        },
+        };
+    }
+    if method != "ping" && !state.is_ready(&sid) {
+        // The runner's initialization gate.
+        return invalid_params(&id);
+    }
+    match method.as_str() {
         "ping" => rpc_result(&id, "{}"),
         "tools/list" => {
-            let key = identity::tier_key(principal, headers);
-            let tier = state.resolve_tier(&app.store, principal, key.as_deref());
+            let key = identity::tier_key(&principal, &headers);
+            let tier = state.resolve_tier(&app.store, &principal, key.as_deref());
             rpc_result(&id, &catalogue::list_result(tier))
         }
         "tools/call" => {
-            let Some(p) = params.as_object() else {
-                return invalid_params(&id);
-            };
-            let Some(name) = p.get("name").and_then(Value::as_str) else {
-                return invalid_params(&id);
-            };
-            let args = match p.get("arguments") {
-                None | Some(Value::Null) => Map::new(),
-                Some(Value::Object(m)) => m.clone(),
-                Some(_) => return invalid_params(&id),
-            };
-            let result = call_tool(app, principal, sid, headers, name, &args).await;
+            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            let args = params.get("arguments").and_then(Value::as_object).cloned().unwrap_or_default();
+            let result = call_tool(&app, &principal, &sid, &headers, name, &args).await;
             rpc_result(&id, &result.to_string())
         }
         "prompts/list" => rpc_result(&id, "{\"prompts\":[]}"),
         "resources/list" => rpc_result(&id, "{\"resources\":[]}"),
         "resources/templates/list" => rpc_result(&id, "{\"resourceTemplates\":[]}"),
+        "prompts/get" => {
+            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": 0, "message": format!("Unknown prompt: {name}")}})
+                .to_string()
+        }
+        "resources/read" => {
+            let uri = params.get("uri").and_then(Value::as_str).unwrap_or_default();
+            rpc_error(&id, INVALID_PARAMS, &format!("Unknown resource: {uri}"), json!({"uri": uri}))
+        }
         _ => rpc_error(&id, METHOD_NOT_FOUND, "Method not found", json!(method)),
     }
 }
 
 /// `InitializeResult` for valid `InitializeRequestParams`; none otherwise.
-fn initialize_result(params: &Value) -> Option<String> {
-    let p = params.as_object()?;
+fn initialize_result(p: &Map<String, Value>) -> Option<String> {
     let version = p.get("protocolVersion")?.as_str()?;
-    p.get("capabilities")?.as_object()?;
+    let caps = p.get("capabilities")?.as_object()?;
+    // ClientCapabilities members are objects (shallow check; see divergences).
+    if caps.values().any(|v| !v.is_object() && !v.is_null()) {
+        return None;
+    }
     let info = p.get("clientInfo")?.as_object()?;
     info.get("name")?.as_str()?;
     info.get("version")?.as_str()?;
@@ -670,10 +787,12 @@ mod sessions {
     #[test]
     fn a_terminated_session_is_not_reopened() {
         let state = McpState::new(Tier::Core, HashMap::new(), true);
-        state.open("s1");
+        state.register("s1");
         assert!(matches!(state.lookup("s1"), Lookup::Live));
+        assert!(!state.is_ready("s1"));
         state.terminate("s1");
-        state.open("s1");
+        // An initialize or initialized notification racing the DELETE.
+        state.mark_ready("s1");
         assert!(matches!(state.lookup("s1"), Lookup::Terminated));
     }
 }
@@ -712,15 +831,18 @@ mod goldens {
         for (version, want) in goldens()["initialize"].as_object().unwrap() {
             let params = json!({"protocolVersion": version, "capabilities": {},
                                 "clientInfo": {"name": "mcp", "version": "0.1.0"}});
-            assert_eq!(initialize_result(&params).unwrap(), want.as_str().unwrap(), "{version}");
+            let params = params.as_object().unwrap();
+            assert_eq!(initialize_result(params).unwrap(), want.as_str().unwrap(), "{version}");
         }
     }
 
     #[test]
     fn toolset_sequences_match_the_oracle() {
         let store = crate::auth::PrincipalStore::new();
+        // One daemon, the identities in the recorded order: overrides one
+        // identity leaves behind are part of what the next one sees.
+        let state = harness_state();
         for ident in goldens()["toolset"].as_array().unwrap() {
-            let state = harness_state();
             let principal = ident["principal"].as_str().unwrap();
             let mut headers = HeaderMap::new();
             if let Some(w) = ident["writer"].as_str() {

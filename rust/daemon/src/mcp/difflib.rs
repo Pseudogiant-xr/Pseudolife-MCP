@@ -60,7 +60,8 @@ fn longest(a: &[char], b: &[char], alo: usize, ahi: usize, blo: usize, bhi: usiz
 pub fn close_match<'a>(word: &str, possibilities: &[&'a str]) -> Option<&'a str> {
     possibilities
         .iter()
-        .map(|p| (ratio(word, p), *p))
+        // get_close_matches sets seq2 = word, seq1 = candidate.
+        .map(|p| (ratio(p, word), *p))
         .filter(|(r, _)| *r >= 0.6)
         .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap().then(x.1.cmp(y.1)))
         .map(|(_, p)| p)
@@ -79,5 +80,8 @@ mod tests {
         assert_eq!(close_match("qry", &["query", "top_k"]), Some("query"));
         assert_eq!(close_match("zzz", &["query", "top_k"]), None);
         assert_eq!(close_match("ab", &["abc", "abd"]), Some("abd"));
+        // Not symmetric (review finding): CPython scores (candidate, word).
+        assert_eq!(close_match("iain", &["action"]), Some("action"));
+        assert_eq!(close_match("cint", &["action"]), None);
     }
 }

@@ -35,8 +35,18 @@ pub fn call_identity(principal: &str, headers: &HeaderMap) -> CallIdentity {
         principal: principal.to_string(),
         writer,
         header_session: header(headers, "x-pl-session"),
+        transport_session: legacy_transport_session()
+            .then(|| header(headers, "mcp-session-id"))
+            .flatten(),
         headers: headers.clone(),
     }
+}
+
+/// `_legacy_transport_session_enabled`: explicit truthy values only.
+fn legacy_transport_session() -> bool {
+    std::env::var("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION").is_ok_and(|v| {
+        matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    })
 }
 
 /// `_tier_principal`: the tier bucket and map key. A named principal, else

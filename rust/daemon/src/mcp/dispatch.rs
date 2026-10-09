@@ -26,6 +26,9 @@ pub struct CallIdentity {
     /// `X-PL-Session` as sent (identity tier 1). The effective session (the
     /// active-session pointer fallback) is resolved by W2-E's episodes module.
     pub header_session: Option<String>,
+    /// The transport's `mcp-session-id`, only under the retired
+    /// `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` hatch (identity tier 4).
+    pub transport_session: Option<String>,
     /// The request's headers, for anything else a body reads (the board's
     /// `X-PL-Agent`, `X-PL-Agent-Key`, `X-PL-Bank`, `X-PL-Principal`).
     pub headers: HeaderMap,

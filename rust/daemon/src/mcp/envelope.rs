@@ -75,12 +75,12 @@ pub fn error_payload(tool: &str, err: &ToolError) -> Value {
                 Some(d) => format!("{code}: {d}"),
                 None => code.clone(),
             };
-            return prose(&text);
+            return prose(tool, &text);
         }
-        ToolError::Invalid(text) => return prose(text),
+        ToolError::Invalid(text) => return prose(tool, text),
     };
     out.insert("error".into(), json!(code));
-    let message = match &detail {
+    let message = match detail.as_deref().filter(|d| !d.is_empty()) {
         Some(d) => format!("{code}: {d}"),
         None => format!("{code}: the call was refused."),
     };
@@ -96,8 +96,10 @@ pub fn error_payload(tool: &str, err: &ToolError) -> Value {
     Value::Object(out)
 }
 
-/// A ValueError whose text is matched against `_ERROR_CODE`.
-fn prose(text: &str) -> Value {
+/// A ValueError whose text is matched against `_ERROR_CODE`; the
+/// `coordination_unavailable` rule applies on this path too
+/// (`coordination.py` raises it as plain text).
+fn prose(tool: &str, text: &str) -> Value {
     let text = py_strip(text);
     match code_re().captures(text) {
         None => json!({
@@ -110,7 +112,11 @@ fn prose(text: &str) -> Value {
                 Some(d) => format!("{code}: {}", d.as_str()),
                 None => format!("{code}: the call was refused."),
             };
-            json!({"error": code, "message": message})
+            let mut out = json!({"error": code, "message": message});
+            if code == "coordination_unavailable" && !READ_ONLY_TOOLS.contains(&tool) {
+                out["mutation"] = json!("unknown");
+            }
+            out
         }
     }
 }
@@ -167,6 +173,20 @@ mod tests {
         let p = error_payload("memory_agents", &ToolError::refused("coordination_unavailable", None));
         assert_eq!(p["mutation"], "unknown");
         assert_eq!(p["message"], "coordination_unavailable: the call was refused.");
+    }
+
+    #[test]
+    fn prose_codes_keep_python_extras() {
+        // Review finding: coordination.py raises ValueError("coordination_unavailable").
+        let p = error_payload("memory_agents", &ToolError::Invalid("coordination_unavailable".into()));
+        assert_eq!(
+            serde_json::to_string(&p).unwrap(),
+            r#"{"error":"coordination_unavailable","message":"coordination_unavailable: the call was refused.","mutation":"unknown"}"#
+        );
+        let p = error_payload("memory_search", &ToolError::Invalid("coordination_unavailable".into()));
+        assert!(p.get("mutation").is_none());
+        let p = error_payload("memory_store", &ToolError::refused("bad_code", Some("")));
+        assert_eq!(p["message"], "bad_code: the call was refused.");
     }
 
     #[test]

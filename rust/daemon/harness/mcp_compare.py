@@ -593,8 +593,9 @@ def sanity(data, diffs):
             diffs.append(f"sanity config_lists: tool counts {got}")
     if "rebinding" in data:
         statuses = sorted({r["status"] for r in data["rebinding"]})
-        # 400: a POST's Content-Type is checked before Host.
-        if statuses != [200, 400, 403, 421]:
+        # 400: a POST's Content-Type is checked before Host; 404: an unknown
+        # session id is answered before the Host check.
+        if statuses != [200, 400, 403, 404, 421]:
             diffs.append(f"sanity rebinding: statuses {statuses}")
 
 
