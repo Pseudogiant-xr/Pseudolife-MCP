@@ -3,8 +3,9 @@
 //!
 //! Local time is shown only where the native zone provably agrees with
 //! CPython's: `TZ` unset (the C runtime and glibc honour it, Chrono does not
-//! read it the same way), a value in years 1970-9999 (Windows' C runtime
-//! refuses negative times; CPython's own range ends far later). On Windows
+//! read it the same way), a non-negative value whose local year is
+//! 1970-9999 (Windows' C runtime refuses negative times; past 9999 CPython's
+//! `%Y` prints five digits where Chrono adds a sign). On Windows
 //! the C runtime applies the zone's current rules to every year, while
 //! Chrono asks Windows for each year's rules, so a value is shown there only
 //! when it, and two days either side, fall in the current local year with
@@ -45,7 +46,7 @@ pub(super) fn local_clock() -> Clock<Local> {
     }
 }
 
-/// The latest value whose local year stays four digits (9999-12-31 UTC).
+/// The last second of 9999 in UTC; the local year is checked as well.
 const LAST: f64 = 253_402_300_799.0;
 const TWO_DAYS: i64 = 2 * 86_400;
 
@@ -65,6 +66,9 @@ impl<Tz: TimeZone> Clock<Tz> {
         // time.localtime floors a float to whole seconds.
         let seconds = value.floor() as i64;
         let local = self.local(seconds)?;
+        if !(1970..=9999).contains(&local.year()) {
+            return None;
+        }
         if self.per_year_rules {
             let offset = local.offset().fix();
             for neighbour in [seconds - TWO_DAYS, seconds, seconds + TWO_DAYS] {
@@ -169,6 +173,25 @@ mod tests {
         };
         assert_eq!(tz.when(Some(1_791_000_000.0)), None);
         assert_eq!(tz.when(None).unwrap(), "-");
+    }
+
+    #[test]
+    fn the_local_year_stays_within_1970_to_9999() {
+        let zone = |hours: i32| Clock {
+            zone: FixedOffset::east_opt(hours * 3600).unwrap(),
+            year: 2026,
+            per_year_rules: false,
+            tz_set: false,
+        };
+        // UTC+14 at the last UTC second of 9999 is already 10000 locally
+        // (CPython's %Y prints 10000, Chrono +10000); UTC-5 at 0 is 1969.
+        assert_eq!(zone(14).when(Some(LAST)), None);
+        assert_eq!(zone(-5).when(Some(0.0)), None);
+        assert_eq!(
+            zone(-5).when(Some(5.0 * 3600.0)).unwrap(),
+            "1970-01-01 00:00"
+        );
+        assert_eq!(zone(-14).when(Some(LAST)).unwrap(), "9999-12-31 09:59");
     }
 
     #[test]

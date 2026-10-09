@@ -7,6 +7,7 @@
 //! mode's deferral line.
 mod bank;
 mod display;
+mod sqlstate;
 use std::{
     ffi::OsString,
     io::{self, Write},
@@ -71,14 +72,62 @@ fn dsn() -> Option<crate::pg::Dsn> {
     crate::pg::Dsn::parse(&value).ok()
 }
 
-/// `print(..., file=out)` lines on stdout, flushed; `Err` when stdout
+/// `print(..., file=out)` lines on stdout, flushed; the error when stdout
 /// refused them.
-fn print(text: &str) -> Result<(), ()> {
+fn print(text: &str) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(&super::text_bytes(text))
         .and_then(|()| stdout.flush())
-        .map_err(|_| ())
+}
+
+/// How an unbuffered write of a whole report ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Written {
+    All,
+    /// Refused before any byte reached stdout.
+    Nothing,
+    /// Refused after some bytes did.
+    Part,
+}
+
+/// `bytes` to stdout through a duplicate of its descriptor, so every byte a
+/// write reports has left this process (std's own stdout buffers lines).
+fn write_unbuffered(bytes: &[u8]) -> Written {
+    #[cfg(unix)]
+    let handle = std::os::fd::AsFd::as_fd(&io::stdout()).try_clone_to_owned();
+    #[cfg(windows)]
+    let handle = std::os::windows::io::AsHandle::as_handle(&io::stdout()).try_clone_to_owned();
+    let Ok(handle) = handle else {
+        return Written::Nothing;
+    };
+    write_all_counted(&mut std::fs::File::from(handle), bytes)
+}
+
+fn write_all_counted(sink: &mut impl Write, mut bytes: &[u8]) -> Written {
+    let mut wrote = false;
+    while !bytes.is_empty() {
+        match sink.write(bytes) {
+            Ok(0) | Err(_) if !wrote => return Written::Nothing,
+            Ok(0) | Err(_) => return Written::Part,
+            Ok(count) => {
+                wrote = true;
+                bytes = &bytes[count..];
+            }
+        }
+    }
+    Written::All
+}
+
+/// The class CPython's print raises for a refused stdout: a pipe whose
+/// reader closed is `BrokenPipeError` on POSIX and `OSError` (EINVAL) on
+/// Windows; anything else is reported as `OSError`.
+fn stdout_error_class(error: &io::Error) -> &'static str {
+    if error.kind() == io::ErrorKind::BrokenPipe && !cfg!(windows) {
+        "BrokenPipeError"
+    } else {
+        "OSError"
+    }
 }
 
 /// The exit status after a committed change whose report stdout refused:
@@ -158,6 +207,49 @@ mod tests {
             &["enrol"],
         ] {
             assert_eq!(parse(&argv(deferred)), None, "{deferred:?}");
+        }
+    }
+
+    /// A sink that takes `room` bytes (three at a time), then refuses.
+    struct Closing {
+        room: usize,
+        taken: Vec<u8>,
+    }
+
+    impl Write for Closing {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.room == 0 {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            let count = bytes.len().min(self.room).min(3);
+            self.room -= count;
+            self.taken.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn an_unbuffered_write_says_whether_any_byte_left() {
+        for (room, expected) in [
+            (0, Written::Nothing),
+            (1, Written::Part),
+            (9, Written::Part),
+            (10, Written::All),
+            (99, Written::All),
+        ] {
+            let mut sink = Closing {
+                room,
+                taken: Vec::new(),
+            };
+            assert_eq!(
+                write_all_counted(&mut sink, b"0123456789"),
+                expected,
+                "{room}"
+            );
+            assert_eq!(sink.taken, &b"0123456789"[..room.min(10)]);
         }
     }
 
