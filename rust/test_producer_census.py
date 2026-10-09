@@ -271,6 +271,14 @@ def test_multiword_placeholder_keeps_compound_suffix():
     assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
 
 
+def test_csv_placeholder_operand_is_whole_but_help_punctuation_is_not_value():
+    operand = '<token-1>:<machine>-client,<token-2>:<machine>-other'
+    call = census.env_calls('PSEUDOLIFE_MCP_TOKENS=' + operand, "docs/demo.md")[0]
+    assert call["shape"]["parameters"]["value"] == {"expression": operand, "placeholder": True}
+    help_call = census.env_calls('PSEUDOLIFE_MCP_TOKEN=<bearer>, or use a file', "rust/shim/src/cli_help.txt")[0]
+    assert help_call["shape"]["parameters"]["value"]["expression"] == '<bearer>'
+
+
 def test_less_than_in_actual_scalar_path_is_not_placeholder_syntax():
     for operand in ['"/tmp/a<b.yaml"', '"/tmp/a<b>.yaml"']:
         call = census.env_calls('PSEUDOLIFE_MCP_TOKEN_FILE=' + operand, "ops/demo.sh")[0]

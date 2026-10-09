@@ -30806,7 +30806,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "expression": "<machine>-claude-code:full",
+                "expression": "<machine>-claude-code:full,<machine>-codex:full",
                 "placeholder": true
               }
             }
@@ -32922,7 +32922,7 @@
             "omitted_optional": null,
             "parameters": {
               "value": {
-                "expression": "<token-1>:<machine>-claude-code",
+                "expression": "<token-1>:<machine>-claude-code,<token-2>:<machine>-codex",
                 "placeholder": true
               }
             }
