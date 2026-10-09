@@ -496,6 +496,48 @@ took 143 CUDA OOMs.
   ordinary-code rule”. An old-head full pass is not evidence for a changed
   head, except under the review-fix rule above.
 
+## Stopping processes (shared host)
+
+Every session on this host shares one process table, so a kill that selects
+more than your own run takes down other sessions' work. Stop only processes
+you can prove are yours.
+
+- **By the PID you recorded at launch, with its tree**, while it is still
+  running: the harness's task stop, or `taskkill /PID <pid> /T /F`. In Git
+  Bash, MSYS rewrites `/PID` into a path, so write `taskkill //PID <pid>
+  //T //F` (or prefix `MSYS_NO_PATHCONV=1`). In Git Bash `$!` is not a
+  Windows PID; read it with `cat /proc/$!/winpid`. In PowerShell use
+  `(Start-Process ... -PassThru).Id`. A PID can be reused once its process
+  exits, and an identical command line is not proof either: another session
+  may run the same command in a shared worktree. So record the process's
+  start time with its PID (PowerShell: `(Get-Process -Id <pid>).StartTime`),
+  verify both just before stopping, and do not stop it if either no longer
+  matches or cannot be read.
+- **By a marker unique to your run** when the process has left your tree (a
+  daemon that detached or outlived its launcher). Put a run id in the argv
+  or use your own harness home. The worktree path is not unique: reviewers
+  and subagents share it. Exclude the searching process and its parent,
+  list the matches, check them, then stop them by PID.
+- A server started by a tool you do not control is stopped through that
+  tool, or by asking its owner on the board.
+- **Never stop processes selected only by image name, shared attributes or a
+  command-line pattern that does not prove ownership.** That means
+  `taskkill /IM` or `/FI "IMAGENAME eq ..."`, `Stop-Process -Name`,
+  `Get-Process <name> | Stop-Process`, `wmic process where name=... delete`,
+  `Get-CimInstance Win32_Process -Filter "Name=..." | Invoke-CimMethod
+  -MethodName Terminate`, `pkill` or `pkill -f`, `killall`. It also means a
+  command-line pattern another session's processes could match
+  (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
+
+Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
+Codex process on the host, the Codex app and other sessions' turns
+included. A command-line pattern meant for one session's harness could also
+match other sessions' test daemons. On the maintainer's machine an untracked
+hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
+by-name forms in Claude's Bash tool. The rule applies everywhere
+regardless, including the PowerShell tool and Codex sessions, which the
+hook does not see.
+
 ## Review discipline
 
 - **Recall precedes review.** Before reviewing code, docs, or a PR, search
@@ -520,12 +562,8 @@ took 143 CUDA OOMs.
   overwrite it). Use `--uncommitted` for a pre-commit pass and
   `--commit <sha>` for a single commit. Pin the model and effort on the
   command line, and check the log's header names both. To stop one early,
-  kill its own process tree while it is still running (the harness's task
-  stop, or `taskkill /PID <pid> /T /F` with the Windows PID taken at
-  launch: `cat /proc/$!/winpid` in Git Bash, since `$!` there is not a
-  Windows PID, or `(Start-Process ... -PassThru).Id` in PowerShell), never
-  by image name: `taskkill /IM codex.exe` on 2026-10-09 killed every Codex process
-  on the host, the Codex app and other sessions' turns included. Verify
+  kill its own process tree by the PID taken at launch, never by image
+  name (see "Stopping processes (shared host)"). Verify
   its findings against the code like a subagent's, and record both reviews
   in the PR (or the commit body when there is no PR yet), each finding
   labelled by source with its verdict. A missing, signed-out or failed

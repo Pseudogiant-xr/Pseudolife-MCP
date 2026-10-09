@@ -187,9 +187,9 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/cli_harness --row mail --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
+          python rust/cli_harness --row mail --row hook --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/cli_harness --row mail --golden --candidate $candidate -v
+          python rust/cli_harness --row mail --row hook --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
         timeout-minutes: 10

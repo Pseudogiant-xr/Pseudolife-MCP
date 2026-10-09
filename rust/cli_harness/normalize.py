@@ -95,8 +95,95 @@ def mail_stdout_error_text(obs: dict) -> None:
     _put(obs, "stderr", _WRITE_FAILED.sub(rb"\1<os-error>\2", _get(obs, "stderr")))
 
 
+_TITLE = re.compile(rb'( - )([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2})(")')
+
+
+def _minute_in(stamp: str, lo: float, hi: float, offset: int) -> bool:
+    return any(time.strftime("%Y-%m-%d %H:%M", time.gmtime(t + offset)) == stamp
+               for t in range(int(lo) - 1, int(hi) + 2))
+
+
+@rule("episode-title-minute")
+def episode_title_minute(obs: dict) -> None:
+    """The episode title's ``YYYY-MM-DD HH:MM`` stamp (session_title.py:103-109)
+    in a POSTed body: a local minute inside the arm's own window, on the
+    clock of the host that ran it. The name before it stays exact."""
+    lo, hi = obs["window"]
+    offset = obs.get("utc_offset", 0)
+
+    def stamp(match: re.Match) -> bytes:
+        if _minute_in(match.group(2).decode(), lo, hi, offset):
+            return match.group(1) + b"<minute>" + match.group(3)
+        return match.group(0)
+    for request in obs.get("requests", []):
+        request["body"] = _TITLE.sub(stamp, request["body"].encode()).decode()
+
+
+def episode_rows(rows: list[str], lo: float, hi: float, offset: int) -> list:
+    """Episode and client-session rows from a bank, with generated values
+    replaced after validation: uuid4-hex episode ids by first-seen symbols,
+    wall-clock seconds inside [lo, hi] by ``<t>``, and title minutes inside
+    the same span by ``<minute>``. Anything that fails validation stays raw."""
+    import json as _json  # noqa: PLC0415
+    ids: dict[str, str] = {}
+
+    def walk(value):
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        if isinstance(value, float) and lo - 1 <= value <= hi + 1:
+            return "<t>"
+        if isinstance(value, str):
+            if re.fullmatch(r"[0-9a-f]{32}", value):
+                return ids.setdefault(value, f"<episode-{len(ids) + 1}>")
+            match = re.fullmatch(r"(.* - )([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2})", value)
+            if match and _minute_in(match.group(2), lo, hi, offset):
+                return match.group(1) + "<minute>"
+        return value
+    return [walk(_json.loads(row)) for row in rows]
+
+
+# Python's float repr for these magnitudes: digits, a point, digits.
+_LEGACY = re.compile(rb'"legacy_first_seen":([0-9]+\.[0-9]+)|"expires_at":([0-9]+\.[0-9]+)')
+
+
+@rule("doorbell-legacy-first-seen")
+def doorbell_legacy_first_seen(obs: dict) -> None:
+    """A legacy pending record's migration stamps ``legacy_first_seen`` with
+    the reader's clock and ``expires_at`` 86400 s later
+    (codex_doorbell_state.py:150-158). Both values are validated (first seen
+    inside the arm's window, expiry exactly first seen + 86400) before being
+    tokenized; key order and every other byte stay exact."""
+    start, end = obs["window"]
+    for rel in list(obs["files"]):
+        if not rel.endswith(".bell-pending"):
+            continue
+        data = _file(obs, rel) or b""
+        values = {m.group(0).split(b":")[0]: m.group(1) or m.group(2)
+                  for m in _LEGACY.finditer(data)}
+        seen, expiry = values.get(b'"legacy_first_seen"'), values.get(b'"expires_at"')
+        try:
+            ok = (seen is not None and expiry is not None
+                  and start - 1 <= float(seen) <= end + 1
+                  and float(expiry) == float(seen) + 86400)
+        except ValueError:
+            ok = False
+        if ok:
+            data = data.replace(b'"legacy_first_seen":' + seen, b'"legacy_first_seen":<t>')
+            data = data.replace(b'"expires_at":' + expiry, b'"expires_at":<t+86400>')
+            _set_file(obs, rel, data)
+
+
 _SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
                              rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+def _shutdown_flush(obs: dict, intended: int) -> None:
+    stderr = _get(obs, "stderr")
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
+        obs["exit"] = intended
 
 
 @rule("python-shutdown-flush")
@@ -106,16 +193,24 @@ def python_shutdown_flush(obs: dict) -> None:
     fails to flush the same stdout, prints an ignored-exception trailer and
     turns the exit into 120. The native CLI keeps the documented exit 2 and
     emits no synthetic trailer. Only that exact trailer with exit 120 maps."""
-    stderr = _get(obs, "stderr")
-    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
-        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
-        obs["exit"] = 2
+    _shutdown_flush(obs, 2)
+
+
+@rule("python-shutdown-flush-silent")
+def python_shutdown_flush_silent(obs: dict) -> None:
+    """Declared substitution ``hook-native-output-failure``: prompt-hook
+    swallows its own write failure to stay silent with exit 0
+    (briefing_cli.py:248-251), then CPython's shutdown flush prints the
+    trailer and exits 120. The native hook stays silent with exit 0."""
+    _shutdown_flush(obs, 0)
 
 
 def home_tokens(obs: dict, home: str) -> None:
     """Replace the disposable home path with {HOME} everywhere, so goldens
     recorded under one home compare against a run under another."""
-    forms = {home.encode(), json.dumps(home)[1:-1].encode()}
+    from urllib.parse import quote  # noqa: PLC0415
+    # Raw, JSON-escaped and URL-quoted (a launcher query carries the path).
+    forms = {home.encode(), json.dumps(home)[1:-1].encode(), quote(home, safe="").encode()}
 
     def swap(data: bytes) -> bytes:
         for form in sorted(forms, key=len, reverse=True):
@@ -129,14 +224,17 @@ def home_tokens(obs: dict, home: str) -> None:
             _set_file(obs, rel, swap(base64.b64decode(value[5:])))
         elif value.startswith("link:"):
             obs["files"][rel] = "link:" + swap(value[5:].encode()).decode()
+    for request in obs.get("requests", []):
+        request["target"] = swap(request["target"].encode()).decode()
+        request["body"] = swap(request["body"].encode()).decode()
 
 
-# Request header fields compared on the wire. Accept, Accept-Encoding and
-# Connection are transport choices with recorded dispositions in PORTING.md
-# (urllib's identity/close defaults dropped, native Accept */*); field names
-# associate case-insensitively. A repeated field name is always a difference.
-WIRE_HEADERS = ("authorization", "user-agent", "host", "content-type", "content-length",
-                "x-pl-agent", "x-pl-agent-key", "x-pl-session", "x-pl-writer", "x-pl-principal")
+# Request header fields left out of the wire comparison. Empty: every field
+# is compared by case-insensitive name, so a field one arm adds or drops
+# (Accept, Origin, Cookie, Referer) is a difference. A repeated field name is
+# always a difference. A row whose transport has a recorded header
+# disposition names it here, with that disposition.
+FREE_HEADERS: tuple[str, ...] = ()
 
 
 def wire(obs: dict) -> None:
@@ -146,7 +244,7 @@ def wire(obs: dict) -> None:
             projected.append(request)
             continue
         names = [k.lower() for k, _ in request["headers"]]
-        fields = {k.lower(): v for k, v in request["headers"] if k.lower() in WIRE_HEADERS}
+        fields = {k.lower(): v for k, v in request["headers"] if k.lower() not in FREE_HEADERS}
         repeated = sorted({n for n in names if names.count(n) > 1})
         entry = {"method": request["method"], "target": request["target"],
                  "headers": dict(sorted(fields.items())), "body": request["body"]}
@@ -159,7 +257,11 @@ def wire(obs: dict) -> None:
 def daemon_tokens(obs: dict, url: str) -> None:
     """The fixture daemon's per-arm port is not the CLI's behaviour."""
     host = url.split("://", 1)[1]
-    forms = (url.encode(), host.encode())
+    port = host.rsplit(":", 1)[1]
+    # Longest first: the URL, then the host:port spellings a case may use.
+    forms = (url.encode(), f"http://localhost:{port}".encode(),
+             f"https://localhost:{port}".encode(), host.encode(),
+             f"localhost:{port}".encode())
 
     def swap(data: bytes) -> bytes:
         for form in forms:

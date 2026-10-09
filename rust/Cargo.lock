@@ -1715,6 +1715,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "yaml-rust2",
 ]
 
 [[package]]
@@ -1740,6 +1741,7 @@ dependencies = [
  "rmcp",
  "rustix",
  "rustls",
+ "rustls-native-certs",
  "rustls-pemfile",
  "serde",
  "serde_json",
