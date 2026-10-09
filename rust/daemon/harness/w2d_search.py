@@ -512,6 +512,22 @@ def disconnect(port: int, path: str, headers) -> None:
         time.sleep(0.05)
 
 
+def config_for(scn: Scenario) -> str:
+    """The scenario's config.yaml with the dream pass off: its background
+    sweep writes dream state (W3-H's slice) on the Python side mid-run."""
+    dream = "  dream:
+    enabled: false
+"
+    if scn.config_yaml is None:
+        return "memory:
+" + dream
+    assert scn.config_yaml.startswith("memory:
+"), scn.name
+    return "memory:
+" + dream + scn.config_yaml[len("memory:
+"):]
+
+
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     dbs = {"python": f"pl_cf_w2d_{tag}_py", "rust": f"pl_cf_w2d_{tag}_rs"}
@@ -521,17 +537,17 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     root = daemons.scratch_root()
     try:
         if "python" in sides:
-            home = daemons.make_home(root, f"w2d-{tag}-py", scn.config_yaml)
+            home = daemons.make_home(root, f"w2d-{tag}-py", config_for(scn))
             procs["python"] = daemons.python_daemon(home, daemons.free_port(),
                                                     daemons.base_env(home, dict(common_env(dsns["python"]),
                                                                                 **scn.env)))
-        home = daemons.make_home(root, f"w2d-{tag}-rs", scn.config_yaml)
+        home = daemons.make_home(root, f"w2d-{tag}-rs", config_for(scn))
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(dict(common_env(dsns["rust"]),
                                                                                  **scn.env))))
         for d in procs.values():
             d.start(300)
-        wait_settled([d.port for d in procs.values()], timeout=900)
+        wait_settled([d.port for d in procs.values()], timeout=900, token=TOKEN)
         golden = json.loads((GOLDENS / f"{scn.name}.json").read_text()) if mode == "golden" else None
         rows = []
         py_seen = []
