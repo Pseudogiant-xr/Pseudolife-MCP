@@ -410,6 +410,7 @@ def _expect(line: str, keep_db: bool, oracle_shape):
         obs["stdout"] = ""
         obs["stderr"] = base64.b64encode((line + _EOL).encode()).decode()
         obs["files"] = obs["setup_files"]
+        obs["modes"] = obs["setup_modes"]
         if not keep_db:
             obs["db"] = "<unchanged>"
     return apply
@@ -460,12 +461,14 @@ def _export_setup(arm: core.Arm) -> None:
     _wait_idle(SRC)
     _wait_idle(TRICKY)
     arm.state["files"] = core.snapshot(arm.home)
+    arm.state["modes"] = core.modes(arm.home)
 
 
 def _export_after(bank: str):
     def after(arm: core.Arm, obs: dict) -> None:
         obs["arm"] = arm.name
         obs["setup_files"] = arm.state["files"]
+        obs["setup_modes"] = arm.state["modes"]
         obs["db"] = _bank.dump(bank)
         obs["db_before"] = arm.state["db_before"]
     return after
@@ -491,6 +494,7 @@ def _import_setup(archive: str, seed=None, holder=False, schema=True):
         elif holder:
             arm.state["holder"] = _bank.connect(TGT, autocommit=True)
         arm.state["files"] = core.snapshot(arm.home)
+        arm.state["modes"] = core.modes(arm.home)
     return setup
 
 
@@ -501,6 +505,7 @@ def _import_after(arm: core.Arm, obs: dict) -> None:
         holder.close()
     obs["arm"] = arm.name
     obs["setup_files"] = arm.state["files"]
+    obs["setup_modes"] = arm.state["modes"]
     obs["db_before"] = arm.state["db_before"]
     obs["db"] = _bank.dump(TGT)
 
@@ -553,12 +558,14 @@ def _lite_marker(arm: core.Arm) -> None:
     # Unreadable on purpose: an oracle with pg0 refuses before starting anything.
     (pgdata / "PG_VERSION").write_text("not-a-version\n")
     arm.state["files"] = core.snapshot(arm.home)
+    arm.state["modes"] = core.modes(arm.home)
     arm.state["db_before"] = None
 
 
 def _lite_after(arm: core.Arm, obs: dict) -> None:
     obs["arm"] = arm.name
     obs["setup_files"] = arm.state["files"]
+    obs["setup_modes"] = arm.state["modes"]
     obs["db_before"] = None
 
 
