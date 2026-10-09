@@ -252,12 +252,20 @@ class Daemon:
         the harness's wire projection passes them through unchanged."""
         with self._lock:
             seen = list(self._seen)
+
+        def mcp(entry: dict) -> bool:
+            return entry["path"].startswith("/mcp")
+
+        # Connect never calls /mcp (connect_cli.py, codex_connection.py), so
+        # an unattributed /mcp request is the handshake child's: on Linux
+        # psutil can miss the child's short-lived sockets. A /mcp request
+        # traced to connect's own pid stays in `own` and fails the comparison.
         own = [{"method": entry["method"], "target": entry["path"],
                 "headers": {"authorization-label": entry["auth"]}, "body": ""}
-               for owner, entry in seen if owner == self.arm_pid or owner is None]
+               for owner, entry in seen
+               if owner == self.arm_pid or (owner is None and not mcp(entry))]
         child = sorted({entry["auth"] for owner, entry in seen
-                        if owner not in (self.arm_pid, None) and entry["path"].startswith("/mcp")
-                        and entry["method"] == "POST"})
+                        if owner != self.arm_pid and mcp(entry) and entry["method"] == "POST"})
         return own + [{"method": "handshake-credentials", "target": "/mcp",
                        "headers": {"authorization-labels": ",".join(child)}, "body": ""}]
 
