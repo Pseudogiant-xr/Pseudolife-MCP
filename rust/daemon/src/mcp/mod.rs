@@ -114,9 +114,13 @@ impl McpState {
         }
     }
 
+    /// Registers a session at `initialize`. A session terminated meanwhile
+    /// (a DELETE racing a re-initialize) stays terminated.
     fn open(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
-        s.live.entry(sid.to_string()).or_insert(None);
+        if !s.terminated.contains(sid) {
+            s.live.entry(sid.to_string()).or_insert(None);
+        }
     }
 
     fn terminate(&self, sid: &str) {
@@ -375,6 +379,9 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
                     None => break,
                 },
                 _ = ping.tick() => if yield_tx.send(Ok(sse_ping())).await.is_err() { break },
+                // The client went away: free the session's stream slot now,
+                // not at the next keep-alive (sse-starlette's disconnect watch).
+                _ = yield_tx.closed() => break,
             }
         }
     });
@@ -653,6 +660,21 @@ fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
             "error": "invalid_argument",
             "message": "action: Input should be 'expand', 'collapse' or 'status'",
             "param": "action"})),
+    }
+}
+
+#[cfg(test)]
+mod sessions {
+    use super::*;
+
+    #[test]
+    fn a_terminated_session_is_not_reopened() {
+        let state = McpState::new(Tier::Core, HashMap::new(), true);
+        state.open("s1");
+        assert!(matches!(state.lookup("s1"), Lookup::Live));
+        state.terminate("s1");
+        state.open("s1");
+        assert!(matches!(state.lookup("s1"), Lookup::Terminated));
     }
 }
 
