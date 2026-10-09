@@ -353,6 +353,23 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
                 rules=("test-login-password", *rules), timeout=120, note=note)
 
 
+_DOCKER: list[bool] = []
+
+
+def _no_docker() -> bool:
+    """Skip container cases where docker cannot reach an engine (a WSL distro
+    without Docker Desktop integration): the --admin-url cases still run."""
+    if not _DOCKER:
+        import subprocess  # noqa: PLC0415
+        try:
+            done = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                                  capture_output=True, timeout=30)
+            _DOCKER.append(done.returncode == 0)
+        except (OSError, subprocess.TimeoutExpired):
+            _DOCKER.append(False)
+    return not _DOCKER[0]
+
+
 def _container_case(id: str, argv: list[str], db: str, prepare=None, rules=()) -> Case:
     name = f"{_cluster.CONTAINER_PREFIX}{TOKEN}-{id}"
 
@@ -379,7 +396,8 @@ def _container_case(id: str, argv: list[str], db: str, prepare=None, rules=()) -
             container.remove()
 
     return Case(id, ["test-login", "create", "--container", name, *argv], setup=setup,
-                after=after, rules=("test-login-password", *rules), timeout=180)
+                after=after, rules=("test-login-password", *rules), timeout=180,
+                skip_if=_no_docker)
 
 
 def _shapes(arm, server) -> None:
@@ -446,9 +464,10 @@ def cases() -> list[Case]:
         Case("no-docker-json", ["test-login", "create", "--json", "--container", absent],
              env={"PATH": "{HOME}" + SEP + "nobin"}),
         # The container path's failure, with no container: docker's own text.
-        Case("container-absent", ["test-login", "create", "--container", absent], timeout=60),
+        Case("container-absent", ["test-login", "create", "--container", absent], timeout=60,
+             skip_if=_no_docker),
         Case("container-absent-json", ["test-login", "create", "--json", "--container", absent],
-             timeout=60),
+             timeout=60, skip_if=_no_docker),
         # The --admin-url path on a throwaway cluster.
         _admin_case("admin-fresh", admin, _shapes),
         _admin_case("admin-fresh-json", [*admin, "--json"], _shapes),
