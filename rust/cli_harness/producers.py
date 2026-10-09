@@ -49,7 +49,16 @@ def write_private(path: Path, body: str) -> None:
 
 
 def render(count: int, preview: list[dict], maintainer: int = 0) -> str:
-    return _adapter_module().render_digest(count, preview, maintainer)
+    """The real renderer with its clock read in UTC, so the seeded bytes (and
+    the goldens recorded from them) are the same in every timezone."""
+    import time  # noqa: PLC0415
+    module = _adapter_module()
+    original = module.time.localtime
+    module.time.localtime = time.gmtime
+    try:
+        return module.render_digest(count, preview, maintainer)
+    finally:
+        module.time.localtime = original
 
 
 def write_digest(path: Path, watermark: int, text: str) -> None:
