@@ -1695,6 +1695,7 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-pemfile",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "serde_stacker",

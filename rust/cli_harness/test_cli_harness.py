@@ -95,14 +95,19 @@ def test_mail_clock_uses_the_recording_hosts_offset():
         assert compare.diff(wrong, candidate, ("mail-clock",))
 
 
-def test_requests_compare_on_projected_fields_and_flag_repeats():
+def test_requests_compare_every_field_by_case_insensitive_name_and_flag_repeats():
     def req(headers, target="/a?x=1"):
         return {"method": "GET", "target": target, "headers": headers, "body": ""}
     base = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
                               ["Accept-Encoding", "identity"]])])
     same = obs(requests=[req([["user-agent", "Python-urllib/3.11"], ["host", "h"],
-                              ["Accept", "*/*"]])])
+                              ["accept-encoding", "identity"]])])
     assert compare.diff(base, same, ()) == []
+    added = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
+                               ["Accept-Encoding", "identity"], ["Accept", "*/*"]])])
+    assert compare.diff(base, added, ())
+    assert compare.diff(base, obs(requests=[req([["Host", "h"],
+                                                 ["User-Agent", "Python-urllib/3.11"]])]), ())
     assert compare.diff(base, obs(requests=[req([["Host", "h"]], "/a?x=2")]), ())
     repeated = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
                                   ["Authorization", "a"], ["authorization", "a"]])])
@@ -128,3 +133,24 @@ def test_rules_apply_to_copies_not_the_raw_observation():
     raw = obs(exit=120, stderr=b"x")
     normalize.apply(raw, ("python-shutdown-flush",), raw["home"])
     assert raw["exit"] == 120
+
+
+def test_episode_title_minute_rewrites_only_an_in_window_minute():
+    now = time.time()
+    offset = time.localtime(now).tm_gmtoff
+
+    def body(stamp):
+        return {"method": "POST", "target": "/api/episode/start", "headers": [],
+                "body": '{"session_key": "k", "title": "proj - %s"}' % stamp}
+    inside = time.strftime("%Y-%m-%d %H:%M", time.gmtime(now + offset))
+    later = time.strftime("%Y-%m-%d %H:%M", time.gmtime(now + offset + 7200))
+    a = dict(obs(requests=[body(inside)]), utc_offset=offset)
+    b = dict(obs(requests=[body(inside)]), utc_offset=offset)
+    out = normalize.apply(a, ("episode-title-minute",), None)
+    assert '"proj - <minute>"' in out["requests"][0]["body"]
+    assert compare.diff(a, b, ("episode-title-minute",)) == []
+    assert compare.diff(a, dict(obs(requests=[body(later)]), utc_offset=offset),
+                        ("episode-title-minute",))
+    renamed = {**body(inside), "body": body(inside)["body"].replace("proj", "other")}
+    assert compare.diff(a, dict(obs(requests=[renamed]), utc_offset=offset),
+                        ("episode-title-minute",))

@@ -640,22 +640,39 @@ to the separate deferred CLI-EPISODE row. Each canonical case (the
 [spec](cli_harness/specs/CLI-HOOK.md)) runs both CLIs against a fixture
 daemon serving the real routes' shapes, with identical reply bytes per arm,
 and compares exit, streams, files and each request on the wire: method,
-target, Authorization, User-Agent and Host exact, field names associated
-case-insensitively, repeated names failing; Accept, Accept-Encoding and
-Connection keep their recorded dispositions. Doorbell pending records are
-written by `PendingNotice.reserve`. All 52 cases match on Windows and Linux.
+target, body and every header field exact by case-insensitive name (the
+native client now sends urllib's fields, so the Accept dispositions below
+are retired for current captures); a repeated name always fails. Doorbell pending records are
+written by `PendingNotice.reserve`. Every case matches: 62 on Windows and 65
+on Linux, where three https cases trust the test CA through `SSL_CERT_FILE`.
 Named rules: `doorbell-legacy-first-seen` (a migrated legacy record's clock
 inside the arm's window, expiry exactly a day later) and
 `python-shutdown-flush-silent` (CPython's shutdown trailer and exit 120 after
-prompt-hook stayed silent on an unwritable stdout). The harness found one
-native defect, fixed here: `briefing_help.txt` lacked the LF pin its sibling
-assets have, so a CRLF checkout (Windows CI's default) printed `
-` in
-`briefing --help`. Six source mutants (cap order, hook event name, dropped
-bearer, unsaved cursor, dropped `since`, inverted receipt match) are each
-caught. Not covered: response-head inactivity timing, Windows symlink parents,
+prompt-hook stayed silent on an unwritable stdout). The harness and its reviews
+found three native defects, fixed here. `briefing_help.txt` lacked the LF
+pin its sibling assets have, so a CRLF checkout (Windows CI's default)
+printed `\r\r\n` in `briefing --help`. The hook GETs went through reqwest,
+whose one connect budget ran out on `::1` before trying IPv4 for a
+`localhost` daemon URL on Windows, and whose read timeout covers the whole
+response head, so a daemon trickling its reply inside each 0.25 s (health)
+or 2 s (prompt-hook) receive failed natively where Python completed. The
+hook GETs now use `hook_http::get`: hyper's HTTP/1 client over a socket
+whose every read and write must progress within the timeout, as
+`socket.settimeout` bounds each recv, with each resolved address tried in
+order, urllib's request fields and `HTTPRedirectHandler`'s limits (a URL at
+most four times, ten distinct targets), and https through the platform
+trust store (`rustls-platform-verifier`, as reqwest used). That needed
+hyper's `client` feature and two shim dependencies already in the lockfile
+(`tokio-rustls`, formerly a dev-dependency, and `rustls-platform-verifier`).
+Nine source mutants (cap order, hook event name, dropped bearer, first
+address only, whole-reply read budget, redirect repeat limit, unsaved cursor,
+dropped `since`, inverted receipt match) are each caught. Not covered: https on Windows in the harness (platform trust cannot hold the
+test CA; the transport's unit tests cover TLS there with injected roots),
+Windows symlink parents,
 POSIX distinct real/effective UID and empty HOME, briefing's own output
-failure (a declared substitution) and non-canonical argv.
+failure (a declared substitution), non-UTF-8 locale output encoding (the
+Python arm runs with UTF-8 streams, as for CLI-VERSION) and non-canonical
+argv.
 
 ## CLI-MAIL closure (2026-10-09)
 
@@ -1767,9 +1784,11 @@ ledger is:
 Outside this ledger Accept is exact. `http-field-name-case-insensitive` and distinct-name order
 use HTTP association; same-name value order, multiplicity and bytes stay exact.
 No Referer is generated on `/health` redirects or discarded by comparison.
-The `Python-urllib/3.11` User-Agent is oracle-pinned. Native transport drops
-urllib's `Accept-Encoding: identity` and `Connection: close`; historical full
-wire differences remain retained, rather than receiving a comparison waiver.
+The `Python-urllib/3.11` User-Agent is oracle-pinned. Before 2026-10-09 the
+native transport dropped urllib's `Accept-Encoding: identity` and
+`Connection: close` and added `Accept: */*`; the current `hook_http` client
+sends urllib's fields exactly, and the historical wire differences remain
+retained rather than receiving a comparison waiver.
 `http-forbidden-input-refused` names bearer C0/DEL/folded refusals; it replaces
 the pending-policy description without rewriting Python observations.
 Non-JSON `/health` means quiet no-daemon, separately from the consumed payload

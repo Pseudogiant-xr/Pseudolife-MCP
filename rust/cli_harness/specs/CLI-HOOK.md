@@ -36,6 +36,10 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 | Coordination opt-out: unset or yes-like proceeds, anything else prints nothing | `:122-127` |
 | Output: markdown stripped, plain + newline, or the SessionStart hook JSON (ensure_ascii); nothing for empty, null or missing markdown, non-2xx or failed fetch | `:30-38,139-147` |
 | Invalid daemon URL: the `[shim] invalid PSEUDOLIFE_MCP_DAEMON_URL` line, exit 1 | `daemon_url.py:30-55` |
+| Connection order: each resolved address in turn with its own timeout (a `localhost` URL reaches an IPv4-only daemon inside the 0.25 s probe) | urllib `socket.create_connection` |
+| Timeouts bound each receive and send, not the whole reply: a reply trickled inside the timeout completes, one that stalls past it fails; the same over https | `socket.settimeout` |
+| Health redirects: a URL at most four times, at most ten distinct targets | `HTTPRedirectHandler.max_repeats/max_redirections` |
+| https origins verified against the platform trust store | `ssl.create_default_context` |
 | prompt-hook: session id `[A-Za-z0-9._-]{1,128}`; mark `<digest dir>/<sha256>.mark`, first line as `since` when it is `[0-9.]{1,22}`; one GET with session_id and since; cursor line validated before any write | `:153-209` |
 | prompt-hook output: the UserPromptSubmit hook JSON only for a non-empty note; mark rewritten as `cursor\n`; marks older than 30 days pruned on a session's first note | `:210-234` |
 | prompt-hook silence: exit 0 with no output on invalid input, transport failure or unwritable stdout | `:237-251` |
@@ -43,11 +47,9 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 
 ## Free items (named rules)
 
-- Request header fields other than Authorization, User-Agent, Host and the
-  content and identity fields are transport choices with recorded
-  dispositions (urllib's `Accept-Encoding: identity`/`Connection: close`
-  dropped, native `Accept: */*`); names associate case-insensitively and a
-  repeated name always differs (`normalize.wire`).
+- Request header field names associate case-insensitively (HTTP semantics);
+  every field's presence and value is compared exactly, and a repeated name
+  always differs (`normalize.wire`).
 - `doorbell-legacy-first-seen`: the migrated record's `legacy_first_seen`
   inside the arm's window and `expires_at` exactly 86400 s later.
 - `python-shutdown-flush-silent`: CPython's shutdown flush trailer and exit 120
@@ -56,11 +58,15 @@ Daemon replies come from a fixture serving the real routes' shapes (`/health`,
 
 ## Declared divergences (not exercised by canonical cases)
 
+Not covered on Windows: https in the harness (the platform trust store cannot
+hold the test CA without changing the system; `hook_http` unit tests cover
+TLS, trickle and stall with injected roots on both OSes).
+
 The PORTING.md hook substitutions stand: `hook-strict-json-refusal`,
 `hook-bounded-json-nesting`, `hook-typed-markdown`, `hook-ascii-numeric`,
 `hook-first-line-cursor`, `hook-native-output-failure` (briefing's own output
 failure prints `pseudolife-mcp briefing: output failed`, exit 1, where Python
 raises), `http-forbidden-input-refused`, and the four doorbell producer domains
-in PARITY.md. Not covered by the harness: response-head inactivity timing,
-Windows symlink parents (capability), POSIX distinct real/effective UID and
-empty HOME, and argparse abbreviations and other non-canonical argv.
+in PARITY.md. Not covered by the harness: Windows symlink parents (capability), POSIX distinct real/effective UID and
+empty HOME, non-UTF-8 locale output encoding (the Python arm runs with UTF-8
+streams), and argparse abbreviations and other non-canonical argv.

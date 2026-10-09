@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .. import producers as p
 from ..core import Case
-from ..fixture_daemon import factory, json_body, redirect, text
+from ..fixture_daemon import TLS_CA, Trickle, factory, json_body, redirect, text
 from ..mutants import Mutant
 
 HEALTH = {"status": "ok", "version": "0.17.0", "schema": 55, "storage": "postgres",
@@ -101,6 +101,37 @@ def _briefing_cases() -> list[Case]:
              daemon=daemon(**{"/api/hook/session-start": text(" \n\t\n")}), env=TOKEN))
     add(Case("briefing-payload-redirect", ["briefing", "--hook-json"],
              daemon=daemon(**{"/api/hook/session-start": redirect("/elsewhere")}), env=TOKEN))
+    # Trickled replies: every gap inside the per-read timeout (health 0.25 s,
+    # payload 5 s), the whole reply longer than it. urllib times each
+    # receive, so Python completes; a total-time budget would not.
+    add(Case("briefing-health-trickle", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)})))
+    add(Case("briefing-payload-trickle", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=daemon(**{"/api/hook/session-start": Trickle(text(SESSION_START), 24, 0.6)})))
+    # Health redirects follow urllib's HTTPRedirectHandler limits: one URL
+    # at most four times, at most ten distinct targets.
+    add(Case("briefing-health-redirect-loop", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=daemon(**{"/health": redirect("/health")})))
+    chain = {f"/h{i}": redirect(f"/h{i + 1}") for i in range(12)}
+    add(Case("briefing-health-redirect-chain", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=daemon(**{"/health": redirect("/h0"), **chain})))
+    add(Case("briefing-health-redirect-once", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=daemon(**{"/health": redirect("/healthz"), "/healthz": json_body(HEALTH)})))
+    # https daemon origins (remote and tunnel connects): the fixture serves
+    # the pg_tls test certificate; both arms trust its CA through
+    # SSL_CERT_FILE, which only the POSIX platform verifier honours.
+    tls_env = {**TOKEN, "SSL_CERT_FILE": str(TLS_CA)}
+    add(Case("briefing-https-hook-json", ["briefing", "--hook-json"], env=tls_env,
+             daemon=factory(routes(), tls=True), platforms=("linux",)))
+    add(Case("briefing-https-health-trickle", ["briefing", "--hook-json"], env=tls_env,
+             daemon=factory(routes(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)}),
+                            tls=True), platforms=("linux",)))
+    add(Case("briefing-https-untrusted", ["briefing", "--hook-json"], env=TOKEN,
+             daemon=factory(routes(), tls=True)))
+    localhost = {**TOKEN, "PSEUDOLIFE_MCP_DAEMON_URL": "http://localhost:{DAEMON_PORT}"}
+    add(Case("briefing-hook-json-localhost", ["briefing", "--hook-json"], daemon=daemon(),
+             env=localhost, note="localhost resolves ::1 first; the fixture listens on IPv4"))
+    add(Case("briefing-plain-localhost", ["briefing"], daemon=daemon(), env=localhost))
     add(Case("briefing-invalid-daemon-url", ["briefing", "--hook-json"],
              env={"PSEUDOLIFE_MCP_DAEMON_URL": "ftp://127.0.0.1:1"}))
 
@@ -150,6 +181,16 @@ def _prompt_cases() -> list[Case]:
              daemon=daemon(**{"/api/hook/memory-changes": text("boom", 500)}),
              setup=lambda arm: p.write_private(_mark(arm.home), "12.0\n")))
     add(Case("prompt-daemon-down", ["prompt-hook"], stdin=prompt_input(), env=TOKEN))
+    add(Case("prompt-trickle", ["prompt-hook"], stdin=prompt_input(), env=TOKEN,
+             daemon=daemon(**{"/api/hook/memory-changes": Trickle(
+                 text("1791516000.25\nMemory changed: 2 new lessons.\n"), 12, 0.3)})))
+    add(Case("prompt-https-trickle", ["prompt-hook"], stdin=prompt_input(),
+             env={**TOKEN, "SSL_CERT_FILE": str(TLS_CA)}, platforms=("linux",),
+             daemon=factory(routes(**{"/api/hook/memory-changes": Trickle(
+                 text("1791516000.25\nMemory changed: 2 new lessons.\n"), 12, 0.3)}),
+                 tls=True)))
+    add(Case("prompt-localhost", ["prompt-hook"], stdin=prompt_input(), daemon=daemon(),
+             env={**TOKEN, "PSEUDOLIFE_MCP_DAEMON_URL": "http://localhost:{DAEMON_PORT}"}))
     add(Case("prompt-no-token", ["prompt-hook"], stdin=prompt_input(), daemon=daemon()))
     add(Case("prompt-token-file", ["prompt-hook"], stdin=prompt_input(), daemon=daemon(),
              env={"PSEUDOLIFE_MCP_TOKEN_FILE": "{HOME}/tok"},
@@ -297,6 +338,18 @@ MUTANTS = [
     Mutant("hook-token-dropped", "hook", "shim/src/cli/briefing_hook.rs",
            'let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();',
            'let token: Option<String> = None;', ("briefing-hook-json",)),
+    Mutant("hook-first-address-only", "hook", "shim/src/cli/hook_http.rs",
+           "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()? {",
+           "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()?.take(1) {",
+           ("briefing-hook-json-localhost",)),
+    Mutant("hook-whole-reply-budget", "hook", "shim/src/cli/hook_http.rs",
+           "            Poll::Ready(result) => {\n                this.read = None;\n",
+           "            Poll::Ready(result) => {\n",
+           ("briefing-health-trickle", "prompt-trickle")),
+    Mutant("hook-redirect-repeat-limit", "hook", "shim/src/cli/hook_http.rs",
+           "visited.get(&next).copied().unwrap_or(0) >= 4",
+           "visited.get(&next).copied().unwrap_or(0) >= 5",
+           ("briefing-health-redirect-loop",)),
     Mutant("hook-cursor-not-saved", "hook", "shim/src/cli/briefing_hook.rs",
            'file.write_all(format!("{next}\\n").as_bytes()).ok()?;',
            'file.write_all(b"").ok()?;', ("prompt-first-note",)),

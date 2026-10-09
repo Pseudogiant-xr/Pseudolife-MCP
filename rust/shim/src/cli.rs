@@ -9,6 +9,7 @@ mod briefing_hook;
 mod doctor;
 mod doorbell_seen;
 mod episode;
+mod hook_http;
 mod hook_json;
 pub mod lease;
 mod version;

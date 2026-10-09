@@ -33,6 +33,7 @@ class Mutant:
 
 
 # Each row module owns its list as ``MUTANTS``; see rows.mutants().
+SKIP_BANK = False
 
 
 def _target() -> Path:
@@ -78,7 +79,8 @@ def run_mutant(mutant: Mutant, oracle: core.Target, verbose: bool,
     candidate = core.rust_target(binary)
     caught: list[str] = []
     for case in rows.load(mutant.row):
-        if not case.runs_here() or (mutant.cases and case.id not in mutant.cases):
+        if (not case.runs_here() or (mutant.cases and case.id not in mutant.cases)
+                or (case.bank and SKIP_BANK)):
             continue
         want, got = core.run_case(case, oracle, candidate)
         if compare.diff(want, got, case.rules):
