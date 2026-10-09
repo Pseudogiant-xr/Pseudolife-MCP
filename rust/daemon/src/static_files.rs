@@ -250,10 +250,11 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
         return Err(std::io::Error::other("embedded NUL in path"));
     }
     #[cfg(windows)]
-    if rel
-        .split(['/', '\\'])
-        .any(|part| part != ".." && part.trim_end_matches(' ') == "..")
-        && !crate::mutants::active("static-traversal-open")
+    if rel.split(['/', '\\']).any(|part| {
+        !part.is_empty()
+            && !matches!(part, "." | "..")
+            && part.bytes().all(|b| matches!(b, b'.' | b' '))
+    }) && !crate::mutants::active("static-traversal-open")
     {
         return Ok(forbidden());
     }

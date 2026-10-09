@@ -1040,6 +1040,8 @@ class StaticPaths(StaticBuild):
                   "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
         paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
                   "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
+        odd_segments = (".. .", ".. ..", "... ", ".... ", ". .")
+        paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
         if os.name != "nt":
             paths += ["/ui/notice.js", "/ui/loop-a", "/ui/unreadable.txt",
                       "/ui/linked-index", "/ui/linked-index/index.html"]
@@ -1050,6 +1052,8 @@ class StaticPaths(StaticBuild):
                 if c["path"] == "/ui/C:index.html":
                     c["refusal_policy"] = "lexical-outside-root"
                 if "..%20/" in c["path"]:
+                    c["refusal_policy"] = "parent-space-refusal"
+                if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
                     c["refusal_policy"] = "parent-space-refusal"
         else:
             for c in out:

@@ -32,7 +32,7 @@ Resolve the requested path against the original static root independently
 of the resolved containment root; Windows normalizes parent components before
 resolving junctions.
 Windows trailing dots/spaces in ordinary asset names are trimmed; this does
-not reproduce every Win32 path spelling. Space-suffixed `..` segments use
+not reproduce every Win32 path spelling. Nonempty dot/space-only segments other than `.` and `..` use
 `parent-space-refusal`: exact 403 before filesystem access, preserving the
 oracle observation whether it also refuses or serves a fallback. Drive-relative requests and lexical escapes through linked
 roots use the named `lexical-outside-root` refusal policy: Rust returns 403
