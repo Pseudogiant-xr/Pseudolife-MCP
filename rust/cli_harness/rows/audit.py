@@ -499,14 +499,18 @@ def audit_stdout_closed_trailer(obs: dict) -> None:
 
 # --- cases -----------------------------------------------------------------------
 
+SEP = "\\" if core.WINDOWS else "/"
 GUARDS = {
     # Never the daemon container or a lite bank on the host running this.
     "PSEUDOLIFE_DAEMON_EXEC": "1",
     "PSEUDOLIFE_DOCKER": "{HOME}/no-docker",
     "PSEUDOLIFE_MCP_DATA_DIR": "{HOME}/no-bank",
     "PSEUDOLIFE_MCP_DATABASE_URL": None,
+    # No-bank paths re-run in the daemon container through docker
+    # (daemon_exec): a PATH inside the home finds none (core's preflight).
+    "PATH": "{HOME}" + SEP + "no-bin",
 }
-SEP = "\\" if core.WINDOWS else "/"
+PROGRAMS = ("docker",)
 
 
 def _home(rel: str) -> str:
@@ -560,7 +564,8 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     environment = {**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name(kind))}
     environment.update(env or {})
     case = core.Case(case_id, list(original), env=environment, setup=setup,
-                     after=after, rules=rules, stdout_closed=stdout_closed, note=note)
+                     after=after, rules=rules, stdout_closed=stdout_closed, note=note,
+                     programs=PROGRAMS)
     return case
 
 
@@ -575,7 +580,8 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
         _stash(arm)
 
     case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
-                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note)
+                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
+                     programs=PROGRAMS)
     return case
 
 
@@ -623,7 +629,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
     case = core.Case(case_id, list(original),
                      env={**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(REDACT_DB)},
                      setup=setup, after=after, rules=rules, timeout=60,
-                     stdout_closed=stdout_closed, note=note)
+                     stdout_closed=stdout_closed, note=note, programs=PROGRAMS)
     return case
 
 

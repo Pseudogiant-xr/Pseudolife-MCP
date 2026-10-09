@@ -38,6 +38,13 @@ def _select(row: str, wanted: list[str], bank: bool = True) -> list[core.Case]:
     return selected
 
 
+def _label(case: core.Case) -> str:
+    """A case's id, naming any real host program it is allowed to run."""
+    if not case.real_programs:
+        return case.id
+    return f"{case.id}  [real programs: {', '.join(case.real_programs)}]"
+
+
 def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
             candidate: core.Target, golden: dict | None, verbose: bool) -> dict:
     results = {}
@@ -56,7 +63,9 @@ def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
         status = "match" if not diffs else "DIFF"
         results[case.id] = {"status": status, "detail": diffs,
                             "seconds": round(time.monotonic() - started, 2)}
-        print(f"  {status:5} {case.id}", flush=True)
+        if case.real_programs:
+            results[case.id]["real_programs"] = list(case.real_programs)
+        print(f"  {status:5} {_label(case)}", flush=True)
         if diffs and verbose:
             for line in diffs:
                 print(f"        {line}")
@@ -77,7 +86,7 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
         normal["home"] = None
         normal.pop("daemon_url", None)
         golden["cases"][case.id] = normal
-        print(f"  recorded {case.id} (exit {obs['exit']})", flush=True)
+        print(f"  recorded {_label(case)} (exit {obs['exit']})", flush=True)
     path = _golden_path(row)
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n", encoding="utf-8",

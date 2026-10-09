@@ -1,16 +1,21 @@
-"""Offline self-tests: the comparator reports every kind of difference and
-each named rule rewrites only the span it validates. No CLI runs here."""
+"""Offline self-tests: the comparator reports every kind of difference,
+each named rule rewrites only the span it validates, and the external-program
+preflight refuses a lookup that leaves the home. No CLI runs here (the
+preflight's child is the interpreter itself)."""
 
 from __future__ import annotations
 
 import base64
+import os
 import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cli_harness import compare, normalize  # noqa: E402
+from cli_harness import compare, core, normalize  # noqa: E402
 
 
 def b64(data: bytes) -> str:
@@ -160,3 +165,89 @@ def test_a_vacuous_arm_is_a_difference_even_when_both_match():
     quiet = dict(obs(), vacuous="no stdout where the case requires output")
     assert compare.diff(quiet, dict(quiet), ())
     assert compare.diff(obs(stdout=b"x"), dict(obs(stdout=b"x"), vacuous="v"), ())
+
+
+# --- external programs: the preflight before any arm -------------------------
+
+def _install(directory: Path, name: str) -> Path:
+    """A fake program file (never run): what ``shutil.which`` would find."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (name + ".exe" if core.WINDOWS else name)
+    path.write_bytes(b"")
+    path.chmod(0o755)
+    return path
+
+
+def _preflight(tmp_path: Path, programs=(), real_programs=(), env=None):
+    home = tmp_path / "home"
+    (home / "cwd").mkdir(parents=True, exist_ok=True)
+    case = core.Case("c", [], env=env or {}, programs=programs, real_programs=real_programs)
+    arm = core.Arm("python", home, home / "cwd")
+    environment = core._environment(case, arm, core.Target("python", []))
+    return core.check_programs(case, environment, arm.cwd, home, sys.executable)
+
+
+def test_a_program_on_a_path_outside_the_home_is_refused(tmp_path):
+    _install(tmp_path / "outside", "plcfake")
+    with pytest.raises(core.ProgramLeak, match="plcfake"):
+        _preflight(tmp_path, ("plcfake",), env={"PATH": str(tmp_path / "outside")})
+
+
+@pytest.mark.skipif(not core.WINDOWS, reason="Program Files variables are Windows-only")
+def test_an_empty_programw6432_is_refused(tmp_path):
+    # 64-bit Windows derives a child's ProgramFiles from ProgramW6432: empty
+    # both, and a default-location lookup falls back to the real C:\Program Files.
+    with pytest.raises(core.ProgramLeak, match="ProgramW6432"):
+        _preflight(tmp_path, ("plcfake",), env={"PATH": "{HOME}\\bin", "ProgramW6432": ""})
+
+
+@pytest.mark.skipif(not core.WINDOWS, reason="Program Files variables are Windows-only")
+def test_program_files_outside_the_home_is_refused(tmp_path):
+    with pytest.raises(core.ProgramLeak, match="ProgramFiles"):
+        _preflight(tmp_path, ("plcfake",), env={"PATH": "{HOME}\\bin",
+                                                 "ProgramW6432": str(tmp_path / "pf")})
+
+
+def test_a_program_inside_the_home_passes(tmp_path):
+    _install(tmp_path / "home" / "bin", "plcfake")
+    seen = _preflight(tmp_path, ("plcfake",), env={"PATH": "{HOME}" + os.sep + "bin"})
+    assert Path(seen["which"]["plcfake"]).parent == tmp_path / "home" / "bin"
+
+
+def test_real_programs_allows_the_named_program_only(tmp_path):
+    outside = tmp_path / "outside"
+    _install(outside, "plcfake-a")
+    _install(outside, "plcfake-b")
+    env = {"PATH": str(outside)}
+    seen = _preflight(tmp_path, ("plcfake-a",), ("plcfake-a",), env=env)
+    assert Path(seen["which"]["plcfake-a"]).parent == outside
+    with pytest.raises(core.ProgramLeak, match="plcfake-b"):
+        _preflight(tmp_path, ("plcfake-a", "plcfake-b"), ("plcfake-a",), env=env)
+
+
+def test_one_child_per_environment_shape(tmp_path, monkeypatch):
+    env = {"PATH": "{HOME}" + os.sep + "bin"}
+    first = _preflight(tmp_path, ("plcfake",), env=env)
+
+    def no_child(*_args, **_kwargs):
+        raise AssertionError("a second child for the same environment")
+    monkeypatch.setattr(core.subprocess, "run", no_child)
+    assert _preflight(tmp_path, ("plcfake",), env=env) == first
+    with pytest.raises(AssertionError, match="second child"):
+        _preflight(tmp_path, ("plcfake",), env={"PATH": "{HOME}" + os.sep + "other"})
+
+
+def test_run_arm_refuses_before_setup_and_before_the_arm(tmp_path):
+    _install(tmp_path / "outside", "plcfake")
+    ran = []
+    case = core.Case("c", [], env={"PATH": str(tmp_path / "outside")}, programs=("plcfake",),
+                     setup=lambda arm: ran.append("setup"))
+    marker = tmp_path / "arm-ran"
+    target = core.Target("python", [sys.executable, "-c", f"open({str(marker)!r}, 'w')"])
+    with pytest.raises(core.ProgramLeak):
+        core.run_arm(case, target, tmp_path / "root" / "h")
+    assert ran == [] and not marker.exists()
+    # The same case without the declaration runs (the target is the interpreter).
+    case.programs = ()
+    core.run_arm(case, target, tmp_path / "root" / "h")
+    assert ran == ["setup"] and marker.exists()
