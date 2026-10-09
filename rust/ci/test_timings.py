@@ -55,3 +55,16 @@ def test_retry_without_an_attempt_start_is_refused():
          "completedAt": "2026-10-10T00:05:00Z", "steps": []}]}]}
     with pytest.raises(ValueError, match="distinct attempt start"):
         timings.summarize(artifact)
+
+
+def test_partial_retry_excludes_jobs_from_the_previous_attempt():
+    artifact = {"runs": [{"conclusion": "success", "attempt": 2,
+                         "createdAt": "2026-10-09T00:00:00Z",
+                         "startedAt": "2026-10-10T00:00:00Z", "jobs": [
+        {"name": "Previous successful job", "conclusion": "success",
+         "startedAt": "2026-10-09T00:00:10Z", "completedAt": "2026-10-09T00:05:00Z", "steps": []},
+        {"name": "Retried job", "conclusion": "success",
+         "startedAt": "2026-10-10T00:00:10Z", "completedAt": "2026-10-10T00:05:00Z", "steps": []}]}]}
+    result = timings.summarize(artifact)
+    assert result["wall_median_seconds"] == 300
+    assert [job["name"] for job in result["jobs"]] == ["Retried job"]

@@ -42,14 +42,14 @@ def summarize(artifact):
     for run in artifact["runs"]:
         if run["conclusion"] != "success":
             continue
-        active = [job for job in run["jobs"] if job["conclusion"] == "success"]
+        start = run["startedAt"]
+        # GitHub may retain successful jobs when only failed jobs are rerun.
+        active = [job for job in run["jobs"] if job["conclusion"] == "success"
+                  and seconds(start, job["startedAt"]) >= 0]
         if not active:
             continue
-        start = run["startedAt"]
         if run["attempt"] > 1 and seconds(run["createdAt"], start) <= 0:
             raise ValueError("retry has no distinct attempt start")
-        if any(seconds(start, job["startedAt"]) < 0 for job in active):
-            raise ValueError("job timestamps precede the selected attempt")
         walls.append(seconds(start, max(job["completedAt"] for job in active)))
         for job in active:
             jobs[job["name"]].append(seconds(job["startedAt"], job["completedAt"]))
