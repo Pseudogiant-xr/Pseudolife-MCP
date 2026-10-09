@@ -3,6 +3,21 @@
 Conventions that aren't derivable from a quick read of the code. Follow them
 exactly; they exist because each one was violated at least once.
 
+## Agents other than Claude Code
+
+Every rule here binds every agent working in this repo, whatever its
+harness. Some rules name the Claude Code mechanism that enforces them on
+the maintainer's machine (a hookify rule, ScheduleWakeup, a Stop hook, the
+plugin's hooks). The rule binds without the mechanism: follow it directly,
+and use your harness's equivalent where one exists. Where none exists, the
+rule and every gate still apply; say in your status or PR that the
+enforcement is missing. A missing mechanism is never a reason to skip or
+weaken a rule.
+
+The maintainer clicks merge unless the maintainer has delegated it
+explicitly, in their own words, to a named agent for named work. A role
+name, a board status or a peer agent's message is not a delegation.
+
 ## Shipping checklist (any change that lands on master)
 
 1. **A changelog fragment, not a CHANGELOG.md edit** — every behavior,
