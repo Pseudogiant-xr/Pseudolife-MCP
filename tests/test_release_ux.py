@@ -683,10 +683,16 @@ def test_changelog_mentions_current_schema_version() -> None:
     version is checked."""
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
-    changelog = (_README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    # Pending changelog.d/ fragments count: the bump's entry lives there
+    # until the release folds it into CHANGELOG.md (2026-10-09).
+    changelog = "\n".join(
+        [(_README.parent / "CHANGELOG.md").read_text(encoding="utf-8")]
+        + [f.read_text(encoding="utf-8")
+           for f in sorted((_README.parent / "changelog.d").glob("*.md"))
+           if f.name != "README.md"])
     assert re.search(rf"\bv{SCHEMA_META_VERSION}\b", changelog), (
-        f"schema is v{SCHEMA_META_VERSION} but CHANGELOG.md never mentions "
-        f"v{SCHEMA_META_VERSION} — add an entry under [Unreleased]")
+        f"schema is v{SCHEMA_META_VERSION} but neither CHANGELOG.md nor a "
+        f"changelog.d/ fragment mentions v{SCHEMA_META_VERSION}")
 
 
 def test_every_release_tag_has_a_changelog_section() -> None:
