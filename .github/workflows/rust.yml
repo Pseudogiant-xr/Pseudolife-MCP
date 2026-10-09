@@ -132,6 +132,9 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
@@ -141,12 +144,20 @@ jobs:
           shared-key: shim-release
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Build daemon schema test executable
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'daemon-schema-test.exe' } else { 'daemon-schema-test' }
+          python daemon/harness/schema_ci.py --build-only --out (Join-Path 'target/release' $binaryName)
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
           path: |
             rust/target/release/pseudolife-stdio
             rust/target/release/pseudolife-stdio.exe
+            rust/target/release/daemon-schema-test
+            rust/target/release/daemon-schema-test.exe
           if-no-files-found: error
 
   parity-checks:
@@ -189,7 +200,7 @@ jobs:
           path: rust/target/release
       - name: Restore executable permission
         if: runner.os == 'Linux'
-        run: chmod +x rust/target/release/pseudolife-stdio
+        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/daemon-schema-test
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -249,13 +260,16 @@ jobs:
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
       - name: Daemon schema startup parity
+        if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
         run: |
-          python rust/daemon/harness/schema_ci.py --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          $binaryName = if ($IsWindows) { 'daemon-schema-test.exe' } else { 'daemon-schema-test' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/schema_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
-        if: always()
+        if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
           name: daemon-schema-parity-${{ runner.os }}

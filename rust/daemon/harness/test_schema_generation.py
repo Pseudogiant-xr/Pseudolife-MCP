@@ -62,17 +62,32 @@ class SchemaGeneration(unittest.TestCase):
 
     def test_chained_or_expression_assignment_targets_are_refused(self):
         for scope in ("module", "backfill"):
-            tree = ast.parse(gen.SOURCE.read_bytes())
-            if scope == "module":
-                assignment = next(n for n in tree.body if isinstance(n, ast.Assign)
-                                  and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "SCHEMA_SQL")
-            else:
-                helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
-                              and n.name == "_backfill_trace_invalidations")
-                assignment = helper.body[1]
-            assignment.targets.append(ast.Name(id="unexpected_alias", ctx=ast.Store()))
-            with self.assertRaisesRegex(ValueError, "unsupported"):
-                gen.render(ast.unparse(tree).encode())
+            for target in ("chained", "attribute", "subscript"):
+                with self.subTest(scope=scope, target=target):
+                    tree = ast.parse(gen.SOURCE.read_bytes())
+                    if scope == "module":
+                        assignment = next(n for n in tree.body if isinstance(n, ast.Assign)
+                                          and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "SCHEMA_SQL")
+                    else:
+                        helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                                      and n.name == "_backfill_trace_invalidations")
+                        assignment = helper.body[1]
+                    if target == "chained":
+                        assignment.targets.append(ast.Name(id="unexpected_alias", ctx=ast.Store()))
+                    else:
+                        expression = "holder.sql" if target == "attribute" else "holder['sql']"
+                        assignment.targets = ast.parse(expression + " = ''").body[0].targets
+                    with self.assertRaisesRegex(ValueError, "unsupported"):
+                        gen.render(ast.unparse(tree).encode())
+
+    def test_later_chained_sql_reassignment_cannot_be_silently_omitted(self):
+        tree = ast.parse(gen.SOURCE.read_bytes())
+        index = next(i for i, node in enumerate(tree.body) if isinstance(node, ast.Assign)
+                     and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "SCHEMA_SQL")
+        hidden = ast.parse("SCHEMA_SQL = unexpected_alias = SCHEMA_SQL + '\\nCREATE TABLE hidden_migration(id INTEGER);'").body[0]
+        tree.body.insert(index + 1, hidden)
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            gen.render(ast.unparse(tree).encode())
 
     def test_every_branch_matches_oracle_statement_order_and_parameters(self):
         oracle = types.ModuleType("schema_oracle")
