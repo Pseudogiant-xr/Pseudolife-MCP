@@ -1,15 +1,16 @@
 //! Read-only hydration of a schema-55 bank into a resident matrix (spec S7).
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use serde_json::Value;
 use tokio_postgres::Client;
 
-pub const SCHEMA: i64 = 55;
 pub const DIM: usize = 1024;
 
 pub struct Entry {
     pub id: i64,
     pub band: String,
+    /// The band column as read, before seating.
+    pub stored_band: String,
     pub text: String,
     pub surprise: f32,
     pub ts: f64,
@@ -32,38 +33,18 @@ pub struct Bank {
     pub matrix: Vec<f32>,
 }
 
-/// Every session is read-only: no DDL and no writes can leave the spike.
-pub async fn read_only(client: &Client) -> Result<()> {
-    client
-        .batch_execute("SET default_transaction_read_only = on")
-        .await?;
-    Ok(())
-}
-
-pub async fn check_schema(client: &Client) -> Result<()> {
-    let row = client
-        .query_opt(
-            "SELECT value::text FROM meta WHERE key = 'schema_version'",
-            &[],
-        )
-        .await
-        .context("reading meta.schema_version")?;
-    // meta.value is JSON: a number, or a string holding one.
-    let v: Option<String> = row.map(|r| r.get(0));
-    let v = v.map(|s| s.trim().trim_matches('"').to_string());
-    match v.as_deref().map(str::parse::<i64>) {
-        Some(Ok(SCHEMA)) => Ok(()),
-        other => bail!("bank schema is {other:?}, the spike reads schema {SCHEMA} only"),
-    }
-}
-
 fn normalize(v: &mut [f32]) {
     // torch F.normalize(p=2, eps=1e-12)
     let n = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
     v.iter_mut().for_each(|x| *x /= n);
 }
 
-pub async fn hydrate(client: &Client) -> Result<Bank> {
+/// `hydrate_cms` (`storage/sync.py:107-155`): every row in id order, seated
+/// in its band, or in the first band when the preset no longer has it; a
+/// stale stamp is then written back (`update_entry(id, band=...)`, one
+/// transaction each; a failed write is logged, never fatal). Capacity
+/// rebalancing on hydration is not ported (declared divergence).
+pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
     let rows = client
         .query(
             "SELECT id, band, text, embedding::real[], surprise, ts, access_count, source, \
@@ -74,30 +55,37 @@ pub async fn hydrate(client: &Client) -> Result<Bank> {
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
     let mut matrix = Vec::with_capacity(rows.len() * DIM);
+    let mut stale: Vec<usize> = Vec::new();
     for r in rows {
-        let mut emb: Vec<f32> = r.get(3);
-        if emb.len() != DIM {
-            bail!(
-                "entry {} has a {}-dim vector, expected {DIM}",
-                r.get::<_, i64>(0),
-                emb.len()
-            );
+        // A NULL vector fails hydration (torch.as_tensor(None) in Python):
+        // an ordinary error, recorded as not_ready.
+        let Some(mut emb) = r.try_get::<_, Option<Vec<f32>>>(3)? else {
+            anyhow::bail!("TypeError: entry {} has no embedding", r.get::<_, i64>(0));
+        };
+        if emb.len() == DIM {
+            normalize(&mut emb);
+            matrix.extend_from_slice(&emb);
+        } else {
+            // Seated and stamped like any row, then refused after the
+            // write-back (`_refuse_on_stale_hydrated_dims` runs after
+            // `hydrate_cms`).
+            stale.push(emb.len());
+            matrix.extend(std::iter::repeat_n(0.0, DIM));
         }
-        normalize(&mut emb);
-        matrix.extend_from_slice(&emb);
         let tags: Option<Value> = r.get(12);
         let slots: Option<Value> = r.get(13);
         entries.push(Entry {
             id: r.get(0),
+            stored_band: r.get(1),
             // Hydration seats a row whose band left the preset in the first
             // band and reconciles its stamp (storage/sync.py:116-145). Python
             // also writes the new stamp back; the read-only spike does not.
             band: {
                 let b: String = r.get(1);
-                if crate::search::BANDS.contains(&b.as_str()) {
+                if bands.contains(&b) {
                     b
                 } else {
-                    crate::search::BANDS[0].to_string()
+                    bands[0].clone()
                 }
             },
             text: r.get(2),
@@ -124,8 +112,52 @@ pub async fn hydrate(client: &Client) -> Result<Bank> {
             distortion_tolerance: r.get(15),
         });
     }
+    for e in &entries {
+        if e.stored_band != e.band {
+            let write = async {
+                client.batch_execute("BEGIN").await?;
+                client
+                    .execute(
+                        "UPDATE entries SET band = $1 WHERE id = $2",
+                        &[&e.band, &e.id],
+                    )
+                    .await?;
+                client.batch_execute("COMMIT").await
+            };
+            if let Err(err) = write.await {
+                let _ = client.batch_execute("ROLLBACK").await;
+                eprintln!("band-stamp write-through failed for entry {}: {err}", e.id);
+            }
+        }
+    }
+    if !stale.is_empty() {
+        stale.sort_unstable();
+        let count = stale.len();
+        stale.dedup();
+        return Err(anyhow::Error::new(StaleDims { count, dims: stale }));
+    }
     Ok(Bank { entries, matrix })
 }
+
+/// Hydrated rows whose vectors do not fit the embedder: the caller records
+/// `init_refusal` (`service.py:1142-1210`).
+#[derive(Debug)]
+pub struct StaleDims {
+    pub count: usize,
+    pub dims: Vec<usize>,
+}
+
+impl std::fmt::Display for StaleDims {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} hydrated row(s) embedded at the wrong dimension",
+            self.count
+        )
+    }
+}
+
+impl std::error::Error for StaleDims {}
 
 pub fn normalize_query(v: &mut [f32]) {
     normalize(v)

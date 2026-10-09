@@ -4,12 +4,19 @@ use crate::bank::{Bank, DIM, Entry};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
-pub const DEFAULT_TOP_K: usize = 8; // MemoryConfig.top_k under the MCP overlay
 pub const ROUTE_TOP_K: i64 = 12; // web/routes.py:358
-pub const MIN_SCORE: f64 = 0.25; // memory.search.min_score
 const ASSISTANT_MULT: f64 = 0.85; // cms.py:813
 const SUPERSEDED_MULT: f64 = 0.55; // cms.py:825
-pub const BANDS: [&str; 1] = ["flat"]; // the default preset
+
+/// `memory.bm25` (`BM25Config`, utils/config.py:188-204).
+#[derive(Clone, Copy)]
+pub struct Bm25Knobs {
+    pub k1: f64,
+    pub b: f64,
+    pub weight: f64,
+    pub top_n: usize,
+    pub min_norm: f64,
+}
 
 pub struct Params {
     pub query: String,
@@ -17,8 +24,14 @@ pub struct Params {
     pub sources: Option<HashSet<String>>,
     pub tags: Option<HashSet<String>>,
     pub min_score: Option<f64>,
-    /// The `bm25` tribool resolved against config (on by default).
-    pub bm25: bool,
+    /// `memory.search.min_score`: the floor when no explicit one is given.
+    pub default_floor: f64,
+    /// BM25 knobs when the `bm25` tribool resolves on (config default on).
+    pub bm25: Option<Bm25Knobs>,
+    /// `memory.hide_superseded`.
+    pub hide_superseded: bool,
+    /// Bands to search (validated by the caller); None searches all.
+    pub bands: Option<HashSet<String>>,
 }
 
 /// One served hit: entry index and its ranking score.
@@ -27,20 +40,24 @@ pub struct Hit {
     pub score: f64,
 }
 
-fn keep(e: &Entry) -> bool {
-    // hide_superseded defaults to false; superseded digests never surface.
+/// Superseded digests never surface (cms.py:899-904, 1913).
+fn not_superseded_digest(e: &Entry) -> bool {
     !(e.source == "digest" && e.superseded_at.is_some())
 }
 
 pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
-    let eligible = |e: &Entry| {
-        keep(e)
+    let filtered = |e: &Entry| {
+        not_superseded_digest(e)
+            && p.bands.as_ref().is_none_or(|b| b.contains(&e.band))
             && p.sources.as_ref().is_none_or(|s| s.contains(&e.source))
             && p.tags
                 .as_ref()
                 .is_none_or(|t| e.tags.iter().any(|x| t.contains(x)))
     };
-    let filter_active = p.sources.is_some() || p.tags.is_some();
+    // `_dense_eligible` adds hide_superseded; the slot pool does not.
+    let eligible = |e: &Entry| filtered(e) && !(p.hide_superseded && e.superseded_at.is_some());
+    let filter_active =
+        p.hide_superseded || p.sources.is_some() || p.tags.is_some() || p.bands.is_some();
     let mut cand: Vec<(usize, f32)> = bank
         .matrix
         .chunks_exact(DIM)
@@ -52,7 +69,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
     cand.sort_by(|a, b| b.1.total_cmp(&a.1));
     cand.truncate(p.k);
 
-    let floor = p.min_score.unwrap_or(MIN_SCORE);
+    let floor = p.min_score.unwrap_or(p.default_floor);
     let mut seen: HashSet<&str> = HashSet::new();
     let mut hits = Vec::new();
     for (idx, cos) in cand {
@@ -85,7 +102,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
     if !qtok.is_empty() {
         let mut slot_hits: Vec<Hit> = Vec::new();
         for (idx, e) in bank.entries.iter().enumerate() {
-            if e.slots.is_empty() || seen.contains(e.text.as_str()) || !eligible(e) {
+            if e.slots.is_empty() || seen.contains(e.text.as_str()) || !filtered(e) {
                 continue;
             }
             let stok = slot_tokens(e);
@@ -110,20 +127,15 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
             hits.push(h);
         }
     }
-    if p.bm25 && !p.query.is_empty() {
-        bm25_fuse(bank, p, &eligible, &mut seen, &mut hits);
+    if let Some(knobs) = p.bm25
+        && !p.query.is_empty()
+    {
+        bm25_fuse(bank, p, knobs, &eligible, &mut seen, &mut hits);
     }
     hits.sort_by(|a, b| b.score.total_cmp(&a.score)); // stable
     hits.truncate(p.k);
     hits
 }
-
-// BM25Config defaults (utils/config.py:~189).
-const BM25_K1: f64 = 1.5;
-const BM25_B: f64 = 0.75;
-const BM25_WEIGHT: f64 = 0.3;
-const BM25_TOP_N: usize = 20;
-const BM25_MIN_NORM: f64 = 0.1;
 
 /// `memory/bm25.py:tokenize`: identifier-aware, lowercased, tiny stop list.
 pub fn bm25_tokens(text: &str) -> Vec<String> {
@@ -142,6 +154,7 @@ pub fn bm25_tokens(text: &str) -> Vec<String> {
 fn bm25_fuse<'a>(
     bank: &'a Bank,
     p: &Params,
+    knobs: Bm25Knobs,
     eligible: &dyn Fn(&Entry) -> bool,
     seen: &mut HashSet<&'a str>,
     hits: &mut Vec<Hit>,
@@ -178,7 +191,7 @@ fn bm25_fuse<'a>(
         for t in toks {
             *tf.entry(t.as_str()).or_default() += 1;
         }
-        let norm = 1.0 - BM25_B + BM25_B * (toks.len() as f64 / avg);
+        let norm = 1.0 - knobs.b + knobs.b * (toks.len() as f64 / avg);
         let mut s = 0.0;
         for qt in &q {
             let f = *tf.get(qt.as_str()).unwrap_or(&0) as f64;
@@ -190,14 +203,14 @@ fn bm25_fuse<'a>(
             if idf <= 0.0 {
                 continue;
             }
-            s += idf * (f * (BM25_K1 + 1.0)) / (f + BM25_K1 * norm);
+            s += idf * (f * (knobs.k1 + 1.0)) / (f + knobs.k1 * norm);
         }
         if s > 0.0 {
             scored.push((*idx, s));
         }
     }
     scored.sort_by(|a, b| b.1.total_cmp(&a.1)); // stable
-    scored.truncate(BM25_TOP_N);
+    scored.truncate(knobs.top_n);
     // normalize_scores: min-max; one hit or a flat set is 1.0.
     let (mx, mn) = scored
         .iter()
@@ -220,7 +233,7 @@ fn bm25_fuse<'a>(
     // Text-keyed lookup; a later duplicate text overwrites an earlier one, as a dict does.
     let mut lookup: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
     for &(i, s) in &normed {
-        if s >= BM25_MIN_NORM {
+        if s >= knobs.min_norm {
             lookup.insert(bank.entries[i].text.as_str(), s);
         }
     }
@@ -229,15 +242,15 @@ fn bm25_fuse<'a>(
             .get(bank.entries[h.idx].text.as_str())
             .unwrap_or(&0.0);
         if boost > 0.0 {
-            h.score += BM25_WEIGHT * boost;
+            h.score += knobs.weight * boost;
         }
     }
     for (i, s) in normed {
         let text = bank.entries[i].text.as_str();
-        if seen.contains(text) || s < BM25_MIN_NORM {
+        if seen.contains(text) || s < knobs.min_norm {
             continue;
         }
-        let injected = BM25_WEIGHT * s;
+        let injected = knobs.weight * s;
         if p.min_score.is_some_and(|m| injected < m) {
             continue;
         }
@@ -360,10 +373,19 @@ pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
 mod tests {
     use super::*;
 
+    const DEFAULT_BM25: Bm25Knobs = Bm25Knobs {
+        k1: 1.5,
+        b: 0.75,
+        weight: 0.3,
+        top_n: 20,
+        min_norm: 0.1,
+    };
+
     fn entry(id: i64, text: &str, source: &str, superseded: bool) -> Entry {
         Entry {
             id,
             band: "flat".into(),
+            stored_band: "flat".into(),
             text: text.into(),
             surprise: 0.5,
             ts: 0.0,
@@ -410,7 +432,10 @@ mod tests {
             sources: None,
             tags: None,
             min_score: None,
-            bm25: false,
+            bm25: None,
+            default_floor: 0.25,
+            hide_superseded: false,
+            bands: None,
         };
         let hits = rank(&bank, &unit(1.0), &p);
         let ids: Vec<i64> = hits.iter().map(|h| bank.entries[h.idx].id).collect();
@@ -423,7 +448,10 @@ mod tests {
             sources: Some(["assistant".to_string()].into()),
             tags: None,
             min_score: None,
-            bm25: false,
+            bm25: None,
+            default_floor: 0.25,
+            hide_superseded: false,
+            bands: None,
         };
         assert_eq!(rank(&bank, &unit(1.0), &p).len(), 1);
     }
@@ -453,7 +481,10 @@ mod tests {
             sources: None,
             tags: None,
             min_score: None,
-            bm25: false,
+            bm25: None,
+            default_floor: 0.25,
+            hide_superseded: false,
+            bands: None,
         };
         let hits = rank(&bank, &unit(1.0), &p);
         // slot tokens {new, removed, membership, analogue}: overlap 1/4 -> 0.55 + 0.35 * 0.25
@@ -502,7 +533,10 @@ mod tests {
             sources: None,
             tags: None,
             min_score: None,
-            bm25: true,
+            bm25: Some(DEFAULT_BM25),
+            default_floor: 0.25,
+            hide_superseded: false,
+            bands: None,
         };
         let hits = rank(&bank, &unit(1.0), &p);
         let got: Vec<(i64, f64)> = hits

@@ -18,15 +18,21 @@ pub enum Action {
 
 /// Returns the result dict, and whether the visible list changed (so the
 /// caller can send `notifications/tools/list_changed`).
-pub fn run(state: &McpState, action: Action, principal: &str, key: Option<&str>) -> (Value, bool) {
+pub fn run(
+    state: &McpState,
+    store: &crate::auth::PrincipalStore,
+    action: Action,
+    principal: &str,
+    key: Option<&str>,
+) -> (Value, bool) {
     let norm_key = tiers::norm(key.unwrap_or(""));
     let default_tier = state
         .tier_map
         .get(&norm_key)
         .copied()
-        .or_else(|| state.stored_tier_for(principal, &norm_key))
+        .or_else(|| state.stored_tier_for(store, principal, &norm_key))
         .unwrap_or(state.default_tier);
-    let current = state.resolve_tier(principal, key);
+    let current = state.resolve_tier(store, principal, key);
 
     if action == Action::Status {
         let ladder: Vec<&str> = LADDER.iter().map(|t| t.name()).collect();

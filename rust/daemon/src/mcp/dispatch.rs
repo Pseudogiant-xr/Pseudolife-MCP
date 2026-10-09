@@ -75,7 +75,7 @@ impl ToolError {
 
 pub type ToolResult = Result<Value, ToolError>;
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>>;
-pub type ToolFn = for<'a> fn(&'a crate::App, ToolCall<'a>) -> ToolFuture<'a>;
+pub type ToolFn = for<'a> fn(&'a crate::http::App, ToolCall<'a>) -> ToolFuture<'a>;
 
 /// Bodies registered by the slices that own them.
 pub fn registry() -> &'static HashMap<&'static str, ToolFn> {

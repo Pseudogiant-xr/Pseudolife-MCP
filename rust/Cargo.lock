@@ -1670,6 +1670,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "yaml-rust2",
 ]
 
 [[package]]

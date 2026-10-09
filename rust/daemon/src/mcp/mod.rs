@@ -15,7 +15,7 @@ pub mod tiers;
 mod toolset;
 
 use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::Response;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -79,21 +79,19 @@ impl McpState {
     }
 
     /// `_stored_tier_of`: the stored principal row's tier, for the request's
-    /// own bearer only. The stored-principal snapshot does not carry tiers
-    /// yet (W1-A); until it does this answers none (divergences.md).
-    fn stored_tier_for(&self, principal: &str, key: &str) -> Option<Tier> {
-        let _ = (principal, key);
-        None
+    /// own bearer only (a client-asserted X-PL-Writer naming a stored
+    /// principal does not take its tier).
+    fn stored_tier_for(&self, store: &crate::auth::PrincipalStore, principal: &str, key: &str) -> Option<Tier> {
+        if key.is_empty() || key != principal {
+            return None;
+        }
+        store.tier_of(key).as_deref().and_then(Tier::parse)
     }
 
     /// `_resolve_principal_tier` for a request.
-    fn resolve_tier(&self, principal: &str, key: Option<&str>) -> Tier {
+    fn resolve_tier(&self, store: &crate::auth::PrincipalStore, principal: &str, key: Option<&str>) -> Tier {
         tiers::resolve(key, &self.overrides, &self.tier_map, self.default_tier, |k| {
-            if principal != identity::DEFAULT_PRINCIPAL && tiers::norm(principal) == k {
-                self.stored_tier_for(principal, k)
-            } else {
-                None
-            }
+            self.stored_tier_for(store, principal, k)
         })
     }
 
@@ -226,12 +224,21 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
     None
 }
 
-/// Entry for every authenticated request no Console or API route claims.
-pub async fn handle(app: &Arc<crate::App>, principal: &str, path: &str, req: Request<Body>) -> Response {
+/// Entry for `/mcp` and `/mcp/*` once the gate has named the principal
+/// (`web/api.py` forwards them to the SDK's Starlette app).
+pub async fn handle(
+    app: &Arc<crate::http::App>,
+    principal: &str,
+    path: &str,
+    method: &str,
+    headers: HeaderMap,
+    raw_query: Option<&str>,
+    body: Body,
+) -> Response {
     if path == "/mcp/" {
         // Starlette's redirect_slashes: same scheme and Host, path stripped.
-        let host = latin1(req.headers(), "host").unwrap_or_default();
-        let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+        let host = latin1(&headers, "host").unwrap_or_default();
+        let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
         let mut r = Response::new(Body::empty());
         *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
         if let Ok(v) = HeaderValue::from_str(&format!("http://{host}/mcp{query}")) {
@@ -249,8 +256,7 @@ pub async fn handle(app: &Arc<crate::App>, principal: &str, path: &str, req: Req
         return r;
     }
     let state = &app.mcp;
-    let headers = req.headers().clone();
-    let method = req.method().clone();
+    let method = Method::from_bytes(method.as_bytes()).unwrap_or(Method::GET);
 
     // Era routing (`StreamableHTTPSessionManager._handle_request`): a
     // protocol-version header outside the handshake versions belongs to the
@@ -258,7 +264,7 @@ pub async fn handle(app: &Arc<crate::App>, principal: &str, path: &str, req: Req
     if let Some(pv) = latin1(&headers, "mcp-protocol-version")
         && !HANDSHAKE_VERSIONS.contains(&pv.as_str())
     {
-        return modern_era_refusal(req).await;
+        return modern_era_refusal(body).await;
     }
 
     let supplied = latin1(&headers, "mcp-session-id");
@@ -290,7 +296,7 @@ pub async fn handle(app: &Arc<crate::App>, principal: &str, path: &str, req: Req
         return r;
     }
     match method {
-        Method::POST => post(app, principal, &sid, known, req).await,
+        Method::POST => post(app, principal, &sid, known, headers, body).await,
         Method::GET => get(state, &sid, known, &headers),
         Method::DELETE => {
             if !known {
@@ -311,8 +317,8 @@ pub async fn handle(app: &Arc<crate::App>, principal: &str, path: &str, req: Req
 /// The modern era's answer to a legacy-shaped request with no `_meta`
 /// envelope (recorded from the oracle); every other modern request is a
 /// declared divergence.
-async fn modern_era_refusal(req: Request<Body>) -> Response {
-    let body = axum::body::to_bytes(req.into_body(), BODY_LIMIT).await.unwrap_or_default();
+async fn modern_era_refusal(body: Body) -> Response {
+    let body = axum::body::to_bytes(body, BODY_LIMIT).await.unwrap_or_default();
     let id = serde_json::from_slice::<Value>(&body)
         .ok()
         .and_then(|v| v.get("id").cloned())
@@ -405,8 +411,14 @@ fn classify(v: &Value) -> Option<Message> {
     }
 }
 
-async fn post(app: &Arc<crate::App>, principal: &str, sid: &str, known: bool, req: Request<Body>) -> Response {
-    let headers = req.headers().clone();
+async fn post(
+    app: &Arc<crate::http::App>,
+    principal: &str,
+    sid: &str,
+    known: bool,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     let (json_ok, sse_ok) = accepts(&headers);
     if !(json_ok && sse_ok) {
         return rpc_http_error(
@@ -431,7 +443,7 @@ async fn post(app: &Arc<crate::App>, principal: &str, sid: &str, known: bool, re
             Some(sid),
         );
     }
-    let body = match axum::body::to_bytes(req.into_body(), BODY_LIMIT).await {
+    let body = match axum::body::to_bytes(body, BODY_LIMIT).await {
         Ok(b) => b,
         Err(_) => return rpc_http_error(500, -32603, "Error handling POST request", Some(sid)),
     };
@@ -493,7 +505,7 @@ fn invalid_params(id: &Value) -> String {
 }
 
 async fn respond(
-    app: &Arc<crate::App>,
+    app: &Arc<crate::http::App>,
     principal: &str,
     sid: &str,
     headers: &HeaderMap,
@@ -510,7 +522,7 @@ async fn respond(
         "ping" => rpc_result(&id, "{}"),
         "tools/list" => {
             let key = identity::tier_key(principal, headers);
-            let tier = state.resolve_tier(principal, key.as_deref());
+            let tier = state.resolve_tier(&app.store, principal, key.as_deref());
             rpc_result(&id, &catalogue::list_result(tier))
         }
         "tools/call" => {
@@ -563,7 +575,7 @@ fn initialize_result(params: &Value) -> Option<String> {
 
 /// One `tools/call`: the CallToolResult object.
 async fn call_tool(
-    app: &Arc<crate::App>,
+    app: &Arc<crate::http::App>,
     principal: &str,
     sid: &str,
     headers: &HeaderMap,
@@ -580,7 +592,7 @@ async fn call_tool(
             Err(payload) => return envelope::error_result(&payload),
         };
         let key = identity::tier_key(principal, headers);
-        let (out, changed) = toolset::run(state, action, principal, key.as_deref());
+        let (out, changed) = toolset::run(state, &app.store, action, principal, key.as_deref());
         if changed {
             state.notify(sid, &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
         }
