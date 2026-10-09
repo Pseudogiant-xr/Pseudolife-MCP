@@ -51,6 +51,8 @@ pub struct MemoryConfig {
     pub cortex: CortexConfig,
     /// `memory.retrieval_log.enabled` (`RetrievalLogConfig`, default true).
     pub retrieval_log_enabled: bool,
+    /// `memory.traces.enabled` (`TracesConfig`, default true).
+    pub traces_enabled: bool,
 }
 
 /// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
@@ -283,6 +285,7 @@ impl Default for MemoryConfig {
             reranker: RerankerConfig::default(),
             cortex: CortexConfig::default(),
             retrieval_log_enabled: true,
+            traces_enabled: true,
         }
     }
 }
@@ -1149,6 +1152,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;
+        }
+        if let Some(Node::Map(t)) = lookup(m, "traces") {
+            memory.traces_enabled = want_bool(t, "enabled", "memory.traces", true)?;
         }
         // The overlay writes `meta_filter.enabled` and
         // `traces.retention_boost` unless the user set them.

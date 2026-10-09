@@ -459,8 +459,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                 p.rerank.fusion_weight
             };
             let fused = crate::read::rerank::fuse(w, &orig, &scores);
-            let mut reranked: Vec<(usize, f64)> =
-                combined.iter().zip(fused).map(|(&(i, _), f)| (i, f)).collect();
+            let mut reranked: Vec<(usize, f64)> = combined
+                .iter()
+                .zip(fused)
+                .map(|(&(i, _), f)| (i, f))
+                .collect();
             reranked.sort_by(|a, b| b.1.total_cmp(&a.1));
             combined = reranked;
         } else if !skip_for_margin {

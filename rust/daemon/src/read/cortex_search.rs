@@ -9,7 +9,6 @@
 //! annotation, then the slot-read telemetry write.
 
 // The route wiring lands with the integration of this slice.
-#![allow(dead_code)]
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -54,6 +53,32 @@ pub struct CortexKnobs {
     pub bm25: Option<Bm25Knobs>,
     pub traces_enabled: bool,
     pub retrieval_log_enabled: bool,
+}
+
+impl CortexKnobs {
+    /// The knobs from the loaded config (`CortexConfig`, `memory.search.stale_policy`,
+    /// `memory.bm25.cortex_enabled`, `memory.traces.enabled`, `memory.retrieval_log.enabled`).
+    pub fn from_config(c: &crate::config::Config) -> CortexKnobs {
+        let m = &c.memory;
+        let b = &m.bm25;
+        CortexKnobs {
+            enabled: m.cortex.enabled,
+            search_first: m.cortex.search_first,
+            guard_min_score: m.cortex.guard_min_score,
+            pin_constraints: m.cortex.pin_constraints,
+            read_tracking: m.cortex.read_tracking,
+            stale_policy: m.search.stale_policy.clone(),
+            bm25: b.cortex_enabled.then_some(Bm25Knobs {
+                k1: b.k1,
+                b: b.b,
+                weight: b.weight,
+                top_n: b.top_n.max(0) as usize,
+                min_norm: b.min_score,
+            }),
+            traces_enabled: m.traces_enabled,
+            retrieval_log_enabled: m.retrieval_log_enabled,
+        }
+    }
 }
 
 impl Default for CortexKnobs {

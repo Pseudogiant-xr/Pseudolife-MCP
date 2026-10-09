@@ -8,6 +8,14 @@ pub mod rerank;
 pub mod search_route;
 
 use crate::http::App;
+
+/// Serialises this slice's statements on the shared writer session, as
+/// Python's service lock does (one search at a time). A stand-in for the
+/// write slice's `txn::run` guard; the call sites switch when it lands.
+pub fn db_guard() -> &'static tokio::sync::Mutex<()> {
+    static GUARD: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    GUARD.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 use axum::http::HeaderMap;
 use axum::response::Response;
 

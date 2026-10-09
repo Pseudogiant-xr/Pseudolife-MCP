@@ -432,13 +432,14 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         count_access: true,
         header_session,
     };
+    // Held across the search and the cortex block, as `service._lock` is.
+    let _guard = crate::read::db_guard().lock().await;
     let mut out = match run(&app.service, &ready, req).await {
         Ok(s) => s,
         Err(e) => return json_response(500, &json!({"error": e.to_string()})),
     };
-    let cc = &cfg.cortex;
-    if cc.enabled && cc.search_first && !crate::mutants::active("search-no-cortex") {
-        let knobs = cortex_search::CortexKnobs::from_config(&app.service.config);
+    let knobs = cortex_search::CortexKnobs::from_config(&app.service.config);
+    if knobs.enabled && knobs.search_first && !crate::mutants::active("search-no-cortex") {
         let r2 = ready.clone();
         let cache_size = app.service.config.embedding.cache_size;
         let q2 = query.clone();
@@ -454,7 +455,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
                     &qv,
                     &query,
                     5,
-                    cc.guard_min_score,
+                    knobs.guard_min_score,
                     &knobs,
                     now(),
                 )
@@ -465,7 +466,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         };
         match facts {
             Ok(facts) if !facts.is_empty() => {
-                if let Some(id) = out.event_id
+                if let Some(id) = out.event_id.filter(|_| knobs.retrieval_log_enabled)
                     && let Err(e) =
                         cortex_search::attach_served_facts(ready.storage.client(), id, &facts).await
                 {
@@ -495,6 +496,7 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
         count_access: false,
         header_session: None,
     };
+    let _guard = crate::read::db_guard().lock().await;
     if let Err(e) = run(svc, ready, req).await {
         eprintln!("warmup search failed: {e}");
     }

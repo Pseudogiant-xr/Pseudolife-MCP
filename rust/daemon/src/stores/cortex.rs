@@ -12,7 +12,6 @@
 //! `members` or `contested` under the record's `key`.
 
 // The route wiring lands with the integration of this slice.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 
@@ -79,6 +78,8 @@ pub fn slot_key(entity: &str, attribute: &str) -> SlotKey {
 /// One `facts` row: every column, plus the derived slot key and the
 /// search-normalised embedding.
 #[derive(Clone, Debug)]
+// Every `facts` column, for the write slice (W2-E) as much as for reads.
+#[allow(dead_code)]
 pub struct CortexRecord {
     pub id: i64,
     pub entity: String,
@@ -187,6 +188,7 @@ pub struct CortexStore {
 }
 
 impl CortexStore {
+    #[allow(dead_code)] // the write slice's accessor
     pub fn records(&self) -> &[CortexRecord] {
         &self.records
     }
