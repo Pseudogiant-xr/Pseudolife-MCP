@@ -128,7 +128,10 @@ def with_pg0(inner=None):
         target.mkdir(parents=True)
         for item in source.iterdir():
             if item.is_file():
-                os.link(item, target / item.name)
+                try:
+                    os.link(item, target / item.name)
+                except OSError:  # another filesystem (Linux /tmp)
+                    shutil.copy2(item, target / item.name)
     return setup
 
 
