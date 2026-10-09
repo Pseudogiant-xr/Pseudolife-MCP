@@ -1,0 +1,5076 @@
+{
+  "repository": "Pseudogiant-xr/Pseudolife-MCP",
+  "workflow": "rust.yml",
+  "runs": [
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-09T18:21:32Z",
+      "databaseId": 37972711919,
+      "event": "pull_request",
+      "headSha": "049863c93ca7e0f19261d6457b7e45f6c8b4da08",
+      "jobs": [
+        {
+          "completedAt": "2026-10-09T18:27:39Z",
+          "conclusion": "success",
+          "databaseId": 113963135782,
+          "name": "Candidate / windows-latest",
+          "startedAt": "2026-10-09T18:21:35Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:21:37Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:21:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:53Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:21:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:07Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T18:21:53Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:12Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T18:22:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:13Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T18:22:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:15Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T18:27:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:36Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T18:27:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:37Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T18:27:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:37Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T18:27:37Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113963135782"
+        },
+        {
+          "completedAt": "2026-10-09T18:25:19Z",
+          "conclusion": "success",
+          "databaseId": 113963135959,
+          "name": "Rust / ubuntu-latest",
+          "startedAt": "2026-10-09T18:21:34Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:21:37Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:21:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:43Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:21:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:43Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:21:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:48Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T18:21:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:57Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T18:21:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:57Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T18:21:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:58Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T18:21:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:06Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T18:21:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:17Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T18:22:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:19Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T18:22:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:20Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T18:22:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:27Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T18:22:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:34Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T18:22:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:23:51Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T18:22:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:23:57Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T18:23:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:03Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T18:23:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:25:16Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T18:24:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:25:16Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:25:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:25:17Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:25:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:25:17Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:25:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:25:17Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:25:17Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113963135959"
+        },
+        {
+          "completedAt": "2026-10-09T18:30:17Z",
+          "conclusion": "success",
+          "databaseId": 113963135983,
+          "name": "Rust / windows-latest",
+          "startedAt": "2026-10-09T18:21:35Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:21:37Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:21:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:51Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:21:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:51Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:21:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:52Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T18:21:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:12Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T18:21:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:12Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T18:22:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:13Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T18:22:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:25Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T18:22:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:56Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T18:22:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:58Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T18:22:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:23:01Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T18:22:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:23:33Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T18:23:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:23:48Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T18:23:33Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:26:44Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T18:23:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:26:55Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T18:26:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:10Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T18:26:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:12Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T18:27:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:13Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:30:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:13Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:30:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:15Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:30:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:15Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:30:15Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113963135983"
+        },
+        {
+          "completedAt": "2026-10-09T18:24:39Z",
+          "conclusion": "success",
+          "databaseId": 113963136073,
+          "name": "Candidate / ubuntu-latest",
+          "startedAt": "2026-10-09T18:21:45Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:21:48Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:21:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:21:55Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:21:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:02Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T18:21:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:22:04Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T18:22:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:29Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T18:22:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:31Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T18:24:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:37Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T18:24:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:37Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T18:24:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:24:37Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T18:24:37Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113963136073"
+        },
+        {
+          "completedAt": "2026-10-09T18:21:32Z",
+          "conclusion": "skipped",
+          "databaseId": 113963137481,
+          "name": "Capture / Windows / wait-mail",
+          "startedAt": "2026-10-09T18:21:33Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113963137481"
+        },
+        {
+          "completedAt": "2026-10-09T18:33:11Z",
+          "conclusion": "success",
+          "databaseId": 113965555563,
+          "name": "Parity checks / ubuntu-latest / judges",
+          "startedAt": "2026-10-09T18:27:41Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:27:43Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:27:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:48Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:27:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:54Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:27:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:01Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:27:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:02Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:28:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:45Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:28:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:46Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:28:45Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:46Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:28:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:28:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:03Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:04Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:33:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:09Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:33:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:09Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:33:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:09Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:33:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:09Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:33:09Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555563"
+        },
+        {
+          "completedAt": "2026-10-09T18:31:25Z",
+          "conclusion": "success",
+          "databaseId": 113965555658,
+          "name": "Parity checks / ubuntu-latest / eval",
+          "startedAt": "2026-10-09T18:27:41Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:27:46Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:27:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:51Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:27:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:56Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:27:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:04Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:27:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:05Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:28:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:47Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:28:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:48Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:28:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:48Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:28:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:52Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:28:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:56Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:28:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:16Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:28:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:16Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:31:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:16Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:31:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:16Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:31:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:17Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:31:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:17Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:31:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:17Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:31:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:23Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:31:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:23Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:31:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:23Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:31:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:23Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:31:23Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555658"
+        },
+        {
+          "completedAt": "2026-10-09T18:42:22Z",
+          "conclusion": "success",
+          "databaseId": 113965555687,
+          "name": "Parity checks / windows-latest / judges",
+          "startedAt": "2026-10-09T18:28:23Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:28:27Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:28:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:40Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:28:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:51Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:28:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:04Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:28:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:12Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:29:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:15Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:29:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:32:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:32:17Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:41:06Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:32:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:41:07Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:41:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:18Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:41:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:19Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:42:18Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:20Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:42:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:21Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:42:20Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555687"
+        },
+        {
+          "completedAt": "2026-10-09T18:34:59Z",
+          "conclusion": "success",
+          "databaseId": 113965555709,
+          "name": "Parity checks / ubuntu-latest / cli",
+          "startedAt": "2026-10-09T18:27:42Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:27:45Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:27:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:55Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:27:45Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:01Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:27:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:09Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:28:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:10Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:28:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:10Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:28:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:12Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:29:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:12Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:29:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:17Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:29:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:17Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:29:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:29:17Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:29:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:03Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:29:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:33:04Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:33:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:51Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:33:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:51Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:34:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:51Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:34:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:51Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:34:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:56Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:34:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:56Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:34:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:56Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:34:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:34:56Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:34:56Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555709"
+        },
+        {
+          "completedAt": "2026-10-09T18:40:54Z",
+          "conclusion": "success",
+          "databaseId": 113965555716,
+          "name": "Parity checks / windows-latest / cli",
+          "startedAt": "2026-10-09T18:28:04Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:28:07Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:28:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:20Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:28:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:31Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:28:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:43Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:28:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:50Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:28:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:19Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:28:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:20Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:31:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:20Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:31:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:20Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:31:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:20Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:31:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:31:20Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:31:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:30Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:31:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:47Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:36:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:08Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:36:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:08Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:40:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:08Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:40:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:08Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:40:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:50Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:40:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:51Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:40:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:53Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:40:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:40:53Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:40:53Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555716"
+        },
+        {
+          "completedAt": "2026-10-09T18:36:57Z",
+          "conclusion": "success",
+          "databaseId": 113965555747,
+          "name": "Parity checks / windows-latest / eval",
+          "startedAt": "2026-10-09T18:27:41Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:27:43Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:27:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:27:56Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:27:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:04Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:27:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:20Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:28:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:28:26Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:28:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:47Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:28:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:47Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:30:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:47Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:30:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:48Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:30:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:30:52Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:30:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:14Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:30:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:14Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:36:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:14Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:36:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:14Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:36:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:15Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:36:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:15Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:36:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:15Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T18:36:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:53Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:36:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:54Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:36:53Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:56Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:36:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:36:56Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:36:56Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113965555747"
+        },
+        {
+          "completedAt": "2026-10-09T18:42:32Z",
+          "conclusion": "success",
+          "databaseId": 113971397580,
+          "name": "Parity / ubuntu-latest",
+          "startedAt": "2026-10-09T18:42:25Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:42:26Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:42:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:31Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T18:42:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:31Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T18:42:31Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113971397580"
+        },
+        {
+          "completedAt": "2026-10-09T18:42:27Z",
+          "conclusion": "success",
+          "databaseId": 113971397600,
+          "name": "Parity / windows-latest",
+          "startedAt": "2026-10-09T18:42:24Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:42:25Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:42:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:26Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T18:42:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:42:26Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T18:42:26Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919/job/113971397600"
+        }
+      ],
+      "startedAt": "2026-10-09T18:21:32Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37972711919"
+    },
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-09T18:50:19Z",
+      "databaseId": 37976048317,
+      "event": "pull_request",
+      "headSha": "ca944304c177fbb32c8ff0dcffe25afe8b582834",
+      "jobs": [
+        {
+          "completedAt": "2026-10-09T18:59:20Z",
+          "conclusion": "success",
+          "databaseId": 113974498804,
+          "name": "Rust / windows-latest",
+          "startedAt": "2026-10-09T18:50:32Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:50:34Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:50:33Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:48Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:50:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:48Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:50:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:50Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T18:50:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:10Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T18:50:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:11Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T18:51:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:12Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T18:51:11Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:25Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T18:51:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:53Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T18:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:55Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T18:51:53Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:58Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T18:51:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:52:27Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T18:51:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:52:44Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T18:52:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:43Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T18:52:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:57Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T18:55:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:56:11Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T18:55:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:10Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T18:56:11Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:14Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:59:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:14Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:59:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:18Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:59:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:18Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:59:18Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113974498804"
+        },
+        {
+          "completedAt": "2026-10-09T18:54:16Z",
+          "conclusion": "success",
+          "databaseId": 113974499131,
+          "name": "Candidate / windows-latest",
+          "startedAt": "2026-10-09T18:51:08Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:51:10Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:51:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:24Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:51:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:36Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T18:51:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:58Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T18:51:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:10Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T18:51:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:12Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T18:54:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:13Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T18:54:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:15Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T18:54:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:15Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T18:54:15Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113974499131"
+        },
+        {
+          "completedAt": "2026-10-09T18:51:52Z",
+          "conclusion": "success",
+          "databaseId": 113974499184,
+          "name": "Candidate / ubuntu-latest",
+          "startedAt": "2026-10-09T18:50:44Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:50:45Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:50:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:50Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:50:45Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:57Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T18:50:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:00Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T18:50:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:49Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T18:51:00Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:50Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T18:51:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:50Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T18:51:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:50Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T18:51:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:51Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T18:51:51Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113974499184"
+        },
+        {
+          "completedAt": "2026-10-09T18:54:54Z",
+          "conclusion": "success",
+          "databaseId": 113974499201,
+          "name": "Rust / ubuntu-latest",
+          "startedAt": "2026-10-09T18:50:50Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:50:52Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:50:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:59Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:50:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:50:59Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:50:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:01Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T18:50:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:07Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T18:51:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:08Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T18:51:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:09Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T18:51:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:17Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T18:51:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:27Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T18:51:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:30Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T18:51:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:31Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T18:51:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:39Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T18:51:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:51:49Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T18:51:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:53:14Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T18:51:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:53:21Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T18:53:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:53:30Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T18:53:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:49Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T18:53:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:50Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T18:54:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:50Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T18:54:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:50Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T18:54:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:50Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T18:54:50Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113974499201"
+        },
+        {
+          "completedAt": "2026-10-09T18:50:20Z",
+          "conclusion": "skipped",
+          "databaseId": 113974500340,
+          "name": "Capture / Windows / wait-mail",
+          "startedAt": "2026-10-09T18:50:20Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113974500340"
+        },
+        {
+          "completedAt": "2026-10-09T19:06:10Z",
+          "conclusion": "success",
+          "databaseId": 113976046155,
+          "name": "Parity checks / windows-latest / cli",
+          "startedAt": "2026-10-09T18:54:19Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:54:23Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:54:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:38Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:54:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:48Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:54:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:01Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:54:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:17Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:55:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:40Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:55:17Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:41Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:57:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:41Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:57:41Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:42Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:57:41Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:42Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:57:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:42Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:57:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:02:48Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:57:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:02:56Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:02:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:02:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:05Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:07Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:06:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:06:08Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:06:07Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046155"
+        },
+        {
+          "completedAt": "2026-10-09T19:01:40Z",
+          "conclusion": "success",
+          "databaseId": 113976046186,
+          "name": "Parity checks / ubuntu-latest / judges",
+          "startedAt": "2026-10-09T18:54:19Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:54:22Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:54:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:29Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:54:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:35Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:54:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:43Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:54:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:47Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:54:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:47Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:54:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:49Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:55:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:49Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:55:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:55:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:35Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:36Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:01:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:36Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:01:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:36Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:01:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:36Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:01:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:01:37Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:01:36Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046186"
+        },
+        {
+          "completedAt": "2026-10-09T19:00:53Z",
+          "conclusion": "success",
+          "databaseId": 113976046198,
+          "name": "Parity checks / ubuntu-latest / cli",
+          "startedAt": "2026-10-09T18:54:19Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:54:21Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:54:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:26Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:54:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:31Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:54:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:38Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:54:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:54:41Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:54:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:25Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:54:41Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:27Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:55:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:27Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:55:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:31Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:55:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:31Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:55:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:31Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:55:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:12Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:55:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:59:13Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:59:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:59:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:49Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:00:49Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046198"
+        },
+        {
+          "completedAt": "2026-10-09T19:07:21Z",
+          "conclusion": "success",
+          "databaseId": 113976046233,
+          "name": "Parity checks / windows-latest / judges",
+          "startedAt": "2026-10-09T18:54:47Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:54:50Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:54:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:02Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:54:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:10Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:55:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:23Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:55:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:40Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:55:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:50Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:55:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:57:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:51Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:14Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T18:57:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:15Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:07:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:16Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:07:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:16Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:07:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:19Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:07:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:07:19Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:07:19Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046233"
+        },
+        {
+          "completedAt": "2026-10-09T19:03:30Z",
+          "conclusion": "success",
+          "databaseId": 113976046285,
+          "name": "Parity checks / windows-latest / eval",
+          "startedAt": "2026-10-09T18:54:56Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:54:59Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:54:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:10Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:54:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:21Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:55:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:34Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:55:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:55:54Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:55:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:21Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:55:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:22Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:58:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:22Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:58:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:22Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:58:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:26Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:58:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:25Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:58:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:25Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:03:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:25Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:03:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:25Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:03:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:27Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:03:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:27Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:03:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:27Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:03:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:27Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:03:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:27Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:03:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:28Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:03:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:03:28Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:03:28Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046285"
+        },
+        {
+          "completedAt": "2026-10-09T19:00:47Z",
+          "conclusion": "success",
+          "databaseId": 113976046343,
+          "name": "Parity checks / ubuntu-latest / eval",
+          "startedAt": "2026-10-09T18:56:37Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T18:56:39Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T18:56:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:56:46Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T18:56:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:56:53Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T18:56:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:01Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T18:56:53Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:57:06Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T18:57:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:06Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T18:57:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:09Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T18:58:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:09Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T18:58:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:10Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T18:58:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T18:58:15Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T18:58:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:42Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T18:58:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:42Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:00:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:42Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:00:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:42Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:00:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:00:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:00:44Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:00:44Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113976046343"
+        },
+        {
+          "completedAt": "2026-10-09T19:08:02Z",
+          "conclusion": "success",
+          "databaseId": 113981176309,
+          "name": "Parity / windows-latest",
+          "startedAt": "2026-10-09T19:07:59Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:08:00Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:08:00Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:08:01Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T19:08:00Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:08:01Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T19:08:01Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113981176309"
+        },
+        {
+          "completedAt": "2026-10-09T19:09:59Z",
+          "conclusion": "success",
+          "databaseId": 113981176352,
+          "name": "Parity / ubuntu-latest",
+          "startedAt": "2026-10-09T19:09:54Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:09:55Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:09:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:09:56Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T19:09:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:09:56Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T19:09:56Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317/job/113981176352"
+        }
+      ],
+      "startedAt": "2026-10-09T18:50:19Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37976048317"
+    },
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "createdAt": "2026-10-09T19:16:59Z",
+      "databaseId": 37979150160,
+      "event": "pull_request",
+      "headSha": "dc9377b456372794a5108ab03ae86acd802647d2",
+      "jobs": [
+        {
+          "completedAt": "2026-10-09T19:26:41Z",
+          "conclusion": "success",
+          "databaseId": 113984928294,
+          "name": "Rust / windows-latest",
+          "startedAt": "2026-10-09T19:17:57Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:18:00Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:17:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:14Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:18:00Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:14Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:18:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:15Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T19:18:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:37Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T19:18:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:38Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T19:18:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:39Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T19:18:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:51Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T19:18:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:21Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T19:18:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:23Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T19:19:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:26Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T19:19:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:56Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T19:19:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:16Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T19:19:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:20Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T19:20:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:36Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T19:23:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:53Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T19:23:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:36Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T19:23:53Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:36Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:26:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:37Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:26:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:39Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:26:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:39Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:26:39Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113984928294"
+        },
+        {
+          "completedAt": "2026-10-09T19:21:54Z",
+          "conclusion": "success",
+          "databaseId": 113984928627,
+          "name": "Candidate / windows-latest",
+          "startedAt": "2026-10-09T19:18:38Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:18:40Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:18:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:55Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:18:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:08Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T19:18:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:32Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T19:19:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:49Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T19:19:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:50Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T19:21:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:51Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T19:21:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:53Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T19:21:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:53Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T19:21:53Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113984928627"
+        },
+        {
+          "completedAt": "2026-10-09T19:20:05Z",
+          "conclusion": "success",
+          "databaseId": 113984928650,
+          "name": "Candidate / ubuntu-latest",
+          "startedAt": "2026-10-09T19:18:39Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:18:41Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:18:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:45Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:18:41Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:55Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 3,
+              "startedAt": "2026-10-09T19:18:45Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:59Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 4,
+              "startedAt": "2026-10-09T19:18:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:02Z",
+              "conclusion": "success",
+              "name": "Build candidate",
+              "number": 5,
+              "startedAt": "2026-10-09T19:18:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:03Z",
+              "conclusion": "success",
+              "name": "Run actions/upload-artifact@v4",
+              "number": 6,
+              "startedAt": "2026-10-09T19:20:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:03Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 11,
+              "startedAt": "2026-10-09T19:20:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:04Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 12,
+              "startedAt": "2026-10-09T19:20:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:20:04Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-10-09T19:20:04Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113984928650"
+        },
+        {
+          "completedAt": "2026-10-09T19:22:42Z",
+          "conclusion": "success",
+          "databaseId": 113984928684,
+          "name": "Rust / ubuntu-latest",
+          "startedAt": "2026-10-09T19:18:46Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:18:48Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:18:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:55Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:18:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:55Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:18:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:18:56Z",
+              "conclusion": "success",
+              "name": "Bind the selected Python interpreter for Rust fixtures",
+              "number": 4,
+              "startedAt": "2026-10-09T19:18:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:02Z",
+              "conclusion": "success",
+              "name": "Install the Python SDK fixture dependency",
+              "number": 5,
+              "startedAt": "2026-10-09T19:18:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:03Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 6,
+              "startedAt": "2026-10-09T19:19:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:04Z",
+              "conclusion": "success",
+              "name": "Prepare selected package metadata for the Rust identity contract",
+              "number": 7,
+              "startedAt": "2026-10-09T19:19:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:13Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 8,
+              "startedAt": "2026-10-09T19:19:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:20Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 9,
+              "startedAt": "2026-10-09T19:19:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:22Z",
+              "conclusion": "success",
+              "name": "Install pinned nextest in the runner temporary directory",
+              "number": 10,
+              "startedAt": "2026-10-09T19:19:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:24Z",
+              "conclusion": "success",
+              "name": "Check formatting",
+              "number": 11,
+              "startedAt": "2026-10-09T19:19:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:32Z",
+              "conclusion": "success",
+              "name": "Check all targets",
+              "number": 12,
+              "startedAt": "2026-10-09T19:19:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:19:42Z",
+              "conclusion": "success",
+              "name": "Clippy",
+              "number": 13,
+              "startedAt": "2026-10-09T19:19:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:05Z",
+              "conclusion": "success",
+              "name": "Nextest",
+              "number": 14,
+              "startedAt": "2026-10-09T19:19:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:12Z",
+              "conclusion": "success",
+              "name": "Check all targets without default features",
+              "number": 15,
+              "startedAt": "2026-10-09T19:21:05Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:21:21Z",
+              "conclusion": "success",
+              "name": "Clippy without default features",
+              "number": 16,
+              "startedAt": "2026-10-09T19:21:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Nextest without default features",
+              "number": 17,
+              "startedAt": "2026-10-09T19:21:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:22:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:22:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:22:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:22:40Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113984928684"
+        },
+        {
+          "completedAt": "2026-10-09T19:17:00Z",
+          "conclusion": "skipped",
+          "databaseId": 113984929656,
+          "name": "Capture / Windows / wait-mail",
+          "startedAt": "2026-10-09T19:17:00Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113984929656"
+        },
+        {
+          "completedAt": "2026-10-09T19:26:59Z",
+          "conclusion": "success",
+          "databaseId": 113986839899,
+          "name": "Parity checks / ubuntu-latest / eval",
+          "startedAt": "2026-10-09T19:22:34Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:22:37Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:22:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:44Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:22:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:51Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:22:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:59Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:22:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:03Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:22:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:07Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:03Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:09Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:24:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:09Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:24:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:13Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:24:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:19Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:24:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:56Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:24:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:56Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:26:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:56Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:26:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:56Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:26:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:26:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:57Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:26:57Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839899"
+        },
+        {
+          "completedAt": "2026-10-09T19:31:10Z",
+          "conclusion": "success",
+          "databaseId": 113986839915,
+          "name": "Parity checks / windows-latest / eval",
+          "startedAt": "2026-10-09T19:22:12Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:22:16Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:22:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:29Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:22:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:40Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:22:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:52Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:22:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:10Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:22:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:34Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:36Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:25:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:36Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:25:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:36Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:25:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:40Z",
+              "conclusion": "success",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:25:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:04Z",
+              "conclusion": "success",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:25:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:04Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:31:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:04Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:31:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:04Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:31:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:06Z",
+              "conclusion": "success",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:31:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:06Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:06Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:06Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:06Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:08Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:08Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:31:08Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839915"
+        },
+        {
+          "completedAt": "2026-10-09T19:35:37Z",
+          "conclusion": "success",
+          "databaseId": 113986839933,
+          "name": "Parity checks / windows-latest / judges",
+          "startedAt": "2026-10-09T19:22:20Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:22:23Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:22:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:37Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:22:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:48Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:22:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:59Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:22:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:16Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:22:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:41Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:43Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:25:41Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:43Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:25:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:25:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:44Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:29Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:25:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:31Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:35:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:31Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:35:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:32Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:35:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:34Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:35:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:35:34Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:35:34Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839933"
+        },
+        {
+          "completedAt": "2026-10-09T19:29:53Z",
+          "conclusion": "success",
+          "databaseId": 113986839938,
+          "name": "Parity checks / ubuntu-latest / cli",
+          "startedAt": "2026-10-09T19:22:42Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:22:46Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:22:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:54Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:22:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:22:58Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:22:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:09Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:22:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:12Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:23:09Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:14Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:15Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:24:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:16Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:24:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:21Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:24:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:21Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:24:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:21Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:24:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:28:06Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:24:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:28:07Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:28:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:28:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:51Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:29:51Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839938"
+        },
+        {
+          "completedAt": "2026-10-09T19:29:10Z",
+          "conclusion": "success",
+          "databaseId": 113986839955,
+          "name": "Parity checks / ubuntu-latest / judges",
+          "startedAt": "2026-10-09T19:23:21Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:23:25Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:23:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:30Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:23:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:34Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:23:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:42Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:23:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:44Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:23:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:33Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:34Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:24:33Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:34Z",
+              "conclusion": "success",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:24:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:24:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:24:35Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:06Z",
+              "conclusion": "success",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:24:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:07Z",
+              "conclusion": "success",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:29:06Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:07Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:29:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:07Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:29:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:08Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:29:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:29:08Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:29:08Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839955"
+        },
+        {
+          "completedAt": "2026-10-09T19:34:53Z",
+          "conclusion": "success",
+          "databaseId": 113986839974,
+          "name": "Parity checks / windows-latest / cli",
+          "startedAt": "2026-10-09T19:22:44Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:22:48Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:22:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:01Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-10-09T19:22:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:13Z",
+              "conclusion": "success",
+              "name": "Run actions/setup-python@v5",
+              "number": 3,
+              "startedAt": "2026-10-09T19:23:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:25Z",
+              "conclusion": "success",
+              "name": "Run dtolnay/rust-toolchain@stable",
+              "number": 4,
+              "startedAt": "2026-10-09T19:23:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:23:43Z",
+              "conclusion": "success",
+              "name": "Run Swatinem/rust-cache@v2",
+              "number": 5,
+              "startedAt": "2026-10-09T19:23:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:25:59Z",
+              "conclusion": "success",
+              "name": "Install checkout and test dependencies",
+              "number": 6,
+              "startedAt": "2026-10-09T19:23:43Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:01Z",
+              "conclusion": "success",
+              "name": "Run actions/download-artifact@v4",
+              "number": 7,
+              "startedAt": "2026-10-09T19:25:59Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:01Z",
+              "conclusion": "skipped",
+              "name": "Restore executable permission",
+              "number": 8,
+              "startedAt": "2026-10-09T19:26:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:02Z",
+              "conclusion": "success",
+              "name": "Bind the event-selected Python oracle",
+              "number": 9,
+              "startedAt": "2026-10-09T19:26:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:02Z",
+              "conclusion": "skipped",
+              "name": "Check CI coverage contract",
+              "number": 10,
+              "startedAt": "2026-10-09T19:26:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:26:02Z",
+              "conclusion": "skipped",
+              "name": "Run every eval harness test",
+              "number": 11,
+              "startedAt": "2026-10-09T19:26:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:12Z",
+              "conclusion": "success",
+              "name": "CLI differential harness",
+              "number": 12,
+              "startedAt": "2026-10-09T19:26:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:31:31Z",
+              "conclusion": "success",
+              "name": "Prepare disposable PostgreSQL for CLI lease row",
+              "number": 13,
+              "startedAt": "2026-10-09T19:31:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:48Z",
+              "conclusion": "success",
+              "name": "CLI lease differential harness",
+              "number": 14,
+              "startedAt": "2026-10-09T19:31:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:48Z",
+              "conclusion": "skipped",
+              "name": "Retain additive executable node outcomes",
+              "number": 15,
+              "startedAt": "2026-10-09T19:34:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:48Z",
+              "conclusion": "skipped",
+              "name": "Run unchanged candidates and differential judges",
+              "number": 16,
+              "startedAt": "2026-10-09T19:34:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:48Z",
+              "conclusion": "skipped",
+              "name": "Retain comparison summary",
+              "number": 17,
+              "startedAt": "2026-10-09T19:34:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:48Z",
+              "conclusion": "success",
+              "name": "Post Run Swatinem/rust-cache@v2",
+              "number": 32,
+              "startedAt": "2026-10-09T19:34:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:49Z",
+              "conclusion": "success",
+              "name": "Post Run actions/setup-python@v5",
+              "number": 33,
+              "startedAt": "2026-10-09T19:34:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:51Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 34,
+              "startedAt": "2026-10-09T19:34:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:34:51Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 35,
+              "startedAt": "2026-10-09T19:34:51Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113986839974"
+        },
+        {
+          "completedAt": "2026-10-09T19:36:33Z",
+          "conclusion": "success",
+          "databaseId": 113992122508,
+          "name": "Parity / ubuntu-latest",
+          "startedAt": "2026-10-09T19:36:27Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:36:28Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:36:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:36:32Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T19:36:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:36:32Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T19:36:32Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113992122508"
+        },
+        {
+          "completedAt": "2026-10-09T19:36:39Z",
+          "conclusion": "success",
+          "databaseId": 113992122587,
+          "name": "Parity / windows-latest",
+          "startedAt": "2026-10-09T19:36:35Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-09T19:36:36Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-09T19:36:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:36:37Z",
+              "conclusion": "success",
+              "name": "Require every Rust and parity job to pass",
+              "number": 2,
+              "startedAt": "2026-10-09T19:36:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-09T19:36:37Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 3,
+              "startedAt": "2026-10-09T19:36:37Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160/job/113992122587"
+        }
+      ],
+      "startedAt": "2026-10-09T19:16:59Z",
+      "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37979150160"
+    }
+  ]
+}
