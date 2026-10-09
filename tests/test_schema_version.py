@@ -35,7 +35,7 @@ change:
   2. docs/guide/configuration.md — the DSN row AND a new row in the
      version-history table (both pinned by tests/test_release_ux.py; the
      history table is gap-detected, so the row is not optional).
-  3. CHANGELOG.md — a `v{actual}` mention under [Unreleased]
+  3. A changelog.d/ fragment that mentions `v{actual}`
      (pinned by tests/test_release_ux.py).
   4. docs/atlas/atlas.json — `meta.schema`, plus RE-VERIFY the affected
      storage cards rather than only renumbering
