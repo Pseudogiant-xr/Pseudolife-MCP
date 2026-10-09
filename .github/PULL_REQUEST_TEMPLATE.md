@@ -31,8 +31,8 @@ code with the pager's.
 
 ## Checklist
 
-- [ ] `CHANGELOG.md` entry under `[Unreleased]` (docs-only and test-only
-      changes are exempt)
+- [ ] A changelog fragment in `changelog.d/` (see its README), not a
+      `CHANGELOG.md` edit (docs-only and test-only changes are exempt)
 - [ ] Full suite green, with the bench Postgres up (`127.0.0.1:5433`) —
       PG-backed tests skip silently without it, which is not a pass
       (docs-only: the doc guards instead, see `CONTRIBUTING.md`)

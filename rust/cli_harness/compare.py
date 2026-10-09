@@ -9,7 +9,7 @@ import json
 from . import normalize
 
 # Fields that describe the run rather than the CLI's behaviour.
-_RUN_FIELDS = ("home", "window")
+_RUN_FIELDS = ("home", "window", "daemon_url", "utc_offset")
 
 
 def _text(value: str) -> str:
@@ -46,7 +46,7 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
             out += _stream_diff(f"file {rel}", va[5:], vb[5:])
         else:
             out.append(f"file {rel}: python {va[:80]!r} rust {vb[:80]!r}")
-    for field in ("requests", "db"):
+    for field in ("requests", "db", "listener", "modes"):
         if a.get(field) != b.get(field):
             ja = json.dumps(a.get(field), indent=1, sort_keys=False).splitlines()
             jb = json.dumps(b.get(field), indent=1, sort_keys=False).splitlines()
