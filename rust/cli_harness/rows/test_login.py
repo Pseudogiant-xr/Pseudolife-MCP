@@ -185,13 +185,22 @@ def _observe(server, home: Path, login: Path, before: str | None) -> dict:
             "authenticates": server.can_login(user, password, "postgres"),
             "bank": server.can_login(user, password, _cluster.BANK),
             "kept": None if before is None else password == before,
-            "password_sha256": hashlib.sha256(password.encode()).hexdigest(),
+            "password_mark": _mark(password),
         }
     return out
 
 
 def _password_before(arm, rel: str = LOGIN_REL) -> str | None:
     return _read_login(_login_path(arm, rel)).get(PASSWORD_KEY) or None
+
+
+# A per-process key: the observation identifies the validated password line
+# without carrying the password or a plain hash of it.
+_MARK_KEY = secrets.token_bytes(32)
+
+
+def _mark(password: str) -> str:
+    return hmac.new(_MARK_KEY, password.encode(), "sha256").hexdigest()
 
 
 @normalize.rule("test-login-password")
@@ -205,7 +214,7 @@ def password_rule(obs: dict) -> None:
     login = (obs.get("db") or {}).get("login")
     if not login:
         return
-    digest = login.pop("password_sha256", None)
+    mark = login.pop("password_mark", None)
     verifier = login.get("verifier") or {}
     valid = (login.get("shape") == "token_urlsafe32" and login.get("authenticates") == "ok"
              and login.get("kept") is not True
@@ -220,7 +229,7 @@ def password_rule(obs: dict) -> None:
         for index, line in enumerate(lines):
             key, sep, password = line.partition("=")
             if (valid and sep and key == PASSWORD_KEY
-                    and hashlib.sha256(password.encode()).hexdigest() == digest):
+                    and mark is not None and hmac.compare_digest(_mark(password), mark)):
                 lines[index] = f"{PASSWORD_KEY}=<validated>"
         obs["files"][rel] = "file:" + base64.b64encode("\n".join(lines).encode()).decode()
 
