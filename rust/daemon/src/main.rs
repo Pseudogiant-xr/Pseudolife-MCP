@@ -17,6 +17,7 @@ mod search;
 mod service;
 mod static_files;
 mod storage;
+mod txn;
 
 use std::path::PathBuf;
 use std::sync::Arc;
