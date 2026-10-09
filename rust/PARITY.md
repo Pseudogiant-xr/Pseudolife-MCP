@@ -11,32 +11,43 @@ and `N` a plain decimal of at least one minute; plus `--help` at
 `COLUMNS=80`. A missing canonical data dir (including `..` spellings) is
 refused verbatim before anything else.
 
-Contract, proven per answered case by `python rust/cli_harness --row backup`
-against the live Python oracle on disposable homes and a disposable bank:
+Contract, checked per answered case by `python rust/cli_harness --row backup`
+against the live Python oracle on disposable homes and a disposable bank, on
+Windows and on Linux (the POSIX symlink member case runs on Linux only):
 exit code; both streams byte-exact apart from the run timestamp in the two
-new file names (validated against the arm's own clock window); every file
-under the home; the state archive read back member by member (name, type,
-mode, uid, gid, mtime as a float, size, link target, content hash; uname and
-gname too on Windows); the dump decompressed, with pg_dump's per-run
-`\restrict` key normalized; and the source bank's rows and catalog unchanged.
-Free: tar header layout, PAX record layout, gzip headers and compression
-bytes. pg_dump is found as Python finds it (the newest `~/.pg0` bundle, then
-Python 3.11 `shutil.which`, including Windows' current-directory-first rule
-and `PATHEXT`).
+new file names (validated against the arm's own clock window; two files that
+normalize to one name stay distinct); every file under the home; the state
+archive read back member by member (name, type, mode, uid, gid, mtime as a
+float, size, link target, content hash; uname and gname too on Windows); the
+dump decompressed, with pg_dump's per-run `\restrict` key normalized only
+when the `\restrict` and `\unrestrict` keys agree; and the source bank's rows
+and catalog unchanged. Free: tar header layout, PAX record layout, gzip
+headers and compression bytes. pg_dump is found as Python 3.11 finds it: the
+newest `~/.pg0` bundle, then `shutil.which` (PATH split as text with quoted
+and empty entries kept, `None` for an empty PATH, Windows' current-directory
+rule and `PATHEXT`, macOS `CS_PATH`). Each member copies exactly its stat
+size; a file that shrinks while archived fails the backup. A closed stdout
+exits 120, as CPython's shutdown flush does (declared substitution
+`backup-stdout-closed`: no interpreter trailer).
 
 Deferred by name, before any effect: anything that could need the lite tier's
 embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
 `--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
-non-canonical spellings and argv shapes; `..` components in a run; an `--out`
-equal to the data dir or nested below one of its archived children; a
-`--keep-days` under one minute (rotation would race this run's new files
-against the platform clock: Python 3.11 reads the coarse system clock on
-Windows); and trees holding anything but files, directories and POSIX
-symlinks (Windows reparse points, POSIX hard links, devices, non-UTF-8 names).
-Declared divergences: archive uname/gname on POSIX are empty (Python looks
-them up; ownership on restore falls back to uid/gid); Python tracebacks after
-an effect (permissions, a full disk) become `backup failed: <error>`; output
-encodings other than UTF-8, as for every CLI leaf.
+non-canonical spellings and argv shapes; `..` components in a run; an output
+dir that resolves (symlinks and junctions followed) to the data dir or below
+one of its archived children; a top-level child `Path.resolve()` would refuse
+(a symlink loop); a `--keep-days` under one minute (rotation would race this
+run's new files against the platform clock: Python 3.11 reads the coarse
+system clock on Windows); trees holding anything but files, directories and
+POSIX symlinks (Windows reparse points, hard links on either OS, devices,
+non-UTF-8 names); unexpected stat errors under `~/.pg0`; and on Windows a
+`TZ` override, an existing target with this second's timestamp, or a
+non-ASCII name in the backups dir (Windows glob folds case with Unicode
+rules). Declared divergences: archive uname/gname on POSIX are empty (Python
+looks them up; ownership on restore falls back to uid/gid); Python tracebacks
+after an effect (permissions, a full disk, a pg_dump that cannot start)
+become `backup failed: <error>`; output encodings other than UTF-8, as for
+every CLI leaf.
 
 ## Stream D retained cell scope (2026-10-08)
 
@@ -243,7 +254,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
 | CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
 | CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
-| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, canonical argv and paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (15 cases incl. `.pg0` and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes) with 7 caught mutants; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |
+| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, canonical argv and paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (17 cases on Linux, 16 on Windows: `.pg0` and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes, sort orders, read-only and dotfile members, closed stdout, POSIX symlink members) with 11 caught Windows mutants; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |
 | CLI-BACKUP-LITE | 2/3 | Lite-tier backup through the embedded pg0 instance (attach or start for the duration, stop only what it started). `backup_cli.py`, `storage/embedded_pg.py` | `test_backup_cli.py::test_backup_roundtrip_embedded`; native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
 | CLI-TRANSFER | 2 | ZIP/JSONL manifest; exact exported/excluded table rosters in the transfer appendix; float4/ids/HLC/JSONB/time/sequences; import refuses a non-empty bank (only meta and builtin relations are exempt), dimension/column mismatches and other live connections. Before importing exported metadata, it clears the target's `curation_listing_spelling_v2` key so only the export's value stands. `transfer_cli.py` | `test_transfer_cli.py` direct calls I/DB, including `test_import_leaves_the_curation_spelling_flag_to_the_export`; add real CLI export/import against disposable banks | deferred |
 | CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |

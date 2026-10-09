@@ -4,7 +4,8 @@
 
 CLI-BACKUP-DSN is ported: explicit-DSN dumps and file-mode state archives,
 with rotation, match the Python oracle in the `backup` harness row on
-Windows; Linux runs the Rust contract tests in CI. The lite tier
+Windows (16 cases) and Linux (17, under WSL); CI runs the Rust contract
+tests on both. The lite tier
 (CLI-BACKUP-LITE) defers by name until embedded_pg is native. Scope,
 contract, free items and deferrals: PARITY.md "Backup explicit-DSN and file
 mode".
