@@ -515,17 +515,13 @@ def disconnect(port: int, path: str, headers) -> None:
 def config_for(scn: Scenario) -> str:
     """The scenario's config.yaml with the dream pass off: its background
     sweep writes dream state (W3-H's slice) on the Python side mid-run."""
-    dream = "  dream:
-    enabled: false
-"
+    nl = chr(10)
+    dream = "  dream:" + nl + "    enabled: false" + nl
+    head = "memory:" + nl
     if scn.config_yaml is None:
-        return "memory:
-" + dream
-    assert scn.config_yaml.startswith("memory:
-"), scn.name
-    return "memory:
-" + dream + scn.config_yaml[len("memory:
-"):]
+        return head + dream
+    assert scn.config_yaml.startswith(head), scn.name
+    return head + dream + scn.config_yaml[len(head):]
 
 
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
