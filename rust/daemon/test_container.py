@@ -9,6 +9,23 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
+VERIFIED_GRAPH = "f5fdee679d0ffb98e1cb0bb178e8ee2b86739ab7ab035a3a9327761d5c6b1f0b"
+DEFAULT_PATHS = ("ops/Dockerfile.daemon", "ops/docker-compose.yml", "ops/docker-compose.ghcr.yml",
+                 "pseudolife_memory/compose/docker-compose.yml", "pseudolife_memory/compose/docker-compose.ghcr.yml",
+                 "pseudolife_memory/update_cli.py", ".github/workflows/release.yml",
+                 "ops/install.sh", "ops/install.ps1")
+
+
+def require_python_defaults(contents, graph):
+    # This is one cutover prerequisite, not authorization to switch defaults.
+    if graph == VERIFIED_GRAPH:
+        return
+    for path, text in contents.items():
+        assert not any(symbol in text for symbol in
+                       ("Dockerfile.daemon-rust", "docker-compose.rust.yml", "w3j-daemon-rust")), path
+    commands = [json.loads(line[4:]) for line in contents["ops/Dockerfile.daemon"].splitlines()
+                if line.startswith("CMD ")]
+    assert commands[-1] == ["python", "-m", "pseudolife_memory.cli", "serve"]
 
 
 def load(name):
@@ -19,6 +36,25 @@ def load(name):
 
 
 class ContainerTests(unittest.TestCase):
+    def test_build_context_excludes_cargo_outputs(self):
+        patterns = (ROOT / ".dockerignore").read_text().splitlines()
+        self.assertTrue({"rust/target", "**/target"}.intersection(patterns))
+
+    def test_unverified_graph_cannot_enter_production_selection(self):
+        graph = load("provision_container_model").FILES["model.onnx"]
+        contents = {path: (ROOT / path).read_text() for path in DEFAULT_PATHS}
+        require_python_defaults(contents, graph)
+        for path in DEFAULT_PATHS:
+            counterfactual = dict(contents)
+            counterfactual[path] += "\nimage: w3j-daemon-rust:prep\n"
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                require_python_defaults(counterfactual, graph)
+        native_cmd = dict(contents)
+        native_cmd["ops/Dockerfile.daemon"] = 'CMD ["pseudolife-daemon"]\n'
+        with self.assertRaises(AssertionError):
+            require_python_defaults(native_cmd, graph)
+        require_python_defaults(counterfactual, VERIFIED_GRAPH)
+
     def test_image_gate_matches_inputs_and_skips_unrelated_changes(self):
         gate = load("container_inputs")
         for path in (".dockerignore", "rust/daemon/src/embed.rs", "rust/Cargo.toml", "rust/Cargo.lock",
@@ -36,7 +72,8 @@ class ContainerTests(unittest.TestCase):
                      "PSEUDOLIFE_DAEMON_ONNX_DIR=", "HEALTHCHECK", "--locked", "-j 3"):
             self.assertIn(item, dockerfile)
         compose = (ROOT / "ops/docker-compose.rust.yml").read_text()
-        self.assertIn("name: w3j-rust", compose)
+        self.assertIn("name: w3j-container-prep", compose)
+        self.assertIn("-p w3j-container-prep", compose)
         self.assertNotIn("internal: true", compose)
         self.assertIn("127.0.0.1:${W3J_RUST_PORT:-8766}:8765", compose)
         self.assertNotIn("pseudolife-mcp-bank", compose)

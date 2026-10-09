@@ -19,12 +19,15 @@ path slice, not this preparation proof. The frozen public ONNX graph is a
 packaging input; its different graph hash from the historical prerequisite
 does not inherit that receipt's numerical evidence.
 
-Named YAML presentation deferral: a quoted continuation starting with a literal
+Named YAML presentation deferral `sent-quoted-continuation-tab`: a quoted continuation starting with a literal
 tab at indentation column zero (for example `ignored: 'a` followed by a line
-starting with tab then `b'`) is accepted by PyYAML and rejected by yaml-rust2.
+starting with tab then `b'`, with either quote style) is accepted by PyYAML and rejected by yaml-rust2.
 The sent boundary retains its named invalid-YAML refusal; shipped configuration
 producers use space indentation and escaped tabs. This case is counted separately
 from actual PyYAML refusals, not reported as differential agreement.
+`sent-anchor-colon-terminator` (`a: &x:y b`) is also deferred: PyYAML ends
+the anchor name at the colon and loads the remaining scalar; yaml-rust2
+includes the colon in the anchor name and the sent boundary refuses it.
 
 Evidence needed before cutover is enumerated in [CUTOVER.md](../CUTOVER.md).
 The image requires an explicit external Postgres DSN; embedded/file modes,

@@ -1,6 +1,6 @@
-# Explicit opt-in: docker compose -f ops/docker-compose.rust.yml up --build -d
+# Explicit opt-in: docker compose -p w3j-container-prep -f ops/docker-compose.rust.yml up --build -d
 # A separate project can run beside the default Python stack. State is disposable.
-name: w3j-rust
+name: w3j-container-prep
 services:
   postgres:
     image: pgvector/pgvector:pg18

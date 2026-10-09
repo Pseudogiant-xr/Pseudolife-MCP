@@ -168,7 +168,7 @@ jobs:
         run: |
           $suffix = if ($IsWindows) { '.exe' } else { '' }
           $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
-          python -m pytest rust/daemon/harness/test_sent_yaml.py -q
+          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q
           exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh

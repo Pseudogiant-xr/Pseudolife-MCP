@@ -48,7 +48,11 @@ ACCEPTED = [
     "ignored: |\n  \ta\n",
     "ignored: >\n  a\n  \tb\n",
 ]
-DEFERRED = ["ignored: 'a\n\tb'\n"]  # yaml-rust2 rejects quoted continuation indentation.
+DEFERRED = [
+    "ignored: 'a\n\tb'\n",  # yaml-rust2 rejects quoted continuation indentation.
+    'ignored: "a\n\tb"\n',
+    "a: &x:y b\n",  # PyYAML ends the anchor at ':', unlike yaml-rust2.
+]
 
 
 @pytest.fixture

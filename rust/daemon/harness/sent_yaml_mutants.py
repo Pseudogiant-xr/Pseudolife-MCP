@@ -37,7 +37,7 @@ def main():
         config.write_text(original.replace(needle, replacement), encoding="utf-8")
         log = scratch / (name + ".unit.log")
         env = dict(os.environ)
-        env.setdefault("CARGO_TARGET_DIR", str(scratch / "target"))
+        env["CARGO_TARGET_DIR"] = str(scratch / "target")
         with log.open("wb") as output:
             result = subprocess.run(
                 ["cargo", "test", "--manifest-path", str(source / "Cargo.toml"),
