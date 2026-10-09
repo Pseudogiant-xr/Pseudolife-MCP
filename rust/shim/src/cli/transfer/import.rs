@@ -42,6 +42,8 @@ enum Stop {
     Defer,
     Refuse(String),
     Fail,
+    /// The COMMIT's answer was FATAL or lost: the import may be durable.
+    CommitUnknown,
 }
 
 /// One target column: the oracle's `information_schema` udt_name (which
@@ -589,7 +591,10 @@ async fn transaction(
         };
         sql::execute(client, &statement).await.map_err(fail)?;
     }
-    sql::execute(client, "COMMIT").await.map_err(fail)?;
+    sql::commit(client).await.map_err(|failure| match failure {
+        sql::CommitFailure::RolledBack => Stop::Fail,
+        sql::CommitFailure::Unknown => Stop::CommitUnknown,
+    })?;
     Ok(counts)
 }
 
@@ -809,5 +814,6 @@ fn outcome(stop: Stop) -> Outcome {
         Stop::Defer => Outcome::Deferred,
         Stop::Refuse(message) => Outcome::Refused(message),
         Stop::Fail => Outcome::Failed,
+        Stop::CommitUnknown => Outcome::CommitUnknown,
     }
 }

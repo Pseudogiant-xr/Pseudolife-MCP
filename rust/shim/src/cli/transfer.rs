@@ -93,6 +93,10 @@ pub(super) enum Outcome {
     SchemaDeferred,
     /// A PostgreSQL failure after the work began (`native-pg-diagnostics`).
     Failed,
+    /// Import only: the COMMIT's answer was FATAL or lost, so the import may
+    /// have become durable. The oracle raises out of `conn.transaction()`
+    /// (a traceback, exit 1) and claims nothing either way.
+    CommitUnknown,
     /// A filesystem failure after export began writing (`native-io-diagnostics`).
     FailedIo,
 }
@@ -258,6 +262,15 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
                 &mut io::stderr().lock(),
                 &format!(
                     "pseudolife-stdio: {mode} failed (native-pg-diagnostics); nothing was committed\n"
+                ),
+            ),
+            1,
+        ),
+        Outcome::CommitUnknown => (
+            emit(
+                &mut io::stderr().lock(),
+                &format!(
+                    "pseudolife-stdio: {mode} lost the answer to its COMMIT (native-pg-diagnostics); it may have been committed: inspect the target bank before retrying\n"
                 ),
             ),
             1,

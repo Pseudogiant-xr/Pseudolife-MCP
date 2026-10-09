@@ -1,7 +1,7 @@
 //! Simple-protocol helpers: text-format results like psycopg's default cursor,
 //! and escape-string literals for the oracle's parameters.
 use crate::pg::Client;
-use tokio_postgres::SimpleQueryMessage;
+use tokio_postgres::{SimpleQueryMessage, error::Severity};
 
 pub(super) type Rows = Vec<Vec<Option<String>>>;
 
@@ -44,6 +44,28 @@ pub(super) async fn affected(client: &Client, sql: &str) -> Result<u64, ()> {
 
 pub(super) async fn execute(client: &Client, sql: &str) -> Result<(), ()> {
     client.batch_execute(sql).await.map_err(|_| ())
+}
+
+/// How a COMMIT failed.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CommitFailure {
+    /// The server answered with an ERROR: it rolled the transaction back.
+    RolledBack,
+    /// A FATAL or PANIC answer, or none (the connection was lost): the
+    /// transaction may have become durable before the session ended.
+    Unknown,
+}
+
+/// `COMMIT`, telling a refusal the server rolled back from an answer that
+/// leaves the outcome open.
+pub(super) async fn commit(client: &Client) -> Result<(), CommitFailure> {
+    match client.batch_execute("COMMIT").await {
+        Ok(()) => Ok(()),
+        Err(error) => Err(match error.as_db_error() {
+            Some(db) if db.parsed_severity() == Some(Severity::Error) => CommitFailure::RolledBack,
+            _ => CommitFailure::Unknown,
+        }),
+    }
 }
 
 /// An escape-string literal: independent of `standard_conforming_strings`.

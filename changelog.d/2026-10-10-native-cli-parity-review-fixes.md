@@ -15,3 +15,8 @@
 - The native `connect` stops with exit 120 at a warning or failure line that
   stderr refuses, as Python's line-buffered stderr does, instead of going on
   to write client configs.
+- The native `import` no longer reports "nothing was committed" when the
+  answer to its COMMIT was lost or fatal, since the import may have become
+  durable. It says the outcome is open and asks for the target bank to be
+  checked (exit 1, as Python's traceback). A COMMIT the server refuses,
+  which rolls back, still says nothing was committed.
