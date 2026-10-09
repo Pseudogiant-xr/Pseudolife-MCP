@@ -378,6 +378,10 @@ async fn api(
     if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
+    #[cfg(feature = "harness")]
+    if method == "POST" && path.starts_with("/api/_harness/tool/") {
+        return crate::harness_route::call(app, path, h, body).await;
+    }
     let params = parse_query(raw_query);
     let coordination_path = path.starts_with("/api/coordination/");
     let coordination_errors = coordination_path
@@ -653,10 +657,11 @@ async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
     let floor = cfg.search_confidence_floor;
     let result = tokio::task::spawn_blocking(move || {
         let qv = ready2.embedder.embed_query(&query)?;
-        let hits = search::rank(&ready2.bank, &qv, &params);
+        let bank = ready2.bank.read().expect("bank lock");
+        let hits = search::rank(&bank, &qv, &params);
         let entries: Vec<Value> = hits
             .iter()
-            .map(|h| search::entry_json(&ready2.bank, &ready2.bank.entries[h.idx], h.score))
+            .map(|h| search::entry_json(&bank, &bank.entries[h.idx], h.score))
             .collect();
         // `abstain.low_confidence` over the direct hits' raw scores.
         let best = hits

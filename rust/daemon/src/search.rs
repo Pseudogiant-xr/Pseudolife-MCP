@@ -312,8 +312,11 @@ pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
     m.insert("source".into(), json!(e.source));
     m.insert("bank".into(), json!(e.band));
     m.insert("timestamp".into(), json!(e.ts));
-    m.insert("access_count".into(), json!(e.access_count));
-    m.insert("surprise_score".into(), json!(round4(e.surprise as f64)));
+    m.insert(
+        "access_count".into(),
+        json!(e.access_count.load(std::sync::atomic::Ordering::Relaxed)),
+    );
+    m.insert("surprise_score".into(), json!(round4(e.surprise)));
     m.insert("superseded".into(), json!(e.superseded_at.is_some()));
     m.insert("superseded_at".into(), json!(e.superseded_at));
     m.insert("superseded_by_text".into(), json!(e.superseded_by_text));
@@ -389,7 +392,6 @@ mod tests {
             text: text.into(),
             surprise: 0.5,
             ts: 0.0,
-            access_count: 0,
             source: source.into(),
             superseded_at: superseded.then_some(1.0),
             superseded_by_text: None,
@@ -399,6 +401,7 @@ mod tests {
             slots: vec![],
             authority: None,
             distortion_tolerance: None,
+            ..Default::default()
         }
     }
 

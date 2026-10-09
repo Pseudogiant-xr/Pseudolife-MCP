@@ -1,20 +1,33 @@
-//! Read-only hydration of a schema-55 bank into a resident matrix (spec S7).
+//! The resident bank: hydration of a schema-55 bank into a resident matrix
+//! (spec S7), extended in place by the write path (spec W1.9-W1.10).
+//!
+//! Mutation paths (CLAUDE.md "Derived state"): `hydrate` builds the bank;
+//! `push` appends one stored entry and its row of the matrix; `remove`
+//! drops one evicted entry and its row. Nothing else edits `entries` or
+//! `matrix`, so the two stay aligned row for row and in `entries` order,
+//! which is id order (the tie order search relies on).
 
 use anyhow::{Result, bail};
 use serde_json::Value;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicI64;
 use tokio_postgres::Client;
 
 pub const DIM: usize = 1024;
 
+#[derive(Default)]
 pub struct Entry {
     pub id: i64,
     pub band: String,
     /// The band column as read, before seating.
     pub stored_band: String,
     pub text: String,
-    pub surprise: f32,
+    /// A double in memory, as Python keeps a fresh entry's score; the
+    /// column is float4, so a hydrated value is that float widened.
+    pub surprise: f64,
     pub ts: f64,
-    pub access_count: i32,
+    /// Bumped under a read guard by search (`cms.py:1752`).
+    pub access_count: AtomicI64,
     pub source: String,
     pub superseded_at: Option<f64>,
     pub superseded_by_text: Option<String>,
@@ -25,12 +38,42 @@ pub struct Entry {
     pub slots: Vec<Value>,
     pub authority: Option<String>,
     pub distortion_tolerance: Option<String>,
+    /// `entries.reinforcements` (eviction's retention term).
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub reinforcements: i32,
+    /// `MemoryEntry.seq`: process-wide store order, never persisted; the
+    /// tie-break of contiguity's stream order (W2-D).
+    #[allow(dead_code)]
+    pub seq: u64,
+    /// `MemoryEntry.cue_flags`: the contradiction scan's (gain, loss) memo.
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub cues: OnceLock<(bool, bool)>,
 }
 
 pub struct Bank {
     pub entries: Vec<Entry>,
     /// Row-major, L2-normalized, `entries.len() * DIM`.
     pub matrix: Vec<f32>,
+}
+
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+impl Bank {
+    /// Append one entry with its (already L2-normalized) row.
+    pub fn push(&mut self, entry: Entry, row: &[f32]) {
+        debug_assert_eq!(row.len(), DIM);
+        self.entries.push(entry);
+        self.matrix.extend_from_slice(row);
+    }
+
+    /// Remove the entry at `idx` and its row, keeping order.
+    pub fn remove(&mut self, idx: usize) -> Entry {
+        self.matrix.drain(idx * DIM..(idx + 1) * DIM);
+        self.entries.remove(idx)
+    }
+
+    pub fn row(&self, idx: usize) -> &[f32] {
+        &self.matrix[idx * DIM..(idx + 1) * DIM]
+    }
 }
 
 fn normalize(v: &mut [f32]) {
@@ -49,7 +92,7 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
         .query(
             "SELECT id, band, text, embedding::real[], surprise, ts, access_count, source, \
              superseded_at, superseded_by_text, episode_id, episode_title, tags, slots, \
-             authority, distortion_tolerance FROM entries ORDER BY id",
+             authority, distortion_tolerance, reinforcements FROM entries ORDER BY id",
             &[],
         )
         .await?;
@@ -83,9 +126,9 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
                 }
             },
             text: r.get(2),
-            surprise: r.get::<_, Option<f32>>(4).unwrap_or(0.0),
+            surprise: r.get::<_, Option<f32>>(4).unwrap_or(0.0).into(),
             ts: r.get::<_, Option<f64>>(5).unwrap_or(0.0),
-            access_count: r.get::<_, Option<i32>>(6).unwrap_or(0),
+            access_count: AtomicI64::new(r.get::<_, Option<i32>>(6).unwrap_or(0).into()),
             source: r.get::<_, Option<String>>(7).unwrap_or_default(),
             superseded_at: r.get(8),
             superseded_by_text: r.get(9),
@@ -104,6 +147,9 @@ pub async fn hydrate(client: &Client, bands: &[String]) -> Result<Bank> {
             },
             authority: r.get(14),
             distortion_tolerance: r.get(15),
+            reinforcements: r.get::<_, Option<i32>>(16).unwrap_or(0),
+            seq: crate::episodes::next_seq(),
+            cues: OnceLock::new(),
         });
     }
     for e in &entries {

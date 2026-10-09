@@ -56,3 +56,21 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
 | Static types for `.md`, `.csv` and other extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## Write path (W2-E)
+
+`memory_store` (spec W1, W2). Each row names the pull request expected to
+close it, or why it stays.
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | never promotes; `cortex_promoted` stays 0 | W2-E cortex PR (needs the cortex write path) |
+| Presets with more than one band (`continuum` and aliases, multi-band `custom`) | store lands in `bands[0]`, the promotion walk moves entries down the chain, and eviction relocates to the next band | store lands in `bands[0]`; no promotion walk; every eviction is a true drop | the opt-in presets; flat is the default since 2026-08-15 |
+| `custom` band `retention_policy` other than `balanced` | its own eviction score | scored as `balanced` | same |
+| Entry insert fails after eviction | the entry stays resident (served until restart) and the error propagates | the entry is not kept; the error propagates | failure path only; keeps bank and table aligned |
+| `surprise_history`, `interaction_count` | written to `weights.pt` by autosave | resident only | W2-E autosave PR |
+| Per-call `_ensure_init` passes: writer-session probe, rehydrate after a changed lease, correction / reinstatement / curation / lesson-synthesis recovery | run before every store | not run | writer-session probe and reconnect: W2-E; recovery passes belong to the curation and dream slices |
+| Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) |
+| Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
+| MCP argument binding and the error envelope | FastMCP / pydantic | not in this slice; the harness reaches the body through a feature-gated route | W2-G |
+| `entries.embedding`, `entries.surprise` | torch fp32 | ONNX Runtime fp32 | compared within measured tolerances (`harness/goldens/w2e-tolerance.json`); an admission decision or reason must never differ |

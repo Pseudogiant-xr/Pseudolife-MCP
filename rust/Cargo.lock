@@ -1659,6 +1659,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "fancy-regex",
  "form_urlencoded",
  "hex",
  "ndarray",
@@ -1670,6 +1671,8 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "unicode-casefold",
+ "uuid",
  "yaml-rust2",
 ]
 

@@ -8,10 +8,15 @@ mod bank;
 mod config;
 mod contradiction;
 mod embed;
+// Reached through the harness route until the MCP dispatch (W2-G) lands.
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod episodes;
+#[cfg(feature = "harness")]
+mod harness_route;
 mod health;
+mod http;
 mod labels;
 mod meta_filter;
-mod http;
 mod mutants;
 mod principals;
 mod routes;
@@ -20,6 +25,12 @@ mod service;
 mod slots;
 mod static_files;
 mod storage;
+// Reached through the harness route until the MCP dispatch (W2-G) lands.
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod store;
+// Reached through the harness route until the MCP dispatch (W2-G) lands.
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod txn;
 
 use std::path::PathBuf;
 use std::sync::Arc;

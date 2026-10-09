@@ -21,7 +21,10 @@ pub struct Ready {
     #[allow(dead_code)]
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
-    pub bank: Arc<Bank>,
+    /// Read by search, extended in place by the write path (spec W1.9).
+    pub bank: Arc<std::sync::RwLock<Bank>>,
+    /// The write path's resident state, behind the service write lock.
+    pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -181,8 +184,13 @@ impl Service {
             });
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
-        match crate::bank::hydrate(storage.client(), &self.config.memory.bands).await {
-            Ok(bank) => {
+        let hydrated = async {
+            let bank = crate::bank::hydrate(storage.client(), &self.config.memory.bands).await?;
+            let write = crate::episodes::hydrate(storage.client()).await?;
+            Ok::<_, anyhow::Error>((bank, write))
+        };
+        match hydrated.await {
+            Ok((bank, write)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -193,7 +201,8 @@ impl Service {
                 let ready = Arc::new(Ready {
                     storage,
                     embedder,
-                    bank: Arc::new(bank),
+                    bank: Arc::new(std::sync::RwLock::new(bank)),
+                    write: tokio::sync::Mutex::new(write),
                 });
                 inner.ready = Some(ready.clone());
                 Ok(ready)

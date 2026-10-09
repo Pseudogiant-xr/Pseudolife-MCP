@@ -42,6 +42,16 @@ pub struct MemoryConfig {
     pub recency_base_half_life_s: f64,
     pub preset: String,
     pub bands: Vec<String>,
+    /// `max_entries` per band, aligned with `bands` (write path, W1.10).
+    pub band_capacity: Vec<i64>,
+    /// The store gate (W1.8); the overlay sets 0.0 unless the leaf is set.
+    pub surprise_threshold: f64,
+    /// `meta_filter.enabled` (W1.4); the overlay sets false unless set.
+    pub meta_filter_enabled: bool,
+    /// `traces.retention_boost` (W1.10); the overlay sets 1.0 unless set.
+    pub retention_boost: f64,
+    /// `cortex.auto_promote` (default false); see divergences.
+    pub cortex_auto_promote: bool,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
@@ -221,6 +231,11 @@ impl Default for MemoryConfig {
             recency_base_half_life_s: LIBRARY_HALF_LIFE_S,
             preset: "flat".to_string(),
             bands: vec!["flat".to_string()],
+            band_capacity: vec![FLAT_CAPACITY],
+            surprise_threshold: 0.0,
+            meta_filter_enabled: false,
+            retention_boost: 1.0,
+            cortex_auto_promote: false,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -1039,9 +1054,28 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
 
         if let Some(miras) = section(m, "miras", "memory.")? {
-            let (preset, bands) = read_miras(miras)?;
+            let (preset, bands, capacity) = read_miras(miras)?;
             memory.preset = preset;
             memory.bands = bands;
+            memory.band_capacity = capacity;
+        }
+        // The write path's keys and their overlay (service.py:1104-1119).
+        if user_set("memory.surprise_threshold") {
+            memory.surprise_threshold =
+                want_float(m, "surprise_threshold", p, memory.surprise_threshold)?;
+        }
+        if user_set("memory.meta_filter.enabled")
+            && let Some(Node::Map(mf)) = lookup(m, "meta_filter")
+        {
+            memory.meta_filter_enabled = want_bool(mf, "enabled", "memory.meta_filter", true)?;
+        }
+        if user_set("memory.traces.retention_boost")
+            && let Some(Node::Map(t)) = lookup(m, "traces")
+        {
+            memory.retention_boost = want_float(t, "retention_boost", "memory.traces", 0.0)?;
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;
@@ -1102,7 +1136,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
-fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigError> {
+/// `flat_bands()` (`memory/miras/presets.py:38-56`).
+const FLAT_CAPACITY: i64 = 5250;
+/// `continuum_bands()` capacities, in `CONTINUUM_BANDS` order.
+const CONTINUUM_CAPACITY: [i64; 8] = [200, 250, 300, 400, 600, 1500, 1000, 1000];
+
+type Miras = (String, Vec<String>, Vec<i64>);
+
+fn read_miras(miras: &[(Node, Node)]) -> Result<Miras, ConfigError> {
     let preset = match lookup(miras, "preset") {
         None => "flat".to_string(),
         Some(Node::Str(s)) => s.clone(),
@@ -1127,9 +1168,14 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
             )));
         }
     };
+    let mut capacity = Vec::new();
     let bands = match preset.as_str() {
-        "flat" => vec!["flat".to_string()],
+        "flat" => {
+            capacity.push(FLAT_CAPACITY);
+            vec!["flat".to_string()]
+        }
         "continuum" | "titans" | "moneta" | "yaad" | "memora" => {
+            capacity.extend(CONTINUUM_CAPACITY);
             CONTINUUM_BANDS.iter().map(|s| (*s).to_string()).collect()
         }
         "custom" => {
@@ -1144,6 +1190,8 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
                     return Err(wrong_type("memory.miras.bands[]", "a mapping", item));
                 };
                 names.push(want_str(spec, "name", "memory.miras.bands[]", "band")?);
+                // `MIRASBandSpec.max_entries` default (utils/config.py:82).
+                capacity.push(want_int(spec, "max_entries", "memory.miras.bands[]", 5000)?);
             }
             names
         }
@@ -1153,7 +1201,7 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
             )));
         }
     };
-    Ok((preset, bands))
+    Ok((preset, bands, capacity))
 }
 
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
