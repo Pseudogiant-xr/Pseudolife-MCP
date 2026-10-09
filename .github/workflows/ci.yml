@@ -58,8 +58,9 @@ jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. Only a pull
     # request whose net change (merge commit vs its base parent) is entirely
-    # under rust/, or is .github/workflows/rust.yml or CHANGELOG.md, skips
-    # them; an empty or unreadable diff runs everything.
+    # under rust/, or is .github/workflows/rust.yml, CHANGELOG.md or a
+    # changelog.d/ fragment, skips them; an empty or unreadable diff runs
+    # everything.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

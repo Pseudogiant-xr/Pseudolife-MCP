@@ -7,12 +7,13 @@ Add your change's CHANGELOG entry here as one file, not by editing
   was written, in lowercase with hyphens. For example,
   `2026-10-09-changelog-fragments.md`.
 - **Content:** exactly the entry as it would sit under `## [Unreleased]`. The
-  first line is `### <Added|Changed|Deprecated|Removed|Fixed|Security>
-  (YYYY-MM-DD — title)`, with the same date as the file name. One or more
+  first line is `### <Added|Changed|Deprecated|Removed|Fixed|Security|Measured|Performance>
+  (YYYY-MM-DD — title)`, optionally followed by ` [#NNN]`, with the same date as the file name. One or more
   `- ` bullets follow. Write one entry per file, with no `## ` release
   headers.
 - **Release:** the version cut runs `python ops/assemble_changelog.py`. It
-  folds every fragment into `## [Unreleased]` newest first and deletes the
+  folds every fragment into `## [Unreleased]`, above any entries already
+  there, newest first by the file name's date (then by slug), and deletes the
   files (see the `release-procedure` skill).
 
 `tests/test_changelog_fragments.py` checks every fragment's name and heading.

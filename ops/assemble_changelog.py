@@ -15,15 +15,18 @@ tests that look up CHANGELOG claims before a release has folded them in.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 UNRELEASED = "## [Unreleased]\n"
+UNRELEASED_LINE = re.compile(r"^## \[Unreleased\][ \t]*\n", re.M)
 
 
 def fragments(root: Path = ROOT) -> list[Path]:
-    """Pending fragments, newest first."""
+    """Pending fragments, newest first: by the file name's date, then by
+    slug in reverse, since the name is all the order a fragment carries."""
     folder = root / "changelog.d"
     if not folder.is_dir():
         return []
@@ -45,13 +48,16 @@ def assemble(root: Path = ROOT) -> int:
         return 0
     path = root / "CHANGELOG.md"
     text = path.read_text(encoding="utf-8")
-    if UNRELEASED not in text:
+    match = UNRELEASED_LINE.search(text)
+    if match is None:
         raise SystemExit("CHANGELOG.md has no '## [Unreleased]' heading")
-    head, tail = text.split(UNRELEASED, 1)
+    head, tail = text[:match.start()], text[match.end():]
     entries = "".join(p.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
                       for p in pending)
+    # LF explicitly: the index stores LF, and a CRLF write on a Windows
+    # clone without autocrlf would rewrite every line of the file.
     path.write_text(head + UNRELEASED + "\n" + entries + tail.lstrip("\n"),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     for fragment in pending:
         fragment.unlink()
     return len(pending)

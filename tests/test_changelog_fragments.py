@@ -17,8 +17,8 @@ REPO = Path(__file__).resolve().parents[1]
 FRAGMENTS = REPO / "changelog.d"
 NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-[a-z0-9][a-z0-9-]*\.md$")
 HEADING = re.compile(
-    r"^### (Added|Changed|Deprecated|Removed|Fixed|Security) "
-    r"\((\d{4}-\d{2}-\d{2}) — [^\n]+\)$")
+    r"^### (Added|Changed|Deprecated|Removed|Fixed|Security|Measured"
+    r"|Performance) \((\d{4}-\d{2}-\d{2}) — [^\n]+\)( \[#\d+\])?$")
 
 
 def _assembler():
@@ -99,3 +99,27 @@ def test_assemble_refuses_a_changelog_without_unreleased(tmp_path):
     _write(tmp_path, "# Changelog\n\n## [0.17.0]\n", {"2026-10-09-newer.md": NEW})
     with pytest.raises(SystemExit):
         _assembler().assemble(tmp_path)
+
+
+@pytest.mark.parametrize("heading", [
+    "### Measured (2026-10-10 — an eval result)",
+    "### Performance (2026-10-10 — a speedup)",
+    "### Fixed (2026-10-10 — a bug) [#189]",
+])
+def test_heading_accepts_the_changelogs_house_kinds(heading):
+    assert HEADING.match(heading), heading
+
+
+def test_assemble_matches_the_heading_line_not_prose(tmp_path):
+    prose = "# Changelog\n\nEntries go under ## [Unreleased]\nuntil a cut.\n\n"
+    _write(tmp_path, prose + BASE.split("\n\n", 2)[2], {"2026-10-09-newer.md": NEW})
+    _assembler().assemble(tmp_path)
+    text = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text.startswith(prose)
+    assert text.index("newer fragment") > text.index("## [Unreleased]\n\n")
+
+
+def test_assemble_writes_lf_line_endings(tmp_path):
+    _write(tmp_path, BASE, {"2026-10-09-newer.md": NEW})
+    _assembler().assemble(tmp_path)
+    assert b"\r\n" not in (tmp_path / "CHANGELOG.md").read_bytes()
