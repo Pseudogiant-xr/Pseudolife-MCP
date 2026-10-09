@@ -178,6 +178,15 @@ fn py_float(s: &str) -> Option<f64> {
     t.parse::<f64>().ok()
 }
 
+/// `_tribool` (web/routes.py:55): None follows config.
+fn tribool(q: &std::collections::HashMap<String, String>, key: &str) -> Option<bool> {
+    let v = q.get(key)?;
+    if matches!(v.as_str(), "" | "null" | "auto") {
+        return None;
+    }
+    Some(matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+}
+
 fn list(q: &std::collections::HashMap<String, String>, key: &str) -> Option<Vec<String>> {
     let items: Vec<String> = q
         .get(key)?
@@ -218,6 +227,7 @@ fn search_route(app: &App, raw_query: Option<&str>) -> Response {
         sources: list(&q, "source").map(|v| v.into_iter().collect::<HashSet<_>>()),
         tags: list(&q, "tag").map(|v| v.into_iter().map(|t| t.to_lowercase()).collect::<HashSet<_>>()),
         min_score: q.get("min_score").filter(|s| !s.is_empty()).and_then(|s| py_float(s)),
+        bm25: tribool(&q, "bm25").unwrap_or(true),
     };
     let qv = match app.embedder.embed_query(&query) {
         Ok(v) => v,

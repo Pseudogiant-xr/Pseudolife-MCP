@@ -1043,6 +1043,7 @@ dependencies = [
  "hex",
  "ndarray",
  "ort",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
