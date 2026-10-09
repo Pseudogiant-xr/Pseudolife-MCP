@@ -38,6 +38,18 @@ def operations():
     cases.append(dict(op="derive_edges", edges=[edge(1, "r-a", 2), edge(1, "r-c", 2)], relations=collision))
     cases.append(dict(op="build_subgraph", edges=[edge(a, "uses", b) for a, b in
         [(1, 4), (4, 6), (6, 8), (1, 3), (3, 5), (5, 8)]], relations={"uses": {}}, root=1, depth=1, to=8))
+    # The loaded registry's ORDER BY uses database collation, not byte order.
+    cases.append(dict(op="derive_edges", edges=[edge(1, "z", 2)], relations={
+        "aa": dict(inverse_of="z"), "a-a": dict(inverse_of="z"), "z": {}}))
+    cases.append(dict(op="build_subgraph", edges=[
+        edge(1, "uses", 2), edge(1, "uses", 3), edge(2, "aa", 4), edge(4, "aa", 8),
+        edge(3, "a-a", 5), edge(5, "a-a", 8)], relations={
+            "aa": dict(transitive=True), "a-a": dict(transitive=True), "uses": {}},
+        root=1, depth=1, to=8))
+    cases.append(dict(op="derive_edges", edges=[
+        edge(1, "aa", 2), edge(2, "aa", 3), edge(1, "a-a", 2), edge(2, "a-a", 3)],
+        relations={"aa": dict(transitive=True, inverse_of="z"),
+                   "a-a": dict(transitive=True, inverse_of="z"), "z": {}}))
     rng = random.Random(37)
     for index in range(100):
         ids = rng.sample(range(1000, 1050), 10) if index % 2 else rng.sample(range(1, 50), 10)
@@ -50,6 +62,10 @@ def operations():
               dict(op="upsert_relation", name="a-trans", description="fixture transitive", transitive=True, inverse_of="z-inverse")]
     for src, dst in [(1, 2), (2, 3)]:
         cases.append(dict(op="upsert_edge", src_id=src, relation="a-trans", dst_id=dst, confidence=0.8, origin="user"))
+    cases += [dict(op="upsert_relation", name="z", description="fixture pivot"),
+              dict(op="upsert_relation", name="aa", description="fixture first inverse", inverse_of="z"),
+              dict(op="upsert_relation", name="a-z", description="fixture later inverse", inverse_of="z"),
+              dict(op="upsert_edge", src_id=1, relation="z", dst_id=2)]
     for root in [1, 2, 9]:
         for depth in [1, 3]:
             cases.append(dict(op="subgraph", root=root, depth=depth, to=3))

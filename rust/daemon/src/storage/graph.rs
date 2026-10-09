@@ -666,22 +666,20 @@ pub async fn subgraph(
                 }))
                 .collect::<Vec<_>>()
         ))?;
-        let relations: std::collections::BTreeMap<String, crate::graph_read::Relation> =
-            serde_json::from_value(Value::Object(
-                registry
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|r| {
-                        (
-                            r["name"].as_str().unwrap().to_owned(),
-                            json!({
-                                "transitive": r["transitive"], "inverse_of": r["inverse_of"],
-                            }),
-                        )
-                    })
-                    .collect(),
-            ))?;
+        let relations: crate::graph_read::Relations = registry
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["name"].as_str().unwrap().to_owned(),
+                    crate::graph_read::Relation {
+                        transitive: r["transitive"].as_bool().unwrap(),
+                        inverse_of: r["inverse_of"].as_str().map(str::to_owned),
+                    },
+                )
+            })
+            .collect();
         let mut result = serde_json::to_value(crate::graph_read::build_subgraph(
             &edges, &relations, root, depth, to,
         ))?;

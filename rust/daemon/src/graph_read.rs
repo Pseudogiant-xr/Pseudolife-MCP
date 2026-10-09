@@ -177,9 +177,19 @@ pub struct Relation {
     pub inverse_of: Option<String>,
 }
 
+pub type Relations = Vec<(String, Relation)>;
+
+/// Keep the producer's registry order; SQL text ordering follows collation.
+pub fn registry_from_value(value: &Value) -> Result<Relations, serde_json::Error> {
+    let rows: Map<String, Value> = serde_json::from_value(value.clone())?;
+    rows.into_iter()
+        .map(|(name, meta)| serde_json::from_value(meta).map(|meta| (name, meta)))
+        .collect()
+}
+
 type Triple = (i64, String, i64);
 
-pub fn derive_edges(edges: &[Edge], relations: &BTreeMap<String, Relation>) -> Vec<Edge> {
+pub fn derive_edges(edges: &[Edge], relations: &Relations) -> Vec<Edge> {
     let base: BTreeSet<Triple> = edges
         .iter()
         .map(|e| (e.src, e.relation.clone(), e.dst))
@@ -230,19 +240,18 @@ pub fn derive_edges(edges: &[Edge], relations: &BTreeMap<String, Relation>) -> V
             inverse.entry(other.clone()).or_insert_with(|| name.clone());
         }
     }
-    // Asserted sources precede transitive sources. Within each phase, source
-    // relation order pins the declared inverse-provenance collision rule.
-    let phases = [
-        base.iter().cloned().collect::<Vec<_>>(),
-        derived.keys().cloned().collect::<Vec<_>>(),
-    ];
+    // Asserted sources precede transitive sources. Only asserted collisions
+    // use the declared lexical rule; transitive sources retain producer order.
+    let phases = [base.iter().cloned().collect::<Vec<_>>(), order.clone()];
     for (index, mut phase) in phases.into_iter().enumerate() {
         if index == 1 && crate::mutants::active("graph-read-inverse-closure") {
             continue;
         }
-        phase.sort_by(|a, b| (&a.1, a.0, a.2).cmp(&(&b.1, b.0, b.2)));
-        if index == 0 && crate::mutants::active("graph-read-provenance") {
-            phase.reverse();
+        if index == 0 {
+            phase.sort_by(|a, b| (&a.1, a.0, a.2).cmp(&(&b.1, b.0, b.2)));
+            if crate::mutants::active("graph-read-provenance") {
+                phase.reverse();
+            }
         }
         for (src, relation, dst) in phase {
             if let Some(mirror) = inverse.get(&relation) {
@@ -283,7 +292,7 @@ pub struct Subgraph {
 
 pub fn build_subgraph(
     edges: &[Edge],
-    relations: &BTreeMap<String, Relation>,
+    relations: &Relations,
     root: i64,
     depth: i64,
     to: Option<i64>,

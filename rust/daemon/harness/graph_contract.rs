@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
             ))?)
         } else if request["op"] == "derive_edges" || request["op"] == "build_subgraph" {
             let edges: Vec<graph_read::Edge> = serde_json::from_value(request["edges"].clone())?;
-            let relations = serde_json::from_value(request["relations"].clone())?;
+            let relations = graph_read::registry_from_value(&request["relations"])?;
             if request["op"] == "derive_edges" {
                 Ok(serde_json::to_value(graph_read::derive_edges(
                     &edges, &relations,

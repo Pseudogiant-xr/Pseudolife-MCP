@@ -1324,6 +1324,108 @@
    "to": 8
   },
   {
+   "op": "derive_edges",
+   "edges": [
+    {
+     "src": 1,
+     "relation": "z",
+     "dst": 2
+    }
+   ],
+   "relations": {
+    "aa": {
+     "inverse_of": "z"
+    },
+    "a-a": {
+     "inverse_of": "z"
+    },
+    "z": {}
+   }
+  },
+  {
+   "op": "build_subgraph",
+   "edges": [
+    {
+     "src": 1,
+     "relation": "uses",
+     "dst": 2
+    },
+    {
+     "src": 1,
+     "relation": "uses",
+     "dst": 3
+    },
+    {
+     "src": 2,
+     "relation": "aa",
+     "dst": 4
+    },
+    {
+     "src": 4,
+     "relation": "aa",
+     "dst": 8
+    },
+    {
+     "src": 3,
+     "relation": "a-a",
+     "dst": 5
+    },
+    {
+     "src": 5,
+     "relation": "a-a",
+     "dst": 8
+    }
+   ],
+   "relations": {
+    "aa": {
+     "transitive": true
+    },
+    "a-a": {
+     "transitive": true
+    },
+    "uses": {}
+   },
+   "root": 1,
+   "depth": 1,
+   "to": 8
+  },
+  {
+   "op": "derive_edges",
+   "edges": [
+    {
+     "src": 1,
+     "relation": "aa",
+     "dst": 2
+    },
+    {
+     "src": 2,
+     "relation": "aa",
+     "dst": 3
+    },
+    {
+     "src": 1,
+     "relation": "a-a",
+     "dst": 2
+    },
+    {
+     "src": 2,
+     "relation": "a-a",
+     "dst": 3
+    }
+   ],
+   "relations": {
+    "aa": {
+     "transitive": true,
+     "inverse_of": "z"
+    },
+    "a-a": {
+     "transitive": true,
+     "inverse_of": "z"
+    },
+    "z": {}
+   }
+  },
+  {
    "op": "build_subgraph",
    "edges": [
     {
@@ -11452,6 +11554,29 @@
    "origin": "user"
   },
   {
+   "op": "upsert_relation",
+   "name": "z",
+   "description": "fixture pivot"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "aa",
+   "description": "fixture first inverse",
+   "inverse_of": "z"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "a-z",
+   "description": "fixture later inverse",
+   "inverse_of": "z"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "z",
+   "dst_id": 2
+  },
+  {
    "op": "subgraph",
    "root": 1,
    "depth": 1,
@@ -12161,6 +12286,15 @@
       ]
      },
      {
+      "src": 3,
+      "relation": "z-inverse",
+      "dst": 2,
+      "derived": true,
+      "via": [
+       "inverse:a-trans"
+      ]
+     },
+     {
       "src": 1,
       "relation": "z-inverse",
       "dst": 3,
@@ -12173,15 +12307,6 @@
       "src": 2,
       "relation": "z-inverse",
       "dst": 1,
-      "derived": true,
-      "via": [
-       "inverse:a-trans"
-      ]
-     },
-     {
-      "src": 3,
-      "relation": "z-inverse",
-      "dst": 2,
       "derived": true,
       "via": [
        "inverse:a-trans"
@@ -12279,6 +12404,15 @@
        ]
       },
       {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1,
        "relation": "z-inverse",
        "dst": 3,
@@ -12291,15 +12425,6 @@
        "src": 2,
        "relation": "z-inverse",
        "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -12399,6 +12524,15 @@
        ]
       },
       {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1,
        "relation": "z-inverse",
        "dst": 3,
@@ -12411,15 +12545,6 @@
        "src": 2,
        "relation": "z-inverse",
        "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -12534,6 +12659,15 @@
        ]
       },
       {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1,
        "relation": "z-inverse",
        "dst": 3,
@@ -12546,15 +12680,6 @@
        "src": 2,
        "relation": "z-inverse",
        "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -12669,6 +12794,15 @@
        ]
       },
       {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1,
        "relation": "z-inverse",
        "dst": 3,
@@ -12681,15 +12815,6 @@
        "src": 2,
        "relation": "z-inverse",
        "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -13443,6 +13568,137 @@
   },
   {
    "index": 47,
+   "op": "derive_edges",
+   "response": {
+    "value": [
+     {
+      "src": 2,
+      "relation": "aa",
+      "dst": 1,
+      "derived": true,
+      "via": [
+       "inverse:z"
+      ]
+     }
+    ]
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 48,
+   "op": "build_subgraph",
+   "response": {
+    "value": {
+     "nodes": [
+      1,
+      2,
+      3,
+      8
+     ],
+     "edges": [
+      {
+       "src": 1,
+       "relation": "uses",
+       "dst": 2,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "uses",
+       "dst": 3,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 2,
+       "relation": "aa",
+       "dst": 8,
+       "derived": true,
+       "via": [
+        "transitive:aa"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "a-a",
+       "dst": 8,
+       "derived": true,
+       "via": [
+        "transitive:a-a"
+       ]
+      }
+     ],
+     "paths": [
+      [
+       1,
+       2,
+       8
+      ]
+     ]
+    }
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 49,
+   "op": "derive_edges",
+   "response": {
+    "value": [
+     {
+      "src": 1,
+      "relation": "aa",
+      "dst": 3,
+      "derived": true,
+      "via": [
+       "transitive:aa"
+      ]
+     },
+     {
+      "src": 1,
+      "relation": "a-a",
+      "dst": 3,
+      "derived": true,
+      "via": [
+       "transitive:a-a"
+      ]
+     },
+     {
+      "src": 3,
+      "relation": "z",
+      "dst": 2,
+      "derived": true,
+      "via": [
+       "inverse:a-a"
+      ]
+     },
+     {
+      "src": 2,
+      "relation": "z",
+      "dst": 1,
+      "derived": true,
+      "via": [
+       "inverse:a-a"
+      ]
+     },
+     {
+      "src": 3,
+      "relation": "z",
+      "dst": 1,
+      "derived": true,
+      "via": [
+       "inverse:aa"
+      ]
+     }
+    ]
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 50,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -13589,6 +13845,15 @@
        ]
       },
       {
+       "src": 49,
+       "relation": "z-inverse",
+       "dst": 44,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 44,
        "relation": "z-inverse",
        "dst": 33,
@@ -13607,9 +13872,9 @@
        ]
       },
       {
-       "src": 49,
+       "src": 24,
        "relation": "z-inverse",
-       "dst": 44,
+       "dst": 49,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -13619,15 +13884,6 @@
        "src": 44,
        "relation": "z-inverse",
        "dst": 24,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 24,
-       "relation": "z-inverse",
-       "dst": 49,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -13709,7 +13965,7 @@
    "diffs": []
   },
   {
-   "index": 48,
+   "index": 51,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -13833,9 +14089,18 @@
        ]
       },
       {
-       "src": 1006,
+       "src": 1003,
        "relation": "z-inverse",
-       "dst": 1042,
+       "dst": 1009,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1042,
+       "relation": "z-inverse",
+       "dst": 1006,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -13851,18 +14116,18 @@
        ]
       },
       {
-       "src": 1042,
+       "src": 1009,
        "relation": "z-inverse",
-       "dst": 1006,
+       "dst": 1030,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1042,
+       "src": 1009,
        "relation": "z-inverse",
-       "dst": 1030,
+       "dst": 1009,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -13878,25 +14143,16 @@
        ]
       },
       {
-       "src": 1003,
+       "src": 1006,
        "relation": "z-inverse",
-       "dst": 1009,
+       "dst": 1042,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1009,
-       "relation": "z-inverse",
-       "dst": 1009,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1009,
+       "src": 1042,
        "relation": "z-inverse",
        "dst": 1030,
        "derived": true,
@@ -13971,7 +14227,7 @@
    "diffs": []
   },
   {
-   "index": 49,
+   "index": 52,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14026,6 +14282,15 @@
        "via": []
       },
       {
+       "src": 32,
+       "relation": "z-inverse",
+       "dst": 45,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 13,
        "relation": "z-inverse",
        "dst": 3,
@@ -14038,15 +14303,6 @@
        "src": 3,
        "relation": "z-inverse",
        "dst": 13,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 32,
-       "relation": "z-inverse",
-       "dst": 45,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14066,7 +14322,7 @@
    "diffs": []
   },
   {
-   "index": 50,
+   "index": 53,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14101,7 +14357,7 @@
       {
        "src": 1000,
        "relation": "z-inverse",
-       "dst": 1004,
+       "dst": 1035,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14110,7 +14366,7 @@
       {
        "src": 1000,
        "relation": "z-inverse",
-       "dst": 1035,
+       "dst": 1004,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14131,7 +14387,7 @@
    "diffs": []
   },
   {
-   "index": 51,
+   "index": 54,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14223,24 +14479,6 @@
        ]
       },
       {
-       "src": 33,
-       "relation": "z-inverse",
-       "dst": 19,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 23,
-       "relation": "z-inverse",
-       "dst": 19,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 39,
        "relation": "z-inverse",
        "dst": 23,
@@ -14253,6 +14491,24 @@
        "src": 42,
        "relation": "z-inverse",
        "dst": 39,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 33,
+       "relation": "z-inverse",
+       "dst": 19,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 23,
+       "relation": "z-inverse",
+       "dst": 19,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14316,7 +14572,7 @@
    "diffs": []
   },
   {
-   "index": 52,
+   "index": 55,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14398,7 +14654,7 @@
    "diffs": []
   },
   {
-   "index": 53,
+   "index": 56,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14474,7 +14730,7 @@
    "diffs": []
   },
   {
-   "index": 54,
+   "index": 57,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14582,9 +14838,9 @@
        ]
       },
       {
-       "src": 1023,
+       "src": 1024,
        "relation": "z-inverse",
-       "dst": 1024,
+       "dst": 1019,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14593,7 +14849,7 @@
       {
        "src": 1019,
        "relation": "z-inverse",
-       "dst": 1037,
+       "dst": 1032,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14609,9 +14865,9 @@
        ]
       },
       {
-       "src": 1024,
+       "src": 1023,
        "relation": "z-inverse",
-       "dst": 1019,
+       "dst": 1024,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14620,7 +14876,7 @@
       {
        "src": 1019,
        "relation": "z-inverse",
-       "dst": 1032,
+       "dst": 1037,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14684,7 +14940,7 @@
    "diffs": []
   },
   {
-   "index": 55,
+   "index": 58,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14755,7 +15011,7 @@
    "diffs": []
   },
   {
-   "index": 56,
+   "index": 59,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -14898,27 +15154,9 @@
        ]
       },
       {
-       "src": 1005,
-       "relation": "z-inverse",
-       "dst": 1048,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1048,
        "relation": "z-inverse",
        "dst": 1043,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1018,
-       "relation": "z-inverse",
-       "dst": 1016,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -14946,6 +15184,24 @@
        "src": 1024,
        "relation": "z-inverse",
        "dst": 1024,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1005,
+       "relation": "z-inverse",
+       "dst": 1048,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1018,
+       "relation": "z-inverse",
+       "dst": 1016,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -15004,7 +15260,7 @@
    "diffs": []
   },
   {
-   "index": 57,
+   "index": 60,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -15423,36 +15679,18 @@
        ]
       },
       {
+       "src": 27,
+       "relation": "z-inverse",
+       "dst": 18,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 13,
        "relation": "z-inverse",
        "dst": 31,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 18,
-       "relation": "z-inverse",
-       "dst": 33,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 18,
-       "relation": "z-inverse",
-       "dst": 23,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 46,
-       "relation": "z-inverse",
-       "dst": 7,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -15468,18 +15706,45 @@
        ]
       },
       {
-       "src": 27,
+       "src": 18,
        "relation": "z-inverse",
-       "dst": 46,
+       "dst": 23,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 29,
+       "src": 23,
+       "relation": "z-inverse",
+       "dst": 27,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 46,
        "relation": "z-inverse",
        "dst": 7,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 18,
+       "relation": "z-inverse",
+       "dst": 33,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 27,
+       "relation": "z-inverse",
+       "dst": 46,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -15504,18 +15769,9 @@
        ]
       },
       {
-       "src": 27,
+       "src": 29,
        "relation": "z-inverse",
-       "dst": 18,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 23,
-       "relation": "z-inverse",
-       "dst": 27,
+       "dst": 7,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -15831,7 +16087,7 @@
    "diffs": []
   },
   {
-   "index": 58,
+   "index": 61,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -15966,15 +16222,6 @@
        ]
       },
       {
-       "src": 1006,
-       "relation": "z-inverse",
-       "dst": 1014,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1010,
        "relation": "z-inverse",
        "dst": 1044,
@@ -15993,18 +16240,18 @@
        ]
       },
       {
-       "src": 1041,
+       "src": 1044,
        "relation": "z-inverse",
-       "dst": 1006,
+       "dst": 1037,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1044,
+       "src": 1041,
        "relation": "z-inverse",
-       "dst": 1037,
+       "dst": 1006,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16023,6 +16270,15 @@
        "src": 1006,
        "relation": "z-inverse",
        "dst": 1010,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1006,
+       "relation": "z-inverse",
+       "dst": 1014,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16113,7 +16369,7 @@
    "diffs": []
   },
   {
-   "index": 59,
+   "index": 62,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -16174,7 +16430,7 @@
    "diffs": []
   },
   {
-   "index": 60,
+   "index": 63,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -16327,6 +16583,15 @@
        ]
       },
       {
+       "src": 1048,
+       "relation": "z-inverse",
+       "dst": 1048,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1027,
        "relation": "z-inverse",
        "dst": 1037,
@@ -16348,15 +16613,6 @@
        "src": 1010,
        "relation": "z-inverse",
        "dst": 1033,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1048,
-       "relation": "z-inverse",
-       "dst": 1048,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16413,7 +16669,7 @@
    "diffs": []
   },
   {
-   "index": 61,
+   "index": 64,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -16606,6 +16862,15 @@
        ]
       },
       {
+       "src": 45,
+       "relation": "z-inverse",
+       "dst": 33,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 18,
        "relation": "z-inverse",
        "dst": 25,
@@ -16633,9 +16898,9 @@
        ]
       },
       {
-       "src": 33,
+       "src": 25,
        "relation": "z-inverse",
-       "dst": 4,
+       "dst": 31,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16651,18 +16916,9 @@
        ]
       },
       {
-       "src": 25,
+       "src": 33,
        "relation": "z-inverse",
-       "dst": 31,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 45,
-       "relation": "z-inverse",
-       "dst": 33,
+       "dst": 4,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16790,7 +17046,7 @@
    "diffs": []
   },
   {
-   "index": 62,
+   "index": 65,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -16833,15 +17089,6 @@
       {
        "src": 1025,
        "relation": "z-inverse",
-       "dst": 1010,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1025,
-       "relation": "z-inverse",
        "dst": 1009,
        "derived": true,
        "via": [
@@ -16852,6 +17099,15 @@
        "src": 1028,
        "relation": "z-inverse",
        "dst": 1009,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1025,
+       "relation": "z-inverse",
+       "dst": 1010,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -16872,7 +17128,7 @@
    "diffs": []
   },
   {
-   "index": 63,
+   "index": 66,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -16961,7 +17217,7 @@
    "diffs": []
   },
   {
-   "index": 64,
+   "index": 67,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17018,15 +17274,6 @@
        ]
       },
       {
-       "src": 1039,
-       "relation": "z-inverse",
-       "dst": 1014,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1000,
        "relation": "z-inverse",
        "dst": 1041,
@@ -17039,6 +17286,15 @@
        "src": 1018,
        "relation": "z-inverse",
        "dst": 1000,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1039,
+       "relation": "z-inverse",
+       "dst": 1014,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17067,7 +17323,7 @@
    "diffs": []
   },
   {
-   "index": 65,
+   "index": 68,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17133,6 +17389,15 @@
       {
        "src": 45,
        "relation": "z-inverse",
+       "dst": 45,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 45,
+       "relation": "z-inverse",
        "dst": 37,
        "derived": true,
        "via": [
@@ -17152,15 +17417,6 @@
        "src": 35,
        "relation": "z-inverse",
        "dst": 44,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 45,
-       "relation": "z-inverse",
-       "dst": 45,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17190,7 +17446,7 @@
    "diffs": []
   },
   {
-   "index": 66,
+   "index": 69,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17284,7 +17540,7 @@
    "diffs": []
   },
   {
-   "index": 67,
+   "index": 70,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17348,7 +17604,7 @@
    "diffs": []
   },
   {
-   "index": 68,
+   "index": 71,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17472,7 +17728,7 @@
    "diffs": []
   },
   {
-   "index": 69,
+   "index": 72,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17626,18 +17882,9 @@
        ]
       },
       {
-       "src": 2,
+       "src": 9,
        "relation": "z-inverse",
        "dst": 4,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 11,
-       "relation": "z-inverse",
-       "dst": 38,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17653,9 +17900,36 @@
        ]
       },
       {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 4,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 11,
        "relation": "z-inverse",
        "dst": 25,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 11,
+       "relation": "z-inverse",
+       "dst": 38,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 25,
+       "relation": "z-inverse",
+       "dst": 13,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17683,24 +17957,6 @@
        "src": 35,
        "relation": "z-inverse",
        "dst": 38,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 25,
-       "relation": "z-inverse",
-       "dst": 13,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 9,
-       "relation": "z-inverse",
-       "dst": 4,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17776,7 +18032,7 @@
    "diffs": []
   },
   {
-   "index": 70,
+   "index": 73,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -17889,18 +18145,18 @@
        ]
       },
       {
-       "src": 1019,
+       "src": 1030,
        "relation": "z-inverse",
-       "dst": 1009,
+       "dst": 1007,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1030,
+       "src": 1019,
        "relation": "z-inverse",
-       "dst": 1007,
+       "dst": 1009,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -17964,7 +18220,7 @@
    "diffs": []
   },
   {
-   "index": 71,
+   "index": 74,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -18502,6 +18758,15 @@
        ]
       },
       {
+       "src": 6,
+       "relation": "z-inverse",
+       "dst": 17,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 33,
        "relation": "z-inverse",
        "dst": 6,
@@ -18538,15 +18803,6 @@
        ]
       },
       {
-       "src": 17,
-       "relation": "z-inverse",
-       "dst": 4,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 11,
        "relation": "z-inverse",
        "dst": 33,
@@ -18556,7 +18812,7 @@
        ]
       },
       {
-       "src": 4,
+       "src": 17,
        "relation": "z-inverse",
        "dst": 4,
        "derived": true,
@@ -18574,18 +18830,18 @@
        ]
       },
       {
-       "src": 8,
+       "src": 4,
        "relation": "z-inverse",
-       "dst": 31,
+       "dst": 4,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 6,
+       "src": 8,
        "relation": "z-inverse",
-       "dst": 17,
+       "dst": 31,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -19036,7 +19292,7 @@
    "diffs": []
   },
   {
-   "index": 72,
+   "index": 75,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -19398,51 +19654,6 @@
        ]
       },
       {
-       "src": 1029,
-       "relation": "z-inverse",
-       "dst": 1002,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1006,
-       "relation": "z-inverse",
-       "dst": 1020,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1040,
-       "relation": "z-inverse",
-       "dst": 1029,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1004,
-       "relation": "z-inverse",
-       "dst": 1040,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1036,
-       "relation": "z-inverse",
-       "dst": 1009,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1009,
        "relation": "z-inverse",
        "dst": 1040,
@@ -19470,6 +19681,15 @@
        ]
       },
       {
+       "src": 1040,
+       "relation": "z-inverse",
+       "dst": 1029,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1002,
        "relation": "z-inverse",
        "dst": 1024,
@@ -19488,9 +19708,45 @@
        ]
       },
       {
+       "src": 1004,
+       "relation": "z-inverse",
+       "dst": 1040,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1006,
+       "relation": "z-inverse",
+       "dst": 1020,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1020,
        "relation": "z-inverse",
        "dst": 1024,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1036,
+       "relation": "z-inverse",
+       "dst": 1009,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1029,
+       "relation": "z-inverse",
+       "dst": 1002,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -19734,7 +19990,7 @@
    "diffs": []
   },
   {
-   "index": 73,
+   "index": 76,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -19962,18 +20218,9 @@
        ]
       },
       {
-       "src": 48,
+       "src": 32,
        "relation": "z-inverse",
-       "dst": 30,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 8,
-       "relation": "z-inverse",
-       "dst": 19,
+       "dst": 45,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -19989,18 +20236,18 @@
        ]
       },
       {
-       "src": 25,
+       "src": 8,
        "relation": "z-inverse",
-       "dst": 6,
+       "dst": 19,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 32,
+       "src": 48,
        "relation": "z-inverse",
-       "dst": 45,
+       "dst": 30,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20010,6 +20257,15 @@
        "src": 6,
        "relation": "z-inverse",
        "dst": 32,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 25,
+       "relation": "z-inverse",
+       "dst": 6,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20165,7 +20421,7 @@
    "diffs": []
   },
   {
-   "index": 74,
+   "index": 77,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -20257,15 +20513,6 @@
        ]
       },
       {
-       "src": 1049,
-       "relation": "z-inverse",
-       "dst": 1002,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1018,
        "relation": "z-inverse",
        "dst": 1049,
@@ -20287,6 +20534,15 @@
        "src": 1039,
        "relation": "z-inverse",
        "dst": 1017,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1049,
+       "relation": "z-inverse",
+       "dst": 1002,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20342,7 +20598,7 @@
    "diffs": []
   },
   {
-   "index": 75,
+   "index": 78,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -20439,18 +20695,18 @@
        ]
       },
       {
-       "src": 8,
+       "src": 23,
        "relation": "z-inverse",
-       "dst": 23,
+       "dst": 10,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 23,
+       "src": 8,
        "relation": "z-inverse",
-       "dst": 10,
+       "dst": 23,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20524,7 +20780,7 @@
    "diffs": []
   },
   {
-   "index": 76,
+   "index": 79,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -20573,7 +20829,7 @@
       {
        "src": 1014,
        "relation": "z-inverse",
-       "dst": 1037,
+       "dst": 1043,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20582,7 +20838,7 @@
       {
        "src": 1014,
        "relation": "z-inverse",
-       "dst": 1043,
+       "dst": 1037,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20602,7 +20858,7 @@
    "diffs": []
   },
   {
-   "index": 77,
+   "index": 80,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -20652,18 +20908,18 @@
        ]
       },
       {
-       "src": 26,
+       "src": 48,
        "relation": "z-inverse",
-       "dst": 48,
+       "dst": 45,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 48,
+       "src": 26,
        "relation": "z-inverse",
-       "dst": 45,
+       "dst": 48,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20693,7 +20949,7 @@
    "diffs": []
   },
   {
-   "index": 78,
+   "index": 81,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -20827,18 +21083,9 @@
        ]
       },
       {
-       "src": 1007,
-       "relation": "z-inverse",
-       "dst": 1024,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1019,
        "relation": "z-inverse",
-       "dst": 1037,
+       "dst": 1007,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20854,9 +21101,18 @@
        ]
       },
       {
+       "src": 1007,
+       "relation": "z-inverse",
+       "dst": 1024,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1019,
        "relation": "z-inverse",
-       "dst": 1007,
+       "dst": 1037,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -20947,7 +21203,7 @@
    "diffs": []
   },
   {
-   "index": 79,
+   "index": 82,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21014,7 +21270,7 @@
    "diffs": []
   },
   {
-   "index": 80,
+   "index": 83,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21087,7 +21343,7 @@
    "diffs": []
   },
   {
-   "index": 81,
+   "index": 84,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21340,6 +21596,24 @@
        ]
       },
       {
+       "src": 39,
+       "relation": "z-inverse",
+       "dst": 11,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 6,
+       "relation": "z-inverse",
+       "dst": 48,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 16,
        "relation": "z-inverse",
        "dst": 40,
@@ -21376,18 +21650,9 @@
        ]
       },
       {
-       "src": 6,
+       "src": 41,
        "relation": "z-inverse",
-       "dst": 48,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 39,
-       "relation": "z-inverse",
-       "dst": 11,
+       "dst": 6,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -21397,15 +21662,6 @@
        "src": 48,
        "relation": "z-inverse",
        "dst": 16,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 41,
-       "relation": "z-inverse",
-       "dst": 6,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -21577,7 +21833,7 @@
    "diffs": []
   },
   {
-   "index": 82,
+   "index": 85,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21648,7 +21904,7 @@
    "diffs": []
   },
   {
-   "index": 83,
+   "index": 86,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21734,6 +21990,15 @@
        ]
       },
       {
+       "src": 48,
+       "relation": "z-inverse",
+       "dst": 23,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 19,
        "relation": "z-inverse",
        "dst": 6,
@@ -21744,15 +22009,6 @@
       },
       {
        "src": 40,
-       "relation": "z-inverse",
-       "dst": 23,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 48,
        "relation": "z-inverse",
        "dst": 23,
        "derived": true,
@@ -21786,7 +22042,7 @@
    "diffs": []
   },
   {
-   "index": 84,
+   "index": 87,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -21902,15 +22158,6 @@
        ]
       },
       {
-       "src": 1009,
-       "relation": "z-inverse",
-       "dst": 1023,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1008,
        "relation": "z-inverse",
        "dst": 1011,
@@ -21939,6 +22186,15 @@
       },
       {
        "src": 1029,
+       "relation": "z-inverse",
+       "dst": 1023,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1009,
        "relation": "z-inverse",
        "dst": 1023,
        "derived": true,
@@ -22006,7 +22262,7 @@
    "diffs": []
   },
   {
-   "index": 85,
+   "index": 88,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -22086,7 +22342,7 @@
    "diffs": []
   },
   {
-   "index": 86,
+   "index": 89,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -22140,7 +22396,7 @@
    "diffs": []
   },
   {
-   "index": 87,
+   "index": 90,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -22293,9 +22549,18 @@
        ]
       },
       {
-       "src": 45,
+       "src": 5,
        "relation": "z-inverse",
-       "dst": 31,
+       "dst": 15,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 15,
+       "relation": "z-inverse",
+       "dst": 24,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -22329,18 +22594,9 @@
        ]
       },
       {
-       "src": 15,
+       "src": 45,
        "relation": "z-inverse",
-       "dst": 24,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 5,
-       "relation": "z-inverse",
-       "dst": 15,
+       "dst": 31,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -22414,7 +22670,7 @@
    "diffs": []
   },
   {
-   "index": 88,
+   "index": 91,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -22502,9 +22758,9 @@
        ]
       },
       {
-       "src": 1043,
+       "src": 1028,
        "relation": "z-inverse",
-       "dst": 1013,
+       "dst": 1000,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -22520,9 +22776,9 @@
        ]
       },
       {
-       "src": 1028,
+       "src": 1043,
        "relation": "z-inverse",
-       "dst": 1000,
+       "dst": 1013,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -22560,7 +22816,7 @@
    "diffs": []
   },
   {
-   "index": 89,
+   "index": 92,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -22685,6 +22941,15 @@
        ]
       },
       {
+       "src": 26,
+       "relation": "z-inverse",
+       "dst": 21,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 4,
        "relation": "z-inverse",
        "dst": 26,
@@ -22706,15 +22971,6 @@
        "src": 4,
        "relation": "z-inverse",
        "dst": 4,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 26,
-       "relation": "z-inverse",
-       "dst": 21,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -22787,7 +23043,7 @@
    "diffs": []
   },
   {
-   "index": 90,
+   "index": 93,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -23116,45 +23372,9 @@
        ]
       },
       {
-       "src": 1039,
-       "relation": "z-inverse",
-       "dst": 1049,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1005,
-       "relation": "z-inverse",
-       "dst": 1029,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1036,
-       "relation": "z-inverse",
-       "dst": 1005,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1017,
        "relation": "z-inverse",
        "dst": 1028,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1011,
-       "relation": "z-inverse",
-       "dst": 1036,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23170,9 +23390,9 @@
        ]
       },
       {
-       "src": 1038,
+       "src": 1011,
        "relation": "z-inverse",
-       "dst": 1029,
+       "dst": 1036,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23182,6 +23402,24 @@
        "src": 1017,
        "relation": "z-inverse",
        "dst": 1049,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1029,
+       "relation": "z-inverse",
+       "dst": 1039,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1038,
+       "relation": "z-inverse",
+       "dst": 1029,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23206,9 +23444,27 @@
        ]
       },
       {
-       "src": 1029,
+       "src": 1039,
        "relation": "z-inverse",
-       "dst": 1039,
+       "dst": 1049,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1036,
+       "relation": "z-inverse",
+       "dst": 1005,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1005,
+       "relation": "z-inverse",
+       "dst": 1029,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23434,7 +23690,7 @@
    "diffs": []
   },
   {
-   "index": 91,
+   "index": 94,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -23534,6 +23790,15 @@
        ]
       },
       {
+       "src": 13,
+       "relation": "z-inverse",
+       "dst": 39,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 27,
        "relation": "z-inverse",
        "dst": 23,
@@ -23555,15 +23820,6 @@
        "src": 13,
        "relation": "z-inverse",
        "dst": 42,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 13,
-       "relation": "z-inverse",
-       "dst": 39,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23619,7 +23875,7 @@
    "diffs": []
   },
   {
-   "index": 92,
+   "index": 95,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -23681,7 +23937,7 @@
        "via": []
       },
       {
-       "src": 1030,
+       "src": 1002,
        "relation": "z-inverse",
        "dst": 1018,
        "derived": true,
@@ -23690,7 +23946,7 @@
        ]
       },
       {
-       "src": 1002,
+       "src": 1030,
        "relation": "z-inverse",
        "dst": 1018,
        "derived": true,
@@ -23713,7 +23969,7 @@
    "diffs": []
   },
   {
-   "index": 93,
+   "index": 96,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -23874,6 +24130,24 @@
        ]
       },
       {
+       "src": 12,
+       "relation": "z-inverse",
+       "dst": 41,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 28,
+       "relation": "z-inverse",
+       "dst": 41,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1,
        "relation": "z-inverse",
        "dst": 36,
@@ -23904,24 +24178,6 @@
        "src": 49,
        "relation": "z-inverse",
        "dst": 5,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 28,
-       "relation": "z-inverse",
-       "dst": 41,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 12,
-       "relation": "z-inverse",
-       "dst": 41,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -23994,7 +24250,7 @@
    "diffs": []
   },
   {
-   "index": 94,
+   "index": 97,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -24106,6 +24362,15 @@
        ]
       },
       {
+       "src": 1042,
+       "relation": "z-inverse",
+       "dst": 1041,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1015,
        "relation": "z-inverse",
        "dst": 1040,
@@ -24118,15 +24383,6 @@
        "src": 1041,
        "relation": "z-inverse",
        "dst": 1025,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1042,
-       "relation": "z-inverse",
-       "dst": 1041,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -24199,7 +24455,7 @@
    "diffs": []
   },
   {
-   "index": 95,
+   "index": 98,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -24264,7 +24520,7 @@
    "diffs": []
   },
   {
-   "index": 96,
+   "index": 99,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -24331,7 +24587,7 @@
    "diffs": []
   },
   {
-   "index": 97,
+   "index": 100,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -24578,15 +24834,6 @@
        ]
       },
       {
-       "src": 34,
-       "relation": "z-inverse",
-       "dst": 32,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 40,
        "relation": "z-inverse",
        "dst": 34,
@@ -24596,9 +24843,9 @@
        ]
       },
       {
-       "src": 6,
+       "src": 32,
        "relation": "z-inverse",
-       "dst": 40,
+       "dst": 22,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -24623,6 +24870,15 @@
        ]
       },
       {
+       "src": 34,
+       "relation": "z-inverse",
+       "dst": 32,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 22,
        "relation": "z-inverse",
        "dst": 49,
@@ -24632,18 +24888,9 @@
        ]
       },
       {
-       "src": 32,
+       "src": 6,
        "relation": "z-inverse",
-       "dst": 22,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 22,
-       "relation": "z-inverse",
-       "dst": 34,
+       "dst": 40,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -24653,6 +24900,15 @@
        "src": 22,
        "relation": "z-inverse",
        "dst": 13,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 22,
+       "relation": "z-inverse",
+       "dst": 34,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -24842,7 +25098,7 @@
    "diffs": []
   },
   {
-   "index": 98,
+   "index": 101,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -24949,15 +25205,6 @@
        ]
       },
       {
-       "src": 1006,
-       "relation": "z-inverse",
-       "dst": 1037,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1032,
        "relation": "z-inverse",
        "dst": 1006,
@@ -24988,6 +25235,15 @@
        "src": 1037,
        "relation": "z-inverse",
        "dst": 1012,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1006,
+       "relation": "z-inverse",
+       "dst": 1037,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -25051,7 +25307,7 @@
    "diffs": []
   },
   {
-   "index": 99,
+   "index": 102,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -25118,7 +25374,7 @@
    "diffs": []
   },
   {
-   "index": 100,
+   "index": 103,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -25399,9 +25655,54 @@
        ]
       },
       {
+       "src": 1032,
+       "relation": "z-inverse",
+       "dst": 1008,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1002,
+       "relation": "z-inverse",
+       "dst": 1011,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1021,
+       "relation": "z-inverse",
+       "dst": 1002,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1002,
+       "relation": "z-inverse",
+       "dst": 1021,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1008,
        "relation": "z-inverse",
        "dst": 1016,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1016,
+       "relation": "z-inverse",
+       "dst": 1007,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -25429,51 +25730,6 @@
        "src": 1021,
        "relation": "z-inverse",
        "dst": 1032,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1032,
-       "relation": "z-inverse",
-       "dst": 1008,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1021,
-       "relation": "z-inverse",
-       "dst": 1002,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1002,
-       "relation": "z-inverse",
-       "dst": 1011,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1002,
-       "relation": "z-inverse",
-       "dst": 1021,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1016,
-       "relation": "z-inverse",
-       "dst": 1007,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -25637,7 +25893,7 @@
    "diffs": []
   },
   {
-   "index": 101,
+   "index": 104,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -25990,15 +26246,6 @@
        ]
       },
       {
-       "src": 37,
-       "relation": "z-inverse",
-       "dst": 48,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 43,
        "relation": "z-inverse",
        "dst": 8,
@@ -26008,45 +26255,9 @@
        ]
       },
       {
-       "src": 41,
-       "relation": "z-inverse",
-       "dst": 37,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 28,
        "relation": "z-inverse",
        "dst": 8,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 44,
-       "relation": "z-inverse",
-       "dst": 8,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 32,
-       "relation": "z-inverse",
-       "dst": 44,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 6,
-       "relation": "z-inverse",
-       "dst": 41,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -26065,6 +26276,51 @@
        "src": 28,
        "relation": "z-inverse",
        "dst": 32,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 32,
+       "relation": "z-inverse",
+       "dst": 44,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 41,
+       "relation": "z-inverse",
+       "dst": 37,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 37,
+       "relation": "z-inverse",
+       "dst": 48,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 44,
+       "relation": "z-inverse",
+       "dst": 8,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 6,
+       "relation": "z-inverse",
+       "dst": 41,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -26291,7 +26547,7 @@
    "diffs": []
   },
   {
-   "index": 102,
+   "index": 105,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -26363,15 +26619,6 @@
        ]
       },
       {
-       "src": 1041,
-       "relation": "z-inverse",
-       "dst": 1033,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1033,
        "relation": "z-inverse",
        "dst": 1007,
@@ -26384,6 +26631,15 @@
        "src": 1047,
        "relation": "z-inverse",
        "dst": 1047,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1041,
+       "relation": "z-inverse",
+       "dst": 1033,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -26413,7 +26669,7 @@
    "diffs": []
   },
   {
-   "index": 103,
+   "index": 106,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -26567,6 +26823,24 @@
        ]
       },
       {
+       "src": 44,
+       "relation": "z-inverse",
+       "dst": 44,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 17,
+       "relation": "z-inverse",
+       "dst": 19,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 23,
        "relation": "z-inverse",
        "dst": 26,
@@ -26585,15 +26859,6 @@
        ]
       },
       {
-       "src": 17,
-       "relation": "z-inverse",
-       "dst": 19,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 14,
        "relation": "z-inverse",
        "dst": 17,
@@ -26606,15 +26871,6 @@
        "src": 36,
        "relation": "z-inverse",
        "dst": 17,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 44,
-       "relation": "z-inverse",
-       "dst": 44,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -26679,7 +26935,7 @@
    "diffs": []
   },
   {
-   "index": 104,
+   "index": 107,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -26766,15 +27022,6 @@
       {
        "src": 1012,
        "relation": "z-inverse",
-       "dst": 1039,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1012,
-       "relation": "z-inverse",
        "dst": 1049,
        "derived": true,
        "via": [
@@ -26798,6 +27045,15 @@
        "via": [
         "inverse:a-trans"
        ]
+      },
+      {
+       "src": 1012,
+       "relation": "z-inverse",
+       "dst": 1039,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
       }
      ],
      "paths": [
@@ -26813,7 +27069,7 @@
    "diffs": []
   },
   {
-   "index": 105,
+   "index": 108,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -26966,6 +27222,15 @@
       {
        "src": 2,
        "relation": "z-inverse",
+       "dst": 19,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
        "dst": 33,
        "derived": true,
        "via": [
@@ -26976,15 +27241,6 @@
        "src": 24,
        "relation": "z-inverse",
        "dst": 5,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 2,
-       "relation": "z-inverse",
-       "dst": 19,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -27076,7 +27332,7 @@
    "diffs": []
   },
   {
-   "index": 106,
+   "index": 109,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -27131,7 +27387,7 @@
    "diffs": []
   },
   {
-   "index": 107,
+   "index": 110,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -27237,6 +27493,15 @@
        ]
       },
       {
+       "src": 36,
+       "relation": "z-inverse",
+       "dst": 24,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 38,
        "relation": "z-inverse",
        "dst": 36,
@@ -27258,15 +27523,6 @@
        "src": 38,
        "relation": "z-inverse",
        "dst": 27,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 36,
-       "relation": "z-inverse",
-       "dst": 24,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -27323,7 +27579,7 @@
    "diffs": []
   },
   {
-   "index": 108,
+   "index": 111,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -27385,7 +27641,7 @@
    "diffs": []
   },
   {
-   "index": 109,
+   "index": 112,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -27444,18 +27700,18 @@
        ]
       },
       {
-       "src": 48,
+       "src": 37,
        "relation": "z-inverse",
-       "dst": 37,
+       "dst": 12,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 37,
+       "src": 48,
        "relation": "z-inverse",
-       "dst": 12,
+       "dst": 37,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -27494,7 +27750,7 @@
    "diffs": []
   },
   {
-   "index": 110,
+   "index": 113,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -27677,9 +27933,45 @@
        ]
       },
       {
+       "src": 1020,
+       "relation": "z-inverse",
+       "dst": 1034,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1020,
+       "relation": "z-inverse",
+       "dst": 1026,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1010,
        "relation": "z-inverse",
        "dst": 1041,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1017,
+       "relation": "z-inverse",
+       "dst": 1020,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1041,
+       "relation": "z-inverse",
+       "dst": 1034,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -27707,42 +27999,6 @@
        "src": 1047,
        "relation": "z-inverse",
        "dst": 1020,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1020,
-       "relation": "z-inverse",
-       "dst": 1034,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1020,
-       "relation": "z-inverse",
-       "dst": 1026,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1017,
-       "relation": "z-inverse",
-       "dst": 1020,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1041,
-       "relation": "z-inverse",
-       "dst": 1034,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -27851,7 +28107,7 @@
    "diffs": []
   },
   {
-   "index": 111,
+   "index": 114,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -28086,27 +28342,9 @@
        ]
       },
       {
-       "src": 32,
-       "relation": "z-inverse",
-       "dst": 18,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 2,
+       "src": 7,
        "relation": "z-inverse",
        "dst": 14,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 14,
-       "relation": "z-inverse",
-       "dst": 20,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28131,9 +28369,27 @@
        ]
       },
       {
+       "src": 14,
+       "relation": "z-inverse",
+       "dst": 20,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 49,
        "relation": "z-inverse",
        "dst": 10,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 14,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28149,9 +28405,9 @@
        ]
       },
       {
-       "src": 7,
+       "src": 32,
        "relation": "z-inverse",
-       "dst": 14,
+       "dst": 18,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28306,7 +28562,7 @@
    "diffs": []
   },
   {
-   "index": 112,
+   "index": 115,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -28650,63 +28906,9 @@
        ]
       },
       {
-       "src": 1048,
-       "relation": "z-inverse",
-       "dst": 1023,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1048,
-       "relation": "z-inverse",
-       "dst": 1002,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1041,
        "relation": "z-inverse",
        "dst": 1023,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1023,
-       "relation": "z-inverse",
-       "dst": 1008,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1048,
-       "relation": "z-inverse",
-       "dst": 1021,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1045,
-       "relation": "z-inverse",
-       "dst": 1021,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1015,
-       "relation": "z-inverse",
-       "dst": 1018,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28722,9 +28924,18 @@
        ]
       },
       {
-       "src": 1030,
+       "src": 1048,
        "relation": "z-inverse",
-       "dst": 1041,
+       "dst": 1021,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1015,
+       "relation": "z-inverse",
+       "dst": 1018,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28743,6 +28954,51 @@
        "src": 1021,
        "relation": "z-inverse",
        "dst": 1048,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1048,
+       "relation": "z-inverse",
+       "dst": 1023,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1023,
+       "relation": "z-inverse",
+       "dst": 1008,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1030,
+       "relation": "z-inverse",
+       "dst": 1041,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1045,
+       "relation": "z-inverse",
+       "dst": 1021,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1048,
+       "relation": "z-inverse",
+       "dst": 1002,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -28969,7 +29225,7 @@
    "diffs": []
   },
   {
-   "index": 113,
+   "index": 116,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29160,15 +29416,6 @@
        ]
       },
       {
-       "src": 5,
-       "relation": "z-inverse",
-       "dst": 29,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 23,
        "relation": "z-inverse",
        "dst": 49,
@@ -29178,9 +29425,9 @@
        ]
       },
       {
-       "src": 15,
+       "src": 5,
        "relation": "z-inverse",
-       "dst": 23,
+       "dst": 29,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -29199,6 +29446,15 @@
        "src": 28,
        "relation": "z-inverse",
        "dst": 5,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 15,
+       "relation": "z-inverse",
+       "dst": 23,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -29335,7 +29591,7 @@
    "diffs": []
   },
   {
-   "index": 114,
+   "index": 117,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29420,18 +29676,18 @@
        ]
       },
       {
-       "src": 1037,
+       "src": 1013,
        "relation": "z-inverse",
-       "dst": 1013,
+       "dst": 1000,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1013,
+       "src": 1037,
        "relation": "z-inverse",
-       "dst": 1000,
+       "dst": 1013,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -29498,7 +29754,7 @@
    "diffs": []
   },
   {
-   "index": 115,
+   "index": 118,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29544,7 +29800,7 @@
    "diffs": []
   },
   {
-   "index": 116,
+   "index": 119,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29617,7 +29873,7 @@
    "diffs": []
   },
   {
-   "index": 117,
+   "index": 120,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29690,18 +29946,18 @@
        ]
       },
       {
-       "src": 8,
+       "src": 3,
        "relation": "z-inverse",
-       "dst": 8,
+       "dst": 16,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 3,
+       "src": 8,
        "relation": "z-inverse",
-       "dst": 16,
+       "dst": 8,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -29749,7 +30005,7 @@
    "diffs": []
   },
   {
-   "index": 118,
+   "index": 121,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29829,7 +30085,7 @@
    "diffs": []
   },
   {
-   "index": 119,
+   "index": 122,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -29903,7 +30159,7 @@
    "diffs": []
   },
   {
-   "index": 120,
+   "index": 123,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30052,14 +30308,14 @@
       {
        "src": 1043,
        "relation": "z-inverse",
-       "dst": 1028,
+       "dst": 1029,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 1015,
+       "src": 1001,
        "relation": "z-inverse",
        "dst": 1042,
        "derived": true,
@@ -30070,16 +30326,7 @@
       {
        "src": 1043,
        "relation": "z-inverse",
-       "dst": 1029,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1001,
-       "relation": "z-inverse",
-       "dst": 1029,
+       "dst": 1028,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30089,15 +30336,6 @@
        "src": 1029,
        "relation": "z-inverse",
        "dst": 1015,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1001,
-       "relation": "z-inverse",
-       "dst": 1042,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30116,6 +30354,24 @@
        "src": 1001,
        "relation": "z-inverse",
        "dst": 1043,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1001,
+       "relation": "z-inverse",
+       "dst": 1029,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1015,
+       "relation": "z-inverse",
+       "dst": 1042,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30197,7 +30453,7 @@
    "diffs": []
   },
   {
-   "index": 121,
+   "index": 124,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30252,18 +30508,18 @@
        "via": []
       },
       {
-       "src": 24,
+       "src": 19,
        "relation": "z-inverse",
-       "dst": 49,
+       "dst": 19,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 19,
+       "src": 24,
        "relation": "z-inverse",
-       "dst": 19,
+       "dst": 49,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30285,7 +30541,7 @@
    "diffs": []
   },
   {
-   "index": 122,
+   "index": 125,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30338,7 +30594,7 @@
    "diffs": []
   },
   {
-   "index": 123,
+   "index": 126,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30402,6 +30658,15 @@
        ]
       },
       {
+       "src": 45,
+       "relation": "z-inverse",
+       "dst": 45,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 10,
        "relation": "z-inverse",
        "dst": 28,
@@ -30414,15 +30679,6 @@
        "src": 16,
        "relation": "z-inverse",
        "dst": 10,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 45,
-       "relation": "z-inverse",
-       "dst": 45,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30451,7 +30707,7 @@
    "diffs": []
   },
   {
-   "index": 124,
+   "index": 127,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30515,7 +30771,7 @@
    "diffs": []
   },
   {
-   "index": 125,
+   "index": 128,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30637,6 +30893,24 @@
        ]
       },
       {
+       "src": 38,
+       "relation": "z-inverse",
+       "dst": 10,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 10,
+       "relation": "z-inverse",
+       "dst": 5,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 5,
        "relation": "z-inverse",
        "dst": 29,
@@ -30667,24 +30941,6 @@
        "src": 20,
        "relation": "z-inverse",
        "dst": 5,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 10,
-       "relation": "z-inverse",
-       "dst": 5,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 38,
-       "relation": "z-inverse",
-       "dst": 10,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -30741,7 +30997,7 @@
    "diffs": []
   },
   {
-   "index": 126,
+   "index": 129,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30796,7 +31052,7 @@
    "diffs": []
   },
   {
-   "index": 127,
+   "index": 130,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -30888,7 +31144,7 @@
    "diffs": []
   },
   {
-   "index": 128,
+   "index": 131,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31033,24 +31289,6 @@
        ]
       },
       {
-       "src": 1027,
-       "relation": "z-inverse",
-       "dst": 1038,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1031,
-       "relation": "z-inverse",
-       "dst": 1019,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1038,
        "relation": "z-inverse",
        "dst": 1031,
@@ -31078,9 +31316,27 @@
        ]
       },
       {
+       "src": 1027,
+       "relation": "z-inverse",
+       "dst": 1038,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1037,
        "relation": "z-inverse",
        "dst": 1003,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1031,
+       "relation": "z-inverse",
+       "dst": 1019,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31180,7 +31436,7 @@
    "diffs": []
   },
   {
-   "index": 129,
+   "index": 132,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31215,7 +31471,7 @@
       {
        "src": 35,
        "relation": "z-inverse",
-       "dst": 21,
+       "dst": 4,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31224,7 +31480,7 @@
       {
        "src": 35,
        "relation": "z-inverse",
-       "dst": 4,
+       "dst": 21,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31245,7 +31501,7 @@
    "diffs": []
   },
   {
-   "index": 130,
+   "index": 133,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31361,7 +31617,7 @@
    "diffs": []
   },
   {
-   "index": 131,
+   "index": 134,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31403,7 +31659,7 @@
       {
        "src": 25,
        "relation": "z-inverse",
-       "dst": 33,
+       "dst": 24,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31412,7 +31668,7 @@
       {
        "src": 25,
        "relation": "z-inverse",
-       "dst": 24,
+       "dst": 33,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31432,7 +31688,7 @@
    "diffs": []
   },
   {
-   "index": 132,
+   "index": 135,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31529,15 +31785,6 @@
        ]
       },
       {
-       "src": 1014,
-       "relation": "z-inverse",
-       "dst": 1029,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1029,
        "relation": "z-inverse",
        "dst": 1022,
@@ -31550,6 +31797,15 @@
        "src": 1022,
        "relation": "z-inverse",
        "dst": 1045,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1014,
+       "relation": "z-inverse",
+       "dst": 1029,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31596,7 +31852,7 @@
    "diffs": []
   },
   {
-   "index": 133,
+   "index": 136,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -31873,9 +32129,9 @@
        ]
       },
       {
-       "src": 23,
+       "src": 19,
        "relation": "z-inverse",
-       "dst": 6,
+       "dst": 32,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31885,6 +32141,24 @@
        "src": 27,
        "relation": "z-inverse",
        "dst": 4,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 23,
+       "relation": "z-inverse",
+       "dst": 6,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 4,
+       "relation": "z-inverse",
+       "dst": 27,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -31903,24 +32177,6 @@
        "src": 14,
        "relation": "z-inverse",
        "dst": 14,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 4,
-       "relation": "z-inverse",
-       "dst": 27,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 19,
-       "relation": "z-inverse",
-       "dst": 32,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -32112,7 +32368,7 @@
    "diffs": []
   },
   {
-   "index": 134,
+   "index": 137,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -32266,15 +32522,6 @@
        ]
       },
       {
-       "src": 1030,
-       "relation": "z-inverse",
-       "dst": 1036,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1011,
        "relation": "z-inverse",
        "dst": 1037,
@@ -32287,6 +32534,15 @@
        "src": 1037,
        "relation": "z-inverse",
        "dst": 1030,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1030,
+       "relation": "z-inverse",
+       "dst": 1036,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -32370,7 +32626,7 @@
    "diffs": []
   },
   {
-   "index": 135,
+   "index": 138,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -32438,7 +32694,7 @@
    "diffs": []
   },
   {
-   "index": 136,
+   "index": 139,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -32523,9 +32779,18 @@
        ]
       },
       {
-       "src": 1012,
+       "src": 1036,
        "relation": "z-inverse",
-       "dst": 1020,
+       "dst": 1023,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1020,
+       "relation": "z-inverse",
+       "dst": 1023,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -32541,18 +32806,9 @@
        ]
       },
       {
-       "src": 1036,
+       "src": 1012,
        "relation": "z-inverse",
-       "dst": 1023,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1020,
-       "relation": "z-inverse",
-       "dst": 1023,
+       "dst": 1020,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -32607,7 +32863,7 @@
    "diffs": []
   },
   {
-   "index": 137,
+   "index": 140,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -32730,7 +32986,7 @@
    "diffs": []
   },
   {
-   "index": 138,
+   "index": 141,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -32816,15 +33072,6 @@
       {
        "src": 1031,
        "relation": "z-inverse",
-       "dst": 1033,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1033,
-       "relation": "z-inverse",
        "dst": 1038,
        "derived": true,
        "via": [
@@ -32851,6 +33098,15 @@
       },
       {
        "src": 1031,
+       "relation": "z-inverse",
+       "dst": 1033,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1033,
        "relation": "z-inverse",
        "dst": 1038,
        "derived": true,
@@ -32908,7 +33164,7 @@
    "diffs": []
   },
   {
-   "index": 139,
+   "index": 142,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33012,9 +33268,9 @@
        ]
       },
       {
-       "src": 29,
+       "src": 15,
        "relation": "z-inverse",
-       "dst": 15,
+       "dst": 29,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -33039,9 +33295,9 @@
        ]
       },
       {
-       "src": 15,
+       "src": 29,
        "relation": "z-inverse",
-       "dst": 29,
+       "dst": 15,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -33089,7 +33345,7 @@
    "diffs": []
   },
   {
-   "index": 140,
+   "index": 143,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33158,7 +33414,7 @@
    "diffs": []
   },
   {
-   "index": 141,
+   "index": 144,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33298,7 +33554,7 @@
    "diffs": []
   },
   {
-   "index": 142,
+   "index": 145,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33344,7 +33600,7 @@
    "diffs": []
   },
   {
-   "index": 143,
+   "index": 146,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33505,18 +33761,18 @@
        ]
       },
       {
-       "src": 37,
+       "src": 12,
        "relation": "z-inverse",
-       "dst": 20,
+       "dst": 11,
        "derived": true,
        "via": [
         "inverse:a-trans"
        ]
       },
       {
-       "src": 12,
+       "src": 37,
        "relation": "z-inverse",
-       "dst": 11,
+       "dst": 20,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -33653,7 +33909,7 @@
    "diffs": []
   },
   {
-   "index": 144,
+   "index": 147,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -33736,27 +33992,27 @@
        ]
       },
       {
-       "src": 1042,
-       "relation": "z-inverse",
-       "dst": 1031,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1009,
-       "relation": "z-inverse",
-       "dst": 1031,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
        "src": 1009,
        "relation": "z-inverse",
        "dst": 1018,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1009,
+       "relation": "z-inverse",
+       "dst": 1031,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1006,
+       "relation": "z-inverse",
+       "dst": 1026,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -33772,9 +34028,9 @@
        ]
       },
       {
-       "src": 1006,
+       "src": 1042,
        "relation": "z-inverse",
-       "dst": 1026,
+       "dst": 1031,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -33821,7 +34077,7 @@
    "diffs": []
   },
   {
-   "index": 145,
+   "index": 148,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -34318,7 +34574,16 @@
        ]
       },
       {
-       "src": 30,
+       "src": 38,
+       "relation": "z-inverse",
+       "dst": 9,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 16,
        "relation": "z-inverse",
        "dst": 38,
        "derived": true,
@@ -34330,6 +34595,33 @@
        "src": 29,
        "relation": "z-inverse",
        "dst": 9,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 30,
+       "relation": "z-inverse",
+       "dst": 38,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 16,
+       "relation": "z-inverse",
+       "dst": 9,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 16,
+       "relation": "z-inverse",
+       "dst": 44,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -34356,43 +34648,7 @@
       {
        "src": 38,
        "relation": "z-inverse",
-       "dst": 9,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 38,
-       "relation": "z-inverse",
        "dst": 44,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 16,
-       "relation": "z-inverse",
-       "dst": 44,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 16,
-       "relation": "z-inverse",
-       "dst": 38,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 16,
-       "relation": "z-inverse",
-       "dst": 9,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -34772,7 +35028,7 @@
    "diffs": []
   },
   {
-   "index": 146,
+   "index": 149,
    "op": "build_subgraph",
    "response": {
     "value": {
@@ -35197,6 +35453,51 @@
        ]
       },
       {
+       "src": 1037,
+       "relation": "z-inverse",
+       "dst": 1039,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1039,
+       "relation": "z-inverse",
+       "dst": 1016,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1008,
+       "relation": "z-inverse",
+       "dst": 1049,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1016,
+       "relation": "z-inverse",
+       "dst": 1016,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 1041,
+       "relation": "z-inverse",
+       "dst": 1016,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1016,
        "relation": "z-inverse",
        "dst": 1023,
@@ -35215,9 +35516,9 @@
        ]
       },
       {
-       "src": 1036,
+       "src": 1049,
        "relation": "z-inverse",
-       "dst": 1008,
+       "dst": 1012,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -35233,63 +35534,18 @@
        ]
       },
       {
+       "src": 1036,
+       "relation": "z-inverse",
+       "dst": 1008,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
        "src": 1012,
        "relation": "z-inverse",
        "dst": 1023,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1039,
-       "relation": "z-inverse",
-       "dst": 1016,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1037,
-       "relation": "z-inverse",
-       "dst": 1039,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1016,
-       "relation": "z-inverse",
-       "dst": 1016,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1008,
-       "relation": "z-inverse",
-       "dst": 1049,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1041,
-       "relation": "z-inverse",
-       "dst": 1016,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 1049,
-       "relation": "z-inverse",
-       "dst": 1012,
        "derived": true,
        "via": [
         "inverse:a-trans"
@@ -35597,25 +35853,25 @@
    "diffs": []
   },
   {
-   "index": 147,
+   "index": 150,
    "op": "upsert_relation",
    "response": {
     "value": null
    },
-   "state_sha256": "a18b539a69a2bb5659de51d26e4f4f4e270b83b69d02ccefe8a4fdeb5720c8b1",
+   "state_sha256": "b569af8ed2a9d18926fc73648d950f5f41aef893faac580754a49cbb293ac530",
    "diffs": []
   },
   {
-   "index": 148,
+   "index": 151,
    "op": "upsert_relation",
    "response": {
     "value": null
    },
-   "state_sha256": "67eda5ac5e8924a08c748f8b7da3811f2af7a2ba43b7fbb771ee282bfd950d2c",
+   "state_sha256": "7cbe9733575d84d5936d004980ab3c3caf4a602e0a3c5c07f65a392720d9440f",
    "diffs": []
   },
   {
-   "index": 149,
+   "index": 152,
    "op": "upsert_edge",
    "response": {
     "value": {
@@ -35623,11 +35879,11 @@
      "confidence": 0.8
     }
    },
-   "state_sha256": "50509a26fa9a145f2cd5b47fa100a9754beafb878a5847d8902d4d7b7a96b042",
+   "state_sha256": "edf4407a404650c0b96af3bdf6d0d6f4e3afec50167ff06842eb581960c63975",
    "diffs": []
   },
   {
-   "index": 150,
+   "index": 153,
    "op": "upsert_edge",
    "response": {
     "value": {
@@ -35635,735 +35891,922 @@
      "confidence": 0.8
     }
    },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
+   "state_sha256": "4b313ac1b07c3fba17cdc0d98160186a53eeee865f9805cd084dcb078478cb3a",
    "diffs": []
   },
   {
-   "index": 151,
-   "op": "subgraph",
-   "response": {
-    "value": {
-     "nodes": [
-      1,
-      2,
-      3
-     ],
-     "edges": [
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 2,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 2,
-       "relation": "a-trans",
-       "dst": 3,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 3,
-       "derived": true,
-       "via": [
-        "transitive:a-trans"
-       ]
-      },
-      {
-       "src": 2,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      }
-     ],
-     "paths": [
-      [
-       1,
-       3
-      ]
-     ],
-     "entities": {
-      "1": {
-       "id": 1,
-       "canonical": "node-a",
-       "display": "Node A",
-       "etype": null,
-       "created_at": 1.0
-      },
-      "2": {
-       "id": 2,
-       "canonical": "node-b",
-       "display": "Node B",
-       "etype": "runtime",
-       "created_at": 1.0
-      },
-      "3": {
-       "id": 3,
-       "canonical": "node-c",
-       "display": "Node C",
-       "etype": null,
-       "created_at": 1.0
-      }
-     },
-     "aliases": {
-      "1": [
-       "first"
-      ]
-     }
-    }
-   },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
-   "diffs": [],
-   "comparison_context": {
-    "op": "build_subgraph",
-    "root": 1,
-    "depth": 1,
-    "to": 3,
-    "edges": [
-     {
-      "src": 1,
-      "relation": "a-trans",
-      "dst": 2,
-      "confidence": 0.8,
-      "origin": "user"
-     },
-     {
-      "src": 2,
-      "relation": "a-trans",
-      "dst": 3,
-      "confidence": 0.8,
-      "origin": "user"
-     }
-    ],
-    "relations": {
-     "a-trans": {
-      "transitive": true,
-      "inverse_of": "z-inverse"
-     },
-     "avoids": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "configures": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "depends-on": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "hosts": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "implements": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "part-of": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "prefers": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "related-to": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "runs-on": {
-      "transitive": false,
-      "inverse_of": "hosts"
-     },
-     "stores-data-in": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "uses": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "z-inverse": {
-      "transitive": false,
-      "inverse_of": null
-     }
-    }
-   }
-  },
-  {
-   "index": 152,
-   "op": "subgraph",
-   "response": {
-    "value": {
-     "nodes": [
-      1,
-      2,
-      3
-     ],
-     "edges": [
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 2,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 2,
-       "relation": "a-trans",
-       "dst": 3,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 3,
-       "derived": true,
-       "via": [
-        "transitive:a-trans"
-       ]
-      },
-      {
-       "src": 2,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      }
-     ],
-     "paths": [
-      [
-       1,
-       3
-      ]
-     ],
-     "entities": {
-      "1": {
-       "id": 1,
-       "canonical": "node-a",
-       "display": "Node A",
-       "etype": null,
-       "created_at": 1.0
-      },
-      "2": {
-       "id": 2,
-       "canonical": "node-b",
-       "display": "Node B",
-       "etype": "runtime",
-       "created_at": 1.0
-      },
-      "3": {
-       "id": 3,
-       "canonical": "node-c",
-       "display": "Node C",
-       "etype": null,
-       "created_at": 1.0
-      }
-     },
-     "aliases": {
-      "1": [
-       "first"
-      ]
-     }
-    }
-   },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
-   "diffs": [],
-   "comparison_context": {
-    "op": "build_subgraph",
-    "root": 1,
-    "depth": 3,
-    "to": 3,
-    "edges": [
-     {
-      "src": 1,
-      "relation": "a-trans",
-      "dst": 2,
-      "confidence": 0.8,
-      "origin": "user"
-     },
-     {
-      "src": 2,
-      "relation": "a-trans",
-      "dst": 3,
-      "confidence": 0.8,
-      "origin": "user"
-     }
-    ],
-    "relations": {
-     "a-trans": {
-      "transitive": true,
-      "inverse_of": "z-inverse"
-     },
-     "avoids": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "configures": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "depends-on": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "hosts": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "implements": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "part-of": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "prefers": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "related-to": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "runs-on": {
-      "transitive": false,
-      "inverse_of": "hosts"
-     },
-     "stores-data-in": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "uses": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "z-inverse": {
-      "transitive": false,
-      "inverse_of": null
-     }
-    }
-   }
-  },
-  {
-   "index": 153,
-   "op": "subgraph",
-   "response": {
-    "value": {
-     "nodes": [
-      1,
-      2,
-      3
-     ],
-     "edges": [
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 2,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 2,
-       "relation": "a-trans",
-       "dst": 3,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 3,
-       "derived": true,
-       "via": [
-        "transitive:a-trans"
-       ]
-      },
-      {
-       "src": 2,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      }
-     ],
-     "paths": [
-      [
-       2,
-       3
-      ]
-     ],
-     "entities": {
-      "1": {
-       "id": 1,
-       "canonical": "node-a",
-       "display": "Node A",
-       "etype": null,
-       "created_at": 1.0
-      },
-      "2": {
-       "id": 2,
-       "canonical": "node-b",
-       "display": "Node B",
-       "etype": "runtime",
-       "created_at": 1.0
-      },
-      "3": {
-       "id": 3,
-       "canonical": "node-c",
-       "display": "Node C",
-       "etype": null,
-       "created_at": 1.0
-      }
-     },
-     "aliases": {
-      "1": [
-       "first"
-      ]
-     }
-    }
-   },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
-   "diffs": [],
-   "comparison_context": {
-    "op": "build_subgraph",
-    "root": 2,
-    "depth": 1,
-    "to": 3,
-    "edges": [
-     {
-      "src": 1,
-      "relation": "a-trans",
-      "dst": 2,
-      "confidence": 0.8,
-      "origin": "user"
-     },
-     {
-      "src": 2,
-      "relation": "a-trans",
-      "dst": 3,
-      "confidence": 0.8,
-      "origin": "user"
-     }
-    ],
-    "relations": {
-     "a-trans": {
-      "transitive": true,
-      "inverse_of": "z-inverse"
-     },
-     "avoids": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "configures": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "depends-on": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "hosts": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "implements": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "part-of": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "prefers": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "related-to": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "runs-on": {
-      "transitive": false,
-      "inverse_of": "hosts"
-     },
-     "stores-data-in": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "uses": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "z-inverse": {
-      "transitive": false,
-      "inverse_of": null
-     }
-    }
-   }
-  },
-  {
    "index": 154,
-   "op": "subgraph",
+   "op": "upsert_relation",
    "response": {
-    "value": {
-     "nodes": [
-      1,
-      2,
-      3
-     ],
-     "edges": [
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 2,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 2,
-       "relation": "a-trans",
-       "dst": 3,
-       "confidence": 0.8,
-       "origin": "user",
-       "derived": false,
-       "via": []
-      },
-      {
-       "src": 1,
-       "relation": "a-trans",
-       "dst": 3,
-       "derived": true,
-       "via": [
-        "transitive:a-trans"
-       ]
-      },
-      {
-       "src": 2,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 2,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      },
-      {
-       "src": 3,
-       "relation": "z-inverse",
-       "dst": 1,
-       "derived": true,
-       "via": [
-        "inverse:a-trans"
-       ]
-      }
-     ],
-     "paths": [
-      [
-       2,
-       3
-      ]
-     ],
-     "entities": {
-      "1": {
-       "id": 1,
-       "canonical": "node-a",
-       "display": "Node A",
-       "etype": null,
-       "created_at": 1.0
-      },
-      "2": {
-       "id": 2,
-       "canonical": "node-b",
-       "display": "Node B",
-       "etype": "runtime",
-       "created_at": 1.0
-      },
-      "3": {
-       "id": 3,
-       "canonical": "node-c",
-       "display": "Node C",
-       "etype": null,
-       "created_at": 1.0
-      }
-     },
-     "aliases": {
-      "1": [
-       "first"
-      ]
-     }
-    }
+    "value": null
    },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
-   "diffs": [],
-   "comparison_context": {
-    "op": "build_subgraph",
-    "root": 2,
-    "depth": 3,
-    "to": 3,
-    "edges": [
-     {
-      "src": 1,
-      "relation": "a-trans",
-      "dst": 2,
-      "confidence": 0.8,
-      "origin": "user"
-     },
-     {
-      "src": 2,
-      "relation": "a-trans",
-      "dst": 3,
-      "confidence": 0.8,
-      "origin": "user"
-     }
-    ],
-    "relations": {
-     "a-trans": {
-      "transitive": true,
-      "inverse_of": "z-inverse"
-     },
-     "avoids": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "configures": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "depends-on": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "hosts": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "implements": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "part-of": {
-      "transitive": true,
-      "inverse_of": null
-     },
-     "prefers": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "related-to": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "runs-on": {
-      "transitive": false,
-      "inverse_of": "hosts"
-     },
-     "stores-data-in": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "uses": {
-      "transitive": false,
-      "inverse_of": null
-     },
-     "z-inverse": {
-      "transitive": false,
-      "inverse_of": null
-     }
-    }
-   }
+   "state_sha256": "7597a7c9c0aae9d65ace984a30e4f224b4264d72ef451bb67990acfd29b5b800",
+   "diffs": []
   },
   {
    "index": 155,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "b22d02050b64974eae3871f4d57fac6fd161d063b59ba27bb38080e03e4c5610",
+   "diffs": []
+  },
+  {
+   "index": 156,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "9aa41e543a9c55a454a59e907d6967fc62c6cd4e11dbe90d264e4330760589b3",
+   "diffs": []
+  },
+  {
+   "index": 157,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 3,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
+   "diffs": []
+  },
+  {
+   "index": 158,
+   "op": "subgraph",
+   "response": {
+    "value": {
+     "nodes": [
+      1,
+      2,
+      3
+     ],
+     "edges": [
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 2,
+       "relation": "a-trans",
+       "dst": 3,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "z",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 3,
+       "derived": true,
+       "via": [
+        "transitive:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "aa",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:z"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      }
+     ],
+     "paths": [
+      [
+       1,
+       3
+      ]
+     ],
+     "entities": {
+      "1": {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      "2": {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      "3": {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     },
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     }
+    }
+   },
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
+   "diffs": [],
+   "comparison_context": {
+    "op": "build_subgraph",
+    "root": 1,
+    "depth": 1,
+    "to": 3,
+    "edges": [
+     {
+      "src": 1,
+      "relation": "a-trans",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 2,
+      "relation": "a-trans",
+      "dst": 3,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
+     }
+    ],
+    "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "a-trans": {
+      "transitive": true,
+      "inverse_of": "z-inverse"
+     },
+     "avoids": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "configures": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "depends-on": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "hosts": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "implements": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "part-of": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "prefers": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "related-to": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "runs-on": {
+      "transitive": false,
+      "inverse_of": "hosts"
+     },
+     "stores-data-in": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "uses": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z-inverse": {
+      "transitive": false,
+      "inverse_of": null
+     }
+    }
+   }
+  },
+  {
+   "index": 159,
+   "op": "subgraph",
+   "response": {
+    "value": {
+     "nodes": [
+      1,
+      2,
+      3
+     ],
+     "edges": [
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 2,
+       "relation": "a-trans",
+       "dst": 3,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "z",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 3,
+       "derived": true,
+       "via": [
+        "transitive:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "aa",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:z"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      }
+     ],
+     "paths": [
+      [
+       1,
+       3
+      ]
+     ],
+     "entities": {
+      "1": {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      "2": {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      "3": {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     },
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     }
+    }
+   },
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
+   "diffs": [],
+   "comparison_context": {
+    "op": "build_subgraph",
+    "root": 1,
+    "depth": 3,
+    "to": 3,
+    "edges": [
+     {
+      "src": 1,
+      "relation": "a-trans",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 2,
+      "relation": "a-trans",
+      "dst": 3,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
+     }
+    ],
+    "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "a-trans": {
+      "transitive": true,
+      "inverse_of": "z-inverse"
+     },
+     "avoids": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "configures": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "depends-on": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "hosts": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "implements": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "part-of": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "prefers": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "related-to": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "runs-on": {
+      "transitive": false,
+      "inverse_of": "hosts"
+     },
+     "stores-data-in": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "uses": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z-inverse": {
+      "transitive": false,
+      "inverse_of": null
+     }
+    }
+   }
+  },
+  {
+   "index": 160,
+   "op": "subgraph",
+   "response": {
+    "value": {
+     "nodes": [
+      1,
+      2,
+      3
+     ],
+     "edges": [
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 2,
+       "relation": "a-trans",
+       "dst": 3,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "z",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 3,
+       "derived": true,
+       "via": [
+        "transitive:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "aa",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:z"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      }
+     ],
+     "paths": [
+      [
+       2,
+       3
+      ]
+     ],
+     "entities": {
+      "1": {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      "2": {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      "3": {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     },
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     }
+    }
+   },
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
+   "diffs": [],
+   "comparison_context": {
+    "op": "build_subgraph",
+    "root": 2,
+    "depth": 1,
+    "to": 3,
+    "edges": [
+     {
+      "src": 1,
+      "relation": "a-trans",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 2,
+      "relation": "a-trans",
+      "dst": 3,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
+     }
+    ],
+    "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "a-trans": {
+      "transitive": true,
+      "inverse_of": "z-inverse"
+     },
+     "avoids": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "configures": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "depends-on": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "hosts": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "implements": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "part-of": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "prefers": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "related-to": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "runs-on": {
+      "transitive": false,
+      "inverse_of": "hosts"
+     },
+     "stores-data-in": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "uses": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z-inverse": {
+      "transitive": false,
+      "inverse_of": null
+     }
+    }
+   }
+  },
+  {
+   "index": 161,
+   "op": "subgraph",
+   "response": {
+    "value": {
+     "nodes": [
+      1,
+      2,
+      3
+     ],
+     "edges": [
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 2,
+       "relation": "a-trans",
+       "dst": 3,
+       "confidence": 0.8,
+       "origin": "user",
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "z",
+       "dst": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "derived": false,
+       "via": []
+      },
+      {
+       "src": 1,
+       "relation": "a-trans",
+       "dst": 3,
+       "derived": true,
+       "via": [
+        "transitive:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 2,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      },
+      {
+       "src": 2,
+       "relation": "aa",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:z"
+       ]
+      },
+      {
+       "src": 3,
+       "relation": "z-inverse",
+       "dst": 1,
+       "derived": true,
+       "via": [
+        "inverse:a-trans"
+       ]
+      }
+     ],
+     "paths": [
+      [
+       2,
+       3
+      ]
+     ],
+     "entities": {
+      "1": {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      "2": {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      "3": {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     },
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     }
+    }
+   },
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
+   "diffs": [],
+   "comparison_context": {
+    "op": "build_subgraph",
+    "root": 2,
+    "depth": 3,
+    "to": 3,
+    "edges": [
+     {
+      "src": 1,
+      "relation": "a-trans",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 2,
+      "relation": "a-trans",
+      "dst": 3,
+      "confidence": 0.8,
+      "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
+     }
+    ],
+    "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "a-trans": {
+      "transitive": true,
+      "inverse_of": "z-inverse"
+     },
+     "avoids": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
+     "configures": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "depends-on": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "hosts": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "implements": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "part-of": {
+      "transitive": true,
+      "inverse_of": null
+     },
+     "prefers": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "related-to": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "runs-on": {
+      "transitive": false,
+      "inverse_of": "hosts"
+     },
+     "stores-data-in": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "uses": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z-inverse": {
+      "transitive": false,
+      "inverse_of": null
+     }
+    }
+   }
+  },
+  {
+   "index": 162,
    "op": "subgraph",
    "response": {
     "value": {
@@ -36402,7 +36845,7 @@
      }
     }
    },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
    "diffs": [],
    "comparison_context": {
     "op": "build_subgraph",
@@ -36423,9 +36866,20 @@
       "dst": 3,
       "confidence": 0.8,
       "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
      }
     ],
     "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
      "a-trans": {
       "transitive": true,
       "inverse_of": "z-inverse"
@@ -36433,6 +36887,10 @@
      "avoids": {
       "transitive": false,
       "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
      },
      "configures": {
       "transitive": false,
@@ -36474,6 +36932,10 @@
       "transitive": false,
       "inverse_of": null
      },
+     "z": {
+      "transitive": false,
+      "inverse_of": null
+     },
      "z-inverse": {
       "transitive": false,
       "inverse_of": null
@@ -36482,7 +36944,7 @@
    }
   },
   {
-   "index": 156,
+   "index": 163,
    "op": "subgraph",
    "response": {
     "value": {
@@ -36521,7 +36983,7 @@
      }
     }
    },
-   "state_sha256": "591047907565a10dfce80dc111e659fe26e948d0f027eed844689bf4b60d4867",
+   "state_sha256": "2f44d43a7e425e1f5db6a101e02d70f44f611ec91019df76d95cff20af9c5cca",
    "diffs": [],
    "comparison_context": {
     "op": "build_subgraph",
@@ -36542,9 +37004,20 @@
       "dst": 3,
       "confidence": 0.8,
       "origin": "user"
+     },
+     {
+      "src": 1,
+      "relation": "z",
+      "dst": 2,
+      "confidence": 0.8,
+      "origin": null
      }
     ],
     "relations": {
+     "aa": {
+      "transitive": false,
+      "inverse_of": "z"
+     },
      "a-trans": {
       "transitive": true,
       "inverse_of": "z-inverse"
@@ -36552,6 +37025,10 @@
      "avoids": {
       "transitive": false,
       "inverse_of": null
+     },
+     "a-z": {
+      "transitive": false,
+      "inverse_of": "z"
      },
      "configures": {
       "transitive": false,
@@ -36590,6 +37067,10 @@
       "inverse_of": null
      },
      "uses": {
+      "transitive": false,
+      "inverse_of": null
+     },
+     "z": {
       "transitive": false,
       "inverse_of": null
      },
@@ -36601,5 +37082,5 @@
    }
   }
  ],
- "normalizers": "ClockState operation-specific windows; graph_read_compare.py derived multisets and inverse collision exception, node sets, standalone minimum paths; subgraph selection exact"
+ "normalizers": "ClockState in graph_store.py; operation-specific windows; JSON object order free; graph_read_compare.py: derived multisets, inverse collision provenance, node sets, standalone minimum paths; subgraph selection exact"
 }

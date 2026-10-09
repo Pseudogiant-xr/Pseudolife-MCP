@@ -16,7 +16,8 @@ services consume. It registers no Console GET or MCP handler.
 
 Canonical nodes are integer bank IDs; relation and alias keys are normalized
 strings. Entity and asserted-edge input order comes from load_graph's ID order;
-registry iteration follows load_relations's name order. Asserted edge metadata
+registry iteration preserves load_relations's row order, including database
+collation; it is not re-sorted by byte order. Asserted edge metadata
 and multiplicity remain exact. Asserted edges precede derived edges. Derived
 triples and provenance compare as multisets under the delegate's standing
 ruling. Nodes compare as sets. Standalone paths compare by minimum hop count
@@ -50,3 +51,10 @@ select subgraph paths. A 100-case diagnostic exposed two changed selections
 under sorted derived output; both are covered by the recorded read profile.
 The actual GraphStore oracle file is loaded directly to avoid unrelated torch
 imports in memory/__init__; no oracle algorithm or Python source is changed.
+
+Independent review correction: preserve ordered registry pairs in both the
+fixture and bank API, including the transitive-source inverse phase. The
+aa/a-a/z ordered reverse-inverse case and multiple-transitive path/provenance
+cases failed before correction. An actual en_US.utf8 disposable-bank aa/a-z/z
+case also exposed a changed inverse triple. The expanded 164-case row includes
+these controls and bank reads under the real loaded order.
