@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/rust.yml"
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
 RUST_CHECKS = (
+    "Check generated daemon schema",
     "Bind the selected Python interpreter for Rust fixtures",
     "Install the Python SDK fixture dependency",
     "Bind the event-selected Python oracle",
@@ -78,6 +79,9 @@ def row_commands(invocations, required_rows, golden):
 
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
+    require_command(commands(rust["Check generated daemon schema"]["run"]),
+                    ("python", "rust/daemon/harness/gen_schema_sql.py"), ("--check",))
+    assert rust["Check generated daemon schema"]["working-directory"] == "."
     for name, prefix in (("Check formatting", ("cargo", "fmt")),
                          ("Check all targets", ("cargo", "check")),
                          ("Clippy", ("cargo", "clippy")),
@@ -279,6 +283,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Check generated daemon schema", "--check", ""),
+    ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
     ("Daemon resident startup parity", "--no-build", ""),
     ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
     ("Daemon resident startup parity", "--no-build", "--no-build --record-goldens"),

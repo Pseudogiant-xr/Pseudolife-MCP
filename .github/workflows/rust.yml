@@ -64,6 +64,12 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
+      - name: Check generated daemon schema
+        working-directory: .
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/gen_schema_sql.py --check
+          exit $LASTEXITCODE
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
