@@ -236,17 +236,21 @@ class Daemon:
                 return conn.pid
         return None
 
-    def requests(self) -> dict:
+    def requests(self) -> list:
         """Connect's own requests in order; of the handshake child (the shim,
         whose transport is its own row) only the credentials its MCP
-        requests carried."""
+        requests carried. Entries are already projected (dict headers), so
+        the harness's wire projection passes them through unchanged."""
         with self._lock:
             seen = list(self._seen)
-        own = [entry for owner, entry in seen if owner == self.arm_pid or owner is None]
+        own = [{"method": entry["method"], "target": entry["path"],
+                "headers": {"authorization-label": entry["auth"]}, "body": ""}
+               for owner, entry in seen if owner == self.arm_pid or owner is None]
         child = sorted({entry["auth"] for owner, entry in seen
                         if owner not in (self.arm_pid, None) and entry["path"].startswith("/mcp")
                         and entry["method"] == "POST"})
-        return {"connect": own, "handshake_credentials": child}
+        return own + [{"method": "handshake-credentials", "target": "/mcp",
+                       "headers": {"authorization-labels": ",".join(child)}, "body": ""}]
 
     def close(self) -> None:
         for server in self.servers:
