@@ -60,6 +60,20 @@ class SchemaGeneration(unittest.TestCase):
         actual = gen.render(gen.SOURCE.read_bytes())["schema.sql"].decode().split("\n", 1)[1]
         self.assertEqual(actual, oracle.SCHEMA_SQL)
 
+    def test_chained_or_expression_assignment_targets_are_refused(self):
+        for scope in ("module", "backfill"):
+            tree = ast.parse(gen.SOURCE.read_bytes())
+            if scope == "module":
+                assignment = next(n for n in tree.body if isinstance(n, ast.Assign)
+                                  and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "SCHEMA_SQL")
+            else:
+                helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                              and n.name == "_backfill_trace_invalidations")
+                assignment = helper.body[1]
+            assignment.targets.append(ast.Name(id="unexpected_alias", ctx=ast.Store()))
+            with self.assertRaisesRegex(ValueError, "unsupported"):
+                gen.render(ast.unparse(tree).encode())
+
     def test_every_branch_matches_oracle_statement_order_and_parameters(self):
         oracle = types.ModuleType("schema_oracle")
         exec(compile(gen.SOURCE.read_bytes(), "schema.py", "exec"), oracle.__dict__)

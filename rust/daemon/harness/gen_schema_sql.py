@@ -130,6 +130,7 @@ def statements(nodes, env, functions, top_level=False):
                 helper = functions["_backfill_trace_invalidations"]
                 body = helper.body
                 if len(body) != 3 or not is_docstring(body[0]) or not isinstance(body[1], ast.Assign) \
+                        or len(body[1].targets) != 1 or not isinstance(body[1].targets[0], ast.Name) \
                         or ast.unparse(body[1].targets[0]) != "result" \
                         or ast.unparse(body[2]) != "return max(result.rowcount, 0)":
                     unsupported(helper)
@@ -152,6 +153,8 @@ def render(source: bytes) -> dict[str, bytes]:
     tree = ast.parse(source)
     env = {}
     for n in tree.body:
+        if isinstance(n, ast.Assign) and (len(n.targets) != 1 or not isinstance(n.targets[0], ast.Name)):
+            unsupported(n)
         if isinstance(n, ast.Assign) and len(n.targets) == 1 \
                 and isinstance(n.targets[0], ast.Name) \
                 and (n.targets[0].id.endswith("SCHEMA_SQL") or n.targets[0].id in
