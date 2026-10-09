@@ -50,6 +50,32 @@ starts empty, since a seeded template carries run-specific values. `gen_schema_s
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
 
+The schema startup boundary has a separate mode in the same harness:
+
+```bash
+python rust/daemon/harness/schema_ci.py --out schema-parity.json
+```
+
+It builds the daemon's native storage test executable, compares fresh and
+historical banks from `schema_history.json` after each open/restart, checks
+future/malformed-version refusal without durable writes, and catches five
+compiled source mutants. It reuses the harness's disposable database and full
+catalog/row helpers, with `pl_cf_pgs_` fixture names. CI supplies its existing
+isolated test login. No embedding model is loaded by these storage cells.
+`gen_schema_sql.py --check` checks the base DDL, the entire ordered migration
+plan, dimension refusal text and generated metadata against `schema.py`.
+The same run compares Rust post-state with the committed oracle captures in
+`harness/goldens/schema-startup.json`, using the existing golden catalog
+digests and full row values. New relation times must first fit their own arm's
+captured constructor window; existing row times remain exact.
+
+To regenerate schema data and oracle post-state fixtures after an upstream
+change, use one command with the isolated test login configured:
+
+```bash
+python rust/daemon/harness/gen_schema_sql.py --record-goldens schema-capture.json
+```
+
 The graph-store boundary uses the same disposable-bank and state helpers:
 
 ```bash

@@ -32,6 +32,7 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -105,6 +106,10 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    schema = commands(parity["Daemon schema startup parity"]["run"])
+    require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
+                    ("--out",), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in schema)
     embedding = parity["Offline embedding golden and mutant row"]
     invocations = commands(embedding["run"])
     require_command(invocations, ("python", "-m", "pytest"),
@@ -161,6 +166,8 @@ def test_shards_cover_both_systems_and_build_once():
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
     assert len(builds) == 1
     assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio -j 4"
+    assert not any("schema_ci.py" in step.get("run", "")
+                   for step in jobs["candidate"]["steps"])
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -266,6 +273,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Daemon schema startup parity", "--out", "--record-goldens --out"),
+    ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
     ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
     ("CLI differential harness", "--golden", ""),

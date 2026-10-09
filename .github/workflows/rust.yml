@@ -295,6 +295,20 @@ jobs:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Daemon schema startup parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/schema_ci.py --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon schema parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-schema-parity-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-schema-parity.json
+          if-no-files-found: error
       - name: Retain graph store outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4

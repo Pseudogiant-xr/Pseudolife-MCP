@@ -51,6 +51,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
+| Future or malformed schema version | `storage/schema.py:1657-1662` overwrites the stored version with the build's version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state | W3 PG-HYDRATE; required by the slice brief, retained for the maintainer's cutover decision |
 | Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
