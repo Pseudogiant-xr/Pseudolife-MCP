@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import queue
@@ -59,6 +60,7 @@ def scenarios() -> list[dict]:
         return {"name": name, "fixture": copy.deepcopy(fixture if seed is None else seed),
                 "actions": actions, "generated_secret": generated}
     token_args = {"secret": SECRET, "backend": "postgres", "generation": "synthetic-generation"}
+    bank_token_args = {**token_args, "generation": hashlib.sha256(bytes.fromhex(SECRET)).hexdigest()}
     return [
         case("membership", [
             {"op": "pull", "limit": 2, "save": "batch"},
@@ -119,6 +121,36 @@ def scenarios() -> list[dict]:
             "entries": [{"text": "unclassified", "ts": 1.0, "dream_state": None}]}),
         case("generated-secret", [{"op": "initialize"}, {"op": "initialize"}, {"op": "restart"}, {"op": "initialize"}],
              {"entries": [{"text": "legacy", "ts": 1.0, "dream_state": None}]}, True),
+        case("tracking-transient", [
+            {"op": "fault", "kind": "tracking-trigger"}, {"op": "pull"},
+            {"op": "fault", "kind": "drop-tracking-trigger"}, {"op": "pull"},
+        ]),
+        case("tracking-refusal", [
+            {"op": "pull"}, {"op": "fault", "kind": "cursor", "value": 10.0},
+            {"op": "pull"}, {"op": "restart"}, {"op": "pull"},
+        ], {"meta": {"cortex_dream_cursor": "bad", "dream_ack_secret_v1": SECRET},
+            "entries": [{"text": "unclassified", "ts": 1.0, "dream_state": None}]}),
+        case("tracking-once", [
+            {"op": "fault", "kind": "tracking-once"}, {"op": "pull"},
+            {"op": "fault", "kind": "drop-tracking-once"},
+        ]),
+        case("commit-latched", [
+            {"op": "issue", **bank_token_args, "entry_ids": [3], "display_timestamp": 11.0, "save": "batch"},
+            {"op": "fault", "kind": "tracking-trigger", "refusal_prefix": False}, {"op": "pull"},
+            {"op": "fault", "kind": "drop-tracking-trigger"},
+            {"op": "commit", "token_from": "batch"}, {"op": "pull"},
+            {"op": "commit", "token_from": "batch"},
+        ]),
+        case("commit-error-class", [
+            {"op": "pull", "save": "batch"},
+            {"op": "fault", "kind": "cursor", "value": "bad"},
+            {"op": "commit", "token_from": "batch"},
+            {"op": "fault", "kind": "cursor", "value": 10.0},
+            {"op": "fault", "kind": "cursor-prefixed-trigger"},
+            {"op": "commit", "token_from": "batch"},
+            {"op": "fault", "kind": "drop-cursor-trigger"},
+            {"op": "commit", "token_from": "batch"},
+        ]),
     ]
 
 
@@ -204,6 +236,10 @@ class Adapter:
             self.answers.put(None)
         self.reader = threading.Thread(target=reader, daemon=True)
         self.reader.start()
+        ready = self.call({"op": "verify", "backend": "postgres", "secret": SECRET,
+                           "generation": "startup-readiness", "token": "v1.bad.bad"})
+        if ready != {"error": "invalid_dream_commit_token"}:
+            raise RuntimeError("adapter startup readiness failed")
         return self
 
     def call(self, action):
@@ -245,15 +281,35 @@ def fault(dsn, action):
         elif kind == "cursor":
             conn.execute("INSERT INTO meta(key,value) VALUES ('cortex_dream_cursor',%s) "
                          "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", (Jsonb(action["value"]),))
-        elif kind == "cursor-trigger":
+        elif kind in ("cursor-trigger", "cursor-prefixed-trigger"):
+            message = ("injected cursor failure" if kind == "cursor-trigger"
+                       else "dream_ack_invalid_states: fixture SQL failure")
             conn.execute("CREATE FUNCTION fail_dream_cursor_write() RETURNS trigger LANGUAGE plpgsql AS "
                          "$$ BEGIN IF NEW.key = 'cortex_dream_cursor' THEN RAISE EXCEPTION "
-                         "'injected cursor failure'; END IF; RETURN NEW; END $$")
+                         f"'{message}'; END IF; RETURN NEW; END $$")
             conn.execute("CREATE TRIGGER fail_dream_cursor_write BEFORE INSERT OR UPDATE ON meta "
                          "FOR EACH ROW EXECUTE FUNCTION fail_dream_cursor_write()")
         elif kind == "drop-cursor-trigger":
             conn.execute("DROP TRIGGER fail_dream_cursor_write ON meta")
             conn.execute("DROP FUNCTION fail_dream_cursor_write()")
+        elif kind in ("tracking-trigger", "tracking-once"):
+            if kind == "tracking-once":
+                conn.execute("CREATE SEQUENCE dream_tracking_attempt")
+            condition = "OLD.dream_state IS NULL"
+            if kind == "tracking-once":
+                condition += " AND nextval('dream_tracking_attempt') = 1"
+            message = ("invalid_fixture_transient" if action.get("refusal_prefix", True)
+                       else "transient_fixture")
+            conn.execute("CREATE FUNCTION fail_dream_tracking() RETURNS trigger LANGUAGE plpgsql AS "
+                         f"$$ BEGIN IF {condition} THEN RAISE EXCEPTION "
+                         f"'{message}'; END IF; RETURN NEW; END $$")
+            conn.execute("CREATE TRIGGER fail_dream_tracking BEFORE UPDATE ON entries "
+                         "FOR EACH ROW EXECUTE FUNCTION fail_dream_tracking()")
+        elif kind in ("drop-tracking-trigger", "drop-tracking-once"):
+            conn.execute("DROP TRIGGER fail_dream_tracking ON entries")
+            conn.execute("DROP FUNCTION fail_dream_tracking()")
+            if kind == "drop-tracking-once":
+                conn.execute("DROP SEQUENCE dream_tracking_attempt")
         else:
             raise ValueError(f"unknown fixture fault: {kind}")
     return {"fault": kind}

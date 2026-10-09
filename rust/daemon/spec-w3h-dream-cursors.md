@@ -10,6 +10,7 @@ the extractor, run journal, claim application or scheduling contracts.
 | Pull pending eligible entries ordered by `(timestamp, db_id)`; cap a pull at 4096 IDs, retain text, timestamp, episode, source, authority and distortion tolerance. Empty pulls omit the token. | `service_dream.py:959-989,1040-1102` |
 | The v1 token binds backend, bank generation, ordered distinct positive IDs and finite display timestamp with HMAC-SHA256. Tampered/foreign/malformed tokens reject before acknowledgement. | `dream_token.py:16-156` |
 | Acknowledgement atomically locks exact IDs, accepts already acknowledged rows, reports deleted IDs, rejects NULL/legacy-covered states, changes only pending members and advances display cursor by max. Failure rolls back both rows and cursor; retry is idempotent. | `storage/postgres.py:1559-1644`, `service_dream.py:1104-1216` |
+| Failure classes determine recovery: ValueError refusals stay latched, operational failures can retry. The first pull retries a transient lazy-init failure, later pulls retry transient latches, and commit never retries an existing latch. Commit maps validation refusals and persistence failures by class, even when a database error resembles a refusal message. | `service.py:3719-3736`, `service_dream.py:990-1002,1040-1051,1104-1216` |
 
 Responses compare by JSON value, including numeric types and list order. Token
 issuance uses Python's canonical sorted compact JSON and verifies across arms.

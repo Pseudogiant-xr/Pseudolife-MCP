@@ -8,6 +8,34 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_postgres::Client;
 
+/// Python distinguishes ValueError refusals from operational failures; an
+/// exception's text is never evidence for its class (`service.py:3736`).
+#[derive(Debug)]
+enum Failure {
+    Refusal(String),
+    Operational(String),
+}
+
+impl Failure {
+    fn text(&self) -> &str {
+        match self {
+            Self::Refusal(s) | Self::Operational(s) => s,
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(value: String) -> Self {
+        Self::Refusal(value)
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(value: &str) -> Self {
+        Self::Refusal(value.into())
+    }
+}
+
 #[derive(Clone)]
 pub struct Policy {
     pub eligible_sources: Vec<String>,
@@ -97,7 +125,14 @@ impl Cursors {
             "pull" => {
                 resident.policy = policy(&action, true);
                 match ensure_initialized(client, &mut resident).await {
-                    Ok(()) => pull(&resident, action["limit"].as_i64().unwrap_or(20)),
+                    Ok(()) => {
+                        // dream_pull retries even a transient failure from its
+                        // first lazy init; dream_commit never performs this retry.
+                        if resident.error.is_some() && resident.retryable {
+                            initialize_resident(client, &mut resident).await;
+                        }
+                        pull(&resident, action["limit"].as_i64().unwrap_or(20))
+                    }
                     Err(e) => Err(e),
                 }
             }
@@ -105,9 +140,9 @@ impl Cursors {
                 Ok(()) => Ok(commit(client, &mut resident, &action["commit_token"]).await),
                 Err(e) => Err(e),
             },
-            op => Err(format!("unknown operation: {op}")),
+            op => Err(format!("unknown operation: {op}").into()),
         };
-        result.unwrap_or_else(|e| json!({"error":e}))
+        result.unwrap_or_else(|e| json!({"error":e.text()}))
     }
 }
 
@@ -133,8 +168,8 @@ fn policy(action: &Value, service_defaults: bool) -> Policy {
     }
 }
 
-fn db_error(e: tokio_postgres::Error) -> String {
-    if let Some(db) = e.as_db_error() {
+fn db_error(e: tokio_postgres::Error) -> Failure {
+    let text = if let Some(db) = e.as_db_error() {
         let mut text = db.message().to_string();
         for (name, part) in [
             ("DETAIL", db.detail()),
@@ -148,10 +183,11 @@ fn db_error(e: tokio_postgres::Error) -> String {
         text
     } else {
         e.to_string()
-    }
+    };
+    Failure::Operational(text)
 }
 
-async fn meta(client: &Client, key: &str) -> Result<Option<Value>, String> {
+async fn meta(client: &Client, key: &str) -> Result<Option<Value>, Failure> {
     Ok(client
         .query_opt("SELECT value FROM meta WHERE key = $1", &[&key])
         .await
@@ -159,16 +195,22 @@ async fn meta(client: &Client, key: &str) -> Result<Option<Value>, String> {
         .map(|r| r.get(0)))
 }
 
-fn cursor_value(value: Option<Value>) -> Result<f64, String> {
+fn cursor_value(value: Option<Value>) -> Result<f64, Failure> {
     match value {
         None => Ok(0.0),
         Some(Value::Number(n)) => n.as_f64().ok_or_else(|| "invalid display cursor".into()),
-        Some(Value::String(s)) => s.parse().map_err(|_| "invalid display cursor".into()),
-        _ => Err("invalid display cursor".into()),
+        Some(Value::String(s)) => s.parse().map_err(|_| {
+            format!(
+                "could not convert string to float: {}",
+                crate::storage::py_repr(&s)
+            )
+            .into()
+        }),
+        _ => Err(Failure::Operational("invalid display cursor type".into())),
     }
 }
 
-async fn finish(client: &Client, result: Result<Value, String>) -> Result<Value, String> {
+async fn finish(client: &Client, result: Result<Value, Failure>) -> Result<Value, Failure> {
     match result {
         Ok(value) => {
             client.batch_execute("COMMIT").await.map_err(db_error)?;
@@ -181,7 +223,7 @@ async fn finish(client: &Client, result: Result<Value, String>) -> Result<Value,
     }
 }
 
-async fn initialize(client: &Client, policy: &Policy) -> Result<Value, String> {
+async fn initialize(client: &Client, policy: &Policy) -> Result<Value, Failure> {
     client.batch_execute("BEGIN").await.map_err(db_error)?;
     let result = async {
         let unclassified = client.query("SELECT id FROM entries WHERE dream_state IS NULL ORDER BY id FOR UPDATE",&[]).await.map_err(db_error)?;
@@ -192,7 +234,7 @@ async fn initialize(client: &Client, policy: &Policy) -> Result<Value, String> {
         let secret = match meta(client,"dream_ack_secret_v1").await? {
             None => {
                 let mut bytes = [0u8;32];
-                getrandom::fill(&mut bytes).map_err(|_| "dream secret generation failed".to_string())?;
+                getrandom::fill(&mut bytes).map_err(|_| Failure::Operational("dream secret generation failed".into()))?;
                 let secret = hex::encode(bytes);
                 client.execute("INSERT INTO meta (key,value) VALUES ('dream_ack_secret_v1',$1::jsonb)", &[&json!(secret)]).await.map_err(db_error)?;
                 secret
@@ -222,7 +264,7 @@ async fn initialize(client: &Client, policy: &Policy) -> Result<Value, String> {
     finish(client, result).await
 }
 
-async fn load(client: &Client, resident: &mut Resident) -> Result<(), String> {
+async fn load(client: &Client, resident: &mut Resident) -> Result<(), Failure> {
     let rows = client.query("SELECT id,text,ts,episode_id,source,authority,distortion_tolerance,dream_state FROM entries ORDER BY id", &[]).await.map_err(db_error)?;
     let entries = rows.into_iter().map(|r| {
         let id: i64 = r.get(0);
@@ -252,26 +294,31 @@ fn apply_initialization(resident: &mut Resident, value: &Value) {
     resident.retryable = false;
 }
 
-async fn ensure_initialized(client: &Client, resident: &mut Resident) -> Result<(), String> {
+async fn ensure_initialized(client: &Client, resident: &mut Resident) -> Result<(), Failure> {
     if !resident.loaded {
         load(client, resident).await?;
     }
-    if resident.initialized && !resident.retryable {
-        return Ok(());
+    if !resident.initialized {
+        initialize_resident(client, resident).await;
     }
+    Ok(())
+}
+
+async fn initialize_resident(client: &Client, resident: &mut Resident) {
     match initialize(client, &resident.policy).await {
         Ok(value) => apply_initialization(resident, &value),
         Err(error) => {
-            resident.retryable = !error.starts_with("invalid_");
-            resident.error = Some(if error.starts_with("invalid_legacy_dream_cursor:") {
-                error
-            } else {
-                format!("dream_ack_initialization_failed: {error}")
-            });
+            resident.retryable = matches!(error, Failure::Operational(_));
+            resident.error = Some(
+                if error.text().starts_with("invalid_legacy_dream_cursor:") {
+                    error.text().to_string()
+                } else {
+                    format!("dream_ack_initialization_failed: {}", error.text())
+                },
+            );
             resident.initialized = true;
         }
     }
-    Ok(())
 }
 
 fn safe_cursor(resident: &Resident) -> f64 {
@@ -282,7 +329,7 @@ fn safe_cursor(resident: &Resident) -> f64 {
     }
 }
 
-fn pull(resident: &Resident, limit: i64) -> Result<Value, String> {
+fn pull(resident: &Resident, limit: i64) -> Result<Value, Failure> {
     let cursor = safe_cursor(resident);
     if let Some(error) = &resident.error {
         return Ok(
@@ -334,7 +381,7 @@ fn pull(resident: &Resident, limit: i64) -> Result<Value, String> {
     Ok(out)
 }
 
-fn acknowledgement_args(action: &Value) -> Result<(Vec<i64>, f64), String> {
+fn acknowledgement_args(action: &Value) -> Result<(Vec<i64>, f64), Failure> {
     let invalid = "dream_ack_invalid_states: entry ids must be distinct positive integers";
     let ids: Vec<i64> = action["entry_ids"]
         .as_array()
@@ -352,7 +399,7 @@ fn acknowledgement_args(action: &Value) -> Result<(Vec<i64>, f64), String> {
     Ok((ids, timestamp))
 }
 
-async fn acknowledge(client: &Client, ids: &[i64], timestamp: f64) -> Result<Value, String> {
+async fn acknowledge(client: &Client, ids: &[i64], timestamp: f64) -> Result<Value, Failure> {
     client.batch_execute("BEGIN").await.map_err(db_error)?;
     let result = async {
         let rows = client.query("SELECT id,dream_state FROM entries WHERE id=ANY($1) FOR UPDATE", &[&ids]).await.map_err(db_error)?;
@@ -365,7 +412,7 @@ async fn acknowledge(client: &Client, ids: &[i64], timestamp: f64) -> Result<Val
                 Some(format!("{i}={}",state.map(crate::storage::py_repr).unwrap_or_else(||"None".into())))
             }
         }).collect();
-        if !invalid.is_empty() {return Err(format!("dream_ack_invalid_states: {}",invalid.join(",")));}
+        if !invalid.is_empty() {return Err(format!("dream_ack_invalid_states: {}",invalid.join(",")).into());}
         let newly = if crate::mutants::active("dream-ack-skip-write") {0} else {
             let statement = if crate::mutants::active("dream-ack-all-pending") {
                 "UPDATE entries SET dream_state='acknowledged' WHERE dream_state='pending' AND ($1::bigint[] IS NOT NULL) RETURNING id"
@@ -428,16 +475,14 @@ async fn commit(client: &Client, resident: &mut Resident, input: &Value) -> Valu
             out
         }
         Err(e) => {
-            let code = e.split(':').next().unwrap_or(&e);
-            let code = if matches!(
-                code,
-                "dream_ack_invalid_states" | "dream_ack_missing_entries"
-            ) {
-                code
-            } else {
-                "dream_ack_persist_failed"
+            let code = match &e {
+                Failure::Operational(_) => "dream_ack_persist_failed",
+                Failure::Refusal(text) => match text.split(':').next().unwrap_or(text) {
+                    code @ ("dream_ack_invalid_states" | "dream_ack_missing_entries") => code,
+                    _ => "dream_ack_rejected",
+                },
             };
-            json!({"error":code,"detail":e})
+            json!({"error":code,"detail":e.text()})
         }
     }
 }
