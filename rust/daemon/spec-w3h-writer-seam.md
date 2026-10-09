@@ -36,5 +36,5 @@ cover recovery ROLLBACK, body ROLLBACK, COMMIT and failed COMMIT cleanup.
 Tool bodies use spawned completion tasks so a disconnected caller does not
 drop durable work. Statement/transaction isolation and pending-query recovery
 are tested using owned loopback PostgreSQL protocol peers; no bank or model is
-used. This increment provides the shared interface and its rejecting controls;
-graph and dream adopt it in their own increments. No consumer is migrated here.
+used. Graph mutations adopt `run`, and graph statements/read groups adopt
+`with_client` in this increment. Dream adopts the same interface after landing.

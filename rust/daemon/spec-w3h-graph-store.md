@@ -42,3 +42,17 @@ drop a Unicode match under PostgreSQL ILIKE. Graph identity lowercase follows
 the Python 3.11 Unicode14 oracle, including final-sigma context; Rust's newer
 Unicode tables changed freshly assigned letters and orphan links. Generated
 data and exhaustive lowercase/context hashes pin that graph-name contract.
+
+The candidate's Windows operation windows use `GetSystemTimePreciseAsFileTime`
+because Python 3.11 `time.time()` may have a 15.625 ms update interval. The
+oracle keeps its own Python clock on both writes and window boundaries.
+Fourteen normalization cases cover separator runs, slash/backslash/dot/colon,
+ASCII and Unicode whitespace, control separators, leading hyphens and empty
+names; an eighth source mutant disables separator normalization. Clock
+refusals retain arm, operation index, raw value and window for diagnosis.
+
+Every graph statement uses the shared writer adapter described in
+`spec-w3h-writer-seam.md`: multi-statement mutations use `run`, and single
+statements/read groups use `with_client`. Only completed mutant comparisons
+with observed differences count as catches; observer, setup or candidate
+failures fail the run and are reported separately.

@@ -1,6 +1,6 @@
 //! Graph storage APIs; oracle: storage/postgres.py:2732–3139,4292–4317.
 use serde_json::{Value, json};
-use tokio_postgres::{Client, Row, Transaction};
+use tokio_postgres::{Client, Row};
 
 #[path = "graph_lower.rs"]
 mod unicode14;
@@ -14,6 +14,9 @@ fn now() -> f64 {
 
 /// Graph names differ from cortex slot keys.
 pub fn norm_name(raw: &str) -> String {
+    if crate::mutants::active("graph-normalize") {
+        return unicode14::lower(super::py_strip(raw));
+    }
     let mut out = String::new();
     for c in unicode14::lower(super::py_strip(raw)).chars() {
         let c = if c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c) || "_/\\.:".contains(c) {
@@ -34,13 +37,13 @@ fn entity(row: &Row) -> Value {
         "created_at": row.get::<_, f64>(4)})
 }
 
-pub async fn ensure_entity(
-    client: &mut Client,
+async fn ensure_entity_body(
+    client: &Client,
     canonical: &str,
     display: Option<&str>,
     etype: Option<&str>,
 ) -> anyhow::Result<i64> {
-    let tx = client.transaction().await?;
+    let tx = client;
     let display = display.filter(|s| !s.is_empty()).unwrap_or(canonical);
     let row = tx
         .query_one(
@@ -101,11 +104,10 @@ pub async fn ensure_entity(
             }
         }
     }
-    tx.commit().await?;
     Ok(id)
 }
 
-pub async fn find_entity(client: &Client, name: &str) -> anyhow::Result<Value> {
+async fn find_entity_body(client: &Client, name: &str) -> anyhow::Result<Value> {
     let canonical = client
         .query_opt(
             "SELECT id,canonical,display,etype,created_at FROM entities \
@@ -142,7 +144,7 @@ pub async fn find_entity(client: &Client, name: &str) -> anyhow::Result<Value> {
     Ok(result)
 }
 
-pub async fn add_alias(client: &Client, alias: &str, id: i64) -> anyhow::Result<()> {
+async fn add_alias_body(client: &Client, alias: &str, id: i64) -> anyhow::Result<()> {
     client
         .execute(
             "INSERT INTO entity_aliases(alias,entity_id) VALUES($1,$2) \
@@ -153,7 +155,7 @@ pub async fn add_alias(client: &Client, alias: &str, id: i64) -> anyhow::Result<
     Ok(())
 }
 
-pub async fn entity_id_map(client: &Client) -> anyhow::Result<Value> {
+async fn entity_id_map_body(client: &Client) -> anyhow::Result<Value> {
     let mut map = serde_json::Map::new();
     for row in client
         .query("SELECT alias,entity_id FROM entity_aliases", &[])
@@ -170,7 +172,7 @@ pub async fn entity_id_map(client: &Client) -> anyhow::Result<Value> {
     Ok(Value::Object(map))
 }
 
-pub async fn load_relations(client: &Client) -> anyhow::Result<Value> {
+async fn load_relations_body(client: &Client) -> anyhow::Result<Value> {
     let rows = client
         .query(
             "SELECT name,description,src_type,dst_type,transitive,inverse_of,builtin \
@@ -197,7 +199,7 @@ pub struct Relation<'a> {
     pub inverse_of: Option<&'a str>,
 }
 
-pub async fn upsert_relation(client: &Client, r: Relation<'_>) -> anyhow::Result<()> {
+async fn upsert_relation_body(client: &Client, r: Relation<'_>) -> anyhow::Result<()> {
     client.execute("INSERT INTO relations(name,description,src_type,dst_type,transitive,inverse_of,builtin,created_at) \
         VALUES($1,$2,$3,$4,$5,$6,FALSE,$7) ON CONFLICT(name) DO UPDATE SET \
         description=EXCLUDED.description,src_type=EXCLUDED.src_type,dst_type=EXCLUDED.dst_type,\
@@ -216,8 +218,8 @@ pub struct Edge<'a> {
     pub source_entry_ids: &'a [i64],
 }
 
-pub async fn upsert_edge(client: &mut Client, edge: Edge<'_>) -> anyhow::Result<Value> {
-    let tx = client.transaction().await?;
+async fn upsert_edge_body(client: &Client, edge: Edge<'_>) -> anyhow::Result<Value> {
+    let tx = client;
     let mut ids = edge.source_entry_ids.to_vec();
     ids.sort_unstable();
     ids.dedup();
@@ -233,7 +235,6 @@ pub async fn upsert_edge(client: &mut Client, edge: Edge<'_>) -> anyhow::Result<
             .map(|r| r.get(0))
             .collect();
         if ids.is_empty() {
-            tx.commit().await?;
             return Ok(Value::Null);
         }
     }
@@ -265,13 +266,12 @@ pub async fn upsert_edge(client: &mut Client, edge: Edge<'_>) -> anyhow::Result<
         )
         .await?;
     }
-    tx.commit().await?;
     // Psycopg's text-format REAL decoder parses PostgreSQL's shortest
     // spelling, rather than widening its binary float32 value.
     Ok(json!({"id": id, "confidence": row.get::<_, f64>(1)}))
 }
 
-pub async fn bless_edge(
+async fn bless_edge_body(
     client: &Client,
     src: i64,
     relation: &str,
@@ -295,7 +295,7 @@ pub async fn bless_edge(
     Ok(count > 0)
 }
 
-pub async fn supersede_edge(
+async fn supersede_edge_body(
     client: &Client,
     src: i64,
     relation: &str,
@@ -311,7 +311,7 @@ pub async fn supersede_edge(
         > 0)
 }
 
-async fn unlink(tx: &Transaction<'_>, id: i64) -> anyhow::Result<()> {
+async fn unlink(tx: &Client, id: i64) -> anyhow::Result<()> {
     for table in ["facts", "lessons"] {
         for col in ["entity_id", "object_entity_id"] {
             tx.execute(
@@ -324,22 +324,21 @@ async fn unlink(tx: &Transaction<'_>, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn delete_entity(client: &mut Client, id: i64) -> anyhow::Result<bool> {
-    let tx = client.transaction().await?;
-    unlink(&tx, id).await?;
+async fn delete_entity_body(client: &Client, id: i64) -> anyhow::Result<bool> {
+    let tx = client;
+    unlink(tx, id).await?;
     let deleted = tx
         .query_opt("DELETE FROM entities WHERE id=$1 RETURNING id", &[&id])
         .await?
         .is_some();
-    tx.commit().await?;
     Ok(deleted)
 }
 
-pub async fn merge_entity(client: &mut Client, from: i64, into: i64) -> anyhow::Result<bool> {
+async fn merge_entity_body(client: &Client, from: i64, into: i64) -> anyhow::Result<bool> {
     if from == into {
         return Ok(false);
     }
-    let tx = client.transaction().await?;
+    let tx = client;
     if tx
         .query(
             "SELECT id FROM entities WHERE id IN ($1,$2)",
@@ -349,7 +348,6 @@ pub async fn merge_entity(client: &mut Client, from: i64, into: i64) -> anyhow::
         .len()
         != 2
     {
-        tx.commit().await?;
         return Ok(false);
     }
     for sql in [
@@ -403,11 +401,10 @@ pub async fn merge_entity(client: &mut Client, from: i64, into: i64) -> anyhow::
     .await?;
     tx.execute("DELETE FROM entities WHERE id=$1", &[&from])
         .await?;
-    tx.commit().await?;
     Ok(true)
 }
 
-pub async fn load_graph(client: &Client) -> anyhow::Result<Value> {
+async fn load_graph_body(client: &Client) -> anyhow::Result<Value> {
     let entities: Vec<Value> = client
         .query(
             "SELECT id,canonical,display,etype,created_at FROM entities \
@@ -443,7 +440,7 @@ pub async fn load_graph(client: &Client) -> anyhow::Result<Value> {
 
 /// Fixture transport only; ordinary callers use the APIs above.
 #[cfg(feature = "graph-harness")]
-pub async fn dispatch(client: &mut Client, r: &Value) -> anyhow::Result<Value> {
+pub async fn dispatch(client: &Client, r: &Value) -> anyhow::Result<Value> {
     let text = |k: &str| r.get(k).and_then(Value::as_str);
     let required = |k: &str| text(k).ok_or_else(|| anyhow::anyhow!("missing string {k}"));
     let id = |k: &str| {
@@ -453,6 +450,7 @@ pub async fn dispatch(client: &mut Client, r: &Value) -> anyhow::Result<Value> {
     };
     let confidence = r.get("confidence").and_then(Value::as_f64).unwrap_or(0.8);
     match required("op")? {
+        "norm_name" => Ok(json!(norm_name(required("raw")?))),
         "ensure_entity" => Ok(json!(
             ensure_entity(
                 client,
@@ -532,4 +530,108 @@ pub async fn dispatch(client: &mut Client, r: &Value) -> anyhow::Result<Value> {
         "load_graph" => load_graph(client).await,
         _ => anyhow::bail!("unknown graph operation"),
     }
+}
+
+// Every graph statement uses the shared writer guard; bodies never nest it.
+pub async fn ensure_entity(
+    client: &Client,
+    canonical: &str,
+    display: Option<&str>,
+    etype: Option<&str>,
+) -> anyhow::Result<i64> {
+    crate::txn::run(client, |client| async move {
+        ensure_entity_body(client, canonical, display, etype).await
+    })
+    .await
+}
+
+pub async fn find_entity(client: &Client, name: &str) -> anyhow::Result<Value> {
+    crate::txn::with_client(client, |client| async move {
+        find_entity_body(client, name).await
+    })
+    .await
+}
+
+pub async fn add_alias(client: &Client, alias: &str, id: i64) -> anyhow::Result<()> {
+    crate::txn::with_client(client, |client| async move {
+        add_alias_body(client, alias, id).await
+    })
+    .await
+}
+
+pub async fn entity_id_map(client: &Client) -> anyhow::Result<Value> {
+    crate::txn::with_client(
+        client,
+        |client| async move { entity_id_map_body(client).await },
+    )
+    .await
+}
+
+pub async fn load_relations(client: &Client) -> anyhow::Result<Value> {
+    crate::txn::with_client(
+        client,
+        |client| async move { load_relations_body(client).await },
+    )
+    .await
+}
+
+pub async fn upsert_relation(client: &Client, r: Relation<'_>) -> anyhow::Result<()> {
+    crate::txn::with_client(client, |client| async move {
+        upsert_relation_body(client, r).await
+    })
+    .await
+}
+
+pub async fn upsert_edge(client: &Client, edge: Edge<'_>) -> anyhow::Result<Value> {
+    crate::txn::run(client, |client| async move {
+        upsert_edge_body(client, edge).await
+    })
+    .await
+}
+
+pub async fn bless_edge(
+    client: &Client,
+    src: i64,
+    relation: &str,
+    dst: i64,
+    confidence: f64,
+) -> anyhow::Result<bool> {
+    crate::txn::with_client(client, |client| async move {
+        bless_edge_body(client, src, relation, dst, confidence).await
+    })
+    .await
+}
+
+pub async fn supersede_edge(
+    client: &Client,
+    src: i64,
+    relation: &str,
+    dst: i64,
+) -> anyhow::Result<bool> {
+    crate::txn::with_client(client, |client| async move {
+        supersede_edge_body(client, src, relation, dst).await
+    })
+    .await
+}
+
+pub async fn delete_entity(client: &Client, id: i64) -> anyhow::Result<bool> {
+    crate::txn::run(client, |client| async move {
+        delete_entity_body(client, id).await
+    })
+    .await
+}
+
+pub async fn merge_entity(client: &Client, from: i64, into: i64) -> anyhow::Result<bool> {
+    crate::txn::run(client, |client| async move {
+        merge_entity_body(client, from, into).await
+    })
+    .await
+}
+
+pub async fn load_graph(client: &Client) -> anyhow::Result<Value> {
+    crate::txn::with_client(
+        client,
+        |client| async move { load_graph_body(client).await },
+    )
+    .await
 }

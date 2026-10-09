@@ -6,7 +6,7 @@
 //! client, whose pipelining would interleave two `BEGIN`..`COMMIT` blocks;
 //! every multi-statement write goes through [`run`] instead.
 
-#![allow(dead_code)] // Shared API; graph and dream adopt it in following increments.
+#![allow(dead_code)] // Shared API; dream adopts it in a following increment.
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};

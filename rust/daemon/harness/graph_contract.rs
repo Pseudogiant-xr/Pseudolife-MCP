@@ -5,18 +5,20 @@
 mod mutants;
 #[path = "../src/storage/mod.rs"]
 mod storage;
+#[path = "../src/txn.rs"]
+mod txn;
 
 use std::io::{BufRead, Write};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let dsn = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL")?;
-    let mut store = storage::Storage::open(&dsn)
+    let store = storage::Storage::open(&dsn)
         .await
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     for line in std::io::stdin().lock().lines() {
         let request: serde_json::Value = serde_json::from_str(&line?)?;
-        let result = match storage::graph::dispatch(store.client_mut(), &request).await {
+        let result = match storage::graph::dispatch(store.client(), &request).await {
             Ok(value) => serde_json::json!({"value": value}),
             Err(error) => match error
                 .downcast_ref::<tokio_postgres::Error>()

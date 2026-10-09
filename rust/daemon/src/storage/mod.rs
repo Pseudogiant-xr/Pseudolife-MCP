@@ -648,11 +648,6 @@ impl Storage {
         &self.client
     }
 
-    /// Exclusive access for a transaction spanning a graph mutation.
-    pub fn client_mut(&mut self) -> &mut Client {
-        &mut self.client
-    }
-
     /// `close()`: end the session and wait until the connection task has
     /// sent its terminate message, so the lease is released when this
     /// returns (the server may still take a moment to exit the backend).

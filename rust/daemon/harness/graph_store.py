@@ -29,9 +29,31 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 GOLDEN = Path(__file__).parent / "goldens" / "graph-store.json"
 MUTANTS = ["graph-confidence", "graph-origin", "graph-revive", "graph-bless",
-           "graph-alias", "graph-relink", "graph-merge"]
+           "graph-alias", "graph-relink", "graph-merge", "graph-normalize"]
 CLOCKS = {("entities", "created_at"), ("relations", "created_at"),
           ("edges", "asserted_at"), ("edges", "superseded_at")}
+
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+    _precise_time = ctypes.WinDLL("kernel32").GetSystemTimePreciseAsFileTime
+    _precise_time.argtypes = [ctypes.POINTER(wintypes.FILETIME)]
+    _precise_time.restype = None
+
+
+def wall_time():
+    """Use the candidate's precise clock, not Python 3.11's coarse Windows clock.
+
+    API: learn.microsoft.com/windows/win32/api/sysinfoapi/
+    nf-sysinfoapi-getsystemtimepreciseasfiletime (VOID, output FILETIME).
+    """
+    if os.name == "nt":
+        value = wintypes.FILETIME()
+        _precise_time(ctypes.byref(value))
+        ticks = (value.dwHighDateTime << 32) | value.dwLowDateTime
+        return (ticks - 116444736000000000) / 10000000
+    return time.time_ns() / 1000000000
 
 
 def strict_json(text):
@@ -149,6 +171,13 @@ def operations():
         op("add_alias", alias_norm="bad", entity_id=999),
         op("upsert_relation", name="bad-relation", description="invalid", inverse_of="missing"),
         edge(src=999), op("load_graph"), op("load_relations")]
+    result += [op("norm_name", raw=raw) for raw in [
+        " -- Depends///__On:::  ", "\t/A_B\\C.D:E/\u00a0",
+        "\u001cAlpha\u001d\u001eBeta\u001f", "-./_: ",
+        "\u00a0ΓΣ.AΣ:\u0301B.. --", "  İ / Ö -- .. CAFÉ : ",
+        "A\u0085B\u2028C\u2029D", "a\u2007\u202fB", "  --___",
+        "A...//\\\\:::__B---C", "AA_İ", "Σ\u0345", "AΣ\u0345 A", "",
+    ]]
     return result
 
 
@@ -158,8 +187,9 @@ class ClockState:
     Unchanged values remain exact, including their equality to seeded values;
     a missing change on either arm therefore differs. No global clock erasure.
     """
-    def __init__(self):
+    def __init__(self, arm="observer"):
         self.seen = {}
+        self.arm = arm
 
     def state(self, raw, index, window):
         normalized = json.loads(json.dumps(raw))
@@ -176,7 +206,8 @@ class ClockState:
                         if value is not None:
                             if not isinstance(value, (int, float)) or isinstance(value, bool) \
                                     or not math.isfinite(value) or not window[0] <= value <= window[1]:
-                                raise AssertionError(f"clock outside operation window: {name}.{col}")
+                                raise AssertionError(f"clock outside operation window: {name}.{col}; "
+                                    f"arm={self.arm}, op={index}, value={value!r}, window={window!r}")
                             token = f"<clock:{index}>"
                         else:
                             token = None
@@ -231,6 +262,9 @@ def catalog_shape(state):
 def oracle_call(st, request):
     kwargs = {k: v for k, v in request.items() if k != "op"}
     try:
+        if request["op"] == "norm_name":
+            from pseudolife_memory.graph import norm_name
+            return {"value": norm_name(request["raw"])}
         return {"value": getattr(st, request["op"])(**kwargs)}
     except Exception as error:
         if not getattr(error, "sqlstate", None):
@@ -249,7 +283,7 @@ def run(candidate, mode, mutant=None):
         seed(template)
         urls = [pg.create(name, template=names[0]) for name in names[1:]]
         initial = dbstate.dump(urls[0])
-        clocks = [ClockState(), ClockState()]
+        clocks = [ClockState("python"), ClockState("rust")]
         for clock in clocks:
             clock.initialize(initial)
         golden = json.loads(GOLDEN.read_text(encoding="utf-8")) if mode == "golden" else None
@@ -278,11 +312,11 @@ def run(candidate, mode, mutant=None):
                     pstart = time.time()
                     expected = oracle_call(oracle, request) if oracle else golden["cases"][index]["response"]
                     pend = time.time()
-                    sstart = time.time()
+                    sstart = wall_time()
                     proc.stdin.write(json.dumps(request, ensure_ascii=True) + "\n")
                     proc.stdin.flush()
                     line = reader.submit(proc.stdout.readline).result(timeout=30)
-                    send = time.time()
+                    send = wall_time()
                     if not line:
                         raise RuntimeError("candidate exited: " + log_path.read_text(encoding="utf-8")[-1000:])
                     actual = strict_json(line)
@@ -349,16 +383,19 @@ def main():
                 indent=1, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n")
         if args.mode == "mutants":
             outcomes = {}
+            failures = {}
             for mutant in MUTANTS:
                 try:
                     cases = run(args.candidate, "live", mutant)
                     outcomes[mutant] = sum(bool(c["diffs"]) for c in cases)
                 except Exception as error:
-                    # Crashes and incomplete scenarios are failures, not survivors.
-                    outcomes[mutant] = f"candidate failure: {type(error).__name__}"
+                    # Only a completed comparison can catch a source mutant.
+                    outcomes[mutant] = None
+                    failures[mutant] = f"{type(error).__name__}: {error}"
                 print(f"mutant {mutant}: {outcomes[mutant]}", flush=True)
             results["mutants"] = outcomes
-            return int(any(not count for count in outcomes.values()))
+            results["mutant_failures"] = failures
+            return int(bool(failures) or any(not count for count in outcomes.values()))
         return 0
     except Exception as error:
         results["failure"] = f"{type(error).__name__}: {error}"

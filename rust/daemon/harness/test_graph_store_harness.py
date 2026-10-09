@@ -1,8 +1,14 @@
 """Rejecting controls for the store harness's semantic clock comparison."""
 import copy
+import os
+import json
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
-from graph_store import ClockState, catalog_shape, digest, response_diff, strict_json
+import graph_store
+from graph_store import ClockState, catalog_shape, digest, response_diff, strict_json, wall_time
 
 
 def state(clock=1.0):
@@ -12,6 +18,26 @@ def state(clock=1.0):
 
 
 class ClockControls(unittest.TestCase):
+    def test_mutant_observer_failures_fail_the_run(self):
+        with tempfile.TemporaryDirectory() as home:
+            candidate = Path(home) / "candidate"
+            candidate.write_bytes(b"fixture")
+            report = Path(home) / "report.json"
+            with patch("sys.argv", ["graph_store", "mutants", "--candidate", str(candidate),
+                                    "--out", str(report)]), \
+                    patch("graph_store.subprocess.check_output", return_value="head"), \
+                    patch("graph_store.run", side_effect=[[{"diffs": []}]] +
+                          [AssertionError("broken observer")] * len(graph_store.MUTANTS)):
+                self.assertEqual(graph_store.main(), 1)
+            result = json.loads(report.read_text())
+            self.assertTrue(all(value is None for value in result["mutants"].values()))
+            self.assertEqual(set(result["mutant_failures"]), set(graph_store.MUTANTS))
+
+    @unittest.skipUnless(os.name == "nt", "precise Windows clock API")
+    def test_candidate_clock_does_not_use_coarse_python_clock(self):
+        with patch("graph_store.time.time", return_value=1.0):
+            self.assertGreater(wall_time(), 1.0)
+
     def test_unchanged_seed_value_stays_exact(self):
         clock = ClockState()
         clock.initialize(state())
