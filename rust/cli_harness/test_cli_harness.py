@@ -141,3 +141,37 @@ def test_home_removal_waits_out_a_briefly_held_file(tmp_path):
     threading.Timer(0.5, held.close).start()
     core._remove(home)
     assert not home.exists()
+
+
+def test_home_removal_retries_injected_sharing_violations(tmp_path, monkeypatch):
+    import os
+    from cli_harness import core
+    home = tmp_path / "h"
+    (home / "d").mkdir(parents=True)
+    (home / "d" / "digest.txt").write_text("7")
+    real, calls = os.unlink, []
+
+    def flaky(path, *args, **kwargs):
+        calls.append(path)
+        if len(calls) <= 2:
+            raise PermissionError(13, "being used by another process")
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(os, "unlink", flaky)
+    core._remove(home)
+    assert not home.exists() and len(calls) >= 3
+
+
+def test_home_removal_gives_up_after_its_deadline(tmp_path, monkeypatch):
+    import os
+    import pytest
+    from cli_harness import core
+    home = tmp_path / "h"
+    home.mkdir()
+    (home / "digest.txt").write_text("7")
+
+    def stuck(path, *args, **kwargs):
+        raise PermissionError(13, "being used by another process")
+    monkeypatch.setattr(os, "unlink", stuck)
+    monkeypatch.setattr(core, "_RETRY_SECONDS", 0.3)
+    with pytest.raises(PermissionError):
+        core._remove(home)

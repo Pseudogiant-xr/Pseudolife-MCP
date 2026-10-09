@@ -160,8 +160,21 @@ _SHARING = (32, 5)
 _RETRY_SECONDS = 10.0
 
 
+def _transient(error: OSError) -> bool:
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in _SHARING
+
+
 def _remove(home: Path) -> None:
     def retry(func, path, exc_info):
+        error = exc_info[1]
+        if isinstance(error, FileNotFoundError):
+            return
+        if func not in (os.unlink, os.remove, os.rmdir):
+            # A failed directory scan or open cannot be resumed by calling it
+            # again: unlock the directory and remove that subtree afresh.
+            os.chmod(path, 0o700)
+            shutil.rmtree(path, onerror=retry)
+            return
         deadline = time.monotonic() + _RETRY_SECONDS
         while True:
             try:
@@ -170,9 +183,8 @@ def _remove(home: Path) -> None:
                 return
             except FileNotFoundError:
                 return
-            except OSError as error:
-                if (getattr(error, "winerror", None) not in _SHARING
-                        and not isinstance(error, PermissionError)) or time.monotonic() > deadline:
+            except OSError as again:
+                if not _transient(again) or time.monotonic() > deadline:
                     raise
                 time.sleep(0.1)
     # chmod-000 stat cases leave a directory a plain rmtree cannot enter.
@@ -269,12 +281,19 @@ def _home_root() -> Path:
 def run_case(case: Case, oracle: Target, candidate: Target) -> tuple[dict, dict]:
     root = _home_root()
     home = root / "h"
+    finished = False
     try:
         python = run_arm(case, oracle, home)
         rust = run_arm(case, candidate, home)
+        finished = True
     finally:
         if root.exists():
-            _remove(root)
+            try:
+                _remove(root)
+            except OSError:
+                # Never let teardown replace the case's own failure.
+                if finished:
+                    raise
     return python, rust
 
 
