@@ -60,14 +60,19 @@ class Daemon:
     daemon's error body. ``default`` applies once ``answers`` is empty."""
 
     def __init__(self, port: int, *, url: str, answers=(), default="pair", principal="laptop",
-                 tier="writer", bank="7f8402238397365c", health=None, accept_bearers=True):
+                 tier="writer", bank="7f8402238397365c", health=None, accept_bearers=True,
+                 result=None, hold_on_post=False):
         self.url = url
         self.health = health if health is not None else {
             "status": "ok", "auth": True, "version": "0.0.0-fixture"}
         self.answers = list(answers)
         self.default = default
-        self.result = {"principal": principal, "tier": tier, "bank": bank}
+        self.result = result if result is not None else {
+            "principal": principal, "tier": tier, "bank": bank}
         self.accept_bearers = accept_bearers
+        self.hold_on_post = hold_on_post
+        self.held: list = []
+        self.home: Path | None = None   # the arm's home, set by the case's setup
         self.paired_hash: str | None = None
         self._seen: list[dict] = []
         self._lock = threading.Lock()
@@ -82,6 +87,11 @@ class Daemon:
                 for name in ("Origin", "Authorization"):
                     if self.headers.get(name) is not None:
                         headers[name.lower()] = self.headers.get(name)
+                if self.command == "POST":
+                    # The minted file still exists while its POST is in
+                    # flight: whether one of the arm's token files hashes to
+                    # the posted digest is the hash's only proof.
+                    headers["x-fixture-digest-of-a-token-file"] = daemon._digest_matches(body)
                 with daemon._lock:
                     daemon._seen.append({
                         "method": self.command, "target": self.path,
@@ -116,6 +126,11 @@ class Daemon:
                 self._record(body)
                 if self.path != "/api/pair":
                     return self._send(404, {"error": "not_found"})
+                if daemon.hold_on_post and daemon.home is not None:
+                    # Hold every pairing file open as the CRT does (read and
+                    # write sharing, no delete): the CLI's unlink then fails.
+                    for path in daemon.home.rglob("pairing-*.token"):
+                        daemon.held.append(open(path, "rb"))  # noqa: SIM115 (closed in close())
                 with daemon._lock:
                     answer = daemon.answers.pop(0) if daemon.answers else daemon.default
                 if answer in ("pair", "drop"):
@@ -130,6 +145,10 @@ class Daemon:
                     return self._send(200, daemon.result)
                 if answer == "garbage":
                     return self._send(200, b"<html>proxy page</html>")
+                if isinstance(answer, tuple):  # (status, raw body)
+                    if answer[0] == 200:
+                        daemon.paired_hash = daemon.paired_hash or json.loads(body)["token_sha256"]
+                    return self._send(*answer)
                 return self._send(answer, {"error": ERRORS.get(answer, "refused")})
 
         class V4Server(ThreadingHTTPServer):
@@ -152,11 +171,26 @@ class Daemon:
             thread.start()
             self.threads.append(thread)
 
+    def _digest_matches(self, body: bytes) -> str:
+        try:
+            digest = json.loads(body)["token_sha256"]
+        except (ValueError, KeyError, TypeError):
+            return "unreadable"
+        for path in sorted((self.home or Path("/nonexistent")).rglob("*.token")):
+            try:
+                if hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+                    return "matches"
+            except OSError:
+                continue
+        return "none"
+
     def requests(self) -> list:
         with self._lock:
             return [dict(entry) for entry in self._seen]
 
     def close(self) -> None:
+        for handle in self.held:
+            handle.close()
         for server in self.servers:
             server.shutdown()
             server.server_close()
@@ -172,12 +206,28 @@ def free_port() -> int:
 
 # ── the real-home guard ─────────────────────────────────────────────────────
 
-def _real_tokens() -> list[str] | None:
+def _real_tokens() -> dict | None:
+    """Every token file in this user's real ``~/.pseudolife-mcp`` (pair's
+    only write on master): name, size, mtime, mode, the oracle's owner-only
+    verdict and the content's SHA-256. The digest lives only in this
+    process, for an equality check; it is never printed or stored."""
+    from pseudolife_memory import client_config  # noqa: PLC0415 (the oracle's own check)
     home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
     try:
-        return sorted(p.name for p in (home / ".pseudolife-mcp").glob("*.token"))
+        paths = sorted((home / ".pseudolife-mcp").glob("*.token"))
     except OSError:
         return None
+    found = {}
+    for path in paths:
+        try:
+            info = path.lstat()
+            digest = hashlib.sha256(path.read_bytes()).digest()
+        except OSError as error:
+            found[path.name] = ("unreadable", type(error).__name__)
+            continue
+        found[path.name] = (info.st_size, info.st_mtime_ns, info.st_mode,
+                            client_config.check_token_file(path).get("status"), digest)
+    return found
 
 
 _BASELINE = _real_tokens()
@@ -186,8 +236,10 @@ _BASELINE = _real_tokens()
 def _check_real_home(arm) -> None:
     now = _real_tokens()
     if now != _BASELINE:
+        changed = sorted(name for name in set(now or {}) | set(_BASELINE or {})
+                         if (now or {}).get(name) != (_BASELINE or {}).get(name))
         raise AssertionError(f"pair row: the real ~/.pseudolife-mcp token files changed "
-                             f"({arm.name} arm): {_BASELINE} -> {now}")
+                             f"({arm.name} arm): {changed}")
 
 
 # ── named rules ─────────────────────────────────────────────────────────────
@@ -210,13 +262,14 @@ def _swap_all(obs: dict, old: bytes, new: bytes) -> None:
 
 @normalize.rule("pair-token")
 def pair_token(obs: dict) -> None:
-    """The token is random by design. A token file this arm minted (43
-    URL-safe base64 characters) becomes ``<token>`` only when its SHA-256 is
-    the ``token_sha256`` of every ``POST /api/pair`` the daemon received from
-    this arm (all attempts carry the same body), and then the verification's
-    ``Bearer <that token>`` becomes ``Bearer <token>``. With no minted file
-    left (the refusals remove it) the hash is checked as 64 lowercase hex,
-    identical across attempts. The hash becomes ``<token-sha256>``. A
+    """The token is random by design. Every ``POST /api/pair`` of this arm
+    must carry the same ``token_sha256``, and the stand-in daemon must have
+    found, while that POST was in flight, a token file in the arm's home
+    whose SHA-256 it is (the request's ``x-fixture-digest-of-a-token-file``
+    is ``matches``); only then does the hash become ``<token-sha256>``. A
+    token file left in the home (43 URL-safe base64 characters) becomes
+    ``<token>`` only when it hashes to that digest, and then the
+    verification's ``Bearer <that token>`` becomes ``Bearer <token>``. A
     ``pairing-<8 hex>.token`` name becomes ``pairing-<hex>.token`` only when
     that file exists in this arm's home, or when no stream names it."""
     posts = [r for r in obs.get("requests", []) if r.get("method") == "POST"]
@@ -241,9 +294,9 @@ def pair_token(obs: dict) -> None:
             for request in obs.get("requests", []):
                 if request["headers"].get("authorization") == f"Bearer {token}":
                     request["headers"]["authorization"] = "Bearer <token>"
-    if digest is not None and re.fullmatch(r"[0-9a-f]{64}", digest) and (
-            not minted or any(v == "file:" + base64.b64encode(b"<token>").decode()
-                              for v in obs["files"].values())):
+    proven = all(post["headers"].get("x-fixture-digest-of-a-token-file") == "matches"
+                 for post in posts)
+    if digest is not None and re.fullmatch(r"[0-9a-f]{64}", digest) and proven:
         for post in posts:
             post["body"] = post["body"].replace(digest, "<token-sha256>")
     names = {m.group(0) for field in ("stdout", "stderr")
@@ -254,6 +307,36 @@ def pair_token(obs: dict) -> None:
                for m in _PAIRING.finditer(rel.encode())}
     if len(names) == 1 and (names <= present or not present):
         _swap_all(obs, next(iter(names)), b"pairing-<hex>.token")
+
+
+_TRACEBACK = re.compile(rb"\ATraceback \(most recent call last\):\r?\n.*\n(?P<last>[A-Za-z]+"
+                        rb"Error: [^\r\n]*)\r?\n\Z", re.DOTALL)
+DECLARED_CRASHES = {
+    # /health nested past CPython's recursion limit (`_json` outside a try).
+    "pair-recursion-traceback": rb"RecursionError: maximum recursion depth exceeded",
+    # A refusal whose `target.unlink(missing_ok=True)` raises (the file is
+    # held open without delete sharing): the oracle dies after the POST.
+    "pair-cleanup-traceback": rb"PermissionError: [WinError 32] ",
+}
+
+
+def _declared_crash(name: str, marker: bytes):
+    def rule(obs: dict) -> None:
+        """Declared: the oracle dies with this uncaught exception (exit 1, a
+        traceback naming its own source files); the candidate prints its
+        deferral line, exit 1. Only that traceback with exit 1 maps; the
+        requests, the files and the owner-only record stay compared."""
+        if obs.get("arm") != "python" or obs["exit"] != 1:
+            return
+        match = _TRACEBACK.match(normalize._get(obs, "stderr"))
+        if match and match.group("last").startswith(marker) and not normalize._get(obs, "stdout"):
+            native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
+            normalize._put(obs, "stderr", native.encode())
+    normalize.rule(name)(rule)
+
+
+for _name, _marker in DECLARED_CRASHES.items():
+    _declared_crash(_name, _marker)
 
 
 @normalize.rule("pair-deferral")
@@ -301,8 +384,10 @@ def _env(**extra) -> dict:
 
 def case(case_id: str, argv: list[str], *, port: int | None = None, url: str | None = None,
          stdin: bytes = b"", seed=None, rules=("pair-token",), env=None, timeout=60,
-         **daemon) -> core.Case:
+         platforms=("windows", "linux"), **daemon) -> core.Case:
     def setup(arm):
+        if arm.daemon is not None:
+            arm.daemon.home = arm.home
         if seed:
             seed(arm.home)
         arm.state["before"] = core.snapshot(arm.home)
@@ -322,7 +407,8 @@ def case(case_id: str, argv: list[str], *, port: int | None = None, url: str | N
         def factory():
             return Daemon(port, url=url, **daemon)
     return core.Case(case_id, ["pair", *argv], env=_env(**(env or {})), stdin=stdin,
-                     setup=setup, after=after, rules=rules, daemon=factory, timeout=timeout)
+                     setup=setup, after=after, rules=rules, daemon=factory, timeout=timeout,
+                     platforms=platforms)
 
 
 def target(remote: bool = False) -> tuple[int, str]:
@@ -425,6 +511,40 @@ def cases() -> list[core.Case]:
     live("existing-principal-file-kept", [CODE],
          seed=seed_file(".pseudolife-mcp/laptop.token", "older-" + "o" * 32))
 
+    # Daemon answers only CPython's reader holds: lone surrogates, nesting up
+    # to its measured recursion limit (987 containers on the pair paths),
+    # integers past 4300 digits.
+    def nest(depth: int) -> bytes:
+        return b"[" * depth + b"]" * depth
+
+    live("health-surrogate-auth", [CODE], health={"status": "ok", "auth": "\ud800"})
+    live("health-surrogate-auth-json", [CODE, "--json"],
+         health={"status": "ok", "auth": ["x\udc00", {"\ud800": 1}]})
+    live("health-nested-at-limit-json", [CODE, "--json"],
+         health=b'{"status": "ok", "auth": ' + nest(986) + b"}")
+    live("health-nested-past-limit", [CODE],
+         health=b'{"status": "ok", "auth": ' + nest(987) + b"}",
+         rules=("pair-token", "pair-recursion-traceback"))
+    live("health-int-past-limit", [CODE],
+         health=b'{"status": "ok", "auth": true, "x": 1' + b"0" * 4300 + b"}")
+    live("health-int-at-limit-json", [CODE, "--json"],
+         health=b'{"status": "ok", "auth": true, "x": -' + b"9" * 4300 + b"}")
+    live("answer-nested-at-limit-json", [CODE, "--json"],
+         answers=[(200, b'{"principal": "laptop", "tier": "writer", "x": ' + nest(986) + b"}")])
+    live("answer-nested-past-limit-then-paired", [CODE],
+         answers=[(200, b'{"principal": "laptop", "x": ' + nest(987) + b"}")])
+    live("answer-refusal-nested-past-limit", [CODE],
+         answers=[(400, b'{"error": ' + nest(990) + b"}")])
+    live("answer-surrogates-json", [CODE, "--json"],
+         answers=[(200, b'{"principal": "lap\\ud800", "tier": "\\udc00w", "bank": "b"}')])
+    live("answer-int-past-limit-then-paired-json", [CODE, "--json"],
+         answers=[(200, b'{"principal": "laptop", "x": 1' + b"0" * 4300 + b"}")])
+
+    # A refusal whose file the oracle cannot remove (held open without
+    # delete sharing, which only Windows enforces): declared crash.
+    live("refusal-cleanup-fails", [CODE], default=400, hold_on_post=True,
+         rules=("pair-token", "pair-cleanup-traceback"), platforms=("windows",))
+
     # Declared deferrals: before any effect.
     deferred = ("pair-deferral",)
     port = free_port()
@@ -444,8 +564,12 @@ def cases() -> list[core.Case]:
 
 MUTANTS = [
     Mutant("pair-file-kept-on-refusal", "pair", "shim/src/cli/pairing/pair.rs",
-           "let _ = std::fs::remove_file(&target);", "",
+           "match std::fs::remove_file(&target) {",
+           "match Ok::<(), std::io::Error>(()) {",
            cases=("daemon-refused-code", "daemon-rate-limited")),
+    Mutant("pair-constant-digest", "pair", "shim/src/cli/pairing/pair.rs",
+           "super::sha256_hex(&token)\n", "\"0\".repeat(64)\n",
+           cases=("daemon-refused-code",)),
     Mutant("pair-retry-flipped", "pair", "shim/src/cli/pairing/pair.rs",
            "if uncertain && (300..500).contains(&status) {",
            "if !uncertain && (300..500).contains(&status) {",
@@ -457,9 +581,6 @@ MUTANTS = [
            "pairing is rate-limited on the daemon, try again in a minute",
            "pairing is rate limited on the daemon, try again in a minute",
            cases=("daemon-rate-limited",)),
-    Mutant("pair-not-owner-only", "pair", "shim/src/cli/pairing/token_file.rs",
-           "        protect(&file)?;\n", "",
-           cases=("success",)),
     Mutant("pair-hash-of-wrong-text", "pair", "shim/src/cli/pairing/pair.rs",
            "super::sha256_hex(&token)\n", "super::sha256_hex(&code)\n",
            cases=("success-json",)),
@@ -468,3 +589,22 @@ MUTANTS = [
            ".filter(|name| super::valid_principal_name(name));",
            cases=("rogue-name-4",)),
 ]
+# Owner-only is made differently per platform, so each has its own break.
+if core.WINDOWS:
+    # The protected DACL is the whole protection (the CRT ignores the mode).
+    MUTANTS.append(Mutant("pair-not-owner-only", "pair", "shim/src/cli/pairing/token_file.rs",
+                          "        protect(&file)?;\n", "", cases=("success",)))
+    # Only Windows refuses to delete a file another process holds open.
+    MUTANTS.append(Mutant(
+        "pair-cleanup-error-swallowed", "pair", "shim/src/cli/pairing/pair.rs",
+        "Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => Err(Defer),",
+        "Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => Err(Defer),",
+        cases=("refusal-cleanup-fails",)))
+else:
+    # `.mode(0o600)` at creation would hide a removed protect(): widen the
+    # fchmod instead, which the owner-only validation then refuses.
+    MUTANTS.append(Mutant("pair-mode-not-owner-only", "pair",
+                          "shim/src/cli/pairing/token_file.rs",
+                          "file.set_permissions(fs::Permissions::from_mode(0o600))",
+                          "file.set_permissions(fs::Permissions::from_mode(0o640))",
+                          cases=("success",)))

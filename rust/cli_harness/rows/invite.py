@@ -101,6 +101,21 @@ def _drop_all() -> None:
 atexit.register(_drop_all)
 
 
+def _create(name: str, schema: bool = True) -> None:
+    """``_bank.create``, waiting out an autovacuum worker on the database:
+    the test login may not terminate one, and it finishes on its own (as
+    the audit row's ``_drop`` waits)."""
+    import psycopg  # noqa: PLC0415
+    for attempt in range(60):
+        try:
+            _bank.create(name, schema=schema)
+            return
+        except (psycopg.errors.InsufficientPrivilege, psycopg.errors.ObjectInUse):
+            if attempt == 59:
+                raise
+            time.sleep(0.5)
+
+
 def ensure(kind: str) -> str:
     """The seeded bank of this kind (created once per harness process)."""
     name = PREFIX + kind
@@ -108,9 +123,9 @@ def ensure(kind: str) -> str:
         return name
     _CREATED.add(name)
     if kind == "noschema":
-        _bank.create(name, schema=False)
+        _create(name, schema=False)
     else:
-        _bank.create(name)
+        _create(name)
         with _bank.connect(name, autocommit=True) as conn:
             SEEDERS[kind](conn, name)
     _BASELINE[name] = _bank.dump(name)
@@ -122,7 +137,7 @@ def fresh_copy(kind: str) -> None:
     copied verbatim (each arm writes into its own)."""
     seed = ensure(kind)
     _CREATED.add(ARM_DB)
-    _bank.create(ARM_DB, schema=kind != "noschema")
+    _create(ARM_DB, schema=kind != "noschema")
     if kind == "noschema":
         return
     with _bank.connect(seed, autocommit=True) as source:
@@ -140,6 +155,21 @@ def fresh_copy(kind: str) -> None:
         marks = ", ".join(["%s"] * len(columns))
         for row in rows:
             target.execute(f"INSERT INTO principals ({', '.join(columns)}) VALUES ({marks})", row)
+        # The clock witness (test instrument, after the seed rows): a BEFORE
+        # trigger notes the database clock as each arm's write reaches the
+        # row, so the rule can check a written time against that moment
+        # instead of the arm's whole run window. The CLIs never read it.
+        _guarded(target)
+        target.execute(f"CREATE TABLE {WITNESS} (principal text, at double precision)")
+        target.execute(
+            f"CREATE FUNCTION {WITNESS}_note() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN "
+            f"INSERT INTO {WITNESS} VALUES (NEW.principal, "
+            "EXTRACT(EPOCH FROM clock_timestamp())::double precision); RETURN NEW; END$$")
+        target.execute(f"CREATE TRIGGER {WITNESS}_note BEFORE INSERT OR UPDATE ON principals "
+                       f"FOR EACH ROW EXECUTE FUNCTION {WITNESS}_note()")
+
+
+WITNESS = "pl_cf_clock"
 
 
 def _principals(dump: dict) -> list[dict]:
@@ -240,6 +270,14 @@ def env(dsn_kind: str | None = "arm", **extra) -> dict:
     return out
 
 
+def refused_login_url() -> str:
+    """The test login's own server and database, a wrong password: the
+    server refuses the login and nothing else is touched."""
+    good = _bank.url(ARM_DB)
+    user = good.split("://", 1)[1].split(":", 1)[0]
+    return f"postgresql://{user}:not-the-password@{good.rsplit('@', 1)[1]}"
+
+
 # ── named rules ─────────────────────────────────────────────────────────────
 
 _CODE = re.compile(rb"\b([0-9A-HJKMNP-TV-Z]{4})-([0-9A-HJKMNP-TV-Z]{4})-([0-9A-HJKMNP-TV-Z]{4})\b")
@@ -249,21 +287,36 @@ def _when(epoch) -> str:
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(epoch)) if epoch else "-"
 
 
+# How far a written clock may precede the witness trigger's own reading of
+# the same statement (the trigger runs right after the row's expressions).
+SLACK = 0.05
+
+
 @normalize.rule("invite-written")
 def invite_written(obs: dict) -> None:
-    """A row this arm wrote. Each clock column that differs from the seed is
-    replaced only when it lies inside the arm's own run window (``<clock>``)
-    or that window plus the case's code lifetime (``<clock+ttl>``). A
-    changed ``code_hash`` is replaced only when it is the SHA-256 of the
-    canonical form of the one code this arm printed; then that printed code
-    becomes ``<code>``, and the printed expiry (JSON ``expires_at``, or the
-    text line's ``(YYYY-MM-DD HH:MM UTC)``) becomes ``<expires>`` only when
-    it equals the stored ``code_expires_at`` of that row."""
+    """A row this arm wrote, checked against the clock witness: the
+    database clock a BEFORE trigger read as that write reached the row
+    (``pl_cf_clock``, itself inside the arm's run window). A changed
+    ``created_at`` / ``revoked_at`` becomes ``<clock>`` only when it lies in
+    ``(at - SLACK, at]``; a changed ``code_expires_at`` becomes
+    ``<clock+ttl>`` only when ``expires - ttl`` does, so a code lifetime
+    shortened by any noticeable amount stays visible. A changed
+    ``code_hash`` becomes ``<printed-code-hash>`` only when it is the
+    SHA-256 of the one code this arm printed; that code becomes ``<code>``,
+    and the printed expiry becomes ``<expires>`` only when it is spelled
+    exactly as the oracle spells the stored value (JSON: ``repr`` of the
+    float; text: ``(%Y-%m-%d %H:%M UTC)`` of its ``gmtime``). The witness
+    table is then dropped from the observation."""
     db = obs.get("db")
     if not isinstance(db, dict):
         return
     start, end = obs["window"]
     ttl = obs.get("ttl") or 0
+    witness: dict[str, float] = {}
+    for text in db["tables"].pop(WITNESS, []):
+        note = json.loads(text)
+        if start - 1 <= note["at"] <= end + 1:
+            witness[note["principal"]] = max(note["at"], witness.get(note["principal"], 0))
     seed = {row["principal"]: row for row in obs.get("seed_rows", [])}
     stdout = base64.b64decode(obs["stdout"])
     codes = {m.group(0) for m in _CODE.finditer(stdout)}
@@ -271,31 +324,50 @@ def invite_written(obs: dict) -> None:
     printed_hash = (hashlib.sha256(printed.replace(b"-", b"")).hexdigest()
                     if printed else None)
     rows = _principals(db)
-    expiry = None
     for row in rows:
         before = seed.get(row["principal"], {})
-        for column in ("created_at", "code_expires_at", "paired_at", "revoked_at"):
+        at = witness.get(row["principal"])
+        expiry = None
+        for column in ("created_at", "code_expires_at", "revoked_at"):
             value = row.get(column)
-            if value is None or before.get(column) == value:
+            if value is None or before.get(column) == value or at is None:
                 continue
-            if start - 1 <= value <= end + 1:
-                row[column] = "<clock>"
-            elif ttl and start + ttl - 1 <= value <= end + ttl + 1:
-                if column == "code_expires_at":
+            if column == "code_expires_at":
+                if ttl and at - SLACK < value - ttl <= at:
                     expiry = value
-                row[column] = "<clock+ttl>"
+                    row[column] = "<clock+ttl>"
+            elif at - SLACK < value <= at:
+                row[column] = "<clock>"
         if row.get("code_hash") and row["code_hash"] != before.get("code_hash") \
                 and row["code_hash"] == printed_hash:
             row["code_hash"] = "<printed-code-hash>"
-            if expiry is not None and row["code_expires_at"] == "<clock+ttl>":
-                text = stdout.replace(printed, b"<code>")
-                when = f"({_when(expiry)})".encode()
-                text = re.sub(rb'("expires_at": )([-0-9.e+]+)',
-                              lambda m: m.group(1) + b'"<expires>"'
-                              if float(m.group(2)) == expiry else m.group(0), text)
-                text = text.replace(when, b"(<expires>)")
-                obs["stdout"] = base64.b64encode(text).decode()
+            text = stdout.replace(printed, b"<code>")
+            if expiry is not None:
+                text = text.replace(b'"expires_at": ' + repr(expiry).encode() + b",",
+                                    b'"expires_at": "<expires>",')
+                text = text.replace(f"({_when(expiry)})".encode(), b"(<expires>)")
+            obs["stdout"] = base64.b64encode(text).decode()
     db["tables"]["principals"] = sorted(json.dumps(row, sort_keys=True) for row in rows)
+
+
+_RECURSION = re.compile(rb"\ATraceback \(most recent call last\):\r?\n.*"
+                        rb"\nRecursionError: maximum recursion depth exceeded[^\r\n]*\r?\n\Z",
+                        re.DOTALL)
+
+
+@normalize.rule("invite-recursion-traceback")
+def invite_recursion_traceback(obs: dict) -> None:
+    """Declared: a ``/health`` nested past CPython's recursion limit kills
+    the oracle with an uncaught ``RecursionError`` (exit 1, a traceback
+    naming its own source files); the candidate prints its deferral line,
+    exit 1. Only that traceback with exit 1 maps; the request both sent and
+    the unchanged bank stay compared."""
+    if obs.get("arm") != "python":
+        return
+    stderr = base64.b64decode(obs["stderr"])
+    if obs["exit"] == 1 and not base64.b64decode(obs["stdout"]) and _RECURSION.match(stderr):
+        native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
+        obs["stderr"] = base64.b64encode(native.encode()).decode()
 
 
 @normalize.rule("invite-deferral")
@@ -428,6 +500,34 @@ def cases() -> list[core.Case]:
     add(read_case("no-principals-table", "noschema",
                   ["laptop", "--port", str(port), "--url", "u"], daemon=_daemon(port, health())))
 
+    # /health values only CPython's reader holds: lone surrogates, nesting
+    # up to its measured recursion limit, integers past 4300 digits.
+    def nested(depth: int, **over) -> bytes:
+        fields = {k: v for k, v in health(**over).items() if k != "auth"}
+        return json.dumps(fields)[:-1].encode() + b', "auth": ' + \
+            b"[" * depth + b"]" * depth + b"}"
+
+    for case_id, payload, json_mode, rules in (
+            ("health-surrogate-schema", health(schema="\ud800x"), False, ()),
+            ("health-surrogate-schema-json", health(schema="\ud800x"), True, ()),
+            ("health-surrogate-bank", health(bank="b\udc00"), False, ()),
+            ("health-surrogate-bank-json", health(bank="b\udc00"), True, ()),
+            ("health-surrogate-in-list-json", health(schema=["\ud800", {"\udc00": 1}]), True, ()),
+            # 984 nested in the object: 985 containers, the invite limit.
+            ("health-nested-at-limit", nested(984), False, ()),
+            ("health-nested-at-limit-json", nested(984), True, ()),
+            ("health-nested-past-limit", nested(985), False, ("invite-recursion-traceback",)),
+            ("health-int-past-limit", json.dumps(health())[:-1].encode()
+             + b', "x": 1' + b"0" * 4300 + b"}", False, ())):
+        port = free_port()
+        argv = ["laptop", "--port", str(port), "--url", "u"] + (["--json"] if json_mode else [])
+        add(read_case(case_id, "states", argv, daemon=_daemon(port, payload), rules=rules))
+
+    # `target = args.name or args.revoke`: an empty --revoke is a target.
+    add(read_case("usage-empty-revoke-with-list", "states", ["--list", "--revoke", ""]))
+    add(read_case("usage-empty-name-and-revoke-json", "states",
+                  ["", "--list", "--revoke", "", "--json"]))
+
     # List.
     add(read_case("list", "states", ["--list"]))
     add(read_case("list-json", "states", ["--list", "--json"]))
@@ -469,6 +569,8 @@ def cases() -> list[core.Case]:
     inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
     inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
     inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
+    inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
+             payload=json.dumps(health())[:-1].encode() + b', "x": -' + b"9" * 4300 + b"}")
     port = free_port()
     add(write_case("invite-env-port", "states", ["laptop", "--url", "u"],
                    extra_env={"PSEUDOLIFE_MCP_PORT": str(port)},
@@ -491,6 +593,10 @@ def cases() -> list[core.Case]:
 
     deferral("defer-no-dsn", ["laptop", "--url", "u"],
              extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": None})
+    # The oracle asks /health first, then fails to log in (exit 1); the
+    # candidate opens the session first, so it defers before any request.
+    deferral("defer-refused-login", ["laptop", "--url", "u"],
+             extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": refused_login_url()})
     deferral("defer-list-no-dsn", ["--list"], extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": ""})
     tailscale = "tailscale.exe" if core.WINDOWS else "tailscale"
     deferral("defer-tailscale-present", ["laptop"],
@@ -512,6 +618,12 @@ def cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    # A code lifetime 0.6 s short: inside the arm's run window, outside the
+    # clock witness's slack.
+    Mutant("invite-ttl-shortened", "invite", "shim/src/cli/pairing/invite_db.rs",
+           "VALUES ($1, $2, $3, $4, {NOW} + $5, {NOW})",
+           "VALUES ($1, $2, $3, $4, {NOW} + $5 - 0.6, {NOW})",
+           cases=("invite-new", "invite-new-json")),
     Mutant("invite-revoke-dropped", "invite", "shim/src/cli/pairing/invite_db.rs",
            "SET revoked_at = COALESCE(revoked_at, {NOW}), ",
            "SET revoked_at = revoked_at, ", cases=("revoke", "revoke-json")),

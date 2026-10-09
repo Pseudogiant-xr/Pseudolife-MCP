@@ -31,6 +31,7 @@ most once, a value as the next argument.
 | `--read-code`: one line from piped stdin (universal newlines) | `read_code_line` 202-206 |
 | Target: `--token-file` as `abspath(expanduser())`, else `<home>/.pseudolife-mcp/pairing-<8 hex>.token`; an existing file or link refused before any request (`... already exists; pairing creates a token file but never replaces one. Nothing was changed`, exit 4) | `redeem` 216-222, `default_token_file` 156-157, `runtimes.home` |
 | `/health`: no proxy, no redirect followed (a 3xx body still read), 64 KiB, JSON object with `status == "ok"`, else refused exit 4; `auth is True`, else refused naming `json.dumps(auth)` | `probe_health` 112-125, `redeem` 224-232 |
+| Both answers read over `json.loads`'s whole domain: a lone surrogate kept (`json.dumps` writes `\udXXX`; never a principal name, never printable), an integer past 4300 digits a `ValueError` (not JSON), nesting up to the measured recursion limit (987 containers on both pair paths, CPython 3.11.9 through this CLI); a 2xx answer nested past it is no answer (outcome unknown), a refusal's body past it no payload | `_json` 105-109, `post_pair` 135-141 |
 | Token: `secrets.token_urlsafe(32)` written owner-only before any POST: exclusive create (`O_EXCL`, `O_NOFOLLOW`), owner-only DACL (`O:<user>D:P(A;;FA;;;OW)`) or mode 0600 before a byte, the oracle's validation, re-read check, removed on failure; refusals `<Class> while writing <path>; ...`, exit 4 | `redeem` 234-243, `client_config.write_token_file` 184-230, `credentials._secure_windows_file` |
 | `POST /api/pair`: body `{"code": "<canonical>", "token_sha256": "<hex>"}` (`json.dumps` defaults), `Content-Type: application/json`, no `Origin`, no `Authorization`, no proxy, no redirect, 10 s | `post_pair` 128-141, `redeem` 244 |
 | Outcomes: 200 + object -> paired; after an unknown attempt any 3xx/4xx -> exit 5, file kept; 400 refused; 429 `rate_limited` and its text; 401/404/405 the old-daemon text; other 3xx/4xx refused (`HTTP n`); a 5xx, a non-200 2xx, or a 200 without a JSON object -> unknown, retried after 1, 2, 4 s with the same body; four unknowns -> exit 5, file kept; every refusal removes the file | `redeem` 257-286 |
@@ -44,7 +45,9 @@ most once, a value as the next argument.
 - Request headers other than the content type and the absence of `Origin`
   / `Authorization` (User-Agent, Accept, Connection, Host spelling).
 - The token's and the pairing name's random values (normalized by the
-  validated `pair-token` rule).
+  validated `pair-token` rule: the stand-in daemon checks, while each POST
+  is in flight, that one of the arm's token files hashes to the posted
+  digest; the rule tokenizes the digest only then).
 - urllib's per-socket-operation timeouts versus the native per-request ones.
 
 ## Deferred before any effect
@@ -58,17 +61,30 @@ most once, a value as the next argument.
   `--opt=value`, abbreviations, a `--token-file` value starting with `-`.
 - A home (`USERPROFILE`, else `HOME`) that pathlib would respell, or none;
   a target whose existence check pathlib would raise on; a non-Unicode path.
-- `/health` JSON this reader cannot hold.
+
+The token and the pairing name are drawn before the first request, so no
+random-source failure can defer after it.
 
 ## Declared divergences
+
+Two oracle crashes after a request (each an uncaught exception: exit 1, a
+traceback naming the oracle's own source files). The candidate leaves the
+same state (requests, files) and exits 1 with its deferral line; rules
+`pair-recursion-traceback` / `pair-cleanup-traceback` map only that
+traceback with exit 1:
+
+- a `/health` nested past the recursion limit (`_json` sits outside the
+  probe's `try`; limit measured on CPython 3.11.9);
+- a refusal whose `target.unlink(missing_ok=True)` raises anything but a
+  missing file (harness case `refusal-cleanup-fails`, Windows: the file held
+  open without delete sharing). The token file stays, as in Python.
+
+Others:
 
 - Windows moves the default file by hard link then unlink (the POSIX
   oracle's own way) where the oracle renames without replace; on a volume
   without hard links the native move refuses (kept-name warning, exit 0)
   where Python renames.
-- A redemption answer nested deeper than 100 levels reads as no payload
-  (outcome unknown). Python parses it up to its recursion limit (~1000
-  levels) and treats deeper nesting as an unknown outcome too.
 - The token check's redirect following keeps reqwest's rule (the bearer is
   dropped on a cross-origin redirect); urllib 3.11 keeps it.
 - Windows registry proxy settings: the native token check never uses a

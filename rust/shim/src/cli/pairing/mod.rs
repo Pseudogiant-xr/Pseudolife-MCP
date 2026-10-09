@@ -13,6 +13,7 @@ mod invite_db;
 mod net;
 mod pair;
 mod pyjson;
+mod sqlstate;
 mod token_file;
 mod url;
 
@@ -33,18 +34,28 @@ pub(super) fn run(mode: &str) -> Option<ExitCode> {
         .into_iter()
         .map(|argument| argument.into_string().ok())
         .collect::<Option<Vec<String>>>()?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    let mode = mode.to_owned();
+    // A daemon answer may nest up to CPython's recursion limit (~1000
+    // levels); cloning, comparing and dropping such a value recurses that
+    // deep, past a debug build's 1 MiB main-thread stack.
+    let worker = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            let code = runtime.block_on(async {
+                match mode.as_str() {
+                    "invite" => invite::run(&arguments).await,
+                    "pair" => pair::run(&arguments).await,
+                    _ => Err(Defer),
+                }
+            });
+            code.ok()
+        })
         .ok()?;
-    let code = runtime.block_on(async {
-        match mode {
-            "invite" => invite::run(&arguments).await,
-            "pair" => pair::run(&arguments).await,
-            _ => Err(Defer),
-        }
-    });
-    code.ok().map(ExitCode::from)
+    worker.join().ok().flatten().map(ExitCode::from)
 }
 
 /// `print(text)`: stdout as Python's text stream writes it. A stdout that
