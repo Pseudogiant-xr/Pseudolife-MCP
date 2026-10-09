@@ -30,7 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mcp_wire import ACCEPT, PROTOCOL, Session, header, request, sse_data  # noqa: E402
 
 TOK = {"default": "tok-default-0001", "alice": "tok-alice-0001", "bob": "tok-bob-0001",
-       "carol": "tok-carol-0001"}
+       "carol": "tok-carol-0001",
+       # Stored principals seeded by mcp_run.py: dave minimal, erin no tier, frank full.
+       "dave": "tok-dave-0001", "erin": "tok-erin-0001", "frank": "tok-frank-0001"}
 JSON_HDRS = [("Content-Type", "application/json"), ("Accept", ACCEPT)]
 # Free text after these prefixes (spec M-free): pydantic and jiter wording.
 FREE_PREFIXES = ("Parse error: ", "Validation error: ")
@@ -176,6 +178,20 @@ def toolset(port):
                  {"action": "status", "verbose": True}, {"action": 3}, {"action": None}]:
         out.append(norm(s.tool("memory_toolset", args)))
     s.close()
+    return out
+
+
+def stored(port):
+    """A stored principal's row tier sits after the tier map, for its own bearer only."""
+    out = []
+    for who, extra in [("dave", {}), ("erin", {}), ("frank", {}),
+                       ("default", {"X-PL-Writer": "dave"}), ("default", {"X-PL-Writer": "frank"})]:
+        s = Session(port, TOK[who], extra)
+        out.append(norm(s.call("tools/list", {})))
+        for args in [{"action": "status"}, {"action": "collapse"}, {"action": "expand"},
+                     {"action": "collapse"}, {"action": "status"}]:
+            out.append(norm(s.tool("memory_toolset", args)))
+        s.close()
     return out
 
 
@@ -328,7 +344,7 @@ def open_lists(port):
     return out
 
 
-CASES = [handshake, lists, protocol_versions, methods, calls, toolset, list_changed_stream,
+CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
          transport, paths]
 if "--tokenless" in sys.argv:
     CASES = [rebinding, open_lists]

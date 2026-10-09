@@ -80,3 +80,52 @@ The spike runs the ONNX export that the prerequisite receipt verified
 - JSON key order and whitespace.
 - The `version` value and the contents of the `memory` object.
 - `access_count` values: Python increments them on every served hit, while the spike is read-only.
+
+## MCP surface (W2-G)
+
+Added 2026-10-09 for slice W2-G. Python references are to
+`pseudolife_memory/` at master `28c1f23c`; SDK references are to the pinned
+`mcp` 2.1.1 (`mcp/server/streamable_http.py`, `streamable_http_manager.py`,
+`transport_security.py`). The canonical producers are the Python and Rust
+shims and `doctor`, which all speak the legacy handshake: POST `initialize`
+(protocol `2025-11-25`), POST `notifications/initialized`, POST requests with
+`Mcp-Session-Id` and `MCP-Protocol-Version`, then DELETE (recorded from the
+SDK client the Python shim uses). Code: `src/mcp/`. Unlike the spike's
+routes, the JSON-RPC bodies below are compared byte for byte, key order
+included; the "Free" list at the end of this section replaces the one above
+for the MCP surface.
+
+### Mount and transport
+
+| # | Exact item | Source |
+|---|---|---|
+| M1 | `/mcp` and `/mcp/*` are served after the bearer gate (503/401 as for the catch-all). `/mcp/` answers 307 with `Location: http://<Host>/mcp[?query]`, no body; any other `/mcp/...` path answers 404 `text/plain; charset=utf-8` `Not Found`. | `web/api.py:858-886`; Starlette `redirect_slashes` |
+| M2 | An `MCP-Protocol-Version` header outside `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` routes to the 2026-07-28 era (declared divergence: only its no-envelope refusal is served). | `streamable_http_manager.py:_handle_request` |
+| M3 | Session lookup first: a known id goes to its transport; an id the process terminated answers 404 `Not Found: Session has been terminated` (with the id header) after the security check; an unknown id answers 404 `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Session not found"}}`, no id header. No id: a new transport with a fresh `uuid4().hex` id, reported in `mcp-session-id` even on refusals. | `streamable_http_manager.py:_handle_stateful_request` |
+| M4 | Security, per request: POST needs a Content-Type whose lowercase starts with `application/json`, else 400 plain `Invalid Content-Type header` (no content type). With no token configured, Host must start with `127.0.0.1:`, `localhost:` or `[::1]:` (421 `Invalid Host header`), and a non-empty Origin must start with `http://127.0.0.1:`, `http://localhost:` or `http://[::1]:` (403 `Invalid Origin header`). With a token, no Host or Origin check. | `mcp_server.py:125-160`; `transport_security.py` |
+| M5 | POST order: Accept must cover both `application/json` and `text/event-stream` (`*/*`, `application/*`, `text/*` count; 406), then a Content-Type part equal to `application/json` (415), then JSON (400, -32700 `Parse error: ...`), then a JSON-RPC message (400, -32602 `Validation error: ...`), then, for anything but `initialize`, a session id (400 `Bad Request: Missing session ID`). Errors are `{"jsonrpc":"2.0","id":null,"error":{"code":C,"message":M}}`, `application/json`, with the id header. | `streamable_http.py:_handle_post_request`, `_create_error_response` |
+| M6 | Notifications and client responses answer 202, empty body, `application/json`, with the id header. Requests answer 200 SSE with `cache-control: no-cache, no-transform`, `connection: keep-alive`, `content-type: text/event-stream`, `mcp-session-id`, `x-accel-buffering: no`, and one `event: message\r\ndata: <json>\r\n\r\n` event; then the stream ends. | same; sse-starlette |
+| M7 | GET needs Accept covering `text/event-stream` (406 `Not Acceptable: Client must accept text/event-stream`), a session id (400), and no open standalone stream on the session (409 `Conflict: Only one SSE stream is allowed per session`); then an open SSE stream carrying server notifications. DELETE needs a session id (400), terminates the session, and answers 200, empty, `application/json`, with the id header. Other methods: 405 `Method Not Allowed` with `allow: GET, POST, DELETE`. | `streamable_http.py:_handle_get_request`, `_handle_delete_request`, `_handle_unsupported_request` |
+| M8 | `initialize` needs `protocolVersion` (string), `capabilities` (object) and `clientInfo` with string `name` and `version`, else -32602 `Invalid request parameters` with `data: ""`. It echoes a handshake version and answers `2025-11-25` for any other; re-initializing a live session is allowed. The result is exactly `{"capabilities":{"experimental":{},"prompts":{"listChanged":false},"resources":{"listChanged":false,"subscribe":false},"tools":{"listChanged":true}},"instructions":I,"protocolVersion":V,"serverInfo":{"name":"Pseudolife Memory","version":""}}`, `I` being `_MCP_INSTRUCTIONS`. `ping` gives `{}`; `prompts/list`, `resources/list`, `resources/templates/list` give empty lists; unknown methods (including `subscriptions/listen` in this era) give -32601 `Method not found` with `data` set to the method. Requests need no prior `notifications/initialized`. | `mcp_server.py:122, 163-166, 3147-3159`; SDK lowlevel server |
+
+### Tools, tiers and identity
+
+| # | Exact item | Source |
+|---|---|---|
+| M9 | The catalogue is 38 tools in registration order; each tool object (`annotations`, `description`, `inputSchema`, `name`, `outputSchema`) is byte-equal to Python's serialization. `src/mcp/tools.jsonl` holds them as recorded by `harness/mcp_catalogue.py`, one object per line. | `mcp_server.py:_tool`, `_bind_arguments`, `_annotations` |
+| M10 | Tiers are cumulative: minimal 10, core 24, full 38 (`src/mcp/tiers.json`). `tools/list`, with any params, returns `{"tools":[...]}` for the caller's tier, with no `nextCursor`. | `mcp_server.py:208-213, 3133-3137` |
+| M11 | The default tier is `PSEUDOLIFE_MCP_TOOLSET`, stripped and lowercased; unset or unknown means `full`. `PSEUDOLIFE_MCP_TIER_MAP` is `writer:tier,...`: each part stripped, split at the first `:`, both sides stripped and lowercased; malformed parts are skipped and a later part wins. | `toolset_tiers.py:36-65` |
+| M12 | The tier key is the bearer's principal when it is not `default`; for `default`, the `X-PL-Writer` header (first value, latin-1, empty means unset), else `PSEUDOLIFE_WRITER_ID`, else none (the shared bucket). Resolution: the key's override (stripped, lowercased) → the tier map → the stored principal's tier (only when the key is the request's own named principal) → the default. | `mcp_server.py:3001-3037`; `toolset_tiers.py:115-130` |
+| M13 | `memory_toolset(action)`: `status` gives `{"current","default","ladder","adds"}` (`adds` text exact). `expand` steps up one rung (floor minimal); `collapse` steps down to the key's floor (tier map → stored tier → default). No move gives `{"changed":false,"current":C,"reason":R}` with `R` `already at full` or `already at your floor (F)`. A move stores the override for 12 h, answers `{"changed":true,"current","previous","visible_tools_added","visible_tools_removed","list_changed_sent":true}` (names sorted), and pushes `{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}` to the session's open GET stream. | `mcp_server.py:1419-1497`; `toolset_tiers.py:67-112` |
+| M14 | `tools/call` with non-object params, no string `name`, or non-object `arguments` gives -32602 `Invalid request parameters`, `data: ""`; missing or null `arguments` is `{}`. A name not in the catalogue gives `{"content":[{"text":"Unknown tool: N","type":"text"}],"isError":true}`. Hidden tools stay callable. | SDK `call_tool`; `toolset_tiers.py` docstring |
+| M15 | A dict result is `{"content":[{"text":T,"type":"text"}],"isError":false,"structuredContent":D}`, `T` being the dict indented by 2. A refusal has the same shape with `isError: true` and the `_error_payload` object: the code from a `code` attribute or a `code` / `code: detail` message, prose as `invalid_argument`, a missing file as `file_not_found`, anything else as `internal_error` (plus `mutation: "unknown"` off the read-only tools); `coordination_unavailable` adds `mutation: "unknown"` off the read-only tools. | `mcp_server.py:240-302, 309-314` |
+| M16 | memory_toolset's argument binding: an unknown name gives `unknown_parameter`, one sentence per name (`unknown parameter 'K' for memory_toolset; did you mean 'G'?` from difflib at cutoff 0.6, else ending `.`), the last closed by ` Accepted: action`, with `param` the first name and `accepted: ["action"]`. A missing `action` gives `action: Field required`; any other value gives `action: Input should be 'expand', 'collapse' or 'status'` (both `invalid_argument`, `param: "action"`). | `mcp_server.py:358-432` |
+| M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
+
+### Free (MCP surface)
+
+- The text after `Parse error: ` and `Validation error: `.
+- SSE keep-alive comments (`: ping - <time>` every 15 s) and their timestamps.
+- The value of `mcp-session-id` (a fresh uuid4 hex); only its presence is compared.
+- Header order, `date`, `server`, `content-length` and `transfer-encoding`.
+- Key order and float text inside a result's `content[0].text`, which repeats `structuredContent`.

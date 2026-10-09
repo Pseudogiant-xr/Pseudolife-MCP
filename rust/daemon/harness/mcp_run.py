@@ -24,6 +24,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 
+sys.path.insert(0, str(daemons.REPO))
+
 DISPOSABLE = re.compile(r"pl_cf_w2g_[a-z0-9_]{1,40}")
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
@@ -64,6 +66,23 @@ def fresh(name):
     return f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{name}"
 
 
+# Stored principals, seeded on both banks through Python's own write path
+# (principal_store.create_invite, then redeem): name -> (token, tier).
+STORED = {"dave": ("tok-dave-0001", "minimal"), "erin": ("tok-erin-0001", None),
+          "frank": ("tok-frank-0001", "full")}
+
+
+def seed_stored(dsn):
+    import psycopg
+    from pseudolife_memory.principal_store import create_invite, redeem
+    from pseudolife_memory.principals import secret_sha256
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        for name, (token, tier) in STORED.items():
+            invite = create_invite(conn, name, tier=tier, ttl_seconds=600, replace=False)
+            row = redeem(dsn, secret_sha256(invite["code"]), secret_sha256(token))
+            assert row is not None and row.principal == name, (name, row)
+
+
 def drop(name):
     assert DISPOSABLE.fullmatch(name), name
     admin(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
@@ -85,8 +104,9 @@ def main():
         py_home = daemons.make_home(root, "py", None)
         rs_home = daemons.make_home(root, "rs", None)
         py_port, rs_port = daemons.free_port(), daemons.free_port()
-        py_env = daemons.base_env(py_home, dict(env, PSEUDOLIFE_MCP_DATABASE_URL=fresh("pl_cf_w2g_py")))
-        rs_extra = dict(env, PSEUDOLIFE_MCP_DATABASE_URL=fresh("pl_cf_w2g_rs"))
+        py_dsn, rs_dsn = fresh("pl_cf_w2g_py"), fresh("pl_cf_w2g_rs")
+        py_env = daemons.base_env(py_home, dict(env, PSEUDOLIFE_MCP_DATABASE_URL=py_dsn))
+        rs_extra = dict(env, PSEUDOLIFE_MCP_DATABASE_URL=rs_dsn)
         if mutant:
             rs_extra["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         rs_env = daemons.base_env(rs_home, rs_extra)
@@ -94,6 +114,14 @@ def main():
         started.append(py)
         rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env).start(wait_s=60)
         started.append(rs)
+        if "--tokenless" not in args:
+            # Both daemons created the principals table at start; seed, then
+            # outwait both 10 s snapshot refreshes.
+            import time
+            time.sleep(3)
+            seed_stored(py_dsn)
+            seed_stored(rs_dsn)
+            time.sleep(13)
         if record:
             cmd = [sys.executable, str(HERE / "mcp_compare.py"), "record", str(py_port), record]
         else:
