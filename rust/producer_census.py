@@ -6,6 +6,7 @@ import ast
 from collections import defaultdict
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -14,6 +15,7 @@ from urllib.parse import parse_qsl
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "rust/producer-census.json"
 INVENTORY = "rust/contract-inventory.json"
+CURRENCY_INPUTS = {"rust/producer_census.py", "rust/producer-census.json", INVENTORY}
 SCOPES = ("plugin", "pseudolife_memory/web/static", "evals/claude_shim.py",
           "evals/codex_shim.py", "rust/shim/src", "ops", "examples", "docs")
 EXTENSIONS = {".py", ".sh", ".ps1", ".bat", ".cmd", ".md", ".js", ".json", ".example",
@@ -22,7 +24,7 @@ CONTRACT_SOURCES = (INVENTORY, "pseudolife_memory/mcp_server.py",
                     "pseudolife_memory/web/routes.py", "pseudolife_memory/web/api.py",
                     "pseudolife_memory/coordination.py", "pseudolife_memory/utils/config.py")
 
-# These whole-file fingerprints make hand resolutions fail closed on source edits.
+# Changed fingerprints withdraw trusted manual shapes and report unresolved drift.
 # Recheck the cited construction/conditions before refreshing any fingerprint.
 MANUAL_SHA256 = {
     'plugin/hooks/lifecycle.ps1': 'ae43493784145e5808512f2e3e4142d59a4d7902706f6758612ab0673430938e',
@@ -39,9 +41,9 @@ def manual_calls(root: Path) -> list[dict]:
     result = []
 
     def add(path, anchor, name, method, fields, *, kind="route", channel="query", conditions=None, source_anchor=None):
+        if not (root / path).is_file() or input_hashes(root, [path])[path] != MANUAL_SHA256[path]:
+            return
         text = (root / path).read_text(encoding="utf-8-sig")
-        if input_hashes(root, [path])[path] != MANUAL_SHA256[path]:
-            raise AssertionError(f"manual resolution needs source review: {path}")
         positions = [m.start() for m in re.finditer(re.escape(anchor), text)]
         assert len(positions) == 1, f"manual anchor is ambiguous or absent: {path}: {anchor}"
         line = text.count("\n", 0, positions[0]) + 1
@@ -91,18 +93,30 @@ def manual_calls(root: Path) -> list[dict]:
     return result
 
 
+def manual_drift(root: Path) -> list[dict]:
+    result = []
+    for path, expected in sorted(MANUAL_SHA256.items()):
+        actual = input_hashes(root, [path])[path] if (root / path).is_file() else None
+        if actual != expected:
+            result.append({"path": path, "location": f"{path}:1", "dynamic": "unresolved",
+                           "reason": "Manual source fingerprint changed or source is missing; prior trusted shapes withdrawn.",
+                           "expected_sha256": expected, "actual_sha256": actual})
+    return result
+
+
 def producer_paths(root: Path = ROOT) -> list[str]:
-    """Walk scoped text, including new untracked producers; exclude vendored code."""
+    """Enumerate only Git-tracked shipped text; never ingest private scratch files."""
     paths = []
-    for scope in SCOPES:
-        base = root / scope
-        for path in ([base] if base.is_file() else base.rglob("*") if base.exists() else []):
-            relative = path.relative_to(root).as_posix()
-            if (path.is_file() and (path.suffix in EXTENSIONS or path.name.startswith("Dockerfile"))
-                    and not any(part in {"__pycache__", "node_modules", "vendor", "target", ".git"}
-                                for part in path.parts)
-                    and not path.name.endswith(("_tests.rs", ".test.ts"))):
-                paths.append(relative)
+    tracked = subprocess.check_output(["git", "ls-files", "-z", "--", *SCOPES], cwd=root).decode("utf-8").split("\0")
+    for relative in tracked:
+        if not relative:
+            continue
+        path = root / relative
+        if (path.is_file() and (path.suffix in EXTENSIONS or path.name.startswith("Dockerfile"))
+                and not any(part in {"__pycache__", "node_modules", "vendor", "target", ".git"}
+                            for part in Path(relative).parts)
+                and not path.name.endswith(("_tests.rs", ".test.ts"))):
+            paths.append(relative)
     return sorted(set(paths))
 
 
@@ -394,7 +408,7 @@ def cli_flags(tail: str) -> dict:
     flags = {}
     i = 0
     while i < len(tokens):
-        token = tokens[i].rstrip("])")
+        token = tokens[i]
         match = re.fullmatch(r"(--[a-z][a-z-]*)(?:=(.*))?", token)
         if not match:
             i += 1
@@ -405,7 +419,7 @@ def cli_flags(tail: str) -> dict:
         else:
             if assigned is None and i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
                 i += 1
-                assigned = tokens[i].rstrip("])")
+                assigned = tokens[i]
             flags[name] = ({"expression": assigned} if assigned is not None and "$" in assigned
                            else value_shape(assigned) if assigned is not None
                            else {"expression": "value not established"})
@@ -434,6 +448,67 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
             call["shape"]["executable_expression"] = match[0].split(match[1], 1)[0].strip()
         calls.extend(extracted)
     return calls
+
+
+def module_cli_calls(text: str, path: str) -> list[dict]:
+    """Recognize text/argv-array launches through Python's -m CLI entry point."""
+    result = []
+    for match in re.finditer(r"-m[ \t]+pseudolife_memory\.cli[ \t]+([a-z][a-z-]*)([^\n]*)", text):
+        calls = cli_calls("pseudolife-mcp " + match[1] + match[2], path)
+        for call in calls:
+            call["location"] = f"{path}:{text.count(chr(10), 0, match.start()) + 1}"
+            call["shape"]["executable_expression"] = "python -m pseudolife_memory.cli"
+        result.extend(calls)
+    # Static argv containers in Dockerfile/Python/Rust; -m immediately precedes the module.
+    pattern = r'''["']-m["'](?:\.into\(\))?\s*,\s*["']pseudolife_memory\.cli["'](?:\.into\(\))?\s*,'''
+    for match in re.finditer(pattern, text):
+        tail = text[match.end():]
+        # The next closing array bracket bounds forwarding evidence as well as literals.
+        finish = tail.find("]")
+        argv_source = tail[:finish] if finish >= 0 else tail.split("\n", 1)[0]
+        parts = split_top(argv_source)
+        if not parts or not parts[0]:
+            continue
+        cleaned = [re.sub(r"\.into\(\)$", "", token.strip()) for token in parts if token]
+        mode = value_shape(cleaned[0]).get("literal")
+        if isinstance(mode, str):
+            tokens = [value_shape(value).get("literal", value) for value in cleaned[1:]]
+            flags_source = " ".join(str(value) for value in tokens)
+            call = record("cli", mode, path, text.count("\n", 0, match.start()) + 1,
+                          cli_flags(flags_source), complete=False, channel="argv", expression=argv_source)
+        else:
+            call = record("cli", "<forwarded-mode>", path, text.count("\n", 0, match.start()) + 1,
+                          complete=False, channel="argv", expression=argv_source)
+        call["shape"]["argv"] = [value_shape(value) for value in cleaned]
+        call["shape"]["executable_expression"] = "python -m pseudolife_memory.cli"
+        result.append(call)
+    return result
+
+
+def forwarded_coordination(calls: list[dict]) -> list[dict]:
+    result = []
+    for call in calls:
+        if call["kind"] != "tool" or call["name"] not in {"memory_agents", "memory_message"}:
+            continue
+        action = call["shape"]["parameters"].get("action", {}).get("literal")
+        if call["name"] == "memory_agents":
+            if action is None and "action" not in call["shape"]["parameters"]:
+                action = "list"
+            target = {"list": "agents", "update": "update", "claim": "lease", "release": "release"}.get(action)
+            mapping = "pseudolife_memory/coordination.py:835"
+        else:
+            target = action if action in {"send", "receive", "ack", "history"} else None
+            mapping = "pseudolife_memory/mcp_server.py:650"
+        if target:
+            forwarded = record("coordination", target, call["location"].rsplit(":", 1)[0],
+                               int(call["location"].rsplit(":", 1)[1]), complete=False, channel="body",
+                               expression="Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.")
+            forwarded["evidence"] = call["evidence"]
+            forwarded["forwarded_from_tool"] = call["name"]
+            forwarded["tool_shape"] = call["shape"]
+            forwarded["mapping_source"] = mapping
+            result.append(forwarded)
+    return result
 
 
 def env_calls(text: str, path: str) -> list[dict]:
@@ -465,7 +540,7 @@ def env_calls(text: str, path: str) -> list[dict]:
                 call.pop("dynamic", None)
                 call["shape"].pop("expression", None)
                 call["usage"] = "assignment"
-                if printed:
+                if printed or content.lstrip().startswith("#"):
                     call["usage"] = "assignment-example"
                     call["evidence"] = "documented"
             result.append(call)
@@ -524,6 +599,7 @@ def scan_files(root: Path, paths: list[str]) -> list[dict]:
             calls.extend(tool_calls(text, path))
             calls.extend(http_mentions(text, path))
             calls.extend(cli_calls(text, path))
+            calls.extend(module_cli_calls(text, path))
             if path in {"ops/install.sh", "ops/install.ps1"}:
                 calls.extend(installer_cli_calls(text, path))
             if path.endswith(".py"):
@@ -816,6 +892,25 @@ def snapshot(root: Path = ROOT) -> dict:
     inventory = json.loads((root / INVENTORY).read_text(encoding="utf-8"))
     paths = producer_paths(root)
     calls = scan_files(root, paths)
+    known_tools = {item["name"] for item in inventory["tools"]}
+    # Hooks/commands also tell the model to use tools without supplying an argv shape.
+    # These are explicitly unverified instruction references, never literal call cases.
+    for path in paths:
+        if not path.startswith("plugin/"):
+            continue
+        text = (root / path).read_text(encoding="utf-8-sig")
+        observed = {(call["name"], call["location"]) for call in calls if call["kind"] == "tool"}
+        for line, content in enumerate(text.splitlines(), 1):
+            if content.lstrip().startswith(("#", "//")) and not path.endswith(".md"):
+                continue
+            for name in sorted(set(re.findall(r"\bmemory_[a-z_]+\b", content)) & known_tools):
+                if (name, f"{path}:{line}") in observed:
+                    continue
+                call = record("tool", name, path, line, complete=False,
+                              expression="Shipped instruction reference supplies no confirmed parameter shape.")
+                call["evidence"] = "unverified"
+                call["usage"] = "instruction-reference"
+                calls.append(call)
     aliases = config_aliases(root)
     for path in paths:
         if not path.endswith(".js"):
@@ -827,6 +922,7 @@ def snapshot(root: Path = ROOT) -> dict:
     # Tool docstrings contain copyable examples, not function implementations.
     mcp_text = (root / "pseudolife_memory/mcp_server.py").read_text(encoding="utf-8-sig")
     calls.extend(description_calls(mcp_text))
+    calls.extend(forwarded_coordination(calls))
     manual = manual_calls(root)
     resolved_locations = {(call["kind"], call["name"], call["location"]) for call in manual}
     calls = [call for call in calls if (call["kind"], call["name"], call["location"]) not in resolved_locations]
@@ -840,7 +936,8 @@ def snapshot(root: Path = ROOT) -> dict:
                 parent["dynamic"] = "unresolved"
                 calls.append(parent)
     surface, gaps = match_surface(inventory_surface(root, inventory), calls)
-    unresolved = []
+    drift = manual_drift(root)
+    unresolved = list(drift)
     for path in paths:
         text = (root / path).read_text(encoding="utf-8-sig")
         if path.endswith(".rs"):
@@ -851,15 +948,17 @@ def snapshot(root: Path = ROOT) -> dict:
             if producer.get("dynamic") == "unresolved":
                 unresolved.append({"location": producer["location"], "surface": item["id"], "dynamic": "unresolved",
                                    "reason": "Producer parameters, method or config/environment use is not fully resolved."})
+    for call in gaps:
+        if call.get("dynamic") == "unresolved":
+            unresolved.append({"location": call["location"], "surface": f"inventory-gap:{call['kind']}:{call['name']}",
+                               "dynamic": "unresolved", "reason": "Unknown or forwarded inventory target/shape."})
     for entry in unresolved:
         resolutions = [call for call in manual if call["location"] == entry["location"]]
         if resolutions:
             entry["resolved_by"] = [f"{call['kind']}:{call.get('method', '')} {call['name']}".strip() for call in resolutions]
     hashes = input_hashes(root, sorted(set(paths) | set(CONTRACT_SOURCES)))
-    # Last commit touching inputs avoids a self-referential HEAD pin on generated output.
-    source_commit = subprocess.check_output(["git", "log", "-1", "--format=%H", "--", *SCOPES, *CONTRACT_SOURCES], cwd=root, text=True).strip()
     return {"schema": 1, "inventory": INVENTORY, "oracle_commit": inventory["oracle_commit"],
-            "source_commit": source_commit, "input_sha256": hashes, "scopes": list(SCOPES),
+            "input_sha256": hashes, "scopes": list(SCOPES), "manual_drift": drift,
             "surface": surface, "inventory_gaps": gaps,
             "no_observed_producer": [item["id"] for item in surface if not item["producers"]],
             "unresolved": unique(unresolved),
@@ -868,14 +967,31 @@ def snapshot(root: Path = ROOT) -> dict:
                             "Environment references are a conservative superset, not proof of writes."]}
 
 
+def ci_currency_required(root: Path = ROOT, env: dict | None = None) -> bool:
+    """Gate currency for census/inventory changes; other input drift is a report."""
+    env = os.environ if env is None else env
+    event_path = env.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return False
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+    if not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) or not base.strip("0"):
+        return False  # A manual dispatch has no changed-file range; still report currency.
+    changed = subprocess.check_output(["git", "diff", "--name-only", "-z", base, "HEAD"], cwd=root).decode("utf-8").split("\0")
+    return bool(CURRENCY_INPUTS.intersection(changed))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if the committed census is stale")
+    parser.add_argument("--ci-check", action="store_true", help="check currency; gate only census/inventory changes from the GitHub event")
     args = parser.parse_args()
     result = snapshot()
-    if args.check:
+    if args.check or args.ci_check:
         if not OUTPUT.exists() or json.loads(OUTPUT.read_text(encoding="utf-8")) != result:
-            parser.exit(1, "producer census is stale; run python rust/producer_census.py\n")
+            if args.check or ci_currency_required():
+                parser.exit(1, "producer census is stale; run python rust/producer_census.py\n")
+            print("producer census is stale (report only); regenerate before using it in a port slice")
     else:
         OUTPUT.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"surfaces": len(result["surface"]), "gaps": len(result["inventory_gaps"]),

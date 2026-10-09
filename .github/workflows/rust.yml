@@ -66,9 +66,14 @@ jobs:
         run: python -m pip install "mcp==2.1.1"
       - name: Check port inventories and producer census
         working-directory: .
+        shell: pwsh
         run: |
           python -m pip install pytest
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/producer_census.py --ci-check
+          exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .

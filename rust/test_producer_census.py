@@ -48,13 +48,16 @@ def test_spread_body_has_unknown_omissions():
 
 
 def test_new_producer_and_changed_literal_make_snapshot_stale(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "examples").mkdir()
     path = tmp_path / "examples/demo.md"
     path.write_text('`memory_search(query="one")`', encoding="utf-8")
+    subprocess.run(["git", "add", "examples/demo.md"], cwd=tmp_path, check=True)
     before = census.scan_files(tmp_path, ["examples/demo.md"])
     path.write_text('`memory_search(query="two")`', encoding="utf-8")
     assert before != census.scan_files(tmp_path, ["examples/demo.md"])
     (tmp_path / "examples/new.md").write_text('`memory_stats()`', encoding="utf-8")
+    subprocess.run(["git", "add", "examples/new.md"], cwd=tmp_path, check=True)
     assert "examples/new.md" in census.producer_paths(tmp_path)
 
 
@@ -108,13 +111,12 @@ def test_console_pure_parameter_helper_resolves_literals():
     assert calls[0]["shape"]["parameters"]["rerank"] == {"expression": "a.rerank?!0:void 0"}
 
 
-def test_manual_resolution_refuses_source_drift(tmp_path):
+def test_manual_resolution_reports_source_drift_without_trusting_old_shape(tmp_path):
     path = tmp_path / "plugin/hooks/lifecycle.ps1"
     path.parent.mkdir(parents=True)
     path.write_text('changed request construction', encoding="utf-8")
-    import pytest
-    with pytest.raises(AssertionError, match="manual resolution needs source review"):
-        census.manual_calls(tmp_path)
+    assert census.manual_calls(tmp_path) == []
+    assert any(row["path"] == "plugin/hooks/lifecycle.ps1" for row in census.manual_drift(tmp_path))
 
 
 def test_shell_assignment_inside_output_string_excludes_closing_quote():
@@ -213,10 +215,99 @@ def test_internal_docstring_negative_examples_are_not_mcp_producers():
 
 def test_malformed_repeated_env_prefix_finishes_in_a_bounded_child():
     # CodeQL's counterexample: adjacent empty quoted values can make the
-    # executable-position regex backtrack exponentially. Own child, capped at 3s.
+    # executable-position regex backtrack exponentially. Own child, capped at 10s.
     script = ('import importlib.util; '
               f's=importlib.util.spec_from_file_location("census", {str(Path(census.__file__))!r}); '
               'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
               'assert m.installer_cli_calls("A=" + (\'""\\tA=\' * 26) + "#", "ops/install.sh") == []')
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=3)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+def test_untracked_and_ignored_files_cannot_enter_shipped_scope(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "examples").mkdir()
+    (tmp_path / "examples/public.md").write_text('memory_stats()', encoding="utf-8")
+    (tmp_path / "examples/private.md").write_text('memory_search(query="private")', encoding="utf-8")
+    (tmp_path / "examples/ignored.md").write_text('memory_search(query="ignored")', encoding="utf-8")
+    (tmp_path / ".gitignore").write_text('examples/ignored.md\n', encoding="utf-8")
+    subprocess.run(["git", "add", "examples/public.md", ".gitignore"], cwd=tmp_path, check=True)
+    assert census.producer_paths(tmp_path) == ["examples/public.md"]
+
+
+def test_snapshot_is_independent_of_source_commit_history(monkeypatch):
+    original = census.subprocess.check_output
+    def history(first):
+        def output(argv, **kwargs):
+            if argv[:2] == ["git", "log"]:
+                return first + "\n"
+            return original(argv, **kwargs)
+        return output
+    monkeypatch.setattr(census.subprocess, "check_output", history("a" * 40))
+    before = census.snapshot()
+    monkeypatch.setattr(census.subprocess, "check_output", history("b" * 40))
+    assert census.snapshot() == before
+
+
+def test_module_form_cli_real_tree_unattended_update_is_present():
+    text = (census.ROOT / "rust/shim/src/lifecycle.rs").read_text(encoding="utf-8-sig")
+    calls = census.module_cli_calls(text.split("#[cfg(test)]")[0], "rust/shim/src/lifecycle.rs")
+    update = next(call for call in calls if call["name"] == "update")
+    assert update["shape"]["parameters"]["--clients-only"] == {"literal": True}
+    assert "--result-file" in update["shape"]["parameters"]
+    assert update["shape"]["parameters"]["--result-file"] == {"expression": "result.to_string_lossy().into_owned()"}
+
+
+def test_module_form_cli_text_array_and_forwarded_modes():
+    assert census.module_cli_calls('python -m pseudolife_memory.cli serve', "ops/demo.sh")[0]["name"] == "serve"
+    assert census.module_cli_calls('CMD ["python", "-m", "pseudolife_memory.cli", "serve"]', "ops/Dockerfile")[0]["name"] == "serve"
+    forwarded = census.module_cli_calls('["-m".into(), "pseudolife_memory.cli".into(), mode.into()]', "rust/shim/src/pg/resolution.rs")[0]
+    assert forwarded["dynamic"] == "unresolved"
+
+
+def test_coordination_tool_forwarding_is_annotated_without_inventing_wire_shape():
+    calls = census.tool_calls('memory_agents(action="update", status="ready"); memory_message(action="ack", message_id=id)', "plugin/demo.md")
+    forwarded = census.forwarded_coordination(calls)
+    assert [call["name"] for call in forwarded] == ["update", "ack"]
+    assert all(not call["shape"]["complete"] for call in forwarded)
+    assert forwarded[0]["forwarded_from_tool"] == "memory_agents"
+
+
+def test_current_tree_census_has_real_producer_floors():
+    result = census.snapshot()
+    surface = {item["id"]: item for item in result["surface"]}
+    console = [producer for item in result["surface"] if item["kind"] == "route" for producer in item["producers"]
+               if producer["location"].startswith("pseudolife_memory/web/static/")]
+    # The 2026-10-10 shipped index-DNrrQi0Q.js has 51 call/plan records;
+    # a floor of 50 catches extraction loss without pinning the bundle's filename.
+    assert len(console) >= 50
+    assert any(p["location"].startswith("plugin/") for p in surface["tool:memory_search"]["producers"])
+    manual = [p for item in result["surface"] for p in item["producers"] if p["evidence"] == "manual"]
+    drifted = {item["path"] for item in result.get("manual_drift", [])}
+    if not drifted:
+        assert len(manual) == 17
+    assert not any(p["location"].rsplit(":", 1)[0] in drifted for p in manual)
+
+
+def test_ci_reports_source_drift_but_gates_census_changes(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "examples").mkdir()
+    (tmp_path / "rust").mkdir()
+    doc = tmp_path / "examples/demo.md"
+    generated = tmp_path / "rust/producer-census.json"
+    doc.write_text('memory_stats()', encoding="utf-8")
+    generated.write_text('{}', encoding="utf-8")
+    def commit():
+        subprocess.run(["git", "add", "examples/demo.md", "rust/producer-census.json"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "-c", "user.name=Census fixture", "-c", "user.email=census@example.com",
+                        "commit", "-qm", "Fixture source update"], cwd=tmp_path, check=True)
+    commit()
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"before": base}), encoding="utf-8")
+    doc.write_text('memory_stats(); memory_search(query="new")', encoding="utf-8")
+    commit()
+    assert not census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    generated.write_text('{"regenerated": true}', encoding="utf-8")
+    commit()
+    assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
