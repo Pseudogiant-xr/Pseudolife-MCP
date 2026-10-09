@@ -13,6 +13,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `POST /api/coordination/*` after the body checks | the board hub | W2-F |
 | `/mcp`, `/mcp/*` after the bearer gate | the MCP transport | W2-G |
+| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; MCP stays unmounted (501) until these gates are ported |
+| Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), the redemption (principal store write), the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | W2-F (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
