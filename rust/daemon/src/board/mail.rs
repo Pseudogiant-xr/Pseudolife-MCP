@@ -1520,7 +1520,7 @@ impl Store {
         let last = rows.last().map_or(seq, |r| r.get::<_, i64>("seq"));
         Ok(json!({"messages": messages, "after": format!("{agent_id}:history:{last}"),
                   "has_more": has_more, "retention_days": audit_retention_days,
-                  "retained_since": cutoff}))
+                  "retained_since": cutoff.map(|c| c as i64)}))
     }
 
     /// `prune`.

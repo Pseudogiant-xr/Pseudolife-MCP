@@ -38,7 +38,7 @@ DIGEST_KEYS = {"credential_hash", "hash", "prev_hash", "fingerprint", "text_comm
                "proof", "through_hash"}
 SALT_KEYS = {"body_salt"}
 # Lists both producers sort by raw random ids; compared as sets.
-UNORDERED_KEYS = {"participants"}
+UNORDERED_KEYS = {"participants", "agent_ids", "message_ids"}
 
 
 class Windows:
@@ -104,6 +104,8 @@ class Normalizer:
         if isinstance(v, dict):
             return {k: self.value(v[k], k) for k in v}
         if isinstance(v, list):
+            if key in UNORDERED_KEYS and v != sorted(v, key=str):
+                return f"<{key} not sorted by raw value>"
             out = [self.value(x, key) for x in v]
             # Sorted by raw random id on both arms: its order is free.
             return sorted(out, key=json.dumps) if key in UNORDERED_KEYS else out
