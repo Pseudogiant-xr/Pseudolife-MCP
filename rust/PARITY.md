@@ -1,5 +1,54 @@
 # Behaviour parity register
 
+## Backup explicit-DSN and file mode (CLI-BACKUP-DSN)
+
+The native backup leaf (`shim/src/cli/backup/`) implements `backup_cli.py`
+for the explicit `PSEUDOLIFE_MCP_DATABASE_URL` and for file mode (no DSN and
+no embedded bank). Canonical argv: `backup [--data-dir P] [--out P]
+[--keep-days N]`, space-separated values, each option at most once, `P` a
+canonical path (`str(Path(P)) == P`, relative or absolute, no `..` for a run)
+and `N` a plain decimal of at least one minute; plus `--help` at
+`COLUMNS=80`. A missing canonical data dir (including `..` spellings) is
+refused verbatim before anything else.
+
+Contract, checked per answered case by `python rust/cli_harness --row backup`
+against the live Python oracle on disposable homes and a disposable bank, on
+Windows and on Linux (the POSIX symlink member case runs on Linux only):
+exit code; both streams byte-exact apart from the run timestamp in the two
+new file names (validated against the arm's own clock window; two files that
+normalize to one name stay distinct); every file under the home; the state
+archive read back member by member (name, type, mode, uid, gid, mtime as a
+float, size, link target, content hash; uname and gname too on Windows); the
+dump decompressed, with pg_dump's per-run `\restrict` key normalized only
+when the `\restrict` and `\unrestrict` keys agree; and the source bank's rows
+and catalog unchanged. Free: tar header layout, PAX record layout, gzip
+headers and compression bytes. pg_dump is found as Python 3.11 finds it: the
+newest `~/.pg0` bundle, then `shutil.which` (PATH split as text with quoted
+and empty entries kept, `None` for an empty PATH, Windows' current-directory
+rule and `PATHEXT`, macOS `CS_PATH`). Each member copies exactly its stat
+size; a file that shrinks while archived fails the backup. A closed stdout
+exits 120, as CPython's shutdown flush does (declared substitution
+`backup-stdout-closed`: no interpreter trailer).
+
+Deferred by name, before any effect: anything that could need the lite tier's
+embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
+`--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
+non-canonical spellings and argv shapes; `..` components in a run; an output
+dir that resolves (symlinks and junctions followed) to the data dir or below
+one of its archived children; a top-level child `Path.resolve()` would refuse
+(a symlink loop); a `--keep-days` under one minute (rotation would race this
+run's new files against the platform clock: Python 3.11 reads the coarse
+system clock on Windows); trees holding anything but files, directories and
+POSIX symlinks (Windows reparse points, hard links on either OS, devices,
+non-UTF-8 names); unexpected stat errors under `~/.pg0`; and on Windows a
+`TZ` override, an existing target with this second's timestamp, or a
+non-ASCII name in the backups dir (Windows glob folds case with Unicode
+rules). Declared divergences: archive uname/gname on POSIX are empty (Python
+looks them up; ownership on restore falls back to uid/gid); Python tracebacks
+after an effect (permissions, a full disk, a pg_dump that cannot start)
+become `backup failed: <error>`; output encodings other than UTF-8, as for
+every CLI leaf.
+
 ## Stream D retained cell scope (2026-10-08)
 
 The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
@@ -200,12 +249,15 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
 | CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
 | CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
-| CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
+| CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | [CLI differential harness](cli_harness/README.md) `--row mail` ([spec](cli_harness/specs/CLI-MAIL.md)): every canonical case exact on Windows (40) and Linux (42) apart from three named rules, 8/8 mutants caught, per-OS goldens, run live by both Parity jobs; see [CLI-MAIL closure](#cli-mail-closure-2026-10-09). The wait-mail producer substitutions stand | ported-with-substitution |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
 | CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
-| CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
-| CLI-BACKUP | 2 | pg_dump + compressed state, no create-on-backup, exclusions and post-success-only own-file rotation. `backup_cli.py` | `test_backup_cli.py`, `test_ops_backup_integrity.py`, `test_bank_dumps.py` I/mixed; add fake pg_dump subprocess fixtures | deferred |
+| CLI-AUDIT | 2 | Canonical verify (export file or bank, every event family, body and salt checks, retention cuts, `--expect-head`), export (project, task, agent and time filters; JSON lines) and redact (the producer transaction, refusal codes, fan-out siblings, vacuum and its notes) over an explicit `PSEUDOLIFE_MCP_DATABASE_URL`. `board_audit_cli.py`, `storage/coordination.py` | `rust/cli_harness/rows/audit.py` live differential on disposable banks seeded through CoordinationStore (per-arm TEMPLATE copies for redact, DB state compared), with caught mutants; spec `rust/cli_harness/rows/audit.md`; `shim/tests/cli_audit_chain.rs` (oracle export files and reports), `cli_audit_f0.rs`, `cli_audit_float_repr.tsv` (CPython repr table) in CI | ported |
+| CLI-AUDIT-STATS | 2 | `board-audit stats`: the coordination report. `board_audit_stats.py` | Native defers. Blockers: the report carries the installed package version, wall-clock `generated_at` and default window, local-time suite durations, and Python rounding that needs its own qualified match | deferred |
+| CLI-AUDIT-TRANSPORT | 2/3 | The lite tier's embedded bank and the daemon-container path (no or empty DSN), help, and local-time ISO arguments including the documented date-only `--since`. `board_audit_cli.py` | Native defers by name before any effect. Blocker: native embedded_pg and container transport; local-zone time parsing | deferred |
+| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, canonical argv and paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (17 cases on Linux, 16 on Windows: `.pg0` and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes, sort orders, read-only and dotfile members, closed stdout, POSIX symlink members) with 11 caught Windows mutants; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |
+| CLI-BACKUP-LITE | 2/3 | Lite-tier backup through the embedded pg0 instance (attach or start for the duration, stop only what it started). `backup_cli.py`, `storage/embedded_pg.py` | `test_backup_cli.py::test_backup_roundtrip_embedded`; native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
 | CLI-TRANSFER | 2 | ZIP/JSONL manifest; exact exported/excluded table rosters in the transfer appendix; float4/ids/HLC/JSONB/time/sequences; import refuses a non-empty bank (only meta and builtin relations are exempt), dimension/column mismatches and other live connections. Before importing exported metadata, it clears the target's `curation_listing_spelling_v2` key so only the export's value stands. `transfer_cli.py` | `test_transfer_cli.py` direct calls I/DB, including `test_import_leaves_the_curation_spelling_flag_to_the_export`; add real CLI export/import against disposable banks | deferred |
 | CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
 | HTTP-SECURITY | 3 | Health public/degraded semantics; MCP/REST bearer gates on UTF-8/Latin-1 bytes, fail-closed map, remote bind/trust policy, DNS/Origin/rebinding, JSON/body limits, error status, redirect refusal. `daemon.py`, `web/api.py`, `principals.py`, `utils/no_redirect.py` | `test_daemon_http.py` P/I; `test_web.py`, `test_principals.py`, `test_extractor_no_redirect.py`, `test_shim_transport_recovery.py`, `test_dim_mismatch_health.py` I/mixed | deferred |
@@ -574,19 +626,19 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | embedded | 3/5 | deferred | Outside client leaves; in-process `mcp_server.py` with storage/models/install behavior; `test_mcp_server.py` internal pool |
 | channel | 1/2 | deferred | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
 | coordination-recovery | 2 | deferred | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
-| board-audit | 2 | deferred | Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
+| board-audit | 2 | deferred | Canonical verify, export and redact over an explicit DSN ported as CLI-AUDIT (harness row `audit`); stats (CLI-AUDIT-STATS) and the embedded/container transports (CLI-AUDIT-TRANSPORT) defer; Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
 | briefing | 2 | deferred | A HTTP/filesystem in `briefing_cli.py`; `test_briefing.py::test_briefing_no_daemon_prints_nothing`, `test_hook_json_serves_the_session_start_core_not_the_bare_briefing`; internal fakes need process equivalents |
 | prompt-hook | 2 | deferred | A HTTP/private watermark in `briefing_cli.py`; `test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor`, `test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor`; internal fakes need process equivalents |
 | doctor | 2 | deferred | A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
 | connect | 2 | deferred | B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
 | tunnel | 2 | deferred | B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
 | update | 5 | deferred | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
-| backup | 2 | deferred | C Phase 3/4; `backup_cli.py` imports embedded_pg, resolves direct DSN and runs pg_dump; `test_backup_cli.py::test_file_mode_backup_archives_state_only`, `test_dumpless_run_never_rotates_dumps`, `test_backup_roundtrip_embedded`; file-only coverage cannot accept whole mode |
+| backup | 2 | deferred | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
 | export | 2 | deferred | C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
 | import | 2 | deferred | C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
 | episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |
 | episode-end | 2 | deferred | A HTTP POST `/api/episode/end` in `episode_cli.py`; same `test_episode_cli.py` nodes as episode-start; action-specific process fixtures pending |
-| wait-mail | 2 | deferred | A private digest/seen/WaitListener (`wait_mail_cli.py`); `test_wait_mail_cli.py::test_a_rung_marker_ends_the_wait_once`, `test_non_ascii_peer_text_reaches_stdout_byte_for_byte`, `test_missing_digest_file_exits_2_and_says_what_to_do`; bounded disposable process fixtures pending |
+| wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
 | doorbell-prompt-seen | 1/2 | deferred | A receipt correlation/private filesystem lock (`codex_doorbell_state.py`); internal `test_codex_doorbell.py::test_prompt_hook_arrival_racing_queue_acceptance_does_not_restore_pending`, `test_a_linked_prompt_receipt_cannot_release_the_queue`; process equivalents pending |
 | lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
 | invite | 2 | deferred | B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error`; direct-bank effect deferred Phase 4, process seam pending |
@@ -613,6 +665,35 @@ and exit code match, except pinned lines. Timing within bounds, identities,
 entropy and clock fields are semantic. Exit codes, consumed stdout, shared files,
 help at COLUMNS=80 and argv acceptance remain contract surfaces; this additive
 note does not rewrite historical comparisons or discard failed receipts.
+
+## CLI-MAIL closure (2026-10-09)
+
+The contract-first [CLI differential harness](cli_harness/README.md) closes
+CLI-MAIL. It runs `python -m pseudolife_memory.cli wait-mail` and the native
+binary on each canonical case (the argv shapes in the
+[spec](cli_harness/specs/CLI-MAIL.md)) in the same disposable home, with state
+seeded through the coordination adapter's own writers, and compares exit,
+both streams, every file under the home (with POSIX mode bits) and the
+waiter's `.wait-armed` listener record, observed once it has armed. All
+cases match on Windows (40) and Linux (42, adding the chmod-000 stat refusal
+and a double-leading-slash path). Three named rules apply,
+each validated before it rewrites its span: `mail-clock` (announcement clock,
+elapsed seconds and ledger epoch inside each arm's own window),
+`mail-stdout-error-text` (OS error wording inside the closed-stdout line) and
+`python-shutdown-flush` (CPython's shutdown trailer and exit 120 after its own
+exit 2, the declared `wait-mail-direct-stdout` substitution). Eight source
+mutants (ring width, decision, `.seen` advance, timeout exit, ledger column,
+help text, listener renewal, leading `.` in paths) are each caught on both
+OSes; CI runs the live and golden comparisons, the mutants run locally. The Windows stat refusal is the
+injected `metadata_error_refuses_arming_and_retries_during_wait` unit, watched
+red with its seam disabled. The harness and its reviews found path-spelling
+defects in diagnostics, fixed here: mixed separators in the Windows default
+digest path, a forward-slash `PSEUDOLIFE_DIGEST_DIR` not rejoined as pathlib
+does, a leading `./` kept, and POSIX `//` collapsed. Not
+covered: Ctrl-C (exit 130), Windows sharing violations mid-replace, and the
+non-canonical inputs the substitutions below govern. Earlier receipts and the
+13-digit negative control keep their own scope; the 13-digit ring is also a
+harness case (exit 3 in both arms).
 
 ## Wait-mail producer substitutions
 

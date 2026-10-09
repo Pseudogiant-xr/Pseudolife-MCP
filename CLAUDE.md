@@ -511,6 +511,25 @@ took 143 CUDA OOMs.
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;
   the pass is not optional because CI was green.
+- **Every review pass also runs a Codex second review, alongside it, not
+  instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
+  effort, started in the background over the same diff —
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1`,
+  with `$OUT` a per-pass path outside the working tree (the session
+  scratchpad, named by the reviewed short sha so a rerun does not
+  overwrite it). Use `--uncommitted` for a pre-commit pass and
+  `--commit <sha>` for a single commit. Pin the model and effort on the
+  command line, and check the log's header names both. To stop one early,
+  kill its own process tree while it is still running (the harness's task
+  stop, or `taskkill /PID <pid> /T /F` with the Windows PID taken at
+  launch: `cat /proc/$!/winpid` in Git Bash, since `$!` there is not a
+  Windows PID, or `(Start-Process ... -PassThru).Id` in PowerShell), never
+  by image name: `taskkill /IM codex.exe` on 2026-10-09 killed every Codex process
+  on the host, the Codex app and other sessions' turns included. Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR (or the commit body when there is no PR yet), each finding
+  labelled by source with its verdict. A missing, signed-out or failed
+  Codex run is recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
