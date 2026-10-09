@@ -13,6 +13,7 @@ ROWS = {
     "lease": "CLI-LEASE-core",
     "transfer": "CLI-TRANSFER-DSN",
     "test_login": "CLI-TEST-LOGIN",
+    "doctor": "CLI-DOCTOR",
 }
 
 
