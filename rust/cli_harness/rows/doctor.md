@@ -65,13 +65,21 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   host's interpreter or checkout paths.
 - `doctor-context-nonce`: the context request's `uuid4().hex` nonce, only
   that span of that body.
-- `shim-handshake-cache-semantic`: temporary, below.
+- The handshake shim's cache file is compared byte for byte (the
+  connect leaf's `cache.rs` writes `json.dumps`'s bytes: spaced separators,
+  ASCII escapes, `url` first). Its content differs between runs only in the
+  fixture URL, which the harness's daemon token replaces (exact URL forms).
+  The earlier `shim-handshake-cache-semantic` rewrite, which compared it as
+  parsed JSON, is gone (review of #678): mutants
+  `doctor-cache-compact-separator`, `doctor-cache-url-last` and
+  `doctor-cache-raw-utf8` (case `healthy-non-ascii-instructions`) escaped
+  it and are caught now.
 - `shim-handshake-cache-name` (`rows/_handshake_cache.py`): the handshake
   shim names its cache `sha256(daemon url)[:16]`, and the fixture's port
   differs per run, so a golden and its replay name the same file apart.
   Only a cache file named by that hash of the observation's own fixture URL
-  (recorded by the `after` hook) is renamed `<fixture-url-hash>.json`; its
-  content is compared as before.
+  (recorded by the `after` hook) is renamed `<fixture-url-hash>.json`; the
+  rule touches the name only, never the content.
 
 ## Declared substitutions and divergences
 
@@ -107,12 +115,6 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
   `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
   asserts `interpreter == sys.executable` and can never hold for a native
   runtime.
-- `shim-handshake-cache-semantic` (harness rule, inherited from CLI-SHIM,
-  temporary): the Python shim writes the handshake cache with `json.dumps`
-  (spaced separators, ASCII escapes, `url` first); the native shim's
-  `cache.rs` writes compact UTF-8 with `url` last. Compared as parsed JSON,
-  that path only. The connect leaf's cache.rs fix writes Python's bytes; the
-  rule goes once it merges.
 - Timeouts are observable: a small `--timeout` (or the 2-second probe cap)
   races startup and response speed differently in each runtime, and the
   native doctor bounds connect and each read the way sockets do, not

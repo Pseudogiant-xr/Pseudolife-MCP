@@ -12,7 +12,8 @@
   keep the counted byte writer.
 - CLI harness: doctor's runtime identity is now checked against the
   executable the harness launched (a nonexistent same-named executable
-  elsewhere was accepted); connect compares its own requests raw, every
-  header field and body, with generated fixture credentials redacted; the
-  maintainer row seeds deterministic banks. Doctor, connect and maintainer
+  elsewhere was accepted), and the handshake shim's cache file is compared
+  byte for byte instead of as parsed JSON; connect compares its own
+  requests raw, every header field and body, with generated fixture
+  credentials redacted; the maintainer row seeds deterministic banks. Doctor, connect and maintainer
   gain Windows goldens.

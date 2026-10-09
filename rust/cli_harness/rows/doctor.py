@@ -39,8 +39,7 @@ HERE = Path(__file__).resolve().parent
 RUST = HERE.parents[1]
 CARGO_VERSION = re.search(r'(?m)^version = "([^"]+)"',
                           (RUST / "shim" / "Cargo.toml").read_text(encoding="utf-8")).group(1)
-RULES = ("doctor-runtime-identity", "shim-handshake-cache-semantic", "doctor-context-nonce",
-         "shim-handshake-cache-name")
+RULES = ("doctor-runtime-identity", "doctor-context-nonce", "shim-handshake-cache-name")
 
 
 def oracle_python() -> str:
@@ -470,35 +469,6 @@ def runtime_identity(obs: dict) -> None:
                        + b"\n<" + identity.encode() + b">")
 
 
-_CACHE = re.compile(r"^\.pseudolife-mcp/handshake-cache/[0-9a-f]{16}\.json$")
-
-
-@normalize.rule("shim-handshake-cache-semantic")
-def handshake_cache_semantic(obs: dict) -> None:
-    """Inherited from CLI-SHIM, not doctor's own output: the handshake's
-    shim writes ``~/.pseudolife-mcp/handshake-cache/<sha256(url)[:16]>.json``.
-    The Python shim writes ``json.dumps({"url": url, **cached})`` (spaced
-    separators, ASCII escapes, ``url`` first); the native shim
-    (``cache.rs``) writes compact UTF-8 with ``url`` last. Its only reader
-    parses it. Only that path, only when the content is a JSON object
-    whose ``url`` is the fixture origin (already ``{DAEMON}``) and whose
-    other keys are ``instructions``/``tools``, is re-serialized with sorted
-    keys; any value difference still shows. Temporary: the connect leaf's
-    cache.rs fix writes Python's bytes, and this rule goes once it merges."""
-    for rel in list(obs["files"]):
-        if not _CACHE.match(rel):
-            continue
-        raw = normalize._file(obs, rel)
-        try:
-            value = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if (not isinstance(value, dict) or value.get("url") != "{DAEMON}"
-                or not set(value) <= {"url", "instructions", "tools"}):
-            continue
-        normalize._set_file(obs, rel, json.dumps(value, sort_keys=True).encode())
-
-
 _NONCE = re.compile(r'"nonce":"([0-9a-f]{32})"')
 
 
@@ -781,6 +751,10 @@ def cases() -> list[Case]:
                                   "nudge_interval_seconds": 9, "fan_out_stagger_seconds": 0,
                                   "nightly_total_extra": 1}})}))
     add(case("healthy-no-instructions", routes=ok, instructions=None))
+    # Non-ASCII instructions: the shim's handshake cache spells them with
+    # json.dumps's ASCII escapes (a surrogate pair past the BMP).
+    add(case("healthy-non-ascii-instructions", routes=ok,
+             instructions="Mémoire partagée ☎ \U0001F600"))
     add(case("healthy-missing-annotations", routes=ok,
              tools=[tool("memory_search", READ_ONLY), tool("memory_store"),
                     tool("memory_agents", READ_ONLY), tool("memory_message")]))
@@ -1148,6 +1122,20 @@ MUTANTS = [
            "    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();\n"
            "    let resolved = executable.clone();\n",
            ("unreachable",)),
+    # The handshake cache's bytes (review of #678): compared byte for byte,
+    # so a native cache that parses alike but is spelled differently is a
+    # difference. Compact separators, `url` last, raw UTF-8 for escapes.
+    Mutant("doctor-cache-compact-separator", "doctor", "shim/src/cache.rs",
+           'out.push_str(": ");', 'out.push_str(":");', ("healthy",)),
+    Mutant("doctor-cache-url-last", "doctor", "shim/src/cache.rs",
+           'let mut data = Map::from_iter([("url".to_owned(), Value::String(self.url.clone()))]);\n'
+           "            data.extend(cached);",
+           "let mut data = cached;\n"
+           '            data.insert("url".to_owned(), Value::String(self.url.clone()));',
+           ("healthy",)),
+    Mutant("doctor-cache-raw-utf8", "doctor", "shim/src/cache.rs",
+           "' '..='~' => out.push(c),", "' '..='~' | '\\u{80}'..=char::MAX => out.push(c),",
+           ("healthy-non-ascii-instructions",)),
     Mutant("doctor-version-mismatch-ok", "doctor", "shim/src/cli/doctor/mod.rs",
            'put(&mut report, "ok", json!(false));\n                    put(&mut report, "version_mismatch"',
            'put(&mut report, "ok", json!(true));\n                    put(&mut report, "version_mismatch"',
