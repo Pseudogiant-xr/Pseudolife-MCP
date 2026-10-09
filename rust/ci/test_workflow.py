@@ -84,7 +84,7 @@ def check_executable_coverage(jobs):
         for no_defaults in (False, True):
             label = name + (" without default features" if no_defaults else "")
             required = ("--locked", "--all-targets") + (("--no-default-features",) if no_defaults else ())
-            forbidden = () if no_defaults else ("--no-default-features",)
+            forbidden = ("--features", "--all-features") if no_defaults else ("--no-default-features",)
             require_command(commands(rust[label]["run"]), prefix, required, forbidden)
 
     parity = {step.get("name"): step for step in jobs["parity-checks"]["steps"]}
@@ -223,6 +223,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Run every eval harness test", "evals/rust_baseline", ""),
     ("Clippy", "--all-targets", ""),
     ("Nextest without default features", "--no-default-features", ""),
+    ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
