@@ -1,11 +1,10 @@
-"""One module per PARITY row; each exposes ``cases()`` and may define
-``MUTANTS`` (a list of ``mutants.Mutant``) for its own mutant control."""
+"""One module per PARITY row; each exposes ``cases()``."""
 
 from __future__ import annotations
 
 import importlib
 
-ROWS: dict[str, str] = {"doctor": "CLI-DOCTOR"}
+ROWS = {"mail": "CLI-MAIL", "doctor": "CLI-DOCTOR"}
 
 
 def load(row: str):
@@ -13,4 +12,5 @@ def load(row: str):
 
 
 def mutants(row: str) -> list:
+    """The row module's own ``MUTANTS`` list (empty when it has none)."""
     return list(getattr(importlib.import_module(f"{__name__}.{row}"), "MUTANTS", []))
