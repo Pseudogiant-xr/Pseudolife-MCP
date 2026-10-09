@@ -16,8 +16,9 @@ def request(port, method, body, headers, timeout=120):
     """One HTTP exchange; ``body`` is bytes, a JSON-able value, or None."""
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
-    c.putrequest(method, "/mcp", skip_accept_encoding=True)
-    pairs = headers.items() if isinstance(headers, dict) else headers
+    pairs = list(headers.items() if isinstance(headers, dict) else headers)
+    c.putrequest(method, "/mcp", skip_accept_encoding=True,
+                 skip_host=any(k.lower() == "host" for k, _ in pairs))
     for k, v in pairs:
         c.putheader(k, v)
     if data is not None:

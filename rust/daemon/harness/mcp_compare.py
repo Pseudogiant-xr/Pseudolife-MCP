@@ -70,6 +70,10 @@ def norm(resp):
             keep[k] = v
     keep["mcp-session-id"] = header(resp, "mcp-session-id") is not None
     ctype = header(resp, "content-type") or ""
+    if ctype == "application/json; charset=utf-8":
+        # The Console gate's `_send_json` (W1-A's contract): values, not bytes.
+        return {"status": resp["status"], "headers": keep,
+                "body": {"json": json.loads(resp["body"] or b"null")}}
     if ctype.startswith("text/event-stream"):
         body = {"sse": sse_data(resp)}
     else:
@@ -278,8 +282,49 @@ def stub_tools(port):
     return out
 
 
+def rebinding(port):
+    """Tokenless installs keep the SDK's loopback Host/Origin allowlist."""
+    out = []
+    ping = {"jsonrpc": "2.0", "id": 9, "method": "ping"}
+    for host, origin in [(f"127.0.0.1:{port}", None), ("localhost:1", None), ("[::1]:5", None),
+                         ("127.0.0.1", None), ("evil.example:80", None), ("localhost", None),
+                         ("127.0.0.1.evil:1", None),
+                         (f"127.0.0.1:{port}", "http://localhost:3000"),
+                         (f"127.0.0.1:{port}", "http://evil.example"),
+                         (f"127.0.0.1:{port}", "https://127.0.0.1:1"),
+                         (f"127.0.0.1:{port}", "http://127.0.0.1"),
+                         (f"127.0.0.1:{port}", "")]:
+        extra = [("Host", host)] + ([("Origin", origin)] if origin is not None else [])
+        r = request(port, "POST", init_body(), JSON_HDRS + extra)
+        out.append(norm(r))
+        sid = header(r, "mcp-session-id")
+        if r["status"] == 200 and sid:
+            out.append(norm(request(port, "POST", ping, JSON_HDRS + extra
+                                    + [("mcp-session-id", sid), ("mcp-protocol-version", PROTOCOL)])))
+            request(port, "DELETE", None, [("Host", f"127.0.0.1:{port}"), ("mcp-session-id", sid)])
+    out.append(norm(request(port, "GET", None, [("Host", "evil.example:1"),
+                                               ("Accept", "text/event-stream")])))
+    out.append(norm(request(port, "DELETE", None, [("Host", "evil.example:1")])))
+    out.append(norm(request(port, "POST", b"x", [("Host", "evil.example:1"),
+                                                 ("Content-Type", "text/plain")])))
+    return out
+
+
+def open_lists(port):
+    """With no token every caller is the default principal; X-PL-Writer keys the tier."""
+    out = []
+    for extra in [{}, {"X-PL-Writer": "writer-m"}, {"Authorization": "Bearer anything"}]:
+        s = Session(port, None, extra)
+        out.append(norm(s.call("tools/list", {})))
+        out.append(norm(s.tool("memory_toolset", {"action": "status"})))
+        s.close()
+    return out
+
+
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, list_changed_stream,
          transport, paths]
+if "--tokenless" in sys.argv:
+    CASES = [rebinding, open_lists]
 
 
 def stub_expected(name):
@@ -320,7 +365,8 @@ def main():
     if mode == "record":
         port, out = int(sys.argv[2]), sys.argv[3]
         data = run_all(port)
-        data["stub_tools"] = stub_tools(port)
+        if "--tokenless" not in sys.argv:
+            data["stub_tools"] = stub_tools(port)
         Path(out).write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"recorded {sum(len(v) for v in data.values())} responses to {out}")
         return 0
@@ -328,7 +374,7 @@ def main():
         py, rs, out = int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
         a = run_all(py)
         b = run_all(rs)
-        a_stub, b_stub = None, stub_tools(rs)
+        a_stub, b_stub = None, ({} if "--tokenless" in sys.argv else stub_tools(rs))
     elif mode == "golden":
         a = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
         a_stub = a.pop("stub_tools", None)
