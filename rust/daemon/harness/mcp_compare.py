@@ -325,10 +325,12 @@ def body_limit(port):
     """The SDK's 4 MiB body limit answers 413 before sessions or routing."""
     auth = [("Authorization", f"Bearer {TOK['carol']}")]
     big = b'{"jsonrpc":"2.0","id":5,"method":"ping","x":"' + b"a" * (4 * 1024 * 1024) + b'"}'
-    edge = b'{"jsonrpc":"2.0","id":5,"method":"ping","x":"' + b"a" * (4 * 1024 * 1024 - 46) + b'"}'
+    head = b'{"jsonrpc":"2.0","id":5,"method":"ping","x":"'
+    edge = head + b"a" * (4 * 1024 * 1024 - len(head) - 2) + b'"}'  # exactly 4 MiB: accepted
     s = Session(port, TOK["carol"])
     out = [norm(request(port, "POST", big, s._headers())),
            norm(request(port, "POST", edge, s._headers())),
+           norm(request(port, "POST", edge + b" ", s._headers())),
            norm(request(port, "POST", big, JSON_HDRS + auth + [("mcp-session-id", "deadbeef" * 4)])),
            norm(request(port, "GET", None, auth + [("Content-Length", "9999999")])),
            norm(request(port, "GET", None, auth + [("Content-Length", " 9999999 ")])),
