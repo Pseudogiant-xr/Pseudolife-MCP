@@ -136,3 +136,74 @@ def test_powershell_function_result_is_not_an_environment_literal():
 
 def test_command_failure_message_is_not_a_cli_call():
     assert not census.cli_calls('echo "WARNING: pseudolife-mcp expose tailscale exited $rc"', "ops/demo.sh")
+
+
+def test_coordination_transport_method_does_not_turn_known_action_into_gap():
+    surface = [{"id": "coordination:receive", "kind": "coordination", "name": "receive", "optional_parameters": ["after", "limit"]}]
+    call = census.record("coordination", "receive", "rust/shim/src/board/adapter.rs", 1230,
+                         {"limit": {"literal": 50}}, method="POST", channel="body")
+    matched, gaps = census.match_surface(surface, [call])
+    assert gaps == []
+    assert matched[0]["producers"][0]["shape"]["omitted_optional"] == ["after"]
+
+
+def test_console_local_constants_do_not_replace_unrelated_parameter_bindings():
+    text = 'function unrelated(){var e=0,t=0,n=30000;} post("/api/facts/resolve",{entity:e,attribute:t,accept:n})'
+    fields = census.console_calls(text, "console.js")[0]["shape"]["parameters"]
+    assert fields == {"entity": {"expression": "e"}, "attribute": {"expression": "t"}, "accept": {"expression": "n"}}
+
+
+def test_multiline_rust_targets_are_at_least_unresolved():
+    text = 'post_json(\n &url,\n "/api/episode/end",\n body.as_bytes(),\n);'
+    calls = census.http_mentions(text, "rust/shim/src/lifecycle.rs")
+    assert len(calls) == 1
+    assert calls[0]["name"] == "/api/episode/end"
+    assert calls[0]["dynamic"] == "unresolved"
+
+
+def test_comments_in_copyable_tool_calls_preserve_following_keywords():
+    text = 'memory_consolidate(query="topic", entry_ids=[10,20], # chosen rows\n new_text="merged")'
+    call = census.tool_calls(text, "docs/demo.md")[0]
+    assert set(call["shape"]["parameters"]) == {"query", "entry_ids", "new_text"}
+    assert not call["shape"].get("positional")
+    matched, _ = census.match_surface([{"id": "tool:memory_consolidate", "kind": "tool", "name": "memory_consolidate", "parameters": ["query", "entry_ids", "new_text", "replaces"], "optional_parameters": ["replaces"]}], [call])
+    assert matched[0]["producers"][0]["shape"]["omitted_optional"] == ["replaces"]
+
+
+def test_installer_argv_preserves_adjacent_flags_and_quoted_expressions():
+    call = census.cli_calls('pseudolife-mcp connect "$URL" --token-file "$FILE" --client "$NAMES" --dry-run --json', "ops/demo.sh")[0]
+    assert call["shape"]["parameters"] == {"--token-file": {"expression": '"$FILE"'}, "--client": {"expression": '"$NAMES"'}, "--dry-run": {"literal": True}, "--json": {"literal": True}}
+
+
+def test_installer_alias_does_not_match_arguments_assignments_or_next_line():
+    text = 'printf "%s" "$SHIM_PATH"\nfi\nx="$SHIM_PATH"\nif true; then\n "$SHIM_PATH" connect "$URL" --json\nfi\n'
+    calls = census.installer_cli_calls(text, "ops/install.sh")
+    assert [call["name"] for call in calls] == ["connect"]
+    assert calls[0]["location"] == "ops/install.sh:5"
+
+
+def test_powershell_assignment_and_shell_env_prefix_retain_installer_call():
+    ps = census.installer_cli_calls('$planOutput = & $shim connect $URL --dry-run --json', "ops/install.ps1")
+    sh = census.installer_cli_calls('PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" maintainer setup --yes', "ops/install.sh")
+    assert [call["name"] for call in ps] == ["connect"]
+    assert [call["name"] for call in sh] == ["maintainer"]
+
+
+def test_installer_prose_about_package_source_is_not_a_cli_mode():
+    assert not census.cli_calls('Write-Host "Python shim: pseudolife-mcp from this checkout"', "ops/install.ps1")
+
+
+def test_windows_shell_path_is_not_decoded_as_python_escapes():
+    call = census.env_calls(r'PSEUDOLIFE_MCP_CONFIG="C:\temp\config.yaml"', "ops/demo.ps1")[0]
+    assert call["shape"]["parameters"]["value"] == {"expression": '"C:\\temp\\config.yaml"'}
+
+
+def test_prose_parenthetical_is_not_a_tool_call():
+    assert not census.tool_calls('memory_fact_resolve (core); memory_set_add (a set-valued slot errors here)', "docs/demo.md")
+
+
+def test_internal_docstring_negative_examples_are_not_mcp_producers():
+    text = 'def _bind():\n    """memory_search(limit=3)"""\n\n@_tool()\ndef memory_search(query):\n    """Try memory_search(query="topic")."""\n'
+    calls = census.description_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["shape"]["parameters"] == {"query": {"literal": "topic"}}

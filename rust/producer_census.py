@@ -224,8 +224,18 @@ def tool_calls(text: str, path: str) -> list[dict]:
         if re.search(r"(?:def|fn)\s+$", text[max(0, match.start() - 20):match.start()]):
             continue
         args, end = balanced(text, match.end() - 1)
+        gap = text[match.start() + len(match[1]):match.end() - 1]
+        if gap and not path.endswith(".py") and not re.search(r"=|^[\s]*[\"']|^[\s]*$", args):
+            continue  # Prose tier/semantic parentheticals have no confirmed call syntax.
         fields, positional, complete = {}, [], end != -1
-        for item in split_top(args):
+        try:
+            parsed = ast.parse(f"{match[1]}({args})", mode="eval").body
+            items = ([f"{kw.arg}={ast.unparse(kw.value)}" if kw.arg else "**" + ast.unparse(kw.value)
+                      for kw in parsed.keywords] + [ast.unparse(arg) for arg in parsed.args])
+        except SyntaxError:
+            items = split_top(args)
+            complete = False  # Unsupported documentation syntax cannot establish omissions.
+        for item in items:
             if not item:
                 continue
             assignment = re.match(r"^([A-Za-z_]\w*)\s*=(?!=)(.*)$", item, re.S)
@@ -254,7 +264,6 @@ def console_calls(text: str, path: str) -> list[dict]:
         body, end = balanced(text, match.end() - 1)
         if end != -1:
             functions[match[1]] = (split_top(match[2]), "{" + body + "}")
-    constants = {m[1]: value_shape(m[2]) for m in re.finditer(r"\b(?:var|const|let)\s+(\w+)\s*=\s*([0-9]+(?:e[0-9]+)?)(?=[,;])", text)}
     pattern = r"\b(" + "|".join(map(re.escape, helpers)) + r")\s*(?:<[^;\n]*?>)?\s*\(\s*([`\"'])(/api/[^`\"']+|/health)\2"
     for match in re.finditer(pattern, text):
         args, end = balanced(text, text.index("(", match.start()))
@@ -272,9 +281,6 @@ def console_calls(text: str, path: str) -> list[dict]:
                     for name, arg in substitutions.items():
                         expression = re.sub(r"\b" + re.escape(name) + r"\b", lambda _: arg, expression)
                     fields[key] = value_shape(expression)
-        for key, value in fields.items():
-            if value.get("expression") in constants:
-                fields[key] = constants[value["expression"]]
         route = match[3]
         calls.append(record("route", route, path, text.count("\n", 0, match.start()) + 1,
                             fields, method=helpers[match[1]], complete=complete and end != -1,
@@ -298,10 +304,10 @@ def http_mentions(text: str, path: str) -> list[dict]:
     for number, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith(("#", "//")) and Path(path).suffix != ".md":
             continue
-        for match in re.finditer(r"/api/[A-Za-z0-9_/-]+(?:\{[^}\n]+\})?", line):
+        for match in re.finditer(r"(?:/api/[A-Za-z0-9_/-]+(?:\{[^}\n]+\})?|/health\b|/mcp\b)", line):
             route = match[0].rstrip("/-")
             if not (re.search(r"curl|Invoke-WebRequest|Invoke-RestMethod|fetch|urlopen|Request\(|\.get\(|\.post\(|format!|https?://|\bGET\b|\bPOST\b", line)
-                    or Path(path).suffix == ".md"):
+                    or Path(path).suffix in {".md", ".rs"}):
                 continue
             method_match = re.search(r"(?:-X\s*|-Method\s+|\b)(GET|POST)\b", line, re.I)
             method = method_match[1].upper() if method_match else None
@@ -340,17 +346,60 @@ def cli_calls(text: str, path: str) -> list[dict]:
         if path.endswith(".md") and number not in fenced_lines and prefix.count("`") % 2 == 0:
             continue  # Ordinary prose names the executable but is not a copied command.
         tail = match[2].split("`", 1)[0].strip() if path.endswith(".md") else match[2].strip()
+        if not path.endswith(".md") and match[1] in {"from", "to", "still", "venv"}:
+            continue
         if not path.endswith(".md") and re.search(r"\bexited\b|\bcould not\b|\bfailed\b|\bwas not\b", tail):
             continue
         mode = {"--help": "help", "--version": "version"}.get(match[1], match[1])
         complete = Path(path).suffix == ".md" and not any(x in tail for x in ("$", "...", "<", "[", "]", "|"))
-        flags = {m[1]: value_shape(m[2]) if m[2] else {"literal": True}
-                 for m in re.finditer(r"(--[a-z][a-z-]*)(?:[= ]([^\s`\";]+))?", tail)}
+        flags = cli_flags(tail)
         call = record("cli", mode, path, text.count("\n", 0, match.start()) + 1,
                       flags, complete=complete, channel="argv", expression=tail)
         # Raw argv evidence is intentionally retained: option parsing is not emulated.
         call["shape"]["argv_source"] = match[1] + (" " + tail if tail else "")
         calls.append(call)
+    return calls
+
+
+def cli_flags(tail: str) -> dict:
+    """Resolve supported argv tokens, retaining quoted shell/PowerShell expansions."""
+    tokens = re.findall(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[^\s]+', tail)
+    switches = {"--yes", "--json", "--dry-run", "--read-code", "--read-token", "--hook-json",
+                "--check", "--all", "--daemon-only", "--clients-only", "--force", "--quiet"}
+    flags = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i].rstrip("])")
+        match = re.fullmatch(r"(--[a-z][a-z-]*)(?:=(.*))?", token)
+        if not match:
+            i += 1
+            continue
+        name, assigned = match.groups()
+        if name in switches and assigned is None:
+            flags[name] = {"literal": True}
+        else:
+            if assigned is None and i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                i += 1
+                assigned = tokens[i].rstrip("])")
+            flags[name] = ({"expression": assigned} if assigned is not None and "$" in assigned
+                           else value_shape(assigned) if assigned is not None
+                           else {"expression": "value not established"})
+        i += 1
+    return flags
+
+
+def installer_cli_calls(text: str, path: str) -> list[dict]:
+    calls = []
+    # The named installer resolvers bind these executable variables to the installed CLI.
+    # Restrict to command position (line/start, substitution, separator, then/try), never argv.
+    pattern = r'(?:^[ \t]*(?:[A-Z_]+=(?:"[^"\n]*"|[^ \t\n]+)[ \t]+)*|\$\(|[;|{][ \t]*|\bthen[ \t]+|=[ \t]*(?=&))(?:"\$SHIM_PATH"|&[ \t]+\$(?:script:shimInstallPath|shim))[ \t]+([a-z][a-z-]*)([^\n]*)'
+    for match in re.finditer(pattern, text, re.M):
+        snippet = "pseudolife-mcp " + match[1] + match[2]
+        extracted = cli_calls(snippet, path)
+        for call in extracted:
+            call["location"] = f"{path}:{text.count(chr(10), 0, match.start()) + 1}"
+            call["shape"]["executable_expression"] = match[0].split(match[1], 1)[0].strip()
+        calls.extend(extracted)
     return calls
 
 
@@ -370,11 +419,11 @@ def env_calls(text: str, path: str) -> list[dict]:
             if direct:
                 token = direct[1]
                 scalar = value_shape(token)
-                if "$" in token:
+                if "$" in token or "\\" in token:
                     scalar = {"expression": token}
                 printed = bool(re.search(r"Write-(?:Host|Output)\b", content))
                 powershell = path.endswith(".ps1") or bool(re.search(r"\$env:" + re.escape(name), content))
-                if "literal" not in scalar and (not powershell or printed) and not any(x in token for x in ("$", "{", "(", "+")):
+                if "literal" not in scalar and (not powershell or printed) and not any(x in token for x in ("$", "\\", "{", "(", "+")):
                     scalar = {"literal": token}
                 if "literal" in scalar:
                     scalar["literal"] = str(scalar["literal"])
@@ -443,13 +492,7 @@ def scan_files(root: Path, paths: list[str]) -> list[dict]:
             calls.extend(http_mentions(text, path))
             calls.extend(cli_calls(text, path))
             if path in {"ops/install.sh", "ops/install.ps1"}:
-                for match in re.finditer(r'(?:"\$SHIM_PATH"|&\s+\$(?:script:shimInstallPath|shim))\s+([a-z][a-z-]*)([^\n]*)', text):
-                    snippet = "pseudolife-mcp " + match[1] + match[2]
-                    extracted = cli_calls(snippet, path)
-                    for call in extracted:
-                        call["location"] = f"{path}:{text.count(chr(10), 0, match.start()) + 1}"
-                        call["shape"]["executable_expression"] = match[0].split(match[1], 1)[0].strip()
-                    calls.extend(extracted)
+                calls.extend(installer_cli_calls(text, path))
             if path.endswith(".py"):
                 calls.extend(python_calls(text, path))
                 if path == "ops/shim_autostart.py":
@@ -667,7 +710,7 @@ def match_surface(surface: list[dict], calls: list[dict]) -> tuple[list[dict], l
     gaps = []
     for call in calls:
         candidates = lookup.get((call["kind"], call["name"]), [])
-        candidates = [item for item in candidates if call.get("method") in {None, item.get("method")}]
+        candidates = [item for item in candidates if item["kind"] != "route" or call.get("method") in {None, item.get("method")}]
         if not candidates:
             gaps.append(call)
             continue
@@ -705,7 +748,7 @@ def unresolved_patterns(text: str, path: str) -> list[dict]:
             reasons.append("built URL")
         if re.search(r"curl\s|Invoke-WebRequest|Invoke-RestMethod|fetch\(", content) and "/api/" not in content:
             reasons.append("request target supplied dynamically or external")
-        if re.search(r"(?:run_shim|Run-Shim|\$shim\b|\$SHIM\b|\$cmd\b|\$command\b).*?(?:--|\$args|\$Args|\"[a-z-]+\")", content):
+        if re.search(r"(?:run_shim|Run-Shim|\$shim\b|\$SHIM(?:_PATH)?\b|\$cmd\b|\$command\b).*?(?:--|\$args|\$Args|\"[a-z-]+\")", content):
             reasons.append("shell-built command")
         if re.search(r"PSEUDOLIFE_[A-Z_]+_[\"']|prefix\s*\+\s*key", content):
             reasons.append("environment key family construction")
@@ -714,6 +757,26 @@ def unresolved_patterns(text: str, path: str) -> list[dict]:
         if reasons:
             result.append({"location": f"{path}:{line}", "dynamic": "unresolved", "reason": ", ".join(reasons)})
     return result
+
+
+def description_calls(text: str) -> list[dict]:
+    """Only registered tool docstrings are shipped descriptions, not private helpers."""
+    tree = ast.parse(text)
+    manually_registered = set(re.findall(r'_TOOL_TIERS\["([^"]+)"\]', text))
+    calls = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        registered = node.name in manually_registered or any(
+            isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) and dec.func.id == "_tool"
+            for dec in node.decorator_list)
+        if registered and node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+            doc = node.body[0].value
+            for call in tool_calls(doc.value, "description.md"):
+                call["location"] = f"pseudolife_memory/mcp_server.py:{doc.lineno + int(call['location'].rsplit(':', 1)[1]) - 1}"
+                call["evidence"] = "description-example"
+                calls.append(call)
+    return calls
 
 
 def snapshot(root: Path = ROOT) -> dict:
@@ -730,13 +793,7 @@ def snapshot(root: Path = ROOT) -> dict:
             calls.append({**call, "kind": "coordination", "name": action})
     # Tool docstrings contain copyable examples, not function implementations.
     mcp_text = (root / "pseudolife_memory/mcp_server.py").read_text(encoding="utf-8-sig")
-    for node in ast.walk(ast.parse(mcp_text)):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
-            doc = node.body[0].value
-            for call in tool_calls(doc.value, "pseudolife_memory/mcp_server.py"):
-                call["location"] = f"pseudolife_memory/mcp_server.py:{doc.lineno + int(call['location'].rsplit(':', 1)[1]) - 1}"
-                call["evidence"] = "description-example"
-                calls.append(call)
+    calls.extend(description_calls(mcp_text))
     manual = manual_calls(root)
     resolved_locations = {(call["kind"], call["name"], call["location"]) for call in manual}
     calls = [call for call in calls if (call["kind"], call["name"], call["location"]) not in resolved_locations]
