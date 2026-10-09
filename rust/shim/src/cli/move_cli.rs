@@ -3,11 +3,12 @@
 //! Oracle: `pseudolife_memory/move_cli.py` (`_parser`, `main` and the first
 //! two checks of `Mover.run`). Every argv that passes those checks goes on to
 //! read the source daemon's `/health`, run docker and ssh, and start a move,
-//! so it defers here. The decision is made from argv and `COLUMNS` alone,
-//! before this process opens a file, a socket or a child process.
+//! so it defers here. The decision is made from argv and the environment
+//! alone, and this module does no I/O beyond writing its one answer to
+//! stdout or stderr (`tests/cli_move_contract.rs` scans it for that).
 use std::{
     ffi::OsString,
-    io::{self, Write},
+    io::{self, ErrorKind, IsTerminal, Write},
 };
 
 /// `_parser().format_help()` at `COLUMNS=80` (argparse wraps at 78).
@@ -54,11 +55,23 @@ const FLAGS: [&str; 5] = [
     "--json",
 ];
 
+/// What the oracle's output depends on besides argv.
+pub(super) struct Context<'a> {
+    /// `COLUMNS`, which sets argparse's wrap width; only 80 is reproduced.
+    pub(super) columns: Option<&'a str>,
+    /// CPython decodes this argv as UTF-8 (see `utf8_argv`).
+    pub(super) utf8_argv: bool,
+    /// argparse could colour what it writes to stdout / stderr.
+    pub(super) colour_stdout: bool,
+    pub(super) colour_stderr: bool,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Decision {
     /// argparse's help on stdout, exit 0.
     Help,
-    /// One refusal on stderr, exit 2 (`EXIT_USAGE`).
+    /// One refusal on stderr, exit 2 (`EXIT_USAGE`): argparse's usage error
+    /// or one of `main` / `Mover.run`'s messages.
     Refuse(String),
     /// Everything else: the dispatcher's deferral line, exit 1.
     Defer,
@@ -195,14 +208,58 @@ fn origin(url: &str) -> Origin {
     }
 }
 
+/// True when CPython decodes a POSIX argv as UTF-8: UTF-8 mode
+/// (`PYTHONUTF8=1`, or unset under the C or POSIX locale, PEP 540) or a
+/// UTF-8 locale codeset. The locale is the first non-empty of `LC_ALL`,
+/// `LC_CTYPE`, `LANG`, as `setlocale` reads them. Anything else (another
+/// codeset, `PYTHONUTF8=0` or a malformed value) is not answered.
+fn posix_utf8_argv(var: impl Fn(&str) -> Option<String>) -> bool {
+    let utf8_mode = var("PYTHONUTF8");
+    if utf8_mode.as_deref() == Some("1") {
+        return true;
+    }
+    if utf8_mode.is_some_and(|value| !value.is_empty()) {
+        return false;
+    }
+    let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|value| !value.is_empty()));
+    let Some(locale) = locale else {
+        return true;
+    };
+    if matches!(locale.as_str(), "C" | "POSIX") {
+        return true;
+    }
+    let codeset = locale
+        .split_once('.')
+        .map_or("", |(_, rest)| rest.split('@').next().unwrap_or(""));
+    codeset.eq_ignore_ascii_case("utf-8") || codeset.eq_ignore_ascii_case("utf8")
+}
+
+/// Windows hands CPython the wide command line, so argv is exact there.
+fn utf8_argv() -> bool {
+    cfg!(windows) || posix_utf8_argv(|name| std::env::var(name).ok())
+}
+
+/// argparse colours its help and usage on a terminal, or as `FORCE_COLOR`,
+/// `PYTHON_COLORS` and `NO_COLOR` say (newer CPython); any of them set defers.
+fn colour_env(var: impl Fn(&str) -> bool) -> bool {
+    ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"]
+        .into_iter()
+        .any(var)
+}
+
 /// The oracle's order: argparse (`_parser`, `main`), the `--target-url`
 /// check, `main`'s `--to` check, then `Mover.run`'s `--to` and
-/// `--target-checkout` checks. `columns` is the `COLUMNS` variable, which
-/// sets argparse's wrap width; only 80 is reproduced.
-pub(super) fn decide(arguments: &[String], columns: Option<&str>) -> Decision {
-    let wrapped_at_80 = columns == Some("80");
+/// `--target-checkout` checks.
+pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
+    let wrapped_at_80 = context.columns == Some("80");
+    // Outside UTF-8 decoding CPython sees other characters than these.
+    if !context.utf8_argv && !arguments.iter().all(|argument| argument.is_ascii()) {
+        return Decision::Defer;
+    }
     if matches!(arguments, [only] if only == "--help" || only == "-h") {
-        return if wrapped_at_80 {
+        return if wrapped_at_80 && !context.colour_stdout {
             Decision::Help
         } else {
             Decision::Defer
@@ -212,7 +269,7 @@ pub(super) fn decide(arguments: &[String], columns: Option<&str>) -> Decision {
         return Decision::Defer;
     };
     let Some(to) = args.to else {
-        return if wrapped_at_80 {
+        return if wrapped_at_80 && !context.colour_stderr {
             let usage = &HELP[..HELP.find("\n\n").map_or(HELP.len(), |end| end + 1)];
             Decision::Refuse(format!("{usage}{REQUIRED}"))
         } else {
@@ -252,6 +309,31 @@ pub(super) fn decide(arguments: &[String], columns: Option<&str>) -> Decision {
     Decision::Defer
 }
 
+/// Writes `bytes`; on failure, how many bytes the stream took first.
+fn emit(out: &mut impl Write, bytes: &[u8]) -> Result<(), usize> {
+    let mut written = 0;
+    while written < bytes.len() {
+        match out.write(&bytes[written..]) {
+            Ok(0) => return Err(written),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(_) => return Err(written),
+        }
+    }
+    out.flush().map_err(|_| written)
+}
+
+/// A write that failed before any byte left defers: nothing was answered
+/// yet. One that failed part-way exits 1, where CPython raises from
+/// `print` (its traceback write fails too; the exit is 1 or 120).
+fn settle(code: u8, written: Result<(), usize>) -> Option<u8> {
+    match written {
+        Ok(()) => Some(code),
+        Err(0) => None,
+        Err(_) => Some(1),
+    }
+}
+
 /// `None` defers to the dispatcher before any effect.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     let arguments = arguments
@@ -260,18 +342,18 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
     let columns = std::env::var("COLUMNS").ok();
-    match decide(&arguments, columns.as_deref()) {
+    let colour = colour_env(|name| std::env::var_os(name).is_some());
+    let context = Context {
+        columns: columns.as_deref(),
+        utf8_argv: utf8_argv(),
+        colour_stdout: colour || io::stdout().is_terminal(),
+        colour_stderr: colour || io::stderr().is_terminal(),
+    };
+    match decide(&arguments, &context) {
         Decision::Defer => None,
-        Decision::Help => {
-            let mut out = io::stdout().lock();
-            out.write_all(&super::text_bytes(HELP))
-                .and_then(|()| out.flush())
-                .ok()
-                .map(|()| 0)
-        }
+        Decision::Help => settle(0, emit(&mut io::stdout().lock(), &super::text_bytes(HELP))),
         Decision::Refuse(text) => {
-            let _ = io::stderr().lock().write_all(&super::text_bytes(&text));
-            Some(2)
+            settle(2, emit(&mut io::stderr().lock(), &super::text_bytes(&text)))
         }
     }
 }
@@ -282,6 +364,15 @@ mod tests {
 
     fn argv(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    fn plain(columns: Option<&str>) -> Context<'_> {
+        Context {
+            columns,
+            utf8_argv: true,
+            colour_stdout: false,
+            colour_stderr: false,
+        }
     }
 
     #[test]
@@ -372,7 +463,7 @@ mod tests {
             &["--to", "box", "--target-checkout", ""],
         ] {
             assert_eq!(
-                decide(&argv(items), Some("80")),
+                decide(&argv(items), &plain(Some("80"))),
                 Decision::Defer,
                 "{items:?}"
             );
@@ -394,52 +485,182 @@ mod tests {
             &["--help", "--to", "box"],
         ] {
             assert_eq!(
-                decide(&argv(items), Some("80")),
+                decide(&argv(items), &plain(Some("80"))),
                 Decision::Defer,
                 "{items:?}"
             );
         }
-        assert_eq!(decide(&argv(&["--help"]), Some("100")), Decision::Defer);
-        assert_eq!(decide(&argv(&[]), None), Decision::Defer);
+        assert_eq!(
+            decide(&argv(&["--help"]), &plain(Some("100"))),
+            Decision::Defer
+        );
+        assert_eq!(decide(&argv(&[]), &plain(None)), Decision::Defer);
     }
 
     #[test]
     fn refusals_follow_the_oracle_order() {
         let refuse = |text: &str| Decision::Refuse(text.to_owned());
         let bad_url = &["--to", "a b", "--target-url", "http://h/x"][..];
-        assert_eq!(decide(&argv(bad_url), None), refuse(BAD_URL));
+        assert_eq!(decide(&argv(bad_url), &plain(None)), refuse(BAD_URL));
         let unsure = &["--to", "a b", "--target-url", "http://[::1]"][..];
-        assert_eq!(decide(&argv(unsure), None), Decision::Defer);
+        assert_eq!(decide(&argv(unsure), &plain(None)), Decision::Defer);
         let fine = &["--to", "a b", "--target-url", "http://h:1"][..];
-        assert_eq!(decide(&argv(fine), None), refuse(BAD_TO));
-        assert_eq!(decide(&argv(&["--to", ""]), None), refuse(BAD_TO));
+        assert_eq!(decide(&argv(fine), &plain(None)), refuse(BAD_TO));
+        assert_eq!(decide(&argv(&["--to", ""]), &plain(None)), refuse(BAD_TO));
         assert_eq!(
-            decide(&argv(&["--to", "a\u{1c}b", "--json"]), None),
+            decide(&argv(&["--to", "a\u{1c}b", "--json"]), &plain(None)),
             refuse(BAD_TO)
         );
-        assert_eq!(decide(&argv(&["--to", "a\u{1}b"]), None), refuse(BAD_TO));
         assert_eq!(
-            decide(&argv(&["--json", "--to", "a\u{1}b"]), None),
+            decide(&argv(&["--to", "a\u{1}b"]), &plain(None)),
+            refuse(BAD_TO)
+        );
+        assert_eq!(
+            decide(&argv(&["--json", "--to", "a\u{1}b"]), &plain(None)),
             Decision::Defer
         );
         let checkout = &["--to", "a\u{1}b", "--target-checkout", "x\ny"][..];
-        assert_eq!(decide(&argv(checkout), None), refuse(BAD_TO));
+        assert_eq!(decide(&argv(checkout), &plain(None)), refuse(BAD_TO));
         for path in ["x\ny", "x\r", "\r/"] {
             let items = &["--to", "box", "--target-checkout", path][..];
-            assert_eq!(decide(&argv(items), None), refuse(BAD_CHECKOUT));
+            assert_eq!(decide(&argv(items), &plain(None)), refuse(BAD_CHECKOUT));
         }
         let json = &["--to", "box", "--target-checkout", "x\n", "--json"][..];
-        assert_eq!(decide(&argv(json), None), Decision::Defer);
+        assert_eq!(decide(&argv(json), &plain(None)), Decision::Defer);
     }
 
     #[test]
     fn missing_to_is_argparse_usage_at_80_columns() {
-        let Decision::Refuse(text) = decide(&argv(&["--yes"]), Some("80")) else {
+        let Decision::Refuse(text) = decide(&argv(&["--yes"]), &plain(Some("80"))) else {
             panic!("expected the usage error");
         };
         assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
         assert!(text.ends_with(&format!("[--dry-run] [--yes] [--json]\n{REQUIRED}")));
         assert_eq!(text.matches('\n').count(), 4);
-        assert_eq!(decide(&argv(&["--yes"]), Some("81")), Decision::Defer);
+        assert_eq!(
+            decide(&argv(&["--yes"]), &plain(Some("81"))),
+            Decision::Defer
+        );
+    }
+
+    /// Takes `room` bytes, then fails.
+    struct Full {
+        room: usize,
+    }
+
+    impl Write for Full {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.room == 0 {
+                return Err(io::Error::other("no space left on device"));
+            }
+            let count = bytes.len().min(self.room);
+            self.room -= count;
+            Ok(count)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_answer_write_defers_only_when_nothing_left() {
+        let text = BAD_TO.as_bytes();
+        // stderr on /dev/full: nothing was written, so nothing was answered.
+        assert_eq!(settle(2, emit(&mut Full { room: 0 }, text)), None);
+        // part of the answer left: CPython's print raised, exit 1 (or 120).
+        assert_eq!(settle(2, emit(&mut Full { room: 5 }, text)), Some(1));
+        let mut sink = Vec::new();
+        assert_eq!(settle(2, emit(&mut sink, text)), Some(2));
+        assert_eq!(sink, text);
+        assert_eq!(
+            settle(0, emit(&mut Full { room: 0 }, HELP.as_bytes())),
+            None
+        );
+    }
+
+    #[test]
+    fn non_ascii_argv_defers_unless_cpython_decodes_it_as_utf8() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            }
+        };
+        for (pairs, utf8) in [
+            (&[][..], true),
+            (&[("LANG", "C")], true),
+            (&[("LANG", "POSIX")], true),
+            (&[("LANG", "C.UTF-8")], true),
+            (&[("LANG", "en_US.utf8")], true),
+            (&[("LANG", "de_DE.UTF-8@euro")], true),
+            (&[("LANG", "en_US.ISO-8859-1")], false),
+            (&[("LANG", "en_US")], false),
+            (
+                &[("LC_ALL", "en_US.ISO-8859-1"), ("LANG", "C.UTF-8")],
+                false,
+            ),
+            (
+                &[
+                    ("LC_ALL", ""),
+                    ("LC_CTYPE", "C.UTF-8"),
+                    ("LANG", "en_US.ISO-8859-1"),
+                ],
+                true,
+            ),
+            (
+                &[("LC_CTYPE", "en_US.ISO-8859-1"), ("LANG", "C.UTF-8")],
+                false,
+            ),
+            (&[("PYTHONUTF8", "1"), ("LANG", "en_US.ISO-8859-1")], true),
+            (&[("PYTHONUTF8", "0"), ("LANG", "C.UTF-8")], false),
+            (&[("PYTHONUTF8", "yes"), ("LANG", "C.UTF-8")], false),
+        ] {
+            assert_eq!(posix_utf8_argv(env(pairs)), utf8, "{pairs:?}");
+        }
+        let latin1 = Context {
+            utf8_argv: false,
+            ..plain(Some("80"))
+        };
+        for items in [
+            &["--to", "root@\u{3000}box"][..],
+            &["--to", "box", "--target-url", "http://box\u{a0}"],
+            &["--to", "a b", "--target-checkout", "/srv/\u{e4}"],
+        ] {
+            assert_eq!(decide(&argv(items), &latin1), Decision::Defer, "{items:?}");
+            assert_ne!(decide(&argv(items), &plain(Some("80"))), Decision::Defer);
+        }
+        let ascii = &["--to", "a b"][..];
+        assert_eq!(
+            decide(&argv(ascii), &latin1),
+            Decision::Refuse(BAD_TO.to_owned())
+        );
+    }
+
+    #[test]
+    fn argparse_output_defers_when_it_could_be_coloured() {
+        let tty_out = Context {
+            colour_stdout: true,
+            ..plain(Some("80"))
+        };
+        let tty_err = Context {
+            colour_stderr: true,
+            ..plain(Some("80"))
+        };
+        assert_eq!(decide(&argv(&["--help"]), &tty_out), Decision::Defer);
+        assert_eq!(decide(&argv(&["-h"]), &tty_err), Decision::Help);
+        assert_eq!(decide(&argv(&["--yes"]), &tty_err), Decision::Defer);
+        assert_ne!(decide(&argv(&["--yes"]), &tty_out), Decision::Defer);
+        // main's own messages are plain print() calls: never coloured.
+        let refusal = &["--to", ""][..];
+        assert_eq!(
+            decide(&argv(refusal), &tty_err),
+            Decision::Refuse(BAD_TO.to_owned())
+        );
+        for name in ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"] {
+            assert!(colour_env(|var| var == name), "{name}");
+        }
+        assert!(!colour_env(|var| var == "TERM"));
     }
 }

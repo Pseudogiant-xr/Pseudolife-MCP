@@ -66,11 +66,30 @@ Unicode, not starting with `-`.
 - `--json` with a `Mover.run` refusal (C0 `--to`, CR/LF checkout): the
   oracle prints its JSON report, which carries a fresh move id and clock.
 - Non-Unicode argv.
+- Any non-ASCII argument when CPython would not decode a POSIX argv as
+  UTF-8: UTF-8 mode (`PYTHONUTF8=1`, or `PYTHONUTF8` unset or empty under
+  the C or POSIX locale, PEP 540) or a UTF-8 codeset in the first non-empty
+  of `LC_ALL`, `LC_CTYPE`, `LANG`. Otherwise the oracle decodes argv with the
+  locale codec and sees other characters. Windows argv is always exact.
+- argparse help when stdout is a terminal, and argparse usage when stderr
+  is a terminal, or either when `FORCE_COLOR`, `PYTHON_COLORS` or `NO_COLOR`
+  is set: newer CPython argparse colours its output there. The plain
+  `print` refusals are never coloured and stay answered.
+- An answer whose write fails before any byte is accepted (stderr on
+  `/dev/full`, a closed stdout): nothing was answered, so the dispatcher's
+  deferral follows (its own write fails too, exit 1).
 
 ## Free items
 
-None: every answered byte is compared. A failed help write defers (the
-oracle's own behaviour there is an unhandled exception).
+None: every answered byte is compared.
+
+## Declared divergence
+
+An answer whose write fails part-way exits 1 with the bytes already
+written. CPython's `print` raises there; its traceback write fails too and
+the exit is 1, or 120 when the final flush fails. Unit-tested only
+(`a_failed_answer_write_defers_only_when_nothing_left`): the harness has no
+stderr-on-`/dev/full` arm.
 
 ## Safety of the harness
 
@@ -84,3 +103,12 @@ never the oracle; the candidate must print the deferral and make no
 request. The Rust contract test `rust/shim/tests/cli_move_contract.rs`
 checks the same deferrals against a bound listener that every proxy and
 daemon variable names, which must see no connection.
+
+A direct socket (a hardcoded `127.0.0.1:8765`) would bypass both
+listeners, so the leaf's source is scanned for network, process, file and
+raw-OS names, and for any crate module but the dispatcher's
+`super::text_bytes`: by `the_leaf_source_reaches_no_io_beyond_its_answer`
+in the contract test, and by every harness case on the source the
+candidate binary was built from (the mutant copy under `--mutants`). The
+`move-direct-socket` mutant inserts such a connect behind `if false`, so it
+never runs and only the scan can catch it.

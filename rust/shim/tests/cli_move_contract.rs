@@ -207,3 +207,54 @@ fn refusals_before_any_effect() {
     assert_quiet(&socket);
     assert!(listing(&home.0).is_empty(), "a refusal wrote a file");
 }
+
+/// The leaf's own source, as compiled into the binary under test.
+const LEAF: &str = include_str!("../src/cli/move_cli.rs");
+
+/// Names through which Rust code reaches the network, a child process, the
+/// file system or raw OS handles. A direct `TcpStream::connect` to the live
+/// daemon's port would not cross the proxy and listener checks above, so the
+/// leaf's source is held to this list instead.
+const IO_NAMES: &[&str] = &[
+    "std::net",
+    "TcpStream",
+    "TcpListener",
+    "UdpSocket",
+    "ToSocketAddrs",
+    "reqwest",
+    "hyper",
+    "tokio",
+    "std::process",
+    "Command",
+    "std::fs",
+    "fs::",
+    "File::",
+    "OpenOptions",
+    "std::os",
+    "libc",
+    "windows_sys",
+    "winapi",
+    "unsafe",
+    "extern",
+];
+
+#[test]
+fn the_leaf_source_reaches_no_io_beyond_its_answer() {
+    let hits: Vec<&str> = IO_NAMES
+        .iter()
+        .copied()
+        .filter(|name| LEAF.contains(name))
+        .collect();
+    assert!(hits.is_empty(), "move_cli.rs names I/O APIs: {hits:?}");
+    // No crate module (they hold the daemon, board and database clients):
+    // only the dispatcher's stream encoder and the tests' glob import.
+    assert!(!LEAF.contains("crate::"), "move_cli.rs uses a crate module");
+    for (at, _) in LEAF.match_indices("super::") {
+        let rest = &LEAF[at..];
+        assert!(
+            rest.starts_with("super::text_bytes(") || rest.starts_with("super::*;"),
+            "move_cli.rs reaches {}",
+            &rest[..rest.len().min(40)]
+        );
+    }
+}

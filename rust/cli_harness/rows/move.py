@@ -13,7 +13,10 @@ runs with ``PATH`` set to an empty directory (no docker or ssh) and every
 ``*_proxy`` variable pointing at a recording listener, which a urllib GET
 to 127.0.0.1 would reach instead of the live daemon (the positive control
 ``_guard_selftest`` proves that once per process); the recorded requests
-are compared, and must be empty. A case whose argv passes validation
+are compared, and must be empty. A direct socket (say to 127.0.0.1:8765)
+would bypass that listener, so every case also scans the candidate's own
+``move_cli.rs`` for network, process and file APIs (``_leaf_io``): any hit
+is a difference. A case whose argv passes validation
 (``ORACLE_NOT_RUN``) never runs the oracle: its Python arm runs a stub
 ``pseudolife_memory.cli`` placed first on ``PYTHONPATH``, verified before
 use, and the expectation is the Rust deferral with no request.
@@ -140,6 +143,34 @@ def _stub_dir() -> str:
     return str(root)
 
 
+# --- the candidate's source, scanned for I/O ------------------------------------
+
+RUST = Path(__file__).resolve().parents[2]
+# Kept in step with IO_NAMES in rust/shim/tests/cli_move_contract.rs.
+IO_NAMES = ("std::net", "TcpStream", "TcpListener", "UdpSocket", "ToSocketAddrs", "reqwest", "hyper",
+            "tokio", "std::process", "Command", "std::fs", "fs::", "File::", "OpenOptions", "std::os",
+            "libc", "windows_sys", "winapi", "unsafe", "extern", "crate::")
+
+
+def _leaf_source(binary: Path) -> Path:
+    """The ``move_cli.rs`` a candidate was built from: a mutant binary
+    (``$CARGO_TARGET_DIR/mutant/debug``) comes from ``mutant-src``, any
+    other from this checkout."""
+    root = RUST
+    if binary.parents[1].name == "mutant" and (binary.parents[2] / "mutant-src" / "rust").is_dir():
+        root = binary.parents[2] / "mutant-src" / "rust"
+    return root / FILE
+
+
+def _leaf_io(binary: Path) -> list[str]:
+    """Read every time: the mutant copy's file changes between mutants."""
+    text = _leaf_source(binary).read_text(encoding="utf-8")
+    hits = [name for name in IO_NAMES if name in text]
+    hits += [text[at:at + 24] for at in range(len(text)) if text.startswith("super::", at)
+             and not text.startswith(("super::text_bytes(", "super::*;"), at)]
+    return hits
+
+
 # --- named rules -----------------------------------------------------------------
 
 @normalize.rule("move-oracle-not-run")
@@ -186,10 +217,16 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
         if not oracle:
             case.env["PYTHONPATH"] = _stub_dir()
 
+    def during(arm, proc) -> None:
+        # Compared field: the oracle arm's is empty by definition.
+        hits = _leaf_io(Path(proc.args[0])) if arm.name == "rust" else []
+        arm.state["listener"] = {"leaf_io": hits}
+
     def after(arm, observation: dict) -> None:
         observation["arm"] = arm.name
 
     case.setup = setup
+    case.during = during
     case.after = after
     return case
 
@@ -203,6 +240,27 @@ def _deferred(case_id: str, argv: list[str], **kwargs) -> Case:
 
 
 GOOD_URL = "http://100.64.0.2:8765"
+
+# The origin() unit table, each URL paired with --to "a b": the oracle then
+# refuses before any effect whatever the URL (BAD_URL, else BAD_TO).
+URLS_VALID = ("http://100.64.0.2:8765", "https://box.example.com", "HTTPS://Box.example.com:443/",
+              "HTTP://box", "http://h:0", "http://h:65535", "http://h/?", "http://h#")
+URLS_INVALID = ("http://h/?q=1", "http://h#frag", "localhost:8765", "http:h", "http:/h", "http://",
+                "http://u@h", "http://:p@h", "http://h:abc", "http://h:1:2", "http://h:0000099999",
+                "http://h\x01")
+URLS_UNSURE = ("http://[::1]:8765", "http://@h", "http://h:", "http://h:+80", "http://h:065535",
+               "http://h_x", "http://\u00e4.example")
+
+
+def _url_cases() -> list[Case]:
+    out = []
+    for kind, urls in (("valid", URLS_VALID), ("invalid", URLS_INVALID), ("unsure", URLS_UNSURE)):
+        for n, url in enumerate(urls, 1):
+            argv = ["--to", "a b", "--target-url", url]
+            case = _deferred(f"url-{kind}-{n}", argv) if kind == "unsure" else _case(f"url-{kind}-{n}", argv)
+            case.note = url
+            out.append(case)
+    return out
 
 # Cases whose argv passes validation: the oracle never runs them.
 ORACLE_NOT_RUN = ("valid-minimal", "valid-dry-run", "valid-resume-yes", "valid-json",
@@ -263,6 +321,11 @@ def cases() -> list[Case]:
         _deferred("defer-control-json", ["--json", "--to", "a\x01b"]),
         _deferred("defer-checkout-json", ["--to", "root@box", "--target-checkout", "x\n", "--json"]),
         _deferred("defer-url-invalid-unsure", ["--to", "a b", "--target-url", "http://[::1"]),
+        # a value starting with '-' is argparse's "expected one argument"
+        _deferred("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
+        _deferred("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
+        _deferred("defer-to-dash-control", ["--to", "-\x01"]),
+        *_url_cases(),
         # argv that passes validation: the candidate defers; the oracle is never run
         _valid("valid-minimal", ["--to", "root@box"]),
         _valid("valid-dry-run", ["--to", "root@box", "--dry-run"]),
@@ -286,8 +349,8 @@ def cases() -> list[Case]:
 MUTANTS = [
     Mutant("move-url-message", "move", FILE, "(no path, query or credentials)",
            "(no path, query, or credentials)", ("url-path",)),
-    Mutant("move-refusal-exit", "move", FILE, "            Some(2)\n", "            Some(1)\n",
-           ("to-empty",)),
+    Mutant("move-refusal-exit", "move", FILE, "settle(2, emit(&mut io::stderr()",
+           "settle(1, emit(&mut io::stderr()", ("to-empty",)),
     Mutant("move-isspace-separators", "move", FILE,
            "c.is_whitespace() || ('\\u{1c}'..='\\u{1f}').contains(&c)", "c.is_whitespace()",
            ("to-separator-json",)),
@@ -300,8 +363,8 @@ MUTANTS = [
     Mutant("move-unsure-as-valid", "move", FILE,
            "Some(Origin::Unsure) => return Decision::Defer,", "Some(Origin::Unsure) => {}",
            ("defer-url-invalid-unsure",)),
-    Mutant("move-help-any-width", "move", FILE, "let wrapped_at_80 = columns == Some(\"80\");",
-           "let wrapped_at_80 = columns.is_some();", ("defer-help-columns",)),
+    Mutant("move-help-any-width", "move", FILE, "let wrapped_at_80 = context.columns == Some(\"80\");",
+           "let wrapped_at_80 = context.columns.is_some();", ("defer-help-columns",)),
     Mutant("move-valid-refused", "move", FILE,
            "    }\n    Decision::Defer\n}", "    }\n    Decision::Refuse(BAD_TO.to_owned())\n}",
            ("valid-minimal",)),
@@ -310,6 +373,18 @@ MUTANTS = [
            "        Some(Origin::Invalid) if !to.is_empty() => return Decision::Refuse(BAD_URL.to_owned()),\n"
            "        Some(Origin::Invalid) => return Decision::Refuse(BAD_TO.to_owned()),",
            ("url-before-to",)),
+    # A direct connect to the live daemon's port that never runs: only the
+    # source scan can see it, which is the point (no mutant reaches 8765).
+    Mutant("move-direct-socket", "move", FILE, "        Decision::Defer => None,\n",
+           "        Decision::Defer => {\n            if false {\n"
+           "                let _ = std::net::TcpStream::connect(\"127.0.0.1:8765\");\n"
+           "            }\n            None\n        }\n", ("valid-minimal",)),
+    Mutant("move-dash-value-admitted", "move", FILE,
+           "        if value.starts_with('-') {\n            return None;\n        }\n", "",
+           ("defer-url-dash-value", "defer-checkout-dash-newline", "defer-to-dash-control")),
+    Mutant("move-scheme-case-sensitive", "move", FILE,
+           '!scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https")',
+           'scheme != "http" && scheme != "https"', ("url-valid-4",)),
 ]
 
 
