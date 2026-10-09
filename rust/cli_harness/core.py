@@ -64,10 +64,11 @@ class Case:
     platforms: tuple[str, ...] = ("windows", "linux")
     stdout_closed: bool = False
     daemon: Callable[[], Any] | None = None
+    skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
     note: str = ""
 
     def runs_here(self) -> bool:
-        return PLATFORM in self.platforms
+        return PLATFORM in self.platforms and not (self.skip_if and self.skip_if())
 
 
 @dataclasses.dataclass
@@ -87,7 +88,8 @@ def python_target(python: str, source: Path) -> Target:
 
 
 def rust_target(binary: Path) -> Target:
-    return Target("rust", [str(binary)])
+    # Absolute: each arm runs with its disposable home's cwd.
+    return Target("rust", [str(Path(binary).resolve())])
 
 
 def _expand(value: str, arm: Arm) -> str:
@@ -112,6 +114,19 @@ def _environment(case: Case, arm: Arm, target: Target) -> dict[str, str]:
         else:
             env[key] = _expand(value, arm)
     return env
+
+
+def modes(root: Path) -> dict[str, str]:
+    """POSIX permission bits of every entry under ``root`` (empty on Windows,
+    where private files are judged by ACLs the CLIs check themselves)."""
+    if WINDOWS or not root.exists():
+        return {}
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in dirnames + filenames:
+            path = Path(dirpath) / name
+            out[path.relative_to(root).as_posix()] = oct(os.lstat(path).st_mode & 0o7777)
+    return dict(sorted(out.items()))
 
 
 def snapshot(root: Path) -> dict[str, str]:
@@ -193,16 +208,22 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             worker.join(10)
         observation = {
             "home": str(home),
+            # Local clock offset, so a golden's clocks validate where recorded.
+            "utc_offset": time.localtime(arm.started).tm_gmtoff,
             "exit": proc.returncode,
             "stdout": base64.b64encode(out or b"").decode(),
             "stderr": base64.b64encode(err).decode(),
             "window": [arm.started, ended],
         }
         if daemon is not None:
+            observation["daemon_url"] = daemon.url
             observation["requests"] = daemon.requests()
         if case.after:
             case.after(arm, observation)
+        if "listener" in arm.state:
+            observation["listener"] = arm.state["listener"]
         observation["files"] = snapshot(home)
+        observation["modes"] = modes(home)
         return observation
     finally:
         if daemon is not None:

@@ -1,5 +1,8 @@
 //! Native CLI options and ASCII numeric inputs for wait-mail.
-use std::{ffi::OsString, path::PathBuf};
+use std::{
+    ffi::OsString,
+    path::{Component, Path, PathBuf},
+};
 
 pub fn columns() -> usize {
     std::env::var("COLUMNS")
@@ -224,7 +227,7 @@ pub fn parse(values: Vec<OsString>) -> Result<Parsed, String> {
         }
         match option {
             1 => args.session = Some(value),
-            2 => args.digest = Some(PathBuf::from(value).components().collect()),
+            2 => args.digest = Some(pathlib(Path::new(&value))),
             3 => args.timeout = number.unwrap(),
             4 => args.interval = number.unwrap(),
             _ => unreachable!(),
@@ -256,6 +259,30 @@ pub fn parse(values: Vec<OsString>) -> Result<Parsed, String> {
         return Err("--digest must name a coordination digest file (<64 hex digits>.txt)".into());
     }
     Ok(Parsed::Args(args))
+}
+
+/// pathlib's spelling of a path, as Python's diagnostics print it:
+/// components rejoined with the native separator, `.` components dropped
+/// (an empty result is `.`), and on POSIX exactly two leading slashes kept.
+pub(super) fn pathlib(path: &Path) -> PathBuf {
+    let mut spelled: PathBuf = path
+        .components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect();
+    if spelled.as_os_str().is_empty() {
+        spelled = PathBuf::from(".");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = path.as_os_str().as_bytes();
+        if raw.starts_with(b"//") && !raw.starts_with(b"///") {
+            let mut doubled = OsString::from("/");
+            doubled.push(spelled.as_os_str());
+            spelled = PathBuf::from(doubled);
+        }
+    }
+    spelled
 }
 
 fn python_float(value: &str) -> Option<f64> {

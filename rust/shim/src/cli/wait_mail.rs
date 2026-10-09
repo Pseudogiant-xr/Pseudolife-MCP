@@ -5,12 +5,56 @@ mod args;
 use std::{
     cmp::Ordering,
     ffi::OsString,
-    fs::{self, File, Metadata, OpenOptions},
+    fs::{File, Metadata, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering as AtomicOrdering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(not(test))]
+use std::fs;
+#[cfg(test)]
+mod fs {
+    pub use std::fs::*;
+    use std::{
+        cell::RefCell,
+        io,
+        path::{Path, PathBuf},
+    };
+    std::thread_local! {
+        static DENY: RefCell<Option<(PathBuf, usize, usize)>> = const { RefCell::new(None) };
+    }
+    pub fn deny_once(path: &Path) {
+        DENY.with(|slot| *slot.borrow_mut() = Some((path.to_path_buf(), 1, 0)));
+    }
+    pub fn clear_denial() -> usize {
+        DENY.with(|slot| slot.borrow_mut().take().map_or(0, |(_, _, calls)| calls))
+    }
+    pub fn metadata(path: impl AsRef<Path>) -> io::Result<std::fs::Metadata> {
+        let denied = DENY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let Some((target, left, calls)) = slot.as_mut() else {
+                return false;
+            };
+            if target.as_path() != path.as_ref() {
+                return false;
+            }
+            *calls += 1;
+            let deny = *left > 0;
+            *left = left.saturating_sub(1);
+            deny
+        });
+        if denied {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "test metadata denial",
+            ))
+        } else {
+            std::fs::metadata(path)
+        }
+    }
+}
 
 const HELP: &str = include_str!("wait_mail_help.txt");
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
@@ -116,8 +160,10 @@ fn digest_path(session: &OsString) -> Option<PathBuf> {
                 .map(PathBuf::from)
                 .or_else(dirs::home_dir)
                 .unwrap_or_default()
-                .join(".pseudolife-mcp/digests")
+                .join(".pseudolife-mcp")
+                .join("digests")
         });
+    let root = args::pathlib(&root);
     let root = crate::credentials::expand_user(&root).ok()?;
     let key = crate::board::identity::hex_hash(session.to_str()?.as_bytes());
     let direct = root.join(format!("{key}.txt"));
@@ -998,6 +1044,41 @@ pub fn run(argv: Vec<OsString>) -> u8 {
 mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn metadata_error_refuses_arming_and_retries_during_wait() {
+        let home = std::env::temp_dir().join(format!("wait-mail-stat-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let digest = home.join(format!("{}.txt", "a".repeat(64)));
+        fs::write(&digest, b"1\npeer\n").unwrap();
+        fs::write(digest.with_extension("ring"), b"1\nrung anyone\n").unwrap();
+        fs::deny_once(&digest);
+        assert_eq!(
+            run(vec![
+                OsString::from("--digest"),
+                digest.clone().into_os_string(),
+                OsString::from("--timeout"),
+                OsString::from("1"),
+                OsString::from("--interval"),
+                OsString::from("0.01")
+            ]),
+            2
+        );
+        assert_eq!(fs::clear_denial(), 1);
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 2);
+        fs::deny_once(&digest);
+        let result = wait(&digest, 1.0, 0.01);
+        assert!(fs::clear_denial() >= 2);
+        match result {
+            WaitResult::Mail(watermark, body, _) => {
+                assert_eq!(watermark.text(), "1");
+                assert_eq!(body, b"peer\n");
+            }
+            _ => panic!("metadata retry did not reach mail"),
+        }
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 2);
+        fs::remove_dir_all(home).unwrap();
+    }
 
     #[derive(Debug, Default)]
     struct RecordedOutput {
