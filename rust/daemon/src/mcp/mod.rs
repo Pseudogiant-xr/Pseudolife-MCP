@@ -66,12 +66,20 @@ enum Lookup {
 
 impl McpState {
     pub fn from_env(auth_configured: bool) -> Self {
-        Self {
-            default_tier: tiers::normalize_tier(
+        Self::new(
+            tiers::normalize_tier(
                 std::env::var("PSEUDOLIFE_MCP_TOOLSET").ok().as_deref(),
                 "PSEUDOLIFE_MCP_TOOLSET",
             ),
-            tier_map: tiers::parse_tier_map(std::env::var("PSEUDOLIFE_MCP_TIER_MAP").ok().as_deref()),
+            tiers::parse_tier_map(std::env::var("PSEUDOLIFE_MCP_TIER_MAP").ok().as_deref()),
+            auth_configured,
+        )
+    }
+
+    fn new(default_tier: Tier, tier_map: HashMap<String, Tier>, auth_configured: bool) -> Self {
+        Self {
+            default_tier,
+            tier_map,
             overrides: Overrides::new(tiers::OVERRIDE_TTL),
             auth_configured,
             sessions: Mutex::new(Sessions::default()),
@@ -645,5 +653,86 @@ fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
             "error": "invalid_argument",
             "message": "action: Input should be 'expand', 'collapse' or 'status'",
             "param": "action"})),
+    }
+}
+
+#[cfg(test)]
+mod goldens {
+    //! The oracle's answers recorded by `harness/mcp_goldens.py` (CI runs
+    //! these without a Python daemon; the live harness stays the acceptance
+    //! check while Python exists).
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    fn goldens() -> Value {
+        serde_json::from_str(include_str!("../../harness/goldens/mcp.json")).unwrap()
+    }
+
+    fn harness_state() -> McpState {
+        McpState::new(
+            Tier::Core,
+            tiers::parse_tier_map(Some("alice:minimal,bob:core,writer-m:minimal")),
+            true,
+        )
+    }
+
+    #[test]
+    fn tier_lists_hash_to_the_oracle() {
+        let g = goldens();
+        for tier in tiers::LADDER {
+            let got = hex::encode(Sha256::digest(catalogue::list_result(tier).as_bytes()));
+            assert_eq!(got, g["list_sha256"][tier.name()], "{}", tier.name());
+        }
+    }
+
+    #[test]
+    fn initialize_results_match_the_oracle() {
+        for (version, want) in goldens()["initialize"].as_object().unwrap() {
+            let params = json!({"protocolVersion": version, "capabilities": {},
+                                "clientInfo": {"name": "mcp", "version": "0.1.0"}});
+            assert_eq!(initialize_result(&params).unwrap(), want.as_str().unwrap(), "{version}");
+        }
+    }
+
+    #[test]
+    fn toolset_sequences_match_the_oracle() {
+        let store = crate::auth::PrincipalStore::new();
+        for ident in goldens()["toolset"].as_array().unwrap() {
+            let state = harness_state();
+            let principal = ident["principal"].as_str().unwrap();
+            let mut headers = HeaderMap::new();
+            if let Some(w) = ident["writer"].as_str() {
+                headers.insert("x-pl-writer", w.parse().unwrap());
+            }
+            let key = identity::tier_key(principal, &headers);
+            for step in ident["steps"].as_array().unwrap() {
+                let args = step["args"].as_object().unwrap();
+                let action = toolset_action(args).unwrap();
+                let (out, _) = toolset::run(&state, &store, action, principal, key.as_deref());
+                assert_eq!(
+                    envelope::success_result(&out).to_string(),
+                    step["result"].as_str().unwrap(),
+                    "{principal} {args:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn toolset_binding_refusals_match_the_oracle() {
+        let g = goldens();
+        for case in g["binding"].as_array().unwrap() {
+            let args = case["args"].as_object().cloned().unwrap_or_default();
+            let payload = toolset_action(&args).err().unwrap();
+            assert_eq!(
+                envelope::error_result(&payload).to_string(),
+                case["result"].as_str().unwrap(),
+                "{args:?}"
+            );
+        }
+        assert_eq!(
+            envelope::unknown_tool("no_such_tool").to_string(),
+            g["unknown_tool"].as_str().unwrap()
+        );
     }
 }
