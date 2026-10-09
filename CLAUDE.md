@@ -231,28 +231,6 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 
 or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
-**Stopping processes: only ones you can prove are yours.** Every session on
-this host shares one process table, so a kill that matches more than your
-own run takes down other sessions' work.
-- Stop by the PID you recorded at launch, with its tree: the harness's task
-  stop, or `taskkill /PID <pid> /T /F`. In Git Bash, `$!` is not a Windows
-  PID; read it with `cat /proc/$!/winpid`. In PowerShell, use
-  `(Start-Process ... -PassThru).Id`.
-- Or match a command line that contains a marker unique to your run: your
-  harness home, your target directory, a run id you put in the argv.
-- Never stop by image name (`taskkill /IM`, `Stop-Process -Name`,
-  `pkill`/`killall <name>`, `Get-Process <name> | Stop-Process`).
-- Never stop by a generic pattern another session's processes could also
-  match (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
-
-Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
-Codex process on the host, the Codex app and other sessions' turns
-included. A command-line pattern meant for one session's harness could also
-match other sessions' test daemons. On the maintainer's machine an untracked
-hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
-by-name forms. The rule applies everywhere regardless, including Codex
-sessions, which do not run Claude hooks.
-
 **Dependent local tests.** Select the union of touched test files, tests
 reached through reverse imports and fixture dependencies, and tests found by
 references to changed paths, module names, commands and configuration keys.
@@ -518,6 +496,43 @@ took 143 CUDA OOMs.
   ordinary-code rule”. An old-head full pass is not evidence for a changed
   head, except under the review-fix rule above.
 
+## Stopping processes (shared host)
+
+Every session on this host shares one process table, so a kill that selects
+more than your own run takes down other sessions' work. Stop only processes
+you can prove are yours.
+
+- **By the PID you recorded at launch, with its tree**, while it is still
+  running: the harness's task stop, or `taskkill /PID <pid> /T /F`. In Git
+  Bash, MSYS rewrites `/PID` into a path, so write `taskkill //PID <pid>
+  //T //F` (or prefix `MSYS_NO_PATHCONV=1`). In Git Bash `$!` is not a
+  Windows PID; read it with `cat /proc/$!/winpid`. In PowerShell use
+  `(Start-Process ... -PassThru).Id`. A recorded PID can be reused once its
+  process exits, so if time has passed, recheck its command line first.
+- **By a marker unique to your run** when the process has left your tree (a
+  daemon that detached or outlived its launcher). Put a run id in the argv
+  or use your own harness home. The worktree path is not unique: reviewers
+  and subagents share it. Exclude the searching process and its parent,
+  list the matches, check them, then stop them by PID.
+- A server started by a tool you do not control is stopped through that
+  tool, or by asking its owner on the board.
+- **Never select by name, filter or generic pattern.** That means
+  `taskkill /IM` or `/FI "IMAGENAME eq ..."`, `Stop-Process -Name`,
+  `Get-Process <name> | Stop-Process`, `wmic process where name=... delete`,
+  `Get-CimInstance Win32_Process -Filter "Name=..." | Invoke-CimMethod
+  -MethodName Terminate`, `pkill` or `pkill -f`, `killall`. It also means a
+  command-line pattern another session's processes could match
+  (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
+
+Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
+Codex process on the host, the Codex app and other sessions' turns
+included. A command-line pattern meant for one session's harness could also
+match other sessions' test daemons. On the maintainer's machine an untracked
+hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
+by-name forms in Claude's Bash tool. The rule applies everywhere
+regardless, including the PowerShell tool and Codex sessions, which the
+hook does not see.
+
 ## Review discipline
 
 - **Recall precedes review.** Before reviewing code, docs, or a PR, search
@@ -543,7 +558,7 @@ took 143 CUDA OOMs.
   `--commit <sha>` for a single commit. Pin the model and effort on the
   command line, and check the log's header names both. To stop one early,
   kill its own process tree by the PID taken at launch, never by image
-  name (see "Stopping processes" under Running tests). Verify
+  name (see "Stopping processes (shared host)"). Verify
   its findings against the code like a subagent's, and record both reviews
   in the PR (or the commit body when there is no PR yet), each finding
   labelled by source with its verdict. A missing, signed-out or failed
