@@ -347,6 +347,37 @@ def seed_template(name: str, paragraphs: int) -> None:
     print(r.stdout.strip(), flush=True)
 
 
+def coverage(responses: list[dict], state: dict) -> dict:
+    """What the oracle actually exercised, so a green run cannot be vacuous."""
+    cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
+           "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0}
+    for r in responses:
+        body = r.get("json") or {}
+        if not isinstance(body, dict):
+            continue
+        cov["with_entries"] += bool(body.get("entries"))
+        cov["with_events"] += bool(body.get("events"))
+        cov["with_cortex"] += bool(body.get("cortex"))
+        for e in body.get("entries") or []:
+            if e.get("via"):
+                cov["via"][e["via"]] = cov["via"].get(e["via"], 0) + 1
+    ev = state["rows"].get("public.retrieval_events")
+    if ev:
+        cols = ev["columns"]
+        for row in ev["rows"]:
+            cov["events_rows"] += 1
+            rec = dict(zip(cols, row))
+            for s_ in rec.get("served") or []:
+                ch = (s_.get("components") or {}).get("channel")
+                cov["channels"][ch] = cov["channels"].get(ch, 0) + 1
+            rr = (rec.get("params") or {}).get("reranker") or {}
+            cov["rerank_fired"] += bool(rr.get("fired"))
+            if rr.get("skip_reason"):
+                cov["rerank_skips"][rr["skip_reason"]] = cov["rerank_skips"].get(rr["skip_reason"], 0) + 1
+            cov["timeline_fired"] += bool(((rec.get("params") or {}).get("timeline") or {}).get("fired"))
+    return cov
+
+
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     dbs = {"python": f"pl_cf_w2d_{tag}_py", "rust": f"pl_cf_w2d_{tag}_rs"}
@@ -367,10 +398,12 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         wait_settled([d.port for d in procs.values()], timeout=900)
         golden = json.loads((GOLDENS / f"{scn.name}.json").read_text()) if mode == "golden" else None
         rows = []
+        py_seen = []
         for i, c in enumerate(scn.cases()):
             py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
                     else golden["responses"][i])
             rs_r = call(procs["rust"].port, "GET", c["path"], c["headers"])
+            py_seen.append(py_r)
             diffs, notes = compare(py_r, rs_r)
             rows.append({"case": c["name"], "path": c["path"][:140], "python_status": py_r["status"],
                          "rust_status": rs_r["status"], "diffs": diffs, "notes": notes,
@@ -388,6 +421,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_state = golden["db_state"]
     else:
         py_state = states["python"]
+    cov = coverage(py_seen, py_state)
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
@@ -400,7 +434,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         r.pop("_python", None)
     for side in sides:
         pg.drop(dbs[side])
-    return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared": declared}
+    return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared": declared,
+            "coverage": cov}
 
 
 def main() -> int:
@@ -444,6 +479,7 @@ def main() -> int:
         for d in r["db_diffs"][:20]:
             print(f"DB DIFF [{r['scenario']}] {d}")
         print(f"[{r['scenario']}] declared python-only writes: {r['declared'].get('python')}")
+        print(f"[{r['scenario']}] coverage: {json.dumps(r['coverage'])}")
     db = sum(1 for r in results if r["db_diffs"])
     summary = {"scenarios": len(results), "cases": n_cases, "case_diffs": n_diff, "db_diff_scenarios": db}
     print(json.dumps(summary))
