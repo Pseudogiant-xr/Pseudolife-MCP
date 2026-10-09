@@ -42,7 +42,8 @@ def tokens(path):
 def call(port, method, path, headers=None):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
     c.putrequest(method, path, skip_accept_encoding=True)
-    for k, v in (headers or {}).items():
+    # A list of pairs sends repeated headers in order.
+    for k, v in (headers.items() if isinstance(headers, dict) else headers or []):
         c.putheader(k, v)
     c.endheaders()
     r = c.getresponse()
@@ -134,6 +135,18 @@ def contract_cases(t):
         ("search: repeated q (last wins)", "GET", s + "q=first&q=install+the+plugin", auth),
         ("search: plus as space", "GET", s + "q=install+the+plugin&disable_recency_boost=yes", auth),
         ("search: bm25=false", "GET", q(q="schema version bump", bm25="false"), auth),
+        ("search: unknown band, blank q", "GET", q(band="nope"), auth),
+        ("auth: valid then junk header", "GET", q(q="deploy"),
+         [("Authorization", f"Bearer {t['T_DEFAULT']}"), ("Authorization", "Bearer junk")]),
+        ("auth: junk then valid header", "GET", q(q="deploy"),
+         [("Authorization", "Bearer junk"), ("Authorization", f"Bearer {t['T_DEFAULT']}")]),
+        ("percent-encoded /health", "GET", "/%68ealth", {}),
+        ("percent-encoded /api/search", "GET", "/api/%73earch?q=deploy", auth),
+        ("unicode query", "GET", q(q="données café 日本語 memory"), auth),
+        ("search: q is a U+001C separator", "GET", s + "q=%1C", auth),
+        ("search: top_k=1__0", "GET", q(q="memory bands", top_k="1__0"), auth),
+        ("search: top_k=1_0", "GET", q(q="memory bands", top_k="1_0"), auth),
+        ("search: min_score=__0.99", "GET", q(q="memory bands", min_score="__0.99"), auth),
     ]
 
 
@@ -148,9 +161,15 @@ def run_contract(pp, sp, t):
         if pct != sct:
             diffs.append(f"content-type: python {pct} vs spike {sct}")
         declared = []
-        if path.startswith("/health"):
+        if urllib.parse.unquote(path).startswith("/health"):
             declared = sorted(k for k in pb if k not in sb and k in DECLARED_HEALTH_OMISSIONS)
             pb = {k: v for k, v in pb.items() if k not in DECLARED_HEALTH_OMISSIONS}
+            # Backend-dependent: Python reports dtype null for its ONNX backend
+            # (memory/embedding.py:363) and a string for torch. The spike is ONNX.
+            if (isinstance(sb.get("embedder"), dict) and sb["embedder"].get("backend") == "onnx"
+                    and isinstance(pb.get("embedder"), dict) and pb["embedder"].get("backend") != "onnx"):
+                pb = {**pb, "embedder": {**pb["embedder"], "dtype": None}}
+                declared = declared + ["embedder.dtype (backend-dependent)"]
         if isinstance(pb, dict) and "entries" in pb and isinstance(sb, dict) and "entries" in sb:
             top_p = {k: shape(v) for k, v in pb.items() if k != "entries"}
             top_s = {k: shape(v) for k, v in sb.items() if k != "entries"}
@@ -163,6 +182,8 @@ def run_contract(pp, sp, t):
             if pb.get("count") != sb.get("count") or pb.get("low_confidence") != sb.get("low_confidence"):
                 diffs.append(f"count/low_confidence: python {pb.get('count')}/{pb.get('low_confidence')} "
                              f"vs spike {sb.get('count')}/{sb.get('low_confidence')}")
+            if [e.get("id") for e in pb["entries"]] != [e.get("id") for e in sb["entries"]]:
+                diffs.append("entry ids differ")
             if pb.get("query") != sb.get("query"):
                 diffs.append(f"query: python {pb.get('query')!r} vs spike {sb.get('query')!r}")
         else:
@@ -173,9 +194,9 @@ def run_contract(pp, sp, t):
                     diffs.append(f"body: python {pb} vs spike {sb}")
             for k in set(pb) & set(sb):
                 if k not in FREE_VALUES and k != "error" and not isinstance(pb[k], (dict, list)) \
-                        and pb[k] != sb[k] and not path.startswith("/health"):
+                        and pb[k] != sb[k] and not urllib.parse.unquote(path).startswith("/health"):
                     diffs.append(f"value {k}: python {pb[k]!r} vs spike {sb[k]!r}")
-            if path.startswith("/health"):
+            if urllib.parse.unquote(path).startswith("/health"):
                 for k in ("status", "schema", "storage", "auth", "bank", "persist_errors", "db"):
                     if pb.get(k) != sb.get(k):
                         diffs.append(f"health {k}: python {pb.get(k)!r} vs spike {sb.get(k)!r}")
@@ -185,7 +206,8 @@ def run_contract(pp, sp, t):
 
 
 def kendall_tau_b(a, b):
-    """Tau-b over items ranked by both lists (ranks taken within each list)."""
+    """Kendall tau over the items both lists rank (ranks taken within each list).
+    Ranks never tie inside one list, so tau-a and tau-b coincide here."""
     common = [x for x in a if x in b]
     n = len(common)
     if n < 2:
@@ -216,19 +238,37 @@ def run_ranking(pp, sp, t, queries, extra):
         si = [e["id"] for e in sb["entries"]]
         denom = max(len(pi), len(si)) or 1
         overlap = len(set(pi) & set(si)) / denom if (pi or si) else 1.0
+        pent = {e["id"]: e for e in pb["entries"]}
+        value_diffs = []
+        for e in sb["entries"]:
+            p = pent.get(e["id"])
+            if p is None:
+                continue
+            for k in sorted(set(p) | set(e)):
+                if k in ("access_count", "score"):
+                    continue
+                if p.get(k, "<absent>") != e.get(k, "<absent>"):
+                    value_diffs.append(f"id {e['id']} {k}: python {p.get(k, '<absent>')!r} vs spike {e.get(k, '<absent>')!r}")
+        extra_keys = sorted((set(pb) ^ set(sb)) - {"retrieval_event_id"})
         pscore = {e["id"]: e["score"] for e in pb["entries"]}
         sscore = {e["id"]: e["score"] for e in sb["entries"]}
         common = set(pscore) & set(sscore)
         rows.append({"query": qtext, "python_ids": pi, "spike_ids": si, "overlap": round(overlap, 4),
                      "kendall_tau_b": kendall_tau_b(pi, si),
                      "max_abs_score_delta": max((abs(pscore[i] - sscore[i]) for i in common), default=None),
-                     "spike_ms": round(spike_ms, 1)})
+                     "spike_ms": round(spike_ms, 1), "value_diffs": value_diffs,
+                     "top_level_key_diffs": extra_keys})
     ov = [r["overlap"] for r in rows]
     taus = [r["kendall_tau_b"] for r in rows if r["kendall_tau_b"] is not None]
     return {"params": {"top_k": 8, "disable_recency_boost": True, **extra},
             "mean_overlap": round(sum(ov) / len(ov), 4), "min_overlap": min(ov),
             "mean_kendall_tau_b": round(sum(taus) / len(taus), 4) if taus else None,
             "queries_below_0_75": [r["query"] for r in rows if r["overlap"] < 0.75],
+            "entry_value_diffs": sum(len(r["value_diffs"]) for r in rows),
+            "top_level_key_diff_queries": [r["query"] for r in rows if r["top_level_key_diffs"]],
+            # Scores are rounded to 4 dp on both sides; a larger gap is a finding.
+            "score_deltas_over_0_0002": [r["query"] for r in rows
+                                         if (r["max_abs_score_delta"] or 0) > 0.0002],
             "per_query": rows}
 
 
@@ -249,9 +289,14 @@ def main():
     for r in contract:
         if r["diffs"]:
             print(" ", r["case"], r["diffs"])
+    failed = result["contract_diff_cases"] > 0 or any(
+        v["queries_below_0_75"] or v["mean_overlap"] < 0.95 or v["entry_value_diffs"]
+        or v["top_level_key_diff_queries"] or v["score_deltas_over_0_0002"] for v in ranking.values())
     for k, v in ranking.items():
         print(k, "mean overlap", v["mean_overlap"], "min", v["min_overlap"], "tau", v["mean_kendall_tau_b"],
-              "below 0.75:", v["queries_below_0_75"])
+              "below 0.75:", v["queries_below_0_75"], "value diffs:", v["entry_value_diffs"],
+              "key diffs:", v["top_level_key_diff_queries"], "score gaps:", v["score_deltas_over_0_0002"])
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

@@ -1043,6 +1043,7 @@ dependencies = [
  "hex",
  "ndarray",
  "ort",
+ "percent-encoding",
  "regex",
  "serde",
  "serde_json",

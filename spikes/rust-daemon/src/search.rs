@@ -252,8 +252,9 @@ fn slot_tokens(e: &Entry) -> HashSet<String> {
     out
 }
 
+/// Python `round(x, 4)`: correctly rounded from the exact binary value, ties to even.
 fn round4(x: f64) -> f64 {
-    (x * 10_000.0).round() / 10_000.0
+    format!("{x:.4}").parse().unwrap_or(x)
 }
 
 pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
@@ -374,6 +375,16 @@ mod tests {
         assert!((hits[0].score - 0.6375).abs() < 1e-9);
         let p = Params { min_score: Some(0.7), ..p };
         assert!(rank(&bank, &unit(1.0), &p).is_empty());
+    }
+
+    #[test]
+    fn round4_matches_python() {
+        // Values checked against CPython 3.11 round(x, 4): an exact tie goes to even,
+        // everything else follows the exact binary value.
+        assert_eq!(round4(0.03125), 0.0312);
+        assert_eq!(round4(0.00005), 0.0001);
+        assert_eq!(round4(1.00005), 1.0001);
+        assert_eq!(round4(0.12345), 0.1235);
     }
 
     #[test]

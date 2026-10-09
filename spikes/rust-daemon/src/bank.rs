@@ -80,7 +80,13 @@ pub async fn hydrate(client: &Client) -> Result<Bank> {
         let slots: Option<Value> = r.get(13);
         entries.push(Entry {
             id: r.get(0),
-            band: r.get(1),
+            // Hydration seats a row whose band left the preset in the first
+            // band and reconciles its stamp (storage/sync.py:116-145). Python
+            // also writes the new stamp back; the read-only spike does not.
+            band: {
+                let b: String = r.get(1);
+                if crate::search::BANDS.contains(&b.as_str()) { b } else { crate::search::BANDS[0].to_string() }
+            },
             text: r.get(2),
             surprise: r.get::<_, Option<f32>>(4).unwrap_or(0.0),
             ts: r.get::<_, Option<f64>>(5).unwrap_or(0.0),

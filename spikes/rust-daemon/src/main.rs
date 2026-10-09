@@ -92,21 +92,24 @@ async fn health(app: &App) -> Response {
         "bank": Value::Null,
         "persist_errors": 0,
         "memory": {"source": "unavailable"},
-        "embedder": {"backend": "onnx", "device": "cpu", "dtype": "fp32"},
+        "embedder": {"backend": "onnx", "device": "cpu", "dtype": null},
     });
     let probe = tokio::time::timeout(Duration::from_secs(2), async {
         let c = connect(&app.db_url).await?;
         c.simple_query("SELECT 1").await?;
-        let row = c.query_opt("SELECT value::text FROM meta WHERE key = 'coordination_bank_id'", &[]).await?;
-        Ok::<_, anyhow::Error>(row.map(|r| r.get::<_, String>(0)))
+        // The bank id is best effort: a failure here leaves `bank` null.
+        let id = match c.query_opt("SELECT value::text FROM meta WHERE key = 'coordination_bank_id'", &[]).await {
+            Ok(Some(r)) => serde_json::from_str::<Value>(&r.get::<_, String>(0)).ok(),
+            _ => None,
+        };
+        Ok::<_, anyhow::Error>(id)
     })
     .await;
     match probe {
         Ok(Ok(bank_id)) => {
             body["db"] = json!("ok");
-            if let Some(id) = bank_id {
-                // meta values are JSON-encoded text; the hash is over the id string.
-                let id = serde_json::from_str::<String>(&id).unwrap_or(id);
+            // Hashed only when it is a non-empty string (daemon.py:_bank_fingerprint).
+            if let Some(Value::String(id)) = bank_id.filter(|v| v.as_str().is_some_and(|s| !s.is_empty())) {
                 body["bank"] = json!(&hex::encode(Sha256::digest(id.as_bytes()))[..16]);
             }
         }
@@ -123,17 +126,25 @@ async fn health(app: &App) -> Response {
     json_response(status, &body)
 }
 
+fn latin1(v: &header::HeaderValue) -> String {
+    v.as_bytes().iter().map(|&b| b as char).collect()
+}
+
+/// First value, as `web/api.py:_hdr` reads Origin and Host.
 fn latin1_header(h: &HeaderMap, name: header::HeaderName) -> Option<String> {
-    h.get(name).map(|v| v.as_bytes().iter().map(|&b| b as char).collect())
+    h.get(name).map(latin1)
+}
+
+/// Last value: the principal resolver reads headers through a dict (web/api.py:263).
+fn latin1_header_last(h: &HeaderMap, name: header::HeaderName) -> Option<String> {
+    h.get_all(name).iter().last().map(latin1)
 }
 
 fn host_part(value: &str) -> String {
     let mut v = value;
     if let Some((_, rest)) = v.split_once("://") {
+        // urlsplit().netloc keeps any userinfo, so "user@localhost" is not loopback.
         v = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-        if let Some((_, h)) = v.rsplit_once('@') {
-            v = h;
-        }
     }
     let v = v.trim().to_lowercase();
     if let Some(rest) = v.strip_prefix('[') {
@@ -168,14 +179,28 @@ fn parse_query(raw: Option<&str>) -> std::collections::HashMap<String, String> {
     form_urlencoded::parse(raw.unwrap_or("").as_bytes()).into_owned().collect()
 }
 
+/// Python `str.strip()`: Unicode whitespace plus the U+001C..U+001F separators.
+fn py_strip(s: &str) -> &str {
+    s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+}
+
+/// Python numeric literals allow single underscores between digits only.
+fn py_underscores(t: &str) -> Option<String> {
+    let b: Vec<char> = t.chars().collect();
+    for (i, c) in b.iter().enumerate() {
+        if *c == '_' && !(i > 0 && i + 1 < b.len() && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit()) {
+            return None;
+        }
+    }
+    Some(t.replace('_', ""))
+}
+
 fn py_int(s: &str) -> Option<i64> {
-    let t = s.trim().replace('_', "");
-    t.parse::<i64>().ok()
+    py_underscores(py_strip(s))?.parse::<i64>().ok()
 }
 
 fn py_float(s: &str) -> Option<f64> {
-    let t = s.trim().replace('_', "");
-    t.parse::<f64>().ok()
+    py_underscores(py_strip(s))?.parse::<f64>().ok()
 }
 
 /// `_tribool` (web/routes.py:55): None follows config.
@@ -199,19 +224,19 @@ fn list(q: &std::collections::HashMap<String, String>, key: &str) -> Option<Vec<
 
 fn search_route(app: &App, raw_query: Option<&str>) -> Response {
     let q = parse_query(raw_query);
-    let query = q.get("q").map(|s| s.trim().to_string()).unwrap_or_default();
-    if query.is_empty() {
-        return json_response(
-            StatusCode::OK,
-            &json!({"entries": [], "query": "", "count": 0, "low_confidence": true}),
-        );
-    }
+    let query = q.get("q").map(|s| py_strip(s).to_string()).unwrap_or_default();
     if let Some(bands) = list(&q, "band") {
         let unknown: Vec<&String> = bands.iter().filter(|b| !search::BANDS.contains(&b.as_str())).collect();
         if !unknown.is_empty() {
             let msg = format!("unknown band name(s) {unknown:?} — this preset has {:?}", search::BANDS);
             return json_response(StatusCode::BAD_REQUEST, &json!({"error": msg}));
         }
+    }
+    if query.is_empty() {
+        return json_response(
+            StatusCode::OK,
+            &json!({"entries": [], "query": "", "count": 0, "low_confidence": true}),
+        );
     }
     let top_k = q.get("top_k").filter(|s| !s.is_empty()).and_then(|s| py_int(s)).unwrap_or(search::ROUTE_TOP_K);
     let k = match top_k {
@@ -243,7 +268,8 @@ fn search_route(app: &App, raw_query: Option<&str>) -> Response {
 }
 
 async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
-    let path = req.uri().path().to_string();
+    // uvicorn percent-decodes the path before the app sees it.
+    let path = percent_encoding::percent_decode_str(req.uri().path()).decode_utf8_lossy().into_owned();
     let method = req.method().clone();
     let headers = req.headers().clone();
     if path == "/health" {
@@ -255,7 +281,7 @@ async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
             return json_response(StatusCode::FORBIDDEN, &json!({"error": denied, "hint": BROWSER_HINT}));
         }
     }
-    let authz = latin1_header(&headers, header::AUTHORIZATION);
+    let authz = latin1_header_last(&headers, header::AUTHORIZATION);
     match auth::resolve(authz.as_deref(), &app.env, &app.store) {
         auth::Resolved::Unavailable => {
             return json_response(StatusCode::SERVICE_UNAVAILABLE, &json!({"error": "principals_unavailable"}))
@@ -290,8 +316,10 @@ async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
 
 async fn refresh_principals(app: Arc<App>) {
     loop {
-        let rows = async {
+        let started = std::time::Instant::now();
+        let rows = tokio::time::timeout(Duration::from_secs(10), async {
             let c = connect(&app.db_url).await?;
+            c.batch_execute("SET statement_timeout = '5s'").await?;
             let rows = c
                 .query(
                     "SELECT principal, token_hash, revoked_at IS NOT NULL FROM public.principals",
@@ -301,11 +329,12 @@ async fn refresh_principals(app: Arc<App>) {
             Ok::<_, anyhow::Error>(
                 rows.into_iter().map(|r| (r.get::<_, String>(0), r.get(1), r.get::<_, bool>(2))).collect(),
             )
-        }
+        })
         .await;
         match rows {
-            Ok(rows) => app.store.load(rows, &app.env),
-            Err(e) => eprintln!("principals refresh failed: {e}"),
+            Ok(Ok(rows)) => app.store.load(rows, &app.env, started),
+            Ok(Err(e)) => eprintln!("principals refresh failed: {e}"),
+            Err(_) => eprintln!("principals refresh timed out"),
         }
         tokio::time::sleep(auth::REFRESH_EVERY).await;
     }
@@ -319,6 +348,11 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("PSEUDOLIFE_MCP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8765);
     let threads: usize = std::env::var("PSEUDOLIFE_SPIKE_THREADS").ok().and_then(|p| p.parse().ok()).unwrap_or(4);
     let env = auth::EnvTokens::from_env();
+    let raw_map = std::env::var("PSEUDOLIFE_MCP_TOKENS").unwrap_or_default();
+    if !raw_map.trim().is_empty() && env.map.is_empty() && env.single.is_none() {
+        eprintln!("PSEUDOLIFE_MCP_TOKENS is set but no entry parsed and PSEUDOLIFE_MCP_TOKEN is unset: refusing to start in open mode");
+        std::process::exit(2);
+    }
     if !env.configured() && !matches!(host.as_str(), "127.0.0.1" | "::1" | "localhost") {
         anyhow::bail!("refusing a non-loopback bind without PSEUDOLIFE_MCP_TOKEN");
     }

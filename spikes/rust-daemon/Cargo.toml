@@ -19,6 +19,7 @@ sha2 = "0.10"
 hex = "0.4"
 form_urlencoded = "1"
 regex = "1"
+percent-encoding = "2"
 anyhow = "1"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "0.16"

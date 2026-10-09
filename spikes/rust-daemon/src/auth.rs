@@ -35,8 +35,8 @@ impl EnvTokens {
     }
 }
 
-/// `token:principal,...`, split on the last colon; reserved and duplicate
-/// principals skipped, duplicate tokens keep the first entry (principals.py:103).
+/// `token:principal,...`, split on the last colon; entries naming a reserved
+/// principal are skipped and a duplicate token keeps its first entry (principals.py:103).
 pub fn parse_token_map(raw: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for part in raw.split(',') {
@@ -79,10 +79,13 @@ impl PrincipalStore {
         PrincipalStore { snap: RwLock::new(Snapshot::default()) }
     }
 
-    /// Replace the snapshot from `(principal, token_hash, revoked)` rows.
-    pub fn load(&self, rows: Vec<(String, Option<String>, bool)>, env: &EnvTokens) {
+    /// Replace the snapshot from `(principal, token_hash, revoked)` rows. The
+    /// snapshot is as old as the read's start (principal_store.py:118-141), so
+    /// a slow read cannot renew a stale snapshot.
+    pub fn load(&self, rows: Vec<(String, Option<String>, bool)>, env: &EnvTokens, started: Instant) {
         let mut by_hash = HashMap::new();
         for (principal, hash, revoked) in rows {
+            let principal = principal.trim().to_lowercase();
             let Some(hash) = hash.filter(|h| !h.is_empty()) else { continue };
             if revoked
                 || !valid_name(&principal)
@@ -93,7 +96,7 @@ impl PrincipalStore {
             }
             by_hash.insert(hash, principal);
         }
-        *self.snap.write().unwrap() = Snapshot { by_hash, loaded_at: Some(Instant::now()) };
+        *self.snap.write().unwrap() = Snapshot { by_hash, loaded_at: Some(started) };
     }
 
     fn available(&self) -> bool {
@@ -198,10 +201,13 @@ mod tests {
                 ("revoked".into(), Some(hex::encode(Sha256::digest(b"r"))), true),
                 ("alice".into(), Some(hex::encode(Sha256::digest(b"shadow"))), false),
                 ("Bad Name".into(), Some(hex::encode(Sha256::digest(b"bad"))), false),
+                (" Erin ".into(), Some(hex::encode(Sha256::digest(b"erin-tok"))), false),
             ],
             &e,
+            Instant::now(),
         );
         assert!(matches!(resolve(Some("Bearer stored-tok"), &e, &s), Resolved::Principal(p) if p == "carol"));
+        assert!(matches!(resolve(Some("Bearer erin-tok"), &e, &s), Resolved::Principal(p) if p == "erin"));
         for t in ["r", "shadow", "bad", "nope"] {
             assert!(matches!(resolve(Some(&format!("Bearer {t}")), &e, &s), Resolved::None), "{t}");
         }
