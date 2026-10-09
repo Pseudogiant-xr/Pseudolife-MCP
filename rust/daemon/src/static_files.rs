@@ -74,9 +74,26 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
     } else {
         trimmed
     };
+    if rel.contains('\0') {
+        // `Path.resolve()` raises on an embedded NUL: the 500 path.
+        return Err(std::io::Error::other("embedded NUL in path"));
+    }
     let root = resolve_under(&std::env::current_dir()?.join(root), "");
     let mut target = resolve_under(&root, rel);
     if !target.starts_with(&root) {
+        return Ok(Served {
+            status: 403,
+            body: b"forbidden".to_vec(),
+            content_type: "text/plain".into(),
+            cache: "no-store",
+        });
+    }
+    // `Path.resolve()` follows symlinks: a link out of the root is refused
+    // like a `..` escape.
+    if let (Ok(real), Ok(real_root)) =
+        (std::fs::canonicalize(&target), std::fs::canonicalize(&root))
+        && !real.starts_with(&real_root)
+    {
         return Ok(Served {
             status: 403,
             body: b"forbidden".to_vec(),
@@ -164,6 +181,23 @@ mod tests {
             (s.status, s.body.as_slice()),
             (403, b"forbidden".as_slice())
         );
+        assert!(serve(&root, "/ui/a\0b").is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_root_is_forbidden() {
+        let root = tree();
+        let outside = root.with_extension("outside");
+        std::fs::write(&outside, b"outside\n").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape.txt")).unwrap();
+        let s = serve(&root, "/ui/escape.txt").unwrap();
+        assert_eq!(
+            (s.status, s.body.as_slice()),
+            (403, b"forbidden".as_slice())
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_file(outside).unwrap();
     }
 }

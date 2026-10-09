@@ -8,25 +8,23 @@ use std::path::Path;
 use std::sync::Mutex;
 use tokenizers::{Tokenizer, TruncationParams};
 
-/// `EmbeddingConfig.query_prefix` (utils/config.py:44): no space after "Query:".
-pub const QUERY_PREFIX: &str =
-    "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:";
-/// `EmbeddingConfig.max_seq_length` (utils/config.py:54).
-pub const MAX_TOKENS: usize = 512;
-
 pub struct Embedder {
+    query_prefix: String,
     tokenizer: Tokenizer,
     session: Mutex<Session>,
 }
 
 impl Embedder {
     /// `model_dir` holds `model.onnx` (+ `model.onnx_data`) and `tokenizer.json`.
-    pub fn load(model_dir: &Path, threads: usize) -> Result<Self> {
+    /// `prefix` and `max_tokens` are `embedding.query_prefix` and
+    /// `embedding.max_seq_length` (a cap: Python takes the smaller of it
+    /// and the model's own limit, which is larger for Qwen3).
+    pub fn load(model_dir: &Path, threads: usize, prefix: &str, max_tokens: usize) -> Result<Self> {
         let mut tokenizer =
             Tokenizer::from_file(model_dir.join("tokenizer.json")).map_err(|e| anyhow!("{e}"))?;
         tokenizer
             .with_truncation(Some(TruncationParams {
-                max_length: MAX_TOKENS,
+                max_length: max_tokens,
                 ..Default::default()
             }))
             .map_err(|e| anyhow!("{e}"))?;
@@ -35,6 +33,7 @@ impl Embedder {
             .with_intra_threads(threads)?
             .commit_from_file(model_dir.join("model.onnx"))?;
         Ok(Embedder {
+            query_prefix: prefix.to_string(),
             tokenizer,
             session: Mutex::new(session),
         })
@@ -67,6 +66,6 @@ impl Embedder {
     }
 
     pub fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
-        self.embed(&format!("{QUERY_PREFIX}{q}"))
+        self.embed(&format!("{}{q}", self.query_prefix))
     }
 }

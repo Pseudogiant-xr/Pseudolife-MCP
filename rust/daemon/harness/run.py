@@ -27,6 +27,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -104,10 +105,15 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
     for k in sorted(HEALTH_DECLARED_ONLY_PYTHON & set(body)):
         declared.append(f"health.{k} (python only)")
         body.pop(k)
-    body["version"] = "<free>"
+    # Free values are replaced only where present: a missing key must still diff.
+    if isinstance(body.get("version"), str):
+        body["version"] = "<free str>"
     if isinstance(body.get("updates"), dict):
-        body["updates"]["checked_at"] = "<free>"
-        body["updates"]["latest_release"] = "<free>"
+        u = body["updates"]
+        if isinstance(u.get("checked_at"), (int, float)) and not isinstance(u.get("checked_at"), bool):
+            u["checked_at"] = "<free number>"
+        if "latest_release" in u and (u["latest_release"] is None or isinstance(u["latest_release"], str)):
+            u["latest_release"] = "<free str|null>"
     if isinstance(body.get("memory"), dict):
         body["memory"] = {"source": body["memory"].get("source")}
     if isinstance(body.get("db"), str) and body["db"].startswith("error: "):
@@ -116,9 +122,21 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
         if isinstance(body.get(key), str):
             body[key] = body[key][:40] + "<free>"
     emb = body.get("embedder")
-    if isinstance(emb, dict):
+    if isinstance(emb, dict) and set(emb) == {"backend", "device", "dtype"} \
+            and emb["backend"] in ("torch", "onnx") and (emb["dtype"] is None or isinstance(emb["dtype"], str)):
         # Backend-dependent: Python reports dtype null for ONNX and a string for torch.
-        body["embedder"] = {"device": emb.get("device"), "backend": "<backend>", "dtype": "<backend>"}
+        body["embedder"] = {"device": emb["device"], "backend": "<torch|onnx>", "dtype": "<str|null>"}
+    return body
+
+
+def normalize_search(body: dict) -> dict:
+    """Scores and access counts are free (spec.md "Free"); presence and type are not."""
+    for e in body.get("entries", []) if isinstance(body.get("entries"), list) else []:
+        if isinstance(e, dict):
+            if isinstance(e.get("score"), (int, float)) and not isinstance(e["score"], bool):
+                e["score"] = "<free number>"
+            if isinstance(e.get("access_count"), int) and not isinstance(e["access_count"], bool):
+                e["access_count"] = "<free int>"
     return body
 
 
@@ -126,8 +144,15 @@ def normalize_response(resp: dict, path: str, declared: list[str]) -> dict:
     resp = json.loads(json.dumps(resp))
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
         resp["json"] = normalize_health(resp["json"], declared)
+    if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
+        resp["json"] = normalize_search(resp["json"])
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
         err = resp["json"].get("error")
+        if isinstance(err, str) and err.startswith("memory bank not ready: "):
+            # service.py:1430: the reason text is free, the shape is not.
+            ok = re.fullmatch(r"memory bank not ready: .+ \(next retry in \d+s\)", err, re.S)
+            resp["json"]["error"] = "memory bank not ready: <reason> (next retry in <n>s)" if ok else err
+            return resp
         # Free wording for 400/500 messages that are not public codes.
         if isinstance(err, str) and (" " in err or ":" in err):
             resp["json"]["error"] = "<free text>"
@@ -147,7 +172,10 @@ def diff_values(a, b, path="") -> list[str]:
         return out
     if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
         return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff_values(x, y, f"{path}[{i}]")]
-    return [] if a == b else [f"{path}: python {json.dumps(a)[:200]} vs rust {json.dumps(b)[:200]}"]
+    # Type-strict: Python's True == 1 and 1 == 1.0 must still diff on the wire.
+    if type(a) is not type(b) or a != b:
+        return [f"{path}: python {json.dumps(a)[:200]} vs rust {json.dumps(b)[:200]}"]
+    return []
 
 
 # ---- scenarios ------------------------------------------------------------------------
@@ -159,7 +187,13 @@ class Scenario:
     seeds_principals = False
     seed_entries = False
     settle = True          # wait until both report db + embedder
-    startup_exit = False   # both must refuse to start
+    hold_lease = False     # take each bank's writer lease before the daemons start
+    files: dict[str, str] = {}  # extra files in each data dir
+
+    def timeline(self, procs: dict, holders: list) -> list[dict]:
+        """Scenarios whose answers depend on time (lease, backoff, reaper):
+        return cases already answered (``_answers``), or [] to use cases()."""
+        return []
 
     def prepare_template(self, dsn: str) -> None:
         """Seed the template bank through Python's own write paths."""
@@ -167,9 +201,6 @@ class Scenario:
     def cases(self) -> list[dict]:
         return []
 
-    def interleave(self, py: daemons.Daemon, rs: daemons.Daemon, dsn_py: str, dsn_rs: str) -> list[dict]:
-        """Extra steps that need both daemons (lease holds, timing)."""
-        return []
 
 
 def case(name, method, path, headers=(), body=None, declared=None):
@@ -334,6 +365,17 @@ class Tokenless(Scenario):
             case("tokenless agents coordination", "GET", "/api/agents?view=coordination", []),
             case("tokenless hook woke authorized", "POST", "/api/hook/woke", [], declared="W2-F: woke marker"),
             case("tokenless mcp", "GET", "/mcp", [("Host", "127.0.0.1:1")], declared="W2-G: MCP transport"),
+            case("origin: unclosed IPv6 bracket", "GET", "/api/nope", [("Origin", "http://[::1")]),
+            case("origin: bracketed name", "GET", "/api/nope", [("Origin", "http://[localhost]")]),
+            case("origin: bracketed IPv4", "GET", "/api/nope", [("Origin", "http://[127.0.0.1]")]),
+            case("origin: invalid scheme", "GET", "/api/nope", [("Origin", "x y://localhost")]),
+            case("origin: tab inside host", "GET", "/api/nope", [("Origin", "http://local\thost")]),
+            case("origin: hook, unclosed bracket", "GET", "/api/hook/park-gate", [("Origin", "http://[::1")]),
+            case("origin: duplicate, foreign first", "GET", "/api/nope",
+                 [("Origin", "http://evil.example"), ("Origin", "http://localhost")]),
+            case("origin: duplicate, loopback first", "GET", "/api/nope",
+                 [("Origin", "http://localhost"), ("Origin", "http://evil.example")]),
+            case("ui: embedded NUL", "GET", "/ui/a%00b"),
         ]
         return c
 
@@ -403,36 +445,106 @@ class ExtractorConfigured(Scenario):
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_DREAM_BASE_URL": "http://127.0.0.1:9/v1", "PSEUDOLIFE_DREAM_MODEL": "m",
-                    "PSEUDOLIFE_BUILD_GIT_SHA": "abc123", "PSEUDOLIFE_BUILD_DIRTY": " TRUE ",
+                    "PSEUDOLIFE_BUILD_GIT_SHA": "abc123", "PSEUDOLIFE_BUILD_DIRTY": "maybe",
                     "PSEUDOLIFE_BUILD_SOURCE": ""}
+        self.files = {"last-backup.json": '\ufeff{"created_at": "2026-10-9t01:02:03z", "rotation": "ok"}'}
 
     def cases(self):
         return [case("health: extractor configured, build stamp", "GET", "/health")]
 
 
 class DbDown(Scenario):
-    """A DSN nothing listens on: Python keeps /health at 200 with no db key."""
+    """A DSN nothing listens on: Python keeps /health at 200 with no db key,
+    and the stored-principal view never loads."""
     name = "db-down"
     settle = False
 
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+
     def cases(self):
+        u = [bearer("unknown-w1a")]
         return [case("health, db unreachable", "GET", "/health"),
-                case("health again", "GET", "/health")]
+                case("health again", "GET", "/health"),
+                case("env bearer still authenticates", "GET", "/api/nope", [bearer(T_DEFAULT)]),
+                case("unknown bearer: principals unavailable", "GET", "/api/nope", u),
+                case("missing bearer still 401", "GET", "/api/nope"),
+                case("non-api, unknown bearer", "GET", "/whatever", u),
+                case("session-end, unknown bearer", "POST", "/api/hook/session-end", u),
+                case("memory-changes, unknown bearer (unauthorized)", "GET", "/api/hook/memory-changes", u),
+                case("search, db unreachable", "GET", "/api/search?q=x", [bearer(T_DEFAULT)])]
 
 
 class LeaseHeld(Scenario):
-    """Another session holds the writer lease: not_ready, 503, then recovery."""
+    """Another session holds the writer lease from before start: not_ready,
+    503, the backoff refusal on a call, then recovery once released."""
     name = "lease-held"
     settle = False
+    hold_lease = True
 
-    def interleave(self, py, rs, dsn_py, dsn_rs):
-        import psycopg
-        holders = []
-        for dsn in (dsn_py, dsn_rs):
-            conn = psycopg.connect(dsn, autocommit=True)
-            conn.execute("SELECT pg_advisory_lock(hashtextextended('pseudolife-bank-writer', 0))")
-            holders.append(conn)
-        return holders
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+
+    def timeline(self, procs, holders):
+        auth = [bearer(T_DEFAULT)]
+
+        def both(m, p, h=()):
+            return (call(procs["python"].port, m, p, list(h)), call(procs["rust"].port, m, p, list(h)))
+
+        out = []
+        time.sleep(8)  # both warmups were refused once and are backing off
+        for label, (m, p, h) in [("health while held", ("GET", "/health", ())),
+                                 ("search while backing off", ("GET", "/api/search?q=x", auth)),
+                                 ("health while held again", ("GET", "/health", ()))]:
+            c = case(label, m, p, h)
+            c["_answers"] = both(m, p, h)
+            out.append(c)
+        release(holders)
+        wait_settled([d.port for d in procs.values()], timeout=240, token=self.env.get("PSEUDOLIFE_MCP_TOKEN"))
+        c = case("health after release and backoff", "GET", "/health")
+        c["_answers"] = both("GET", "/health")
+        out.append(c)
+        return out
+
+
+class Reaper(Scenario):
+    """The lease is held until both warmups give up (backoff at its 60 s
+    cap); after release nothing calls the daemons, yet the session reaper's
+    init retry recovers them (PSEUDOLIFE_SESSION_REAP_SECONDS=5)."""
+    name = "reaper"
+    settle = False
+    hold_lease = True
+
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_SESSION_REAP_SECONDS": "5"}
+
+    def timeline(self, procs, holders):
+        time.sleep(110)  # failures near 0, 5, 15, 35, 75 s: the fifth arms 60 s; warmup stops
+        c = case("health after warmup gave up", "GET", "/health")
+        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        out = [c]
+        release(holders)
+        wait_settled([d.port for d in procs.values()], timeout=240, token=self.env.get("PSEUDOLIFE_MCP_TOKEN"))
+        c = case("health after reaper retry", "GET", "/health")
+        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        out.append(c)
+        return out
+
+
+def take_leases(dsns):
+    import psycopg
+    holders = []
+    for dsn in dsns:
+        conn = psycopg.connect(dsn, autocommit=True)
+        conn.execute("SELECT pg_advisory_lock(hashtextextended('pseudolife-bank-writer', 0))")
+        holders.append(conn)
+    return holders
+
+
+def release(holders):
+    for h in holders:
+        h.close()
+    holders.clear()
 
 
 class DimMismatch(Scenario):
@@ -503,10 +615,103 @@ STARTUP_REFUSALS = [
     ("invalid fusion", {}, "memory:\n  search:\n    fusion: nope\n", 1),
     ("unknown preset", {}, "memory:\n  miras:\n    preset: nope\n", 1),
     ("wake cap not int", {}, "coordination:\n  wake:\n    nightly_total: 1.5\n", 1),
+    ("port not an integer", {"PSEUDOLIFE_MCP_PORT": "abc"}, None, 1),
+    ("unfinished move", {}, "move.json", 2),
+    ("port out of range, non-loopback, no token", {"PSEUDOLIFE_MCP_PORT": "70000", "PSEUDOLIFE_MCP_HOST": "0.0.0.0"}, None, 2),
+    ("autosave seconds not a number", {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "x"}, None, 1),
+    ("reap seconds not a number", {"PSEUDOLIFE_SESSION_REAP_SECONDS": "x"}, None, 1),
+    ("dream sweep interval not a number", {}, "memory:\n  dream:\n    sweep_interval_seconds: abc\n", 1),
 ]
 
+class NullEmbedding(Scenario):
+    """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
+    name = "null-embedding"
+    settle = False
+
+    def prepare_template(self, dsn: str) -> None:
+        import psycopg
+        sys.path.insert(0, str(REPO))
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        PostgresStorage(dsn).close()
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
+            conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
+                         "VALUES ('flat', 'no vector', NULL, 1.0, 'agent')")
+
+    def timeline(self, procs, holders):
+        time.sleep(90)  # both have loaded their embedders and failed hydration
+        c = case("health after a NULL-vector hydration failure", "GET", "/health")
+        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        return [c]
+
+
+class UnconstrainedDims(Scenario):
+    """entries.embedding as untyped vector holding a 384-d row: the schema
+    guard passes, the hydrated-dimension guard refuses (init_refusal)."""
+    name = "unconstrained-dims"
+    settle = False
+
+    def prepare_template(self, dsn: str) -> None:
+        import psycopg
+        sys.path.insert(0, str(REPO))
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        PostgresStorage(dsn).close()
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("ALTER TABLE entries ALTER COLUMN embedding TYPE vector")
+            conn.execute("INSERT INTO entries (band, text, embedding, ts, source) VALUES "
+                         "('flat', 'old model', ('[' || array_to_string(array_fill(0.1::real, ARRAY[384]), ',') || ']')::vector, 1.0, 'agent')")
+
+    def timeline(self, procs, holders):
+        time.sleep(90)
+        c = case("health after a stale-dimension refusal", "GET", "/health")
+        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        return [c]
+
+
+class DbLost(Scenario):
+    """Storage exists, then the database refuses new connections: /health
+    pings fail (degraded, 503); allowed again, both recover."""
+    name = "db-lost"
+
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+
+    def timeline(self, procs, holders):
+        import psycopg
+        out = []
+        dbs = [f"pl_cf_w1a_db_lost_{side}" for side in ("py", "rs")]
+        with psycopg.connect(pg.dsn("pl_cf_w1a_db_lost_t"), autocommit=True) as conn:
+            for db in dbs:
+                conn.execute(f'ALTER DATABASE "{db}" WITH ALLOW_CONNECTIONS false')
+            try:
+                c = case("health while the database refuses connections", "GET", "/health")
+                c["_answers"] = (call(procs["python"].port, "GET", "/health"),
+                                 call(procs["rust"].port, "GET", "/health"))
+                out.append(c)
+            finally:
+                for db in dbs:
+                    conn.execute(f'ALTER DATABASE "{db}" WITH ALLOW_CONNECTIONS true')
+        c = case("health after connections are allowed again", "GET", "/health")
+        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        out.append(c)
+        return out
+
+
+class TrustBind(Scenario):
+    """Tokenless on 0.0.0.0, allowed by PSEUDOLIFE_MCP_TRUST_BIND."""
+    name = "trust-bind"
+
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_TRUST_BIND": "On"}
+
+    def cases(self):
+        return [case("health on a trusted wildcard bind", "GET", "/health"),
+                case("browser gate still applies", "GET", "/api/nope", [("Host", "evil.example")])]
+
+
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
-                                  DbDown, LeaseHeld, DimMismatch, StampedBank, SeededBank)}
+                                  DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
+                                  TrustBind, NullEmbedding, UnconstrainedDims, DbLost)}
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -528,19 +733,25 @@ def common_env(scn: Scenario, dsn: str) -> dict[str, str]:
     return env
 
 
-def settled(port: int) -> bool:
+def settled(port: int, token: str | None) -> bool:
+    """Init finished: health is ok with a db and an embedder, and a blank
+    search (which runs ``ensure_init`` under the service lock, then answers
+    without touching the bank) succeeds."""
     try:
         body = call(port, "GET", "/health", timeout=30).get("json") or {}
+        if not (body.get("status") == "ok" and body.get("db") == "ok" and "embedder" in body):
+            return False
+        r = call(port, "GET", "/api/search?q=", [bearer(token)] if token else [], timeout=300)
+        return r["status"] == 200
     except OSError:
         return False
-    return "db" in body and "embedder" in body
 
 
-def wait_settled(ports: list[int], timeout: float = 600.0) -> None:
+def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = None) -> None:
     deadline = time.monotonic() + timeout
     pending = set(ports)
     while pending and time.monotonic() < deadline:
-        pending = {p for p in pending if not settled(p)}
+        pending = {p for p in pending if not settled(p, token)}
         if pending:
             time.sleep(2)
     if pending:
@@ -556,6 +767,10 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
         if rs["status"] != 501 or rs.get("json") != want:
             row["diffs"].append(f"declared case: rust must answer 501 {want}, got {rs['status']} {rs.get('json') or rs.get('bytes', '')[:120]}")
+        h = rs["headers"]
+        if (h.get("content-type"), h.get("cache-control"), h.get("x-content-type-options")) != \
+                ("application/json; charset=utf-8", "no-store", "nosniff"):
+            row["diffs"].append(f"declared case: JSON transport headers wrong: {h}")
         return row
     a = normalize_response(py, c["path"], declared)
     b = normalize_response(rs, c["path"], [])
@@ -569,29 +784,34 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     template = f"pl_cf_w1a_{tag}_t"
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
+    # The banks' state before either daemon touched them: declared writes and
+    # clock values are judged against it, so changes to existing rows show.
+    before = dbstate.dump(dsn_t)
     dbs = {"python": f"pl_cf_w1a_{tag}_py", "rust": f"pl_cf_w1a_{tag}_rs"}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     if scn.name == "db-down":
         dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/pl_cf_w1a_down" for k in dsns}
     procs = {}
+    holders = take_leases(list(dsns.values())) if scn.hold_lease else []
     try:
         if mode in ("live", "record"):
             home = daemons.make_home(root, f"{tag}-py", scn.config_yaml)
+            for name, text in scn.files.items():
+                (home / "data" / name).write_text(text, encoding="utf-8")
             procs["python"] = daemons.python_daemon(home, daemons.free_port(),
                                                     daemons.base_env(home, common_env(scn, dsns["python"])))
         home = daemons.make_home(root, f"{tag}-rs", scn.config_yaml)
+        for name, text in scn.files.items():
+            (home / "data" / name).write_text(text, encoding="utf-8")
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(common_env(scn, dsns["rust"]))))
         for d in procs.values():
             d.start(240)
-        holders = scn.interleave(procs.get("python"), procs["rust"], dsns["python"], dsns["rust"])
         if scn.settle:
-            wait_settled([d.port for d in procs.values()])
+            wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"))
         rows = []
         golden = load_golden(scn.name) if mode == "golden" else None
-        cases = scn.cases()
-        if scn.name == "lease-held":
-            cases = lease_cases(procs, holders)
+        cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
@@ -601,17 +821,18 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             rows.append(compare_case(c, py_r, rs_r))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
-        for h in holders or []:
-            h.close()
     finally:
+        release(holders)
         for d in procs.values():
             d.stop()
     states, scrubbed = {}, {}
     if scn.name != "db-down":
         sides = dbs if mode != "golden" else {"rust": dbs["rust"]}
         for side, name in sides.items():
-            out = scrub_declared_rows(dbstate.normalize(dbstate.dump(pg.dsn(name)), DB_NONDETERMINISTIC))
-            states[side], scrubbed[side] = out["state"], out["declared"]
+            raw = dbstate.dump(pg.dsn(name))
+            out = scrub_declared_rows(raw, before)
+            states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
+            scrubbed[side] = out["declared"]
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
     if mode == "golden" and golden.get("db_state"):
         db_diffs = dbstate.diff(golden["db_state"], states["rust"])
@@ -623,43 +844,30 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     return result
 
 
-def scrub_declared_rows(state: dict) -> dict:
-    """Remove declared Python-only init writes from a state (either side) and
-    record what was removed; the record is reported, never diffed."""
+def scrub_declared_rows(state: dict, before: dict) -> dict:
+    """Remove declared Python-only init writes from a state (either side),
+    only where they are NEW against the pre-start state ``before``; a change
+    to or a deletion of an existing row is never scrubbed. The record is
+    reported, never diffed."""
     declared = []
     for kind, table, key, why in DB_DECLARED:
         if kind == "sequence":
+            prior = {r[1]: r for r in before["catalog"]["sequences"]}
             for row in state["catalog"]["sequences"]:
-                if row[1] == table and row[5] is not None:
-                    row[5] = None
+                if row[1] == table and prior.get(table) is not None and row[5] != prior[table][5]:
+                    row[5] = prior[table][5]
                     declared.append(f"sequence {table}: {why}")
             continue
         t = state["rows"].get(f"public.{table}")
         if not t:
             continue
-        keep = [r for r in t["rows"] if kind == "row" and r[0] != key]
+        old = {json.dumps(r, sort_keys=True) for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
+        keep = [r for r in t["rows"]
+                if json.dumps(r, sort_keys=True) in old or (kind == "row" and r[0] != key)]
         if len(keep) != len(t["rows"]):
             declared.append(f"{table}{'.' + key if key else ''}: {why}")
             t["rows"] = keep
     return {"state": state, "declared": declared}
-
-
-def lease_cases(procs, holders) -> list[dict]:
-    """Health while the lease is held (both degraded), then after release."""
-    out = []
-    time.sleep(8)  # both warmups have tried and been refused
-    for label in ("while held", "while held again"):
-        c = case(f"health {label}", "GET", "/health")
-        c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
-        out.append(c)
-    for h in holders:
-        h.close()
-    holders.clear()
-    wait_settled([d.port for d in procs.values()], timeout=180)
-    c = case("health after release and backoff", "GET", "/health")
-    c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
-    out.append(c)
-    return out
 
 
 def run_refusals(binary: Path, root: Path) -> list[dict]:
@@ -668,8 +876,8 @@ def run_refusals(binary: Path, root: Path) -> list[dict]:
         exits = {}
         for side in ("python", "rust"):
             home = daemons.make_home(root, f"refusal-{side}", None)
-            if extra == "moved.json":
-                (home / "data" / "moved.json").write_text('{"moved_to": "elsewhere"}', encoding="utf-8")
+            if extra in ("moved.json", "move.json"):
+                (home / "data" / extra).write_text('{"moved_to": "elsewhere", "move_id": "m1"}', encoding="utf-8")
             elif extra:
                 (home / "data" / "config.yaml").write_text(extra, encoding="utf-8")
             e = daemons.base_env(home, common_env(Scenario(), "postgresql://nobody@127.0.0.1:9/pl_cf_w1a_none"))
@@ -721,15 +929,34 @@ def main() -> int:
     args = ap.parse_args()
     root = daemons.scratch_root()
     names = args.only or list(SCENARIOS) + ["refusals"]
+    unknown = [n for n in names if n not in SCENARIOS and n != "refusals"]
+    if unknown or not names:
+        ap.error(f"unknown scenario(s) {unknown}; choose from {sorted(SCENARIOS)} or refusals")
 
     def one_pass(mode: str) -> tuple[list[dict], list[dict]]:
-        results = [run_scenario(SCENARIOS[n](), args.rust_bin, root, mode, args.record)
-                   for n in names if n in SCENARIOS]
+        results = []
+        for n in names:
+            if n not in SCENARIOS:
+                continue
+            r = run_scenario(SCENARIOS[n](), args.rust_bin, root, mode, args.record)
+            results.append(r)
+            bad = [c["case"] for c in r["cases"] if c["diffs"]]
+            print(f"[{n}] cases {len(r['cases'])} diffs {len(bad)} db_diffs {len(r['db_diffs'])} {bad[:6]}",
+                  flush=True)
+            if args.out:
+                args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
         refusals = (run_refusals(args.rust_bin, root)
                     if "refusals" in names and mode != "golden" and not args.no_refusals else [])
         return results, refusals
 
     if args.mode == "mutants":
+        os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        control, control_refusals = one_pass("live")
+        c_cases, c_diff, c_db = summarize(control, control_refusals)
+        print(f"control: {c_diff} case diffs, {c_db} bank-state diffs", flush=True)
+        if c_diff or c_db:
+            print("control run is not clean; mutant results would not be attributable")
+            return 1
         outcome = {}
         for m in MUTANTS:
             os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
