@@ -9,7 +9,7 @@ use std::{
 #[path = "doorbell_files.rs"]
 mod files;
 #[path = "doorbell_json.rs"]
-mod json;
+pub(super) mod json;
 use json::Value;
 #[derive(Debug)]
 enum Failure {

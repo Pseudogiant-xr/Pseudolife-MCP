@@ -11,7 +11,11 @@ resolution. Existing paths, other argument forms, archive/dump/compression,
 rotation, implicit data-directory resolution and embedded ownership remain
 deferred. Backup's acceptance disposition is unchanged: Linux first-cell
 proof cannot supply the required Windows path/stdio evidence.
-Non-canonical Windows path spellings (extended-length prefixes or repeated separators) may defer under the canonical-shapes rule; every non-deferred answer must match Python.
+Only canonical absolute spellings, where Python's `str(Path(value)) == value`,
+are admitted and echoed verbatim. Every other spelling defers under the
+canonical-shapes rule: relative paths, empty or `.` components, trailing or
+repeated separators, a POSIX `//` root, and on Windows forward slashes,
+extended-length `\?\` and UNC forms.
 
 ## Stream D retained cell scope (2026-10-08)
 

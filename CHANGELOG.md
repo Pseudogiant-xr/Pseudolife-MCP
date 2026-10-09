@@ -9,9 +9,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added (2026-10-09 — native backup help and missing-directory refusal)
 
 - The experimental native backup leaf handles `backup --help` at `COLUMNS=80`
-  and refuses `backup --data-dir PATH` when an explicit absolute UTF-8 path
-  does not exist. It checks the filesystem before any bank resolution.
-  Other argument forms, existing paths and backup creation remain deferred.
+  and refuses `backup --data-dir PATH` when a canonical absolute UTF-8 path
+  does not exist, echoing it verbatim; every other spelling defers. It
+  checks the filesystem before any bank resolution. Other argument forms,
+  existing paths and backup creation remain deferred.
+
+### Added (2026-10-09 — native register audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` computes chained
+  register hashes and walks archive rows in order without Python delegation or
+  bank attachment. It detects decoded duplicate keys and retains sequence,
+  previous-hash, hash and body-failure precedence for this bounded slice.
+  Archive acceptance remains partial: unsupported JSON and numeric domains,
+  other event families, retention, expected-head checks, bank verification,
+  export and stats remain deferred. Exhaustive finite-float correspondence
+  with Python and Windows integration remain unverified; the full audit mode
+  is not accepted.
 
 ### Added (2026-10-09 — native doctor disposable database refusal)
 

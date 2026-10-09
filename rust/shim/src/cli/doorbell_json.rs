@@ -1,7 +1,7 @@
 //! Standard scalar JSON under serde's ordinary 128-level recursion budget.
 pub(super) use serde_json::Value;
 
-pub(super) fn from_str(text: &str) -> Result<Value, ()> {
+pub(in crate::cli) fn from_str(text: &str) -> Result<Value, ()> {
     // arbitrary_precision preserves ignored integer tokens, but also admits
     // overflowing float tokens. Check every token, including overwritten keys,
     // before serde applies last-value-wins object semantics.
