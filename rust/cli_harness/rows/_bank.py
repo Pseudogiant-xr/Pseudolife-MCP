@@ -57,8 +57,34 @@ def _admin():
 
 
 def drop(name: str) -> None:
+    import psycopg  # noqa: PLC0415
+    from pseudolife_memory.storage.schema import (  # noqa: PLC0415
+        assert_disposable_database, refuse_production_database)
     url(name)  # validates the name
     with _admin() as conn:
+        if not conn.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
+            return
+        # Ask the server which database the name reaches before reaping
+        # anything on it (tests/test_disposable_database_guard.py). A database
+        # dropped in between is already gone; any other failure propagates.
+        # psycopg leaves sqlstate unset on connect-time errors, so recheck the
+        # catalog rather than parse the message. A database half-dropped by a
+        # killed run (PostgreSQL 15+ marks it datconnlimit = -2) refuses
+        # connections but must still be droppable: refuse a production name
+        # by itself, then carry on to the DROP.
+        try:
+            with _connect(name) as target:
+                assert_disposable_database(target)
+        except psycopg.OperationalError:
+            row = conn.execute(
+                "SELECT datconnlimit, datallowconn FROM pg_database "
+                "WHERE datname = %s", (name,)).fetchone()
+            if row is None:
+                return
+            if row[0] != -2 and row[1]:
+                raise
+            refuse_production_database(name)
         # Only this login's sessions: an autovacuum worker is not ours to end,
         # and DROP ... WITH (FORCE) waits it out.
         conn.execute(
