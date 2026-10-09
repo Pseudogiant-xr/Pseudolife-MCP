@@ -94,6 +94,9 @@ async fn request(
     follow: bool,
     tls: Option<Arc<rustls::ClientConfig>>,
 ) -> Option<Reply> {
+    // urllib turns a followed 301/302/303 into a body-less GET; no caller
+    // follows redirects with a body, and this path would re-POST it.
+    debug_assert!(!(follow && body.is_some()));
     let mut url = format!("{origin}{target}");
     let mut visited: HashMap<String, u32> = HashMap::new();
     loop {

@@ -251,7 +251,9 @@ fn title(cwd: &[u32]) -> String {
         let is_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .and_then(|home| absolute(Path::new(&home)))
             .zip(os_text(cwd).and_then(|cwd| absolute(Path::new(&cwd))))
-            .is_some_and(|(home, cwd)| home == cwd);
+            // Python compares the abspath strings exactly; Path equality
+            // would treat `c:` and `C:` as one drive.
+            .is_some_and(|(home, cwd)| home.as_os_str() == cwd.as_os_str());
         if !is_home {
             let base = basename(&norm_points(cwd));
             let lower: String = base

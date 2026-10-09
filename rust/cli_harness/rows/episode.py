@@ -69,6 +69,9 @@ def _wire_cases() -> list[Case]:
              stdin_json=hook(cwd="{CWD}/proj/src/deep")))
     add(Case("start-cwd-home", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd="{HOME}")))
+    add(Case("start-cwd-home-lowercase-drive", start, daemon=daemon(), rules=TITLE,
+             stdin_json=hook(cwd="{HOME_LOWER_DRIVE}"), platforms=("windows",),
+             note="VS Code-launched hosts report c:\...; Python compares abspath strings"))
     add(Case("start-cwd-missing", start, daemon=daemon(), rules=TITLE, stdin_json=hook()))
     add(Case("start-cwd-null", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd=None)))
@@ -108,14 +111,28 @@ def _wire_cases() -> list[Case]:
     add(Case("start-health-trickle", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
              daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)}),
              after=require_post))
-    add(Case("end-post-trickle", end, stdin_json=hook(event="SessionEnd"), after=require_post,
-             daemon=daemon(**{"/api/episode/end": Trickle(json_body({}), 8, 0.4)})))
+    # The reply takes ~8 s in 8-byte pieces 0.7 s apart: past the 5 s timeout
+    # in total, inside it per receive. Both arms must wait for the whole reply.
+    add(Case("end-post-trickle", end, stdin_json=hook(event="SessionEnd"), timeout=60,
+             after=require_post_read(6.0),
+             daemon=daemon(**{"/api/episode/end": Trickle(json_body({}), 8, 0.7)})))
     add(Case("start-https", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
              daemon=factory(routes(), tls=True), after=require_post,
              env={**TOKEN, "SSL_CERT_FILE": str(TLS_CA)}))
     add(Case("start-health-redirect-loop", start, stdin_json=hook(cwd="{CWD}"),
              daemon=daemon(**{"/health": redirect("/health")})))
     return c
+
+
+def require_post_read(seconds: float):
+    """The POST happened and the arm stayed until its slow reply was read."""
+    def after(arm, observation):
+        require_post(arm, observation)
+        lo, hi = observation["window"]
+        if hi - lo < seconds:
+            observation["vacuous"] = (f"left after {hi - lo:.1f} s, before the {seconds:.0f} s "
+                                      "reply was read")
+    return after
 
 
 def require_post(arm, observation):
@@ -129,21 +146,75 @@ def require_post(arm, observation):
 _RUN_START = time.time()
 
 
-def bank_rows(keys: tuple[str, ...]):
+def bank_rows(keys: tuple[str, ...], expect=None):
+    """After the CLI runs: the rows the case's keys own, and the case's
+    expected state, so a start both arms silently dropped is a difference
+    rather than a match of two empty banks."""
     def after(arm, observation):
         bank = arm.daemon.bank
         episodes = _daemon.rows(
             bank, "SELECT to_jsonb(e)::text FROM episodes e WHERE session_key = ANY(%s) "
-                  "ORDER BY started_at, id", (list(keys),))
+                  "ORDER BY session_key, started_at", (list(keys),))
         sessions = _daemon.rows(
             bank, "SELECT to_jsonb(s)::text FROM client_sessions s "
                   "WHERE session_key = ANY(%s) ORDER BY session_key", (list(keys),))
-        hi = observation["window"][1]
+        lo, hi = observation["window"]
         offset = observation["utc_offset"]
-        observation["db"] = {
-            "episodes": normalize.episode_rows(episodes, _RUN_START, hi, offset),
-            "client_sessions": normalize.episode_rows(sessions, _RUN_START, hi, offset)}
+        ids: dict[str, str] = {}
+        db = {"episodes": normalize.episode_rows(episodes, _RUN_START, lo, hi, offset, ids),
+              "client_sessions": normalize.episode_rows(sessions, _RUN_START, lo, hi, offset,
+                                                         ids)}
+        observation["db"] = db
+        problem = expect(db) if expect else None
+        if problem:
+            observation["vacuous"] = f"bank state not as the case requires: {problem}"
     return after
+
+
+def _episode(db, key):
+    return [r for r in db["episodes"] if r["session_key"] == key]
+
+
+def _session(db, key):
+    return next((r for r in db["client_sessions"] if r["session_key"] == key), None)
+
+
+def _open_episode(key, title_prefix=None, starts=None, roots=None):
+    def check(db):
+        rows = _episode(db, key)
+        session = _session(db, key)
+        if len(rows) != 1 or rows[0]["ended_at"] is not None:
+            return f"{key}: expected one open episode, got {rows}"
+        if title_prefix and not rows[0]["title"].startswith(title_prefix):
+            return f"{key}: title {rows[0]['title']!r}"
+        if session is None or session["ended_at"] is not None:
+            return f"{key}: expected an open client session, got {session}"
+        if starts is not None and len(session["start_times"]) != starts:
+            return f"{key}: expected {starts} start times, got {session['start_times']}"
+        if roots is not None and len(session["episode_ids"]) != roots:
+            return f"{key}: expected {roots} root episodes, got {session['episode_ids']}"
+        return None
+    return check
+
+
+def _ended(key, refreshed: bool):
+    def check(db):
+        session = _session(db, key)
+        if _episode(db, key):
+            return f"{key}: expected the empty episode deleted, got {_episode(db, key)}"
+        if session is None or session["end_reason"] != "end":
+            return f"{key}: expected an ended client session, got {session}"
+        stamp = "<t:case>" if refreshed else "<t:earlier>"
+        if session["ended_at"] != stamp:
+            return f"{key}: expected ended_at {stamp}, got {session['ended_at']}"
+        return None
+    return check
+
+
+def _both(*checks):
+    def check(db):
+        return next((p for p in (c(db) for c in checks) if p), None)
+    return check
 
 
 def _bank_cases() -> list[Case]:
@@ -151,22 +222,29 @@ def _bank_cases() -> list[Case]:
     c: list[Case] = []
     add = c.append
 
-    def bank(case_id, mode, key, cwd=None, setup=None, keys=None, rules=()):
+    def bank(case_id, mode, key, cwd=None, setup=None, keys=None, rules=(), expect=None):
         fields = {} if cwd is None else {"cwd": cwd}
         event = "SessionStart" if mode == "episode-start" else "SessionEnd"
         add(Case(case_id, [mode], daemon=real, stdin_json=hook(session=key, event=event,
                                                                 **fields),
-                 setup=setup, after=bank_rows(keys or (key,)), rules=rules, timeout=60,
-                 bank=True))
+                 setup=setup, after=bank_rows(keys or (key,), expect), rules=rules,
+                 timeout=60, bank=True))
 
-    bank("bank-start-git", "episode-start", "w1b-bank-a", cwd="{CWD}/proj/src", setup=git_repo)
-    bank("bank-start-repeat", "episode-start", "w1b-bank-a", cwd="{CWD}/other")
-    bank("bank-start-second", "episode-start", "w1b-bank-b", cwd="{HOME}",
-         keys=("w1b-bank-a", "w1b-bank-b"))
-    bank("bank-end-first", "episode-end", "w1b-bank-a", keys=("w1b-bank-a", "w1b-bank-b"))
-    bank("bank-end-again", "episode-end", "w1b-bank-a")
-    bank("bank-end-unknown", "episode-end", "w1b-bank-never-started")
-    bank("bank-restart-after-end", "episode-start", "w1b-bank-a", cwd="{CWD}")
+    a, b = "w1b-bank-a", "w1b-bank-b"
+    bank("bank-start-git", "episode-start", a, cwd="{CWD}/proj/src", setup=git_repo,
+         expect=_open_episode(a, "proj - ", starts=1, roots=1))
+    bank("bank-start-repeat", "episode-start", a, cwd="{CWD}/other",
+         expect=_open_episode(a, "proj - ", starts=2, roots=1))
+    bank("bank-start-second", "episode-start", b, cwd="{HOME}", keys=(a, b),
+         expect=_both(_open_episode(a), _open_episode(b, "session - ", starts=1)))
+    bank("bank-end-first", "episode-end", a, keys=(a, b),
+         expect=_both(_ended(a, refreshed=True), _open_episode(b)))
+    bank("bank-end-again", "episode-end", a, expect=_ended(a, refreshed=True))
+    bank("bank-end-unknown", "episode-end", "w1b-bank-never-started",
+         expect=lambda db: (None if not db["episodes"] and not db["client_sessions"]
+                            else f"unexpected rows {db}"))
+    bank("bank-restart-after-end", "episode-start", a, cwd="{CWD}",
+         expect=_open_episode(a, "cwd - ", roots=2))
     return c
 
 
@@ -183,6 +261,10 @@ MUTANTS = [
            ("end-plain",)),
     Mutant("episode-system-dir-titled", "episode", "shim/src/cli/episode.rs",
            '"system32" | "syswow64"', '"system33" | "syswow64"', ("start-cwd-system-dir",)),
+    Mutant("episode-home-drive-insensitive", "episode", "shim/src/cli/episode.rs",
+           ".is_some_and(|(home, cwd)| home.as_os_str() == cwd.as_os_str());",
+           ".is_some_and(|(home, cwd)| home == cwd);", ("start-cwd-home-lowercase-drive",),
+           platforms=("windows",)),
     Mutant("episode-default-name", "episode", "shim/src/cli/episode.rs",
            '"session".chars()', '"sessions".chars()', ("start-cwd-home", "bank-start-second")),
 ]

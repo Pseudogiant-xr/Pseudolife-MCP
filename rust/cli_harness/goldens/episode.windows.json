@@ -1,7 +1,7 @@
 {
  "row": "CLI-EPISODE",
  "platform": "windows",
- "oracle_commit": "6b07588a16c505fbc66c055a2ea6b9410f87c7e6",
+ "oracle_commit": "306b5515e4a8f08a5d477762e731226276e23649",
  "cases": {
   "start-plain-dir": {
    "home": null,
@@ -10,8 +10,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534083.670649,
-    1791534083.8104668
+    1791535790.9164903,
+    1791535791.0735528
    ],
    "requests": [
     {
@@ -36,7 +36,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -51,8 +51,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534084.310573,
-    1791534084.483207
+    1791535791.5620568,
+    1791535791.724221
    ],
    "requests": [
     {
@@ -77,7 +77,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -96,8 +96,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534084.980672,
-    1791534085.1538253
+    1791535792.2016027,
+    1791535792.3410058
    ],
    "requests": [
     {
@@ -122,7 +122,48 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:49\"}"
+    }
+   ],
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "start-cwd-home-lowercase-drive": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "window": [
+    1791535792.8430345,
+    1791535792.9731965
+   ],
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/health",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    },
+    {
+     "method": "POST",
+     "target": "/api/episode/start",
+     "headers": {
+      "accept-encoding": "identity",
+      "connection": "close",
+      "content-length": "63",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"h - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -137,8 +178,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534085.6520174,
-    1791534085.8309996
+    1791535793.4791884,
+    1791535793.643626
    ],
    "requests": [
     {
@@ -163,7 +204,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -178,8 +219,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534086.3175166,
-    1791534086.485397
+    1791535794.1181731,
+    1791535794.267709
    ],
    "requests": [
     {
@@ -204,7 +245,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -219,8 +260,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534086.9873848,
-    1791534087.2165086
+    1791535794.770875,
+    1791535794.9062898
    ],
    "requests": [
     {
@@ -245,7 +286,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj\\u00e9 \\u2713 \\ud83d\\ude80 - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"proj\\u00e9 \\u2713 \\ud83d\\ude80 - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -261,8 +302,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534087.6891227,
-    1791534087.9151733
+    1791535795.407751,
+    1791535795.5554335
    ],
    "requests": [
     {
@@ -287,7 +328,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"session - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -302,8 +343,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534088.4183772,
-    1791534088.631821
+    1791535796.0600605,
+    1791535796.223403
    ],
    "requests": [
     {
@@ -328,7 +369,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"client-app - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"client-app - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -343,8 +384,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534089.1020553,
-    1791534089.2674787
+    1791535796.7048283,
+    1791535796.861111
    ],
    "requests": [
     {
@@ -370,7 +411,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:49\"}"
     }
    ],
    "files": {
@@ -385,8 +426,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534089.7754326,
-    1791534089.9374716
+    1791535797.3371348,
+    1791535797.5015783
    ],
    "requests": [
     {
@@ -426,8 +467,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534090.4416058,
-    1791534090.6051471
+    1791535798.0059354,
+    1791535798.1370127
    ],
    "requests": [
     {
@@ -468,8 +509,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534091.1105387,
-    1791534091.2428622
+    1791535798.6311378,
+    1791535798.7576923
    ],
    "requests": [],
    "files": {
@@ -484,8 +525,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534091.624039,
-    1791534091.7751167
+    1791535799.143068,
+    1791535799.2817793
    ],
    "requests": [],
    "files": {
@@ -500,8 +541,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534092.1348152,
-    1791534092.2704957
+    1791535799.655899,
+    1791535799.7826498
    ],
    "requests": [],
    "files": {
@@ -516,8 +557,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534092.654189,
-    1791534092.7862482
+    1791535800.1689012,
+    1791535800.2935212
    ],
    "requests": [],
    "files": {
@@ -532,8 +573,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534093.1614997,
-    1791534093.559715
+    1791535800.681034,
+    1791535801.0805223
    ],
    "files": {
     "cwd": "dir"
@@ -547,8 +588,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534093.562237,
-    1791534093.699185
+    1791535801.0826442,
+    1791535801.2181876
    ],
    "requests": [
     {
@@ -573,7 +614,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -588,8 +629,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534094.1954455,
-    1791534094.3385544
+    1791535801.7241135,
+    1791535801.8727238
    ],
    "requests": [
     {
@@ -616,8 +657,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534094.8341277,
-    1791534094.9978034
+    1791535802.3790445,
+    1791535802.542382
    ],
    "requests": [
     {
@@ -642,7 +683,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -657,8 +698,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534095.4681861,
-    1791534095.6062164
+    1791535803.024172,
+    1791535803.1577747
    ],
    "requests": [
     {
@@ -684,7 +725,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -699,8 +740,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534096.1060019,
-    1791534096.2445908
+    1791535803.6640291,
+    1791535803.8288538
    ],
    "requests": [
     {
@@ -725,7 +766,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -740,8 +781,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534096.7435286,
-    1791534099.1993332
+    1791535804.3050153,
+    1791535806.77681
    ],
    "requests": [
     {
@@ -766,7 +807,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -781,8 +822,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534099.6906729,
-    1791534101.3777757
+    1791535807.265848,
+    1791535808.9042625
    ],
    "requests": [
     {
@@ -807,7 +848,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -822,8 +863,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534101.8637304,
-    1791534106.4204574
+    1791535809.408258,
+    1791535817.2437208
    ],
    "requests": [
     {
@@ -863,8 +904,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534106.615293,
-    1791534109.1241164
+    1791535817.7455347,
+    1791535820.2198615
    ],
    "requests": [
     {
@@ -890,7 +931,7 @@
       "host": "{DAEMON}",
       "user-agent": "Python-urllib/3.11"
      },
-     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:21\"}"
+     "body": "{\"session_key\": \"w1b-ep-wire\", \"title\": \"cwd - 2026-10-09 19:50\"}"
     }
    ],
    "files": {
@@ -905,8 +946,8 @@
    "stdout": "",
    "stderr": "",
    "window": [
-    1791534109.6289191,
-    1791534109.7792034
+    1791535820.726743,
+    1791535820.892892
    ],
    "requests": [
     {
