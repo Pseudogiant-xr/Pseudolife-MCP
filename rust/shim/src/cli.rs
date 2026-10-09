@@ -14,6 +14,7 @@ mod hook_http;
 mod hook_json;
 pub mod lease;
 pub mod maintainer;
+mod pairing;
 mod test_login;
 mod transfer;
 mod version;
@@ -157,6 +158,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "connect"
         && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "invite" | "pair")
+        && let Some(code) = pairing::run(mode)
     {
         return Some(code);
     }

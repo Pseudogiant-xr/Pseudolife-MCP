@@ -16,6 +16,8 @@ ROWS = {
     "doctor": "CLI-DOCTOR",
     "connect": "CLI-CONNECT",
     "maintainer": "CLI-MAINTAINER",
+    "invite": "CLI-PAIRING",
+    "pair": "CLI-PAIRING",
 }
 
 
