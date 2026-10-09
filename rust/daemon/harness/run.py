@@ -59,7 +59,7 @@ DB_DECLARED = [
 HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
                                "capacity_warning", "lesson_reconciliation_required"}
 NOT_IMPLEMENTED = "not_implemented"
-MUTANTS = ["auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
+MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff"]
 
@@ -115,6 +115,10 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
             u["checked_at"] = "<free number>"
         if "latest_release" in u and (u["latest_release"] is None or isinstance(u["latest_release"], str)):
             u["latest_release"] = "<free str|null>"
+    lb = body.get("last_backup")
+    if isinstance(lb, dict) and isinstance(lb.get("age_hours"), (int, float)) \
+            and not isinstance(lb.get("age_hours"), bool):
+        lb["age_hours"] = "<free number>"  # measured against the clock at answer time
     if isinstance(body.get("memory"), dict):
         body["memory"] = {"source": body["memory"].get("source")}
     if isinstance(body.get("db"), str) and body["db"].startswith("error: "):
@@ -129,6 +133,20 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
         # Backend-dependent: Python reports dtype null for ONNX and a string for torch.
         body["embedder"] = {"device": emb["device"], "backend": "<torch|onnx>", "dtype": "<str|null>"}
     return body
+
+
+def seed_clock_scrub(resp: dict) -> dict:
+    """Golden replay only: entries seeded into a template carry the moment
+    they were seeded, which a later replay cannot reproduce."""
+    resp = json.loads(json.dumps(resp))
+    body = resp.get("json")
+    if isinstance(body, dict) and isinstance(body.get("entries"), list):
+        for e in body["entries"]:
+            if isinstance(e, dict):
+                for k in ("timestamp", "superseded_at"):
+                    if isinstance(e.get(k), (int, float)) and not isinstance(e.get(k), bool):
+                        e[k] = "<seed clock>"
+    return resp
 
 
 def normalize_search(body: dict) -> dict:
@@ -199,6 +217,12 @@ def raw_diffs(py: dict, rs: dict, normalized: dict) -> list[str]:
         elif isinstance(a, tuple) and a[0] == "num" and isinstance(b, tuple) and b[0] == "num":
             if a[1] != b[1]:
                 out.append(f"raw {path}: number python {a[1]} vs rust {b[1]}")
+        elif isinstance(n, str) and isinstance(a, str) and a == n:
+            # The literal as json.dumps (ensure_ascii) writes it must be in
+            # the Rust body: isascii() alone cannot see DEL or escape style.
+            want = json.dumps(n)
+            if want in py["raw"] and want not in rs["raw"]:
+                out.append(f"raw {path}: string not written as json.dumps writes it: {want[:80]}")
     walk(_raw_tree(py["raw"]), _raw_tree(rs["raw"]), normalized.get("json"), "")
     return out
 
@@ -550,7 +574,7 @@ class LeaseHeld(Scenario):
         def both(m, p, h=()):
             return (call(procs["python"].port, m, p, list(h)), call(procs["rust"].port, m, p, list(h)))
 
-        out = []
+        out = self.partial = []
         time.sleep(8)  # both warmups were refused once and are backing off
         for label, (m, p, h) in [("health while held", ("GET", "/health", ())),
                                  ("search while backing off", ("GET", "/api/search?q=x", auth)),
@@ -581,13 +605,21 @@ class Reaper(Scenario):
         time.sleep(110)  # failures near 0, 5, 15, 35, 75 s: the fifth arms 60 s; warmup stops
         c = case("health after warmup gave up", "GET", "/health")
         c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
-        out = [c]
+        out = self.partial = [c]
         release(holders)
         wait_settled([d.port for d in procs.values()], timeout=240, token=self.env.get("PSEUDOLIFE_MCP_TOKEN"))
         c = case("health after reaper retry", "GET", "/health")
         c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
         out.append(c)
         return out
+
+
+def assert_disposable(conn) -> None:
+    """The server's own name for this database must be a disposable one
+    before the harness alters or deletes anything in it."""
+    name = conn.execute("SELECT current_database()").fetchone()[0]
+    if not pg.DISPOSABLE_NAME.fullmatch(name):
+        raise RuntimeError(f"refusing to modify non-disposable database {name!r}")
 
 
 def take_leases(dsns):
@@ -614,6 +646,7 @@ class DimMismatch(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             conn.execute("CREATE TABLE entries (id BIGSERIAL PRIMARY KEY, embedding vector(384))")
 
@@ -632,6 +665,7 @@ class StampedBank(Scenario):
         from pseudolife_memory.storage.postgres import PostgresStorage
         PostgresStorage(dsn).close()
         with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
             conn.execute("UPDATE meta SET value = '99'::jsonb WHERE key = 'schema_version'")
             conn.execute("UPDATE meta SET value = '\"x\"'::jsonb WHERE key = 'writer_lease_epoch'")
             conn.execute("DELETE FROM relations WHERE name = 'uses'")
@@ -661,6 +695,7 @@ class SeededBank(Scenario):
         # writer, a migration): jsonb keeps 1.10's scale and 1E2 as 100.
         import psycopg
         with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
             conn.execute(
                 "UPDATE entries SET slots = '[[\"daemon\", \"port\", 1.10, true], "
                 "[\"daemon\", \"ratio\", 2.50, true], [\"daemon\", \"hundred\", 1E2, true], "
@@ -785,6 +820,7 @@ class NullEmbedding(Scenario):
         from pseudolife_memory.storage.postgres import PostgresStorage
         PostgresStorage(dsn).close()
         with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
             conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
             conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
                          "VALUES ('flat', 'no vector', NULL, 1.0, 'agent')")
@@ -793,6 +829,7 @@ class NullEmbedding(Scenario):
         time.sleep(90)  # both have loaded their embedders and failed hydration
         c = case("health after a NULL-vector hydration failure", "GET", "/health")
         c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        self.partial = [c]
         return [c]
 
 
@@ -808,6 +845,7 @@ class UnconstrainedDims(Scenario):
         from pseudolife_memory.storage.postgres import PostgresStorage
         PostgresStorage(dsn).close()
         with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
             conn.execute("ALTER TABLE entries ALTER COLUMN embedding TYPE vector")
             conn.execute("INSERT INTO entries (band, text, embedding, ts, source) VALUES "
                          "('flat', 'old model', ('[' || array_to_string(array_fill(0.1::real, ARRAY[384]), ',') || ']')::vector, 1.0, 'agent')")
@@ -816,6 +854,7 @@ class UnconstrainedDims(Scenario):
         time.sleep(90)
         c = case("health after a stale-dimension refusal", "GET", "/health")
         c["_answers"] = (call(procs["python"].port, "GET", "/health"), call(procs["rust"].port, "GET", "/health"))
+        self.partial = [c]
         return [c]
 
 
@@ -829,10 +868,13 @@ class DbLost(Scenario):
 
     def timeline(self, procs, holders):
         import psycopg
-        out = []
+        out = self.partial = []
         dbs = [f"{pg.PREFIX}db_lost_{side}" for side in ("py", "rs")]
         with psycopg.connect(pg.dsn(f"{pg.PREFIX}db_lost_t"), autocommit=True) as conn:
+            assert_disposable(conn)
             for db in dbs:
+                if not pg.DISPOSABLE_NAME.fullmatch(db):
+                    raise RuntimeError(f"refusing to fence non-disposable database {db!r}")
                 conn.execute(f'ALTER DATABASE "{db}" WITH ALLOW_CONNECTIONS false')
             try:
                 c = case("health while the database refuses connections", "GET", "/health")
@@ -870,6 +912,30 @@ class Encodings(Scenario):
         ]
 
 
+class MapOrder(Scenario):
+    """Two map tokens, each matching one of a bearer's two candidate
+    encodings: the earlier map entry wins whichever candidate it matched
+    (principals.py:290-293). alice first here; MapOrderReversed swaps them."""
+    name = "map-order"
+    config_yaml = "coordination:\n  allowed_principals: [alice]\n"
+    settle = False
+    tokens = "caf\u00e9:alice,caf\u00c3\u00a9:bob"
+
+    def __init__(self):
+        self.env = {"PSEUDOLIFE_MCP_TOKENS": self.tokens}
+
+    def cases(self):
+        return [case("UTF-8 bearer matching both entries", "GET", "/api/hook/coordination-start",
+                     [("Authorization", b"Bearer caf\xc3\xa9")])]
+
+
+class MapOrderReversed(MapOrder):
+    """The control: the same two entries in the other order, so bob wins and
+    the board refuses him (alice is the one allowed)."""
+    name = "map-order-reversed"
+    tokens = "caf\u00c3\u00a9:bob,caf\u00e9:alice"
+
+
 class TrustBind(Scenario):
     """Tokenless on 0.0.0.0, allowed by PSEUDOLIFE_MCP_TRUST_BIND."""
     name = "trust-bind"
@@ -884,7 +950,8 @@ class TrustBind(Scenario):
 
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
-                                  TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings)}
+                                  TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
+                                  MapOrder, MapOrderReversed)}
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -999,6 +1066,9 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"])
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
+                    if type(scn).prepare_template is not Scenario.prepare_template:
+                        # A seeded template's entries carry the seeding moment.
+                        py_r, rs_r = seed_clock_scrub(py_r), seed_clock_scrub(rs_r)
             rows.append(compare_case(c, py_r, rs_r))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
@@ -1177,11 +1247,20 @@ def main() -> int:
         for n in names:
             if n not in SCENARIOS:
                 continue
+            scn = SCENARIOS[n]()
+            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
+                # Timing scenarios ask both daemons the same question at the
+                # same moment: live-only (README).
+                print(f"[{n}] live-only: skipped in golden mode", flush=True)
+                continue
             try:
-                r = run_scenario(SCENARIOS[n](), args.rust_bin, root, mode, args.record)
+                r = run_scenario(scn, args.rust_bin, root, mode, args.record)
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
-                r = {"scenario": n, "cases": [{"case": "scenario error", "diffs": [f"{type(exc).__name__}: {exc}"],
-                                               "declared": None}], "db_diffs": [], "declared_db_writes": {}}
+                answered = [compare_case(c, *c["_answers"]) for c in getattr(scn, "partial", [])]
+                r = {"scenario": n, "cases": answered + [{"case": "scenario error",
+                                                          "diffs": [f"{type(exc).__name__}: {exc}"],
+                                                          "declared": None}],
+                     "db_diffs": [], "declared_db_writes": {}}
                 for name in pg.existing():
                     if name.startswith(f"{pg.PREFIX}{n.replace('-', '_')}_"):
                         pg.drop(name)

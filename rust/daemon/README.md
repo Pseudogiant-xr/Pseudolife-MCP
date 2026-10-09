@@ -36,7 +36,12 @@ value and both banks' state afterwards, and exits non-zero on any
 difference. `run.py mutants` takes a `--features mutants` build and requires
 each deliberate break to turn the harness red against a clean control.
 `run.py live --record` writes the oracle's normalized answers and bank state
-to `harness/goldens/`; `run.py golden` checks the Rust daemon against them
-without a Python daemon. `gen_schema_sql.py --check` and
+to `harness/goldens/` (no raw bodies or machine paths; vectors, large bodies
+and catalogs as digests); `run.py golden` checks the Rust daemon against them
+without a Python daemon. Golden mode replays every scenario's responses
+except the five timing scenarios (`lease-held`, `reaper`, `null-embedding`,
+`unconstrained-dims`, `db-lost`), which ask both daemons the same question at
+the same moment and are live-only. It checks bank state only where the bank
+starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.

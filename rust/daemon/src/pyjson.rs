@@ -69,7 +69,10 @@ fn string(out: &mut String, s: &str) {
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
             // json.encoder ESCAPE_ASCII: everything outside ' '..'~', DEL included.
-            c if (c as u32) < 0x20 || (c as u32) > 0x7e => {
+            c if (c as u32) < 0x20
+                || ((c as u32) > 0x7e
+                    && !(c == '\u{7f}' && crate::mutants::active("del-unescaped"))) =>
+            {
                 let mut buf = [0u16; 2];
                 for unit in c.encode_utf16(&mut buf) {
                     let _ = write!(out, "\\u{unit:04x}");
