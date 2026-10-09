@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import importlib
 
-ROWS: dict[str, str] = {}
+ROWS: dict[str, str] = {"backup": "CLI-BACKUP-DSN"}
 
 
 def load(row: str):

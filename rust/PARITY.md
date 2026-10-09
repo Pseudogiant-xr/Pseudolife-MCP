@@ -1,21 +1,42 @@
 # Behaviour parity register
 
-## Backup help and missing-directory first slice
+## Backup explicit-DSN and file mode (CLI-BACKUP-DSN)
 
-The native backup leaf admits `backup --help` at `COLUMNS=80` and
-`backup --data-dir PATH` for a canonical absolute UTF-8 path that does not
-exist. The help payload comes from genuine public Python module captures at
-`ce0960ba188669eea67028f1c1eba7f5ef90bf44`; it is not constructed from parser
-constants. The missing-directory branch checks the filesystem before bank
-resolution. Existing paths, other argument forms, archive/dump/compression,
-rotation, implicit data-directory resolution and embedded ownership remain
-deferred. Backup's acceptance disposition is unchanged: Linux first-cell
-proof cannot supply the required Windows path/stdio evidence.
-Only canonical absolute spellings, where Python's `str(Path(value)) == value`,
-are admitted and echoed verbatim. Every other spelling defers under the
-canonical-shapes rule: relative paths, empty or `.` components, trailing or
-repeated separators, a POSIX `//` root, and on Windows forward slashes,
-extended-length `\\?\` and UNC forms.
+The native backup leaf (`shim/src/cli/backup/`) implements `backup_cli.py`
+for the explicit `PSEUDOLIFE_MCP_DATABASE_URL` and for file mode (no DSN and
+no embedded bank). Canonical argv: `backup [--data-dir P] [--out P]
+[--keep-days N]`, space-separated values, each option at most once, `P` a
+canonical path (`str(Path(P)) == P`, relative or absolute, no `..` for a run)
+and `N` a plain decimal of at least one minute; plus `--help` at
+`COLUMNS=80`. A missing canonical data dir (including `..` spellings) is
+refused verbatim before anything else.
+
+Contract, proven per answered case by `python rust/cli_harness --row backup`
+against the live Python oracle on disposable homes and a disposable bank:
+exit code; both streams byte-exact apart from the run timestamp in the two
+new file names (validated against the arm's own clock window); every file
+under the home; the state archive read back member by member (name, type,
+mode, uid, gid, mtime as a float, size, link target, content hash; uname and
+gname too on Windows); the dump decompressed, with pg_dump's per-run
+`\restrict` key normalized; and the source bank's rows and catalog unchanged.
+Free: tar header layout, PAX record layout, gzip headers and compression
+bytes. pg_dump is found as Python finds it (the newest `~/.pg0` bundle, then
+Python 3.11 `shutil.which`, including Windows' current-directory-first rule
+and `PATHEXT`).
+
+Deferred by name, before any effect: anything that could need the lite tier's
+embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
+`--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
+non-canonical spellings and argv shapes; `..` components in a run; an `--out`
+equal to the data dir or nested below one of its archived children; a
+`--keep-days` under one minute (rotation would race this run's new files
+against the platform clock: Python 3.11 reads the coarse system clock on
+Windows); and trees holding anything but files, directories and POSIX
+symlinks (Windows reparse points, POSIX hard links, devices, non-UTF-8 names).
+Declared divergences: archive uname/gname on POSIX are empty (Python looks
+them up; ownership on restore falls back to uid/gid); Python tracebacks after
+an effect (permissions, a full disk) become `backup failed: <error>`; output
+encodings other than UTF-8, as for every CLI leaf.
 
 ## Stream D retained cell scope (2026-10-08)
 
@@ -222,7 +243,8 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
 | CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
 | CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
-| CLI-BACKUP | 2 | pg_dump + compressed state, no create-on-backup, exclusions and post-success-only own-file rotation. `backup_cli.py` | `test_backup_cli.py`, `test_ops_backup_integrity.py`, `test_bank_dumps.py` I/mixed; add fake pg_dump subprocess fixtures | deferred |
+| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, canonical argv and paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (15 cases incl. `.pg0` and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes) with 7 caught mutants; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |
+| CLI-BACKUP-LITE | 2/3 | Lite-tier backup through the embedded pg0 instance (attach or start for the duration, stop only what it started). `backup_cli.py`, `storage/embedded_pg.py` | `test_backup_cli.py::test_backup_roundtrip_embedded`; native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
 | CLI-TRANSFER | 2 | ZIP/JSONL manifest; exact exported/excluded table rosters in the transfer appendix; float4/ids/HLC/JSONB/time/sequences; import refuses a non-empty bank (only meta and builtin relations are exempt), dimension/column mismatches and other live connections. Before importing exported metadata, it clears the target's `curation_listing_spelling_v2` key so only the export's value stands. `transfer_cli.py` | `test_transfer_cli.py` direct calls I/DB, including `test_import_leaves_the_curation_spelling_flag_to_the_export`; add real CLI export/import against disposable banks | deferred |
 | CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
 | HTTP-SECURITY | 3 | Health public/degraded semantics; MCP/REST bearer gates on UTF-8/Latin-1 bytes, fail-closed map, remote bind/trust policy, DNS/Origin/rebinding, JSON/body limits, error status, redirect refusal. `daemon.py`, `web/api.py`, `principals.py`, `utils/no_redirect.py` | `test_daemon_http.py` P/I; `test_web.py`, `test_principals.py`, `test_extractor_no_redirect.py`, `test_shim_transport_recovery.py`, `test_dim_mismatch_health.py` I/mixed | deferred |
@@ -598,7 +620,7 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | connect | 2 | deferred | B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
 | tunnel | 2 | deferred | B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
 | update | 5 | deferred | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
-| backup | 2 | deferred | C Phase 3/4; `backup_cli.py` imports embedded_pg, resolves direct DSN and runs pg_dump; `test_backup_cli.py::test_file_mode_backup_archives_state_only`, `test_dumpless_run_never_rotates_dumps`, `test_backup_roundtrip_embedded`; file-only coverage cannot accept whole mode |
+| backup | 2 | deferred | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
 | export | 2 | deferred | C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
 | import | 2 | deferred | C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
 | episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |

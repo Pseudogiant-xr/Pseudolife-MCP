@@ -6,13 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added (2026-10-09 — native backup help and missing-directory refusal)
+### Added (2026-10-09 — native backup for explicit-DSN and file mode)
 
-- The experimental native backup leaf handles `backup --help` at `COLUMNS=80`
-  and refuses `backup --data-dir PATH` when a canonical absolute UTF-8 path
-  does not exist, echoing it verbatim; every other spelling defers. It
-  checks the filesystem before any bank resolution. Other argument forms,
-  existing paths and backup creation remain deferred.
+- The experimental native `backup` leaf now backs up a bank named by
+  `PSEUDOLIFE_MCP_DATABASE_URL` (pg_dump through gzip, found in the `~/.pg0`
+  bundle or on PATH as Python finds it) and archives the data dir's state
+  with rotation of its own files, matching the Python command's output,
+  files and archive contents. Canonical arguments and paths only; the lite
+  tier's embedded bank and other shapes still defer by name before doing
+  anything.
 
 ### Added (2026-10-09 — native register audit archive verification)
 
