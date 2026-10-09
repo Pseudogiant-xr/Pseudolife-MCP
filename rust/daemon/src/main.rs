@@ -3,6 +3,9 @@
 //! and GET /api/search. See spec.md for the contract this answers to.
 
 mod auth;
+mod config;
+mod principals;
+mod storage;
 mod bank;
 mod embed;
 mod search;
