@@ -261,16 +261,38 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
 }
 
 /// `RequestBodyLimitMiddleware`: a declared Content-Length over the limit is
-/// refused before anything is read; a longer body is refused while reading.
+/// refused, as is a body that grows past it. uvicorn keeps reading what the
+/// client sends, so the refusal reaches a client still writing; the rest of
+/// the body is drained (up to `DRAIN_LIMIT`) before answering.
 async fn read_body(headers: &HeaderMap, body: Body) -> Result<Bytes, Response> {
-    let too_large = || plain(413, "Request body too large");
-    if let Some(declared) = latin1(headers, "content-length")
+    use futures::StreamExt;
+    const DRAIN_LIMIT: usize = 64 * 1024 * 1024;
+    let declared_over = latin1(headers, "content-length")
         .and_then(|v| v.trim().parse::<i128>().ok())
-        && declared > BODY_LIMIT as i128
-    {
-        return Err(too_large());
+        .is_some_and(|d| d > BODY_LIMIT as i128);
+    let mut stream = body.into_data_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut seen = 0usize;
+    let mut over = declared_over;
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else { break };
+        seen += chunk.len();
+        if seen > BODY_LIMIT {
+            over = true;
+        }
+        if over {
+            buf = Vec::new();
+            if seen > DRAIN_LIMIT {
+                break;
+            }
+        } else {
+            buf.extend_from_slice(&chunk);
+        }
     }
-    axum::body::to_bytes(body, BODY_LIMIT).await.map_err(|_| too_large())
+    if over {
+        return Err(plain(413, "Request body too large"));
+    }
+    Ok(Bytes::from(buf))
 }
 
 /// Entry for `/mcp` and `/mcp/*` once the gate has named the principal
@@ -452,16 +474,12 @@ enum Message {
     Other(Option<String>),
 }
 
-/// A JSON-RPC request id as pydantic's `int | str` takes it: strings,
-/// integers, and floats with no fractional part (coerced to the integer).
+/// A JSON-RPC request id as the SDK's union takes it: a string or an
+/// integer (a float, even `2.0`, makes the message a notification).
 fn request_id(v: &Value) -> Option<Value> {
     match v {
         Value::String(_) => Some(v.clone()),
         Value::Number(n) if n.is_i64() || n.is_u64() => Some(v.clone()),
-        Value::Number(n) => {
-            let f = n.as_f64()?;
-            (f.fract() == 0.0 && f.abs() < 9.007_199_254_740_992e15).then(|| json!(f as i64))
-        }
         _ => None,
     }
 }
