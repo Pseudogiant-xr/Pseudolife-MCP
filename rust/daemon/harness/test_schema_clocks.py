@@ -9,6 +9,12 @@ import schema_cases
 
 
 class SchemaClocks(unittest.TestCase):
+    def test_coarse_windows_endpoints_admit_only_one_tick_of_uncertainty(self):
+        state = {"rows": {"public.relations": {"columns": ["name", "created_at"],
+                                              "rows": [["uses", 100.01]]}}}
+        self.assertEqual(schema_cases.clock_diffs(state, {"rows": {}}, (100.0, 100.0), 0.015625), [])
+        state["rows"]["public.relations"]["rows"][0][1] = 100.02
+        self.assertTrue(schema_cases.clock_diffs(state, {"rows": {}}, (100.0, 100.0), 0.015625))
     def test_zero_or_outside_window_is_not_normalized(self):
         for clock in [0.0, 99.0, 102.0, float("nan"), float("inf"), True]:
             state = {"rows": {"public.relations": {"columns": ["name", "created_at"],

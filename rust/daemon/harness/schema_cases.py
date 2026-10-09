@@ -33,10 +33,14 @@ def golden_state(state):
     return golden_scrub(state)
 
 
-def clock_diffs(state, before, window):
+def clock_diffs(state, before, window, resolution=None):
     start, end = window
     if not (math.isfinite(start) and math.isfinite(end) and start <= end):
         return ["constructor invocation window is invalid"]
+    # Python 3.11's Windows wall clock can be coarser than Rust's system
+    # clock. Each endpoint carries one tick of measurement uncertainty.
+    resolution = time.get_clock_info("time").resolution if resolution is None else resolution
+    start, end = start - resolution, end + resolution
     prior = {r[0] for r in before["rows"].get("public.relations", {}).get("rows", [])}
     table = state["rows"].get("public.relations")
     if not table:
