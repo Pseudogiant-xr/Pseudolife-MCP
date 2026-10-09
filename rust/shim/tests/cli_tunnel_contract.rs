@@ -193,9 +193,30 @@ fn a_setup_that_validates_defers_before_the_daemon_handshake() {
         &["setup", "--profile-dir", &dir],
         &[("PSEUDOLIFE_MCP_TOKEN_FILE", token)],
     );
-    // A client registration exists: its env block is not read natively.
+    // A Codex registration exists: its env block is not read natively.
+    std::fs::create_dir_all(home.path(".codex")).unwrap();
+    std::fs::write(home.path(".codex/config.toml"), b"[other]\n").unwrap();
+    assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+    std::fs::remove_dir_all(home.path(".codex")).unwrap();
+    // A Claude Code registration exists.
     std::fs::write(home.path(".claude.json"), b"{}").unwrap();
     assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+}
+
+#[test]
+fn setup_resuming_an_existing_profile_defers() {
+    // The main real flow: anything saved under the name means load and
+    // resume (handshake next), never a native answer.
+    let home = Home::new();
+    let dir = home.dir();
+    std::fs::create_dir_all(home.path("tunnels")).unwrap();
+    std::fs::write(home.path("tunnels/dot.profile.json"), b"{}").unwrap();
+    assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+    assert_deferred(
+        &home,
+        &["setup", "--profile-dir", &dir, "--tunnel-id", "nope"],
+        &[],
+    );
 }
 
 #[test]
@@ -247,7 +268,7 @@ fn file_free_answers_and_refusals_match_the_oracle_text() {
             "--profile-dir".into(),
             dir.clone(),
             "--daemon-url".into(),
-            "http://127.0.0.1:8765".into(),
+            "http://127.0.0.1:9".into(),
             "--token-file".into(),
             token.to_owned(),
         ];
@@ -311,12 +332,12 @@ mod seeded {
         let token = home.path("token");
         let body = if ready {
             format!(
-                "{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:8765\", \"token_file\": \"{}\", \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true}}",
+                "{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": \"{}\", \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true}}",
                 token.display()
             )
         } else {
             format!(
-                "{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:8765\", \"token_file\": \"{}\"}}",
+                "{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": \"{}\"}}",
                 token.display()
             )
         };
@@ -378,5 +399,64 @@ mod seeded {
         private(&home.path("tunnels/dot.process.json"), b"{}");
         assert_deferred(&home, &["verify", "--profile-dir", &dir], &[]);
         assert_deferred(&home, &["status", "--profile-dir", &dir], &[]);
+    }
+
+    /// Run with a deadline; a hung child is killed by its own PID.
+    fn run_bounded(home: &Home, args: &[&str]) -> Output {
+        let listener = Listener::new();
+        let mut command = command(home, &listener);
+        command
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("tunnel {args:?} did not exit within 10 s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let output = child.wait_with_output().unwrap();
+        listener.assert_untouched();
+        output
+    }
+
+    #[test]
+    fn a_redirected_challenge_is_no_challenge_and_a_fifo_never_hangs() {
+        let home = Home::new();
+        let dir = home.dir();
+        profile(&home, "dot", true);
+        let normal = run(&home, &["status", "--profile-dir", &dir, "--json"], &[]);
+        assert_eq!(normal.status.code(), Some(0));
+        // A deep record behind a symlink: Python's checked_path refuses the
+        // link, so verification_status reads no challenge at all.
+        private(&home.path("deep.json"), "[".repeat(150).as_bytes());
+        let verification = home.path("tunnels/dot-verification");
+        std::fs::create_dir_all(&verification).unwrap();
+        std::os::unix::fs::symlink(home.path("deep.json"), verification.join("challenge.json"))
+            .unwrap();
+        let output = run_bounded(&home, &["status", "--profile-dir", &dir, "--json"]);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, normal.stdout);
+        // The same deep record as a private regular file: deferred.
+        std::fs::remove_file(verification.join("challenge.json")).unwrap();
+        private(
+            &verification.join("challenge.json"),
+            "[".repeat(150).as_bytes(),
+        );
+        assert_deferred(&home, &["status", "--profile-dir", &dir], &[]);
+        // A FIFO would block Python's open: deferred, without blocking here.
+        std::fs::remove_file(verification.join("challenge.json")).unwrap();
+        let made = Command::new("mkfifo")
+            .arg(verification.join("challenge.json"))
+            .status();
+        if made.is_ok_and(|status| status.success()) {
+            let output = run_bounded(&home, &["status", "--profile-dir", &dir]);
+            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(output.stderr, native_text(DEFERRED));
+        }
     }
 }

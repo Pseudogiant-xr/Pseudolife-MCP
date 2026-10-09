@@ -2,7 +2,10 @@
 
 Oracle: `pseudolife_memory/tunnel_cli.py`, `tunnel_profiles.py`,
 `tunnel_bridge.py`, `tunnel_runtime.py`, `credentials.py`,
-`doctor_cli.py` at the branch base. Line numbers refer to that tree.
+`doctor_cli.py` at the branch base, run by CPython 3.11.9 (the interpreter
+of every recorded run). Line numbers refer to that tree. Where CPython
+versions disagree on an input (`datetime.fromisoformat`), the leaf defers
+rather than pick one.
 
 ## Canonical argv
 
@@ -39,8 +42,8 @@ reproduced (item 4 of the scope is deferred).
 | Key presence: `read_key` succeeds (POSIX `PLAIN\0` + valid token; Windows `DPAPI\0`), any `TunnelError` is absent | `tunnel_cli.py:76-81`, `tunnel_profiles.py:299-311`, `credentials.py:251-260` |
 | `key_expiry` dict and runtime class (`unknown` / `expired` / `near-expiry` under 7 days / `valid`) | `tunnel_cli.py:84-89`, `tunnel_profiles.py:333-339` |
 | Runtime without a process record: `running=false, ready=false` | `tunnel_runtime.py:404-408` |
-| Cloud without a process record: `identity()` raises inside `verification_status`'s guard, so `{verified: false, successful_calls: 0, challenge_current: false}` | `tunnel_bridge.py:24-49`, `79-95` |
-| Refresh outcome: `.reload.json` (pending / unavailable), else `.reload.result.json` (allowlisted state, `rolled_back is True`), else none; `str(id)` matched against `[a-f0-9]{32}` | `tunnel_cli.py:210-233` |
+| Cloud without a process record: `identity()` raises inside `verification_status`'s guard, so `{verified: false, successful_calls: 0, challenge_current: false}`. The challenge record is read only as `_challenge` reads it, through `private_read` (a redirect, an unsafe, missing or oversized file is `{}`); a readable one with more than 100 brackets (near the recursion limit) defers | `tunnel_bridge.py:24-49`, `52-70`, `79-95` |
+| Refresh outcome: `.reload.json` (pending / unavailable), else `.reload.result.json` (allowlisted state, `rolled_back is True`), else none; `str(id)` matched against `[a-f0-9]{32}` (a string, or an integer token of ASCII digits only; any float or signed token is never a match) | `tunnel_cli.py:210-233` |
 | Status text lines and JSON key order (`json.dumps` default separators, ensure_ascii) | `tunnel_cli.py:179-207` |
 | `update`: absent root or no profiles prints one line, exit 3; root `_prepare` checks (owner-only directory); `*.profile.json` glob (case-insensitive on Windows) with `validate_name` on each stem; profiles sorted; each loaded; pending (not ready, or ready without a key) summarized as JSON, exit 0 | `tunnel_cli.py:261-282`, `322-328`, `tunnel_profiles.py:245-257`, `283-287` |
 | `verify`: load; unfinished (not ready, or no key) refused; ready with a key and no process record fails `identity()`'s private read before `begin_challenge` writes | `tunnel_cli.py:331-335`, `tunnel_bridge.py:24-49`, `75-78`, `tunnel_runtime.py:310-326` |
@@ -65,9 +68,15 @@ reproduced (item 4 of the scope is deferred).
   existing profile, a present client registration file, `~`-led or
   drive-relative/UNC token paths.
 - Python-only JSON (BOM/UTF-16/32, surrogates, NaN/Infinity, more than 100
-  brackets, digit runs over 4000), expiry spellings outside the decided set
-  (basic format, other separators, 7+ fraction digits, offset minutes 60+,
-  years 1 and 9999 with an offset), URLs outside the decided set, non-ASCII
+  brackets, digit runs over 4000), and any object key that decodes to
+  serde_json's reserved `$serde_json::private::Number` (arbitrary_precision
+  would read that object as a number).
+- Expiry spellings outside the decided set: basic format, other separators,
+  a fraction of other than 3 or 6 digits (3.10 refuses, 3.11+ admits), hour
+  24 (3.14 admits, 3.11 refuses), offset minutes 60+, years 1 and 9999 with
+  an offset.
+- A FIFO where a private file is read (Python's blocking open waits for a
+  writer). URLs outside the decided set, non-ASCII
   runtime versions, UNC/device paths, dangling Windows junctions, a
   non-directory root, glob entries that are not regular files, non-ASCII
   names on Windows, a challenge record with more than 100 brackets.
@@ -83,7 +92,27 @@ Rules: `tunnel-deferral` (deferral expectation), `tunnel-dpapi-key`
 (per-arm DPAPI ciphertext, tokenized only after the oracle's `_dpapi`
 unprotects it to the fixture key). No clock or uuid reaches any output: all
 expiry and refresh ids are seeded constants (the near-expiry date is fixed
-once per run), so none is tokenized. Guards: empty `PATH`, a loopback
-listener as the daemon URL that records every connection (none may occur),
-and a fingerprint of the caller's real `~/.pseudolife-mcp/tunnel` (names,
-size, mtime_ns, sha256 in memory) checked after every arm.
+once per run), so none is tokenized. The DPAPI rule tokenizes a key file
+only when its bytes equal that arm's own seeded bytes (recorded before the
+arm ran), so a rewritten or re-encrypted key shows.
+
+Guards, every arm:
+
+- Before it runs, the child's environment is checked: `PATH` empty,
+  `COMSPEC` and `PATHEXT` removed, and every program-directory variable
+  (`HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, the `ProgramFiles`
+  family, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, XDG dirs, the shim runtime and
+  launcher overrides, `PYTHONHOME`, virtualenv/conda prefixes) inside the
+  disposable home or absent. `SYSTEMROOT`/`WINDIR` and `TEMP`/`TMP` stay.
+- Every daemon URL, saved in a seeded profile or passed as `--daemon-url`,
+  is the arm's own loopback listener, which records every connection,
+  including any still in its backlog after the arm exits. None may occur;
+  the `tunnel-saved-url-connect` mutant (a connect to the saved URL) is
+  caught by it.
+- The caller's real `~/.pseudolife-mcp` is compared before and after the arm
+  by `lstat` metadata only: names, size, mtime_ns, mode, inode, link count
+  and Windows attributes. Directories are listed; no file is opened or
+  read; links and junctions are recorded, never followed. Subtrees other
+  live sessions write during any run (`digests`, `locks`, `suite-results`,
+  `handshake-cache`, `agent-state`, `overnight`, `ledgers`) are not
+  compared; everything else, `tunnel/` included, is.

@@ -60,6 +60,10 @@ pub(super) fn json_loads(data: &[u8]) -> Admit<Value> {
     if text.bytes().filter(|b| matches!(b, b'[' | b'{')).count() > 100 {
         return Admit::Defer;
     }
+    // arbitrary_precision would read an object with this key as a number.
+    if reserved_number_key(text) {
+        return Admit::Defer;
+    }
     let mut run = 0usize;
     for byte in text.bytes() {
         run = if byte.is_ascii_digit() { run + 1 } else { 0 };
@@ -76,6 +80,41 @@ pub(super) fn json_loads(data: &[u8]) -> Admit<Value> {
     }
 }
 
+/// serde_json's reserved arbitrary-precision key, once its escapes decode.
+const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+/// Whether any object key in `text` decodes to [`NUMBER_TOKEN`].
+fn reserved_number_key(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'"' {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < bytes.len() && bytes[index] != b'"' {
+            index += if bytes[index] == b'\\' { 2 } else { 1 };
+        }
+        index += 1;
+        let Some(token) = text.get(start..index.min(bytes.len())) else {
+            return true; // a split character: not decided here
+        };
+        let mut next = index;
+        while bytes.get(next).is_some_and(u8::is_ascii_whitespace) {
+            next += 1;
+        }
+        // Only an object key is reserved; a string value is just text.
+        if bytes.get(next) == Some(&b':')
+            && serde_json::from_str::<String>(token).is_ok_and(|key| key == NUMBER_TOKEN)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn surrogate_escape(text: &str) -> bool {
     text.as_bytes().windows(3).any(|w| {
         w[0] == b'u'
@@ -90,7 +129,15 @@ pub(super) fn refresh_id(value: Option<&Value>) -> bool {
     let text = match value {
         Some(Value::String(text)) => text.clone(),
         // arbitrary_precision keeps the token; a JSON integer's str() is it.
-        Some(Value::Number(number)) => number.to_string(),
+        // Any other token (fraction, exponent, sign) is a float or a
+        // negative integer, whose str() never matches.
+        Some(Value::Number(number)) => {
+            let text = number.to_string();
+            if !text.bytes().all(|b| b.is_ascii_digit()) {
+                return false;
+            }
+            text
+        }
         _ => return false,
     };
     text.len() == 32
@@ -238,6 +285,10 @@ fn time_part(text: &str) -> Option<TimeAndOffset> {
             .then(|| u32::from(b[i] - b'0') * 10 + u32::from(b[i + 1] - b'0'))
     };
     let hour = two(0)?;
+    // CPython 3.14 reads 24:00 as the next midnight; 3.11 refuses it.
+    if hour == 24 {
+        return None;
+    }
     if b.get(2) != Some(&b':') {
         return None;
     }
@@ -253,7 +304,9 @@ fn time_part(text: &str) -> Option<TimeAndOffset> {
                 .iter()
                 .take_while(|c| c.is_ascii_digit())
                 .count();
-            if !(1..=6).contains(&digits) {
+            // CPython 3.10 refuses other lengths; 3.11+ admits 1..=6 and
+            // truncates longer ones: only the lengths every version reads.
+            if digits != 3 && digits != 6 {
                 return None;
             }
             let fraction = &text[index + 1..index + 1 + digits];
@@ -327,8 +380,12 @@ mod tests {
             Some("2030-06-01T06:30:00+00:00")
         );
         assert_eq!(
-            at("2030-06-01 12:00:00.5Z").as_deref(),
+            at("2030-06-01 12:00:00.500Z").as_deref(),
             Some("2030-06-01T12:00:00.500+00:00")
+        );
+        assert_eq!(
+            at("2030-06-01T12:00:00.000250Z").as_deref(),
+            Some("2030-06-01T12:00:00.000250+00:00")
         );
         assert_eq!(
             at("2030-06-01T12:00-01:00").as_deref(),
@@ -342,7 +399,6 @@ mod tests {
             "0000-01-01",
             "2026-01-01T00:00:00",
             "2026-01-01 00:00",
-            "2026-01-01T24:00:00Z",
             "2026-01-01T00:00:60Z",
             "2026-01-01T00:00:00+24:00",
             "2026-13-01T00:00:00Z",
@@ -354,6 +410,12 @@ mod tests {
             "2026-01-01T00:00:00z",
             "2026-01-01T00:00:00+05:60",
             "2026-01-01T00:00:00.1234567Z",
+            // CPython 3.14 admits hour 24 (3.11 refuses); 3.10 refuses a
+            // fraction of other than 3 or 6 digits (3.11 admits it).
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T24:00:00",
+            "2026-01-01T00:00:00.5Z",
+            "2026-01-01T00:00:00.12345Z",
             "0001-01-01T00:00:00+05:00",
             "2026-W01-1",
             "2026-01-01X00:00:00Z",
@@ -378,6 +440,18 @@ mod tests {
             assert_eq!(json_loads(deferred), Admit::Defer);
         }
         assert_eq!(json_loads("[".repeat(101).as_bytes()), Admit::Defer);
+        // arbitrary_precision reads this reserved key as a number: defer.
+        for marker in [
+            &b"{\"id\": {\"$serde_json::private::Number\": \"1\"}}"[..],
+            b"{\"id\": {\"\\u0024serde_json::private::Number\": \"1\"}}",
+            b"{\"$serde_json::private::Number\": 1}",
+        ] {
+            assert_eq!(json_loads(marker), Admit::Defer);
+        }
+        assert!(matches!(
+            json_loads(b"{\"note\": \"$serde_json::private::Number\"}"),
+            Admit::Yes(_)
+        ));
         assert_eq!(json_loads("1".repeat(4001).as_bytes()), Admit::Defer);
     }
 
@@ -388,6 +462,11 @@ mod tests {
         assert!(id("12345678901234567890123456789012"));
         assert!(!id("\"0123456789ABCDEF0123456789ABCDEF\""));
         assert!(!id("1234567890123456789012345678901.0"));
+        // str(float) of an exponent token never matches (serde spells
+        // the exponent with a sign, so the digit-only rule is belt and braces).
+        assert!(!id("123456789012345678901234567890e1"));
+        assert!(!id("123456789012345678901234567890E1"));
+        assert!(!id("-1234567890123456789012345678901"));
         assert!(!id("null"));
         assert!(!id("true"));
     }

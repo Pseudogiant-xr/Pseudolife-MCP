@@ -225,18 +225,15 @@ fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
     let path = root
         .join(format!("{name}-verification"))
         .join("challenge.json");
-    if !occupied(&path)? {
-        return Ok(());
+    // `_challenge` reads through private_read: a redirect, an unsafe or
+    // missing file, or one too large is no challenge at all (`{}`).
+    match store::private_read(&path, 65536) {
+        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {
+            Err(Fail::Defer)
+        }
+        Ok(_) | Err(Fail::Tunnel(_)) => Ok(()),
+        Err(Fail::Defer) => Err(Fail::Defer),
     }
-    use std::io::Read;
-    let mut data = Vec::new();
-    if let Ok(file) = std::fs::File::open(&path) {
-        let _ = file.take(65537).read_to_end(&mut data);
-    }
-    if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 {
-        return Err(Fail::Defer);
-    }
-    Ok(())
 }
 
 fn status(options: &Options, root: &Path) -> Output {

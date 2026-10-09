@@ -125,7 +125,10 @@ fn open_private(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+        // NONBLOCK: a FIFO swapped in after the type check below cannot
+        // block the open (regular files ignore the flag).
+        use rustix::fs::OFlags;
+        options.custom_flags((OFlags::NOFOLLOW | OFlags::NONBLOCK).bits() as i32);
     }
     #[cfg(windows)]
     {
@@ -174,6 +177,14 @@ fn owner_only_file(file: &File) -> bool {
 /// `tunnel_profiles.private_read`.
 pub(super) fn private_read(path: &Path, limit: usize) -> Result<Vec<u8>, Fail> {
     let target = checked_path(path)?;
+    // Python's blocking open of a FIFO waits for a writer: not decided here.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if fs::symlink_metadata(&target).is_ok_and(|info| info.file_type().is_fifo()) {
+            return Err(Fail::Defer);
+        }
+    }
     let file = open_private(&target).map_err(|_| Fail::Tunnel(UNAVAILABLE))?;
     if !owner_only_file(&file) {
         return Err(Fail::Tunnel(UNAVAILABLE));

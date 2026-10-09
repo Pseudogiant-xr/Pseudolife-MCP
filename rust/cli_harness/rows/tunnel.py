@@ -13,19 +13,30 @@ process or network use. Everything else defers (``rows/tunnel.md``).
 Profiles, keys, refresh records and tokens are written through the oracle's
 own writers (``ProfileStore.save`` / ``set_key`` / ``private_write``); an
 invalid profile is ``private_write`` of the writer's own payload with one
-field edited. Every arm runs with an empty ``PATH`` and its daemon URL on a
-loopback listener that records any connection attempt (none may happen),
-and every case checks that the caller's real tunnel profile directory did
-not change.
+field edited. Guards on every arm:
+
+- before it runs, the environment the child receives is checked: ``PATH``
+  and every program-directory variable point only inside the disposable
+  home (``PATH`` is empty, ``COMSPEC`` and ``PATHEXT`` are removed);
+- every daemon URL, saved in a profile or passed as an argument, is the
+  arm's own loopback listener, which records any connection (none may
+  happen; the ``tunnel-saved-url-connect`` mutant proves it would show);
+- the caller's real ``~/.pseudolife-mcp`` is compared by ``lstat`` metadata
+  only (names, size, mtime_ns, mode, inode, link count, Windows attributes)
+  before and after the arm. No file there is opened or read; links and
+  junctions are not followed. Subtrees other live sessions write while a
+  run is going (``LIVE_SHARED``) are not compared; ``tunnel/`` always is.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
+import shutil
 import socket
+import stat
+import tempfile
 import threading
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -39,6 +50,7 @@ NEAR = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT00:00
 REFRESH_ID = "0123456789abcdef0123456789abcdef"
 FIXTURE_KEY = "fixture-tunnel-key"
 DEFERRAL = "pseudolife-stdio: mode 'tunnel' is deferred in this candidate\n"
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def _home(rel: str) -> str:
@@ -46,57 +58,125 @@ def _home(rel: str) -> str:
 
 
 DIR = _home("tunnels")
+DAEMON = "{DAEMON}"  # replaced in setup by the arm's listener URL
 
 
-# --- guard: the caller's real profile directory --------------------------------
+# --- guard: the caller's real ~/.pseudolife-mcp, by metadata only --------------
 
-REAL = Path(os.path.expanduser("~")) / ".pseudolife-mcp" / "tunnel"
+PL_HOME = Path(os.path.expanduser("~")) / ".pseudolife-mcp"
+# Written by other live sessions during any run (board digests, locks and
+# leases, suite results, handshake cache, agent state, overnight ledgers):
+# a change there cannot be attributed to an arm, so it is not compared.
+LIVE_SHARED = frozenset({"digests", "locks", "suite-results", "handshake-cache",
+                         "agent-state", "overnight", "ledgers"})
 
 
-def _fingerprint(root: Path):
-    """Names, sizes, mtime_ns and sha256 of everything under ``root``, kept in
-    memory only (the bytes are never written anywhere)."""
+def _lstat_tree(root: Path):
+    """``lstat`` metadata of ``root`` and everything under it. Directories are
+    listed; no file is opened; links and junctions are recorded, never
+    entered."""
     if not os.path.lexists(root):
         return None
-    out = {}
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        for name in sorted(dirnames + filenames):
-            path = Path(dirpath) / name
-            info = os.lstat(path)
-            digest = None
-            if os.path.isfile(path) and not os.path.islink(path):
-                try:
-                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-                except OSError as error:
-                    digest = f"unreadable:{error.__class__.__name__}"
-            out[str(path.relative_to(root))] = (info.st_size, info.st_mtime_ns, digest)
+    out: dict[str, object] = {}
+
+    def record(path: str, rel: str):
+        info = os.lstat(path)
+        out[rel] = (info.st_size, info.st_mtime_ns, info.st_mode, info.st_ino, info.st_nlink,
+                    getattr(info, "st_file_attributes", None))
+        return info
+
+    def descend(info) -> bool:
+        return (stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                and not getattr(info, "st_file_attributes", 0) & REPARSE)
+
+    def walk(directory: str, rel: str):
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError as error:
+            out[rel + "/<listing>"] = type(error).__name__
+            return
+        for name in names:
+            if rel == "." and name in LIVE_SHARED:
+                continue
+            child = name if rel == "." else f"{rel}/{name}"
+            path = os.path.join(directory, name)
+            try:
+                info = record(path, child)
+            except OSError as error:
+                out[child] = type(error).__name__
+                continue
+            if descend(info):
+                walk(path, child)
+
+    if descend(record(str(root), ".")):
+        walk(str(root), ".")
     return out
 
 
-_REAL_BEFORE = _fingerprint(REAL)
+def _guard_real(before) -> None:
+    after = _lstat_tree(PL_HOME)
+    if after != before:
+        changed = sorted(k for k in set(before or {}) | set(after or {})
+                         if (before or {}).get(k) != (after or {}).get(k))
+        raise RuntimeError(f"the real {PL_HOME} changed during the arm: {changed[:20]}")
 
 
-def _guard_real() -> None:
-    if _fingerprint(REAL) != _REAL_BEFORE:
-        raise RuntimeError(f"the real tunnel profile directory changed: {REAL}")
+# --- guard: no real program can resolve -----------------------------------------
+
+# Variables that name where programs or per-user program state live. Each one
+# the child receives must point inside the disposable home; COMSPEC and
+# PATHEXT must be absent; PATH must be empty or inside the home. SYSTEMROOT
+# and WINDIR (the OS itself, needed to start an interpreter) and TEMP/TMP stay.
+PROGRAM_DIRS = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
+                "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
+                "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "PROGRAMDATA",
+                "ALLUSERSPROFILE", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME", "XDG_BIN_HOME", "PSEUDOLIFE_SHIM_RUNTIMES",
+                "PSEUDOLIFE_SHIM_LAUNCHER", "PSEUDOLIFE_DOCKER", "PSEUDOLIFE_MCP_DATA_DIR",
+                "PYTHONHOME", "PYTHONUSERBASE", "VIRTUAL_ENV", "CONDA_PREFIX")
+ABSENT = ("COMSPEC", "PATHEXT")
+
+
+def _prove_environment(case_obj: core.Case, arm: core.Arm) -> None:
+    env = core._environment(case_obj, arm, core.Target(arm.name, []))
+    home = os.path.normcase(os.path.abspath(arm.home))
+
+    def inside(value: str) -> bool:
+        path = os.path.normcase(os.path.abspath(value))
+        return path == home or path.startswith(home + os.sep)
+
+    upper = {key.upper(): value for key, value in env.items()}
+    bad = [f"PATH entry {entry!r}" for entry in upper.get("PATH", "").split(os.pathsep)
+           if entry and not inside(entry)]
+    bad += [f"{name} present" for name in ABSENT if name in upper]
+    bad += [f"{name}={upper[name]!r}" for name in PROGRAM_DIRS
+            if name in upper and not inside(upper[name])]
+    if bad:
+        raise RuntimeError(f"{case_obj.id}/{arm.name}: child environment reaches outside "
+                           f"the disposable home: {bad}")
 
 
 # --- guard: no connection to the daemon URL ------------------------------------
 
 class Listener:
     """A loopback listener named as the arm's daemon: it records every
-    accepted connection and answers nothing."""
+    connection and answers nothing. ``requests()`` runs after the arm's
+    process exited and also drains connections still in the backlog."""
 
     def __init__(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
-        self.sock.listen(8)
-        self.sock.settimeout(0.2)
+        self.sock.listen(16)
+        self.sock.settimeout(0.1)
         self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}"
         self.accepted: list[dict] = []
         self.closing = False
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
+
+    def _take(self, conn) -> None:
+        self.accepted.append({"method": "CONNECT", "target": "", "headers": {}, "body": ""})
+        conn.close()
 
     def _serve(self):
         while not self.closing:
@@ -104,10 +184,18 @@ class Listener:
                 conn, _ = self.sock.accept()
             except OSError:
                 continue
-            self.accepted.append({"method": "CONNECT", "target": "", "headers": {}, "body": ""})
-            conn.close()
+            self._take(conn)
 
     def requests(self):
+        self.closing = True
+        self.thread.join(2)
+        self.sock.setblocking(False)
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                break
+            self._take(conn)
         return list(self.accepted)
 
     def close(self):
@@ -116,7 +204,35 @@ class Listener:
         self.sock.close()
 
 
+# --- junctions (Windows) ---------------------------------------------------------
+
+def _junction(target: Path, link: Path) -> None:
+    import _winapi  # noqa: PLC0415 (Windows only)
+    _winapi.CreateJunction(str(target), str(link))
+
+
+def _junctions_work() -> bool:
+    if not core.WINDOWS:
+        return False
+    probe = Path(tempfile.mkdtemp(prefix="pl-tunnel-junction-"))
+    try:
+        (probe / "target").mkdir()
+        _junction(probe / "target", probe / "link")
+        return (os.lstat(probe / "link").st_file_attributes & REPARSE) != 0
+    except OSError:
+        return False
+    finally:
+        link = probe / "link"
+        if os.path.lexists(link):
+            os.rmdir(link)  # removes the junction itself, never its target
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+JUNCTIONS = _junctions_work()
+
+
 # --- seeding through the oracle's writers ---------------------------------------
+# A seed receives the arm: its home, and its listener (the only daemon URL).
 
 def _profiles():
     import pseudolife_memory.tunnel_profiles as module  # noqa: PLC0415 (oracle writer)
@@ -130,17 +246,25 @@ def _token(home: Path) -> Path:
     return path
 
 
+def token(arm) -> None:
+    _token(arm.home)
+
+
 def _root(home: Path, rel: str = "tunnels") -> Path:
     return home / Path(rel)
 
 
-def profile(name="dot", *, rel="tunnels", raw_edit=None, file_name=None, **fields):
-    """``ProfileStore.save`` of a valid profile, or ``private_write`` of the
-    writer's own payload with ``raw_edit`` applied."""
-    def seed(home: Path):
+def profile(name="dot", *, rel="tunnels", raw_edit=None, file_name=None, token_file=None,
+            **fields):
+    """``ProfileStore.save`` of a valid profile naming the arm's listener as
+    its daemon, or ``private_write`` of the writer's own payload with
+    ``raw_edit`` applied."""
+    def seed(arm):
+        home = arm.home
         m = _profiles()
         store = m.ProfileStore(_root(home, rel))
-        value = m.Profile(name, "http://127.0.0.1:8765", str(_token(home)), **fields)
+        reference = str(home / token_file) if token_file else str(_token(home))
+        value = m.Profile(name, arm.daemon.url, reference, **fields)
         if raw_edit is None and file_name is None:
             store.save(value)
             return
@@ -160,9 +284,9 @@ def ready(name="dot", **fields):
 def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False):
     """``set_key`` (DPAPI on Windows, PLAIN elsewhere), or ``private_write``
     of raw key bytes; ``plain_file`` writes without owner-only protection."""
-    def seed(home: Path):
+    def seed(arm):
         m = _profiles()
-        store = m.ProfileStore(_root(home, rel))
+        store = m.ProfileStore(_root(arm.home, rel))
         if raw is None:
             store.set_key(name, FIXTURE_KEY)
         elif plain_file:
@@ -173,28 +297,46 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
 
 
 def private(rel: str, data: bytes):
-    def seed(home: Path):
-        _profiles().private_write(home / Path(rel), data)
+    def seed(arm):
+        _profiles().private_write(arm.home / Path(rel), data)
     return seed
 
 
 def plain(rel: str, data: bytes):
-    def seed(home: Path):
-        path = home / Path(rel)
+    def seed(arm):
+        path = arm.home / Path(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     return seed
 
 
 def prepared(rel="tunnels"):
-    def seed(home: Path):
-        _profiles().ProfileStore(_root(home, rel))._prepare()
+    def seed(arm):
+        _profiles().ProfileStore(_root(arm.home, rel))._prepare()
     return seed
 
 
 def mkdir(rel: str):
-    def seed(home: Path):
-        (home / Path(rel)).mkdir(parents=True, exist_ok=True)
+    def seed(arm):
+        (arm.home / Path(rel)).mkdir(parents=True, exist_ok=True)
+    return seed
+
+
+def symlink(rel: str, target_rel: str):
+    def seed(arm):
+        os.symlink(arm.home / Path(target_rel), arm.home / Path(rel))
+    return seed
+
+
+def junction(rel: str, target_rel: str, *, dangling=False):
+    """A junction at ``rel`` to the directory ``target_rel`` (created if
+    absent, then removed again when ``dangling``)."""
+    def seed(arm):
+        target = arm.home / Path(target_rel)
+        target.mkdir(parents=True, exist_ok=True)
+        _junction(target, arm.home / Path(rel))
+        if dangling:
+            shutil.rmtree(target)
     return seed
 
 
@@ -227,7 +369,10 @@ def tunnel_deferral(obs: dict) -> None:
     obs["stdout"] = ""
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
     before = {"stdout": "", "stderr": "", "files": dict(obs.get("before", {}))}
-    normalize.home_tokens(before, obs["home"])  # as apply() did for the observed files
+    # The same home and daemon tokens apply() gave the observed files.
+    normalize.home_tokens(before, obs["home"])
+    if obs.get("daemon_url"):
+        normalize.daemon_tokens(before, obs["daemon_url"])
     obs["files"] = before["files"]
     obs["modes"] = dict(obs.get("before_modes", {}))
 
@@ -235,27 +380,36 @@ def tunnel_deferral(obs: dict) -> None:
 @normalize.rule("tunnel-dpapi-key")
 def tunnel_dpapi_key(obs: dict) -> None:
     """Windows ``set_key`` output is DPAPI ciphertext, fresh per arm. A key
-    file is tokenized only after the oracle's own ``_dpapi`` unprotects it to
-    the fixture key, so a changed or foreign key still shows."""
+    file is tokenized only when its bytes are exactly the ones this arm's
+    setup seeded (recorded before the arm ran) and the oracle's own
+    ``_dpapi`` unprotects them to the fixture key. A rewritten, re-encrypted
+    or foreign key stays as observed and shows as a difference."""
+    seeded = obs.get("before", {})
     for rel, value in list(obs["files"].items()):
-        if not (rel.endswith(".key") and value.startswith("file:")):
+        if not (rel.endswith(".key") and value.startswith("file:")) or seeded.get(rel) != value:
             continue
         data = base64.b64decode(value[5:])
         prefix, _, sealed = data.partition(b"\0")
         if prefix != b"DPAPI":
             continue
         try:
-            plain = _profiles()._dpapi(sealed, decrypt=True)
+            unsealed = _profiles()._dpapi(sealed, decrypt=True)
         except Exception:  # noqa: BLE001 - an unreadable key stays as observed
             continue
-        if plain == FIXTURE_KEY.encode():
+        if unsealed == FIXTURE_KEY.encode():
             obs["files"][rel] = "file:" + base64.b64encode(b"DPAPI\0<fixture key>").decode()
 
 
-def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux"), note=""):
+def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux"),
+         skip_if=None, note=""):
+    original = ["tunnel", *argv]
+
     def setup(arm):
+        made.argv = [item.replace(DAEMON, arm.daemon.url) for item in original]
+        _prove_environment(made, arm)
+        arm.state["real"] = _lstat_tree(PL_HOME)
         for seed in seeds:
-            seed(arm.home)
+            seed(arm)
         arm.state["before"] = core.snapshot(arm.home)
         arm.state["before_modes"] = core.modes(arm.home)
 
@@ -263,10 +417,12 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
         obs["arm"] = arm.name
         obs["before"] = arm.state.get("before", {})
         obs["before_modes"] = arm.state.get("before_modes", {})
-        _guard_real()
+        _guard_real(arm.state.get("real"))
 
     environment = {
         "PATH": "",
+        "PATHEXT": None,
+        "COMSPEC": None,
         "PSEUDOLIFE_MCP_TOKEN": None,
         "PSEUDOLIFE_MCP_TOKEN_FILE": None,
         "CLAUDE_CONFIG_DIR": None,
@@ -274,8 +430,10 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
         "OPENAI_API_KEY": None,
     }
     environment.update(env or {})
-    return core.Case(case_id, ["tunnel", *argv], env=environment, setup=setup, after=after,
-                     rules=rules, platforms=platforms, daemon=Listener, note=note)
+    made = core.Case(case_id, list(original), env=environment, setup=setup, after=after,
+                     rules=rules, platforms=platforms, daemon=Listener, skip_if=skip_if,
+                     note=note)
+    return made
 
 
 def status(case_id, *seeds, extra=(), json_out=True, **kw):
@@ -293,10 +451,17 @@ def setup_case(case_id, *extra, seeds=(), env=None):
 
 
 def explicit(*extra):
-    return ["--daemon-url", "http://127.0.0.1:8765", "--token-file", _home("token"), *extra]
+    return ["--daemon-url", DAEMON, "--token-file", _home("token"), *extra]
+
+
+def no_junctions() -> bool:
+    return not JUNCTIONS
 
 
 WRONG_PREFIX = b"PLAIN\0fixture-tunnel-key" if core.WINDOWS else b"DPAPI\0fixture-tunnel-key"
+DEEP = b"[" * 150  # past the native bound of 100 brackets
+RESERVED_ID = b'{"id": {"$serde_json::private::Number": "12345678901234567890123456789012"}'
+EXPONENT_ID = b'"id": 123456789012345678901234567890e1'
 
 
 def cases() -> list[core.Case]:
@@ -336,6 +501,8 @@ def cases() -> list[core.Case]:
         status("status-refresh-pending-bad-id", profile(), refresh("dot.reload.json", id="x")),
         status("status-refresh-pending-corrupt", profile(),
                private("tunnels/dot.reload.json", b"{not json")),
+        status("status-refresh-pending-exponent-id", profile(),
+               private("tunnels/dot.reload.json", b"{" + EXPONENT_ID + b"}")),
         status("status-refresh-refreshed", ready(),
                refresh("dot.reload.result.json", state="refreshed", changed=True, running=True,
                        rolled_back=False, id=REFRESH_ID)),
@@ -357,13 +524,28 @@ def cases() -> list[core.Case]:
         status("status-refresh-integer-id", ready(),
                private("tunnels/dot.reload.result.json",
                        b'{"state": "failed", "id": 12345678901234567890123456789012}')),
+        status("status-refresh-result-exponent-id", ready(),
+               private("tunnels/dot.reload.result.json",
+                       b'{"state": "failed", ' + EXPONENT_ID + b"}")),
         status("status-refresh-not-owner-only", ready(),
                plain("tunnels/dot.reload.result.json",
                      json.dumps({"state": "refreshed", "id": REFRESH_ID}).encode())),
+        status("status-refresh-result-junction", ready(), mkdir("elsewhere"),
+               junction("tunnels/dot.reload.result.json", "elsewhere"),
+               platforms=("windows",), skip_if=no_junctions),
+        # status: a challenge record is read only through checked_path/private_read
         status("status-challenge-present", ready(),
                private("tunnels/dot-verification/challenge.json",
                        json.dumps({"nonce": REFRESH_ID, "identity": "a" * 64,
                                    "created": 1.0}).encode())),
+        status("status-challenge-symlink", ready(), private("deep.json", DEEP),
+               mkdir("tunnels/dot-verification"),
+               symlink("tunnels/dot-verification/challenge.json", "deep.json"),
+               platforms=("linux",)),
+        status("status-challenge-junction", ready(),
+               private("deep-dir/challenge.json", DEEP),
+               junction("tunnels/dot-verification", "deep-dir"),
+               platforms=("windows",), skip_if=no_junctions),
         # status: refusals (exit 2, sanitized stderr)
         status("status-missing-profile", prepared()),
         status("status-missing-dir"),
@@ -374,7 +556,7 @@ def cases() -> list[core.Case]:
         status("status-missing-field",
                profile(raw_edit=lambda p: p.pop("token_file"))),
         status("status-not-owner-only", plain("tunnels/dot.profile.json", json.dumps(
-            {"name": "dot", "daemon_url": "http://127.0.0.1:8765", "token_file": "/x"}).encode())),
+            {"name": "dot", "daemon_url": "http://127.0.0.1:9", "token_file": "/x"}).encode())),
         status("status-bad-tunnel-id", profile(raw_edit=edit(tunnel_id="tunnel_xyz"))),
         status("status-bad-organization", profile(raw_edit=edit(organization_id="acme"))),
         status("status-bad-state", profile(raw_edit=edit(state="live"))),
@@ -391,6 +573,12 @@ def cases() -> list[core.Case]:
         status("status-too-large", private("tunnels/dot.profile.json", b" " * 70000 + b"{}")),
         status("status-invalid-name", prepared(), extra=["--profile", "bad.name"]),
         status("status-reserved-name", prepared(), extra=["--profile", "CON"]),
+        status("status-profile-symlink", profile(file_name="real.profile.json.bak"),
+               symlink("tunnels/dot.profile.json", "tunnels/real.profile.json.bak"),
+               platforms=("linux",)),
+        status("status-profile-junction", prepared(), mkdir("elsewhere"),
+               junction("tunnels/dot.profile.json", "elsewhere"),
+               platforms=("windows",), skip_if=no_junctions),
         # update: nothing saved, or only pending profiles
         case("update-no-dir", ["update", "--profile-dir", DIR]),
         case("update-default-root-absent", ["update"]),
@@ -422,27 +610,24 @@ def cases() -> list[core.Case]:
         setup_case("setup-no-registrations",
                    env={"CLAUDE_CONFIG_DIR": _home("claude"), "CODEX_HOME": _home("codex")}),
         setup_case("setup-no-registrations-default-home"),
-        setup_case("setup-token-file-only", "--token-file", _home("token"),
-                   seeds=(lambda home: _token(home),)),
+        setup_case("setup-token-file-only", "--token-file", _home("token"), seeds=(token,)),
         setup_case("setup-bad-tunnel-id", *explicit("--tunnel-id", "tunnel_xyz"),
-                   seeds=(lambda home: _token(home),)),
-        setup_case("setup-empty-tunnel-id", *explicit("--tunnel-id", ""),
-                   seeds=(lambda home: _token(home),)),
+                   seeds=(token,)),
+        setup_case("setup-empty-tunnel-id", *explicit("--tunnel-id", ""), seeds=(token,)),
         setup_case("setup-bad-organization", *explicit("--organization-id", "acme"),
-                   seeds=(lambda home: _token(home),)),
+                   seeds=(token,)),
         setup_case("setup-naive-expiry", *explicit("--key-expires-at", "2026-12-01T00:00:00"),
-                   seeds=(lambda home: _token(home),)),
+                   seeds=(token,)),
         setup_case("setup-garbage-expiry", *explicit("--key-expires-at", "next week",
                                                      "--catalog", "full"),
-                   seeds=(lambda home: _token(home),)),
-        setup_case("setup-env-token-file-bad-id", "--tunnel-id", "tunnel_",
-                   seeds=(lambda home: _token(home),),
+                   seeds=(token,)),
+        setup_case("setup-env-token-file-bad-id", "--tunnel-id", "tunnel_", seeds=(token,),
                    env={"PSEUDOLIFE_MCP_TOKEN_FILE": _home("token")}),
-        setup_case("setup-relative-token-bad-id", "--daemon-url", "http://127.0.0.1:8765",
+        setup_case("setup-relative-token-bad-id", "--daemon-url", DAEMON,
                    "--token-file", "token", "--tunnel-id", "nope"),
-        setup_case("setup-url-scheme", "--daemon-url", "ftp://127.0.0.1:8765", "--token-file",
-                   _home("token"), seeds=(lambda home: _token(home),)),
-        setup_case("setup-url-space", "--daemon-url", "http://127.0.0.1 :8765", "--token-file",
+        setup_case("setup-url-scheme", "--daemon-url", "ftp://127.0.0.1:9", "--token-file",
+                   _home("token"), seeds=(token,)),
+        setup_case("setup-url-space", "--daemon-url", "http://127.0.0.1 :9", "--token-file",
                    _home("token")),
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
@@ -461,6 +646,31 @@ def cases() -> list[core.Case]:
                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),
         defer("defer-status-seven-digit-fraction", ["status", "--profile-dir", DIR],
               profile(runtime_key_expires_at="2099-12-31T00:00:00.1234567Z")),
+        defer("defer-status-one-digit-fraction", ["status", "--profile-dir", DIR],
+              profile(runtime_key_expires_at="2099-12-31T00:00:00.5Z")),
+        # hour 24: refused by the 3.11 oracle, admitted by CPython 3.14
+        defer("defer-status-hour-24-expiry", ["status", "--profile-dir", DIR],
+              profile(raw_edit=edit(runtime_key_expires_at="2099-12-31T24:00:00Z"))),
+        defer("defer-status-deep-challenge", ["status", "--profile-dir", DIR], ready(),
+              private("tunnels/dot-verification/challenge.json", DEEP)),
+        defer("defer-status-refresh-reserved-id", ["status", "--profile-dir", DIR], profile(),
+              private("tunnels/dot.reload.json", RESERVED_ID + b"}")),
+        defer("defer-status-result-reserved-id", ["status", "--profile-dir", DIR], ready(),
+              private("tunnels/dot.reload.result.json",
+                      RESERVED_ID + b', "state": "failed"}')),
+        defer("defer-profile-dangling-junction", ["status", "--profile-dir", DIR], prepared(),
+              junction("tunnels/dot.profile.json", "gone", dangling=True),
+              platforms=("windows",), skip_if=no_junctions),
+        # setup resuming a saved profile (its token reference is missing, so
+        # the oracle stops at check_token_file, before any handshake process)
+        defer("defer-setup-existing-profile", ["setup", "--profile-dir", DIR],
+              profile(token_file="missing-token")),
+        # a Codex registration file: its env block is not read natively (the
+        # oracle reads it, finds no server block and refuses)
+        defer("defer-setup-codex-registration", ["setup", "--profile-dir", DIR],
+              plain(".codex/config.toml", b"[other]\nx = 1\n")),
+        defer("defer-setup-claude-registration", ["setup", "--profile-dir", DIR],
+              plain(".claude.json", b'{"mcpServers": {}}')),
         defer("defer-status-help", ["status", "--help"]),
         defer("defer-no-subcommand", []),
         defer("defer-joined-option", ["status", "--profile=dot", "--profile-dir", DIR],
@@ -512,4 +722,34 @@ MUTANTS = [
            "(psutil): deferred.\n    if occupied(",
            "(psutil): deferred.\n    if false && occupied(",
            ("defer-status-process-record",)),
+    # review round 1
+    Mutant("tunnel-saved-url-connect", "tunnel", "shim/src/cli/tunnel/store.rs",
+           "        Some(Some(url)) => validate_url(url)?,\n",
+           "        Some(Some(url)) => {\n            validate_url(url)?;\n"
+           "            let _ = std::net::TcpStream::connect(url.trim_start_matches(\"http://\"));\n"
+           "        }\n",
+           ("status-pending-json",)),
+    Mutant("tunnel-challenge-bound", "tunnel", "shim/src/cli/tunnel/mod.rs",
+           "        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {",
+           "        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 1000 => {",
+           ("defer-status-deep-challenge",)),
+    Mutant("tunnel-existing-profile-resumed", "tunnel", "shim/src/cli/tunnel/mod.rs",
+           "    if occupied(&path)? {\n", "    if false && occupied(&path)? {\n",
+           ("defer-setup-existing-profile",)),
+    Mutant("tunnel-codex-registration-ignored", "tunnel", "shim/src/cli/tunnel/mod.rs",
+           "|| occupied(&codex)?", "|| false",
+           ("defer-setup-codex-registration",)),
+    Mutant("tunnel-redirect-message", "tunnel", "shim/src/cli/tunnel/store.rs",
+           "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(REDIRECT)),",
+           "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(UNSAFE_PATH)),",
+           ("status-profile-junction", "status-profile-symlink")),
+    Mutant("tunnel-dangling-junction-answered", "tunnel", "shim/src/cli/tunnel/store.rs",
+           "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
+           "        Ok(_) => Err(Fail::Defer),",
+           "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
+           "        Ok(_) => Err(Fail::Tunnel(REDIRECT)),",
+           ("defer-profile-dangling-junction",)),
+    Mutant("tunnel-reserved-number-key-admitted", "tunnel", "shim/src/cli/tunnel/syntax.rs",
+           "    if reserved_number_key(text) {\n", "    if false && reserved_number_key(text) {\n",
+           ("defer-status-refresh-reserved-id", "defer-status-result-reserved-id")),
 ]
