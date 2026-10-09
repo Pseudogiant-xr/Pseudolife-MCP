@@ -145,10 +145,14 @@ run too.
 - Container cases skip unless `docker version` reports a Linux server: a
   WSL distro without Docker integration, and hosted Windows, whose engine
   runs Windows containers only.
-- `goldens/test_login.windows.json` is replayed on hosted Windows. There is
-  no Linux golden: recording needs pg0's `initdb` (which needs libicu) and a
-  Linux Docker engine, and the WSL distro that records Linux goldens has
-  neither. The ubuntu lane's live run is the row's Linux proof.
+- `goldens/test_login.windows.json` is replayed on hosted Windows. The Linux
+  golden is recorded on the hosted ubuntu lane: recording needs pg0's
+  `initdb` (which needs libicu) and a Linux Docker engine, and the WSL
+  distro that records the other Linux goldens has neither. While
+  `goldens/test_login.linux.json` is absent, that lane leaves the row out of
+  its golden pass, records it, uploads it as the `test_login-linux-golden`
+  artifact and writes the executed and skipped counts to the step summary;
+  once the artifact is committed, the lane replays it like every other row.
 - Rule `test-login-run-tokens`: each arm records the throwaway cluster's
   port and the disposable containers' name token it ran with, and only
   those exact spellings (`127.0.0.1:<port>`, `pl-cf-w1c-testlogin-<token>-`,

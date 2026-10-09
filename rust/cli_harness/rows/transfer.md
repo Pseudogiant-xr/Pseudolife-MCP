@@ -36,6 +36,11 @@ Argv and resolution (`run_transfer` 579-629):
 - Success stdout: `exported to: <path>` / `imported: <archive>`, then
   `  <table>: <n>` for each non-zero count in count order (617-623).
   Refusals: `<mode> refused: <message>` on stderr, exit 1 (624-626).
+- A refused stdout: the report (and argparse's help) waits in CPython's
+  stdout buffer, so the export or import completes and the
+  interpreter-shutdown flush then fails with exit 120; the native leaf
+  exits 120 too. Cases `export-help-stdout-closed`, `export-stdout-closed`,
+  `import-stdout-closed` (live only, rule `python-stdout-closed-trailer`).
 
 Export (`perform_export` 205-244, `_export_table` 247-276):
 

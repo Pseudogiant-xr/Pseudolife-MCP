@@ -126,16 +126,27 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         Err(Fail::Tunnel(message)) => (String::new(), format!("{message}\n"), 2),
         Err(Fail::Defer) => return None,
     };
-    let written = io::stdout()
-        .lock()
+    // The oracle's stdout is block-buffered: a refused stdout fails only its
+    // interpreter-shutdown flush, which turns any exit into 120. An empty
+    // stdout is never written, so it cannot be refused.
+    let mut out = io::stdout().lock();
+    let stdout_refused = out
         .write_all(&super::text_bytes(&stdout))
-        .and_then(|()| io::stderr().lock().write_all(&super::text_bytes(&stderr)));
-    Some(if written.is_ok() {
+        .and_then(|()| out.flush())
+        .is_err();
+    drop(out);
+    let written = io::stderr().lock().write_all(&super::text_bytes(&stderr));
+    Some(if stdout_refused {
+        ExitCode::from(STDOUT_REFUSED)
+    } else if written.is_ok() {
         ExitCode::from(code)
     } else {
         ExitCode::FAILURE
     })
 }
+
+/// CPython's exit when its shutdown flush of a refused stdout fails.
+const STDOUT_REFUSED: u8 = 120;
 
 type Output = Result<(String, u8), Fail>;
 

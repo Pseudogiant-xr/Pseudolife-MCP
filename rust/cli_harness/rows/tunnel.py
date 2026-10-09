@@ -33,7 +33,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import shutil
 import socket
 import stat
@@ -262,6 +261,9 @@ def profile(name="dot", *, rel="tunnels", raw_edit=None, file_name=None, token_f
     ``raw_edit`` applied."""
     def seed(arm):
         home = arm.home
+        if "runtime_key_expires_at" in fields:
+            # The exact value written, for rule tunnel-near-expiry.
+            arm.state["seeded_expiry"] = fields["runtime_key_expires_at"]
         m = _profiles()
         store = m.ProfileStore(_root(home, rel))
         reference = str(home / token_file) if token_file else str(_token(home))
@@ -412,36 +414,50 @@ def _dpapi_fixture(home) -> list[str]:
     return sorted(found)
 
 
-_NEAR = re.compile(rb"\b(\d{4}-\d{2}-\d{2})T00:00:00Z")
+_EXPIRY_FIELD = b'"runtime_key_expires_at": '
 
 
 @normalize.rule("tunnel-near-expiry")
 def tunnel_near_expiry(obs: dict) -> None:
     """``NEAR`` is three days from the day the row was loaded, so a golden
-    replayed on another day seeds another date. A midnight UTC stamp in
-    stdout or a file becomes ``<near>`` only when it lies one to three days
-    after the start of this arm's own run window (the oracle reports such a
-    key as ``near-expiry``); any other date stays as written."""
-    start = obs["window"][0]
-
-    def swap(data: bytes) -> bytes:
-        def one(match):
-            moment = datetime.strptime(match.group(1).decode(), "%Y-%m-%d").replace(
-                tzinfo=timezone.utc).timestamp()
-            if 86_400 < moment - start <= 3 * 86_400:
-                return b"<near>"
-            return match.group(0)
-        return _NEAR.sub(one, data)
-
-    obs["stdout"] = base64.b64encode(swap(base64.b64decode(obs["stdout"]))).decode()
-    for rel, value in list(obs["files"].items()):
-        if value.startswith("file:"):
-            obs["files"][rel] = "file:" + base64.b64encode(
-                swap(base64.b64decode(value[5:]))).decode()
+    replayed on another day seeds another date. Only the exact value this
+    arm's setup seeded (``seeded_expiry``, recorded with the observation)
+    becomes ``<near>``, and only in its named places: the saved profile's
+    ``runtime_key_expires_at`` and the status report's ``"expires_at"`` (JSON)
+    or ``API key expiry:`` line (text). The seed must be a midnight UTC stamp
+    one to three days after this arm's start (the near-expiry class), and the
+    profile after the run must hold exactly that value in its one expiry
+    field; otherwise nothing is replaced. Any other date, a seed's date moved
+    by a day included, stays as written and shows as a difference."""
+    seed = obs.get("seeded_expiry")
+    if not isinstance(seed, str):
+        return
+    try:
+        moment = datetime.strptime(seed, "%Y-%m-%dT00:00:00Z").replace(
+            tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return
+    if not 86_400 < moment - obs["window"][0] <= 3 * 86_400:
+        return
+    value = seed.encode()
+    field = _EXPIRY_FIELD + b'"' + value + b'"'
+    saved = [rel for rel, data in obs["files"].items()
+             if data.startswith("file:") and _EXPIRY_FIELD in base64.b64decode(data[5:])]
+    if len(saved) != 1:
+        return
+    data = base64.b64decode(obs["files"][saved[0]][5:])
+    if data.count(_EXPIRY_FIELD) != 1 or data.count(field) != 1:
+        return
+    obs["files"][saved[0]] = "file:" + base64.b64encode(
+        data.replace(field, _EXPIRY_FIELD + b'"<near>"')).decode()
+    stdout = base64.b64decode(obs["stdout"])
+    for named in (b'"expires_at": "' + value + b'"', b"API key expiry: " + value + b"."):
+        stdout = stdout.replace(named, named.replace(value, b"<near>"))
+    obs["stdout"] = base64.b64encode(stdout).decode()
 
 
 def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux"),
-         skip_if=None, note="", programs=()):
+         skip_if=None, note="", programs=(), stdout_closed=False):
     original = ["tunnel", *argv]
 
     def setup(arm):
@@ -464,6 +480,8 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
         obs["before"] = before["files"]
         obs["before_modes"] = arm.state.get("before_modes", {})
         obs["dpapi_fixture"] = _dpapi_fixture(arm.home) if core.WINDOWS else []
+        if "seeded_expiry" in arm.state:
+            obs["seeded_expiry"] = arm.state["seeded_expiry"]
         _guard_real(arm.state.get("real"))
 
     environment = {
@@ -477,9 +495,11 @@ def case(case_id, argv, *seeds, env=None, rules=(), platforms=("windows", "linux
         "OPENAI_API_KEY": None,
     }
     environment.update(env or {})
+    if stdout_closed:
+        rules = (*rules, "python-stdout-closed-trailer")
     made = core.Case(case_id, list(original), env=environment, setup=setup, after=after,
                      rules=rules, platforms=platforms, daemon=Listener, skip_if=skip_if,
-                     note=note, programs=programs)
+                     note=note, programs=programs, stdout_closed=stdout_closed)
     return made
 
 
@@ -645,6 +665,17 @@ def cases() -> list[core.Case]:
              private("tunnels/dot.profile.json", b"{")),
         # verify: refused before any challenge is written
         case("verify-pending", ["verify", "--profile-dir", DIR], profile()),
+        # A refused stdout (review of #678 at 6447829f): the oracle's buffered
+        # report fails only CPython's shutdown flush, which turns the exit
+        # into 120. A refusal on stderr leaves stdout empty: nothing to flush,
+        # so verify-pending-stdout-closed keeps its exit 2.
+        status("status-pending-json-stdout-closed", profile(), stdout_closed=True),
+        status("status-pending-text-stdout-closed", profile(), json_out=False,
+               stdout_closed=True),
+        case("update-no-dir-stdout-closed", ["update", "--profile-dir", DIR],
+             stdout_closed=True),
+        case("verify-pending-stdout-closed", ["verify", "--profile-dir", DIR], profile(),
+             stdout_closed=True),
         case("verify-ready-no-key", ["verify", "--profile-dir", DIR], ready()),
         case("verify-ready-wrong-key", ["verify", "--profile-dir", DIR], ready(),
              key(raw=WRONG_PREFIX)),
@@ -745,6 +776,19 @@ MUTANTS = [
     Mutant("tunnel-near-expiry-window", "tunnel", "shim/src/cli/tunnel/mod.rs",
            "remaining < chrono::Duration::days(7)", "remaining < chrono::Duration::days(2)",
            ("status-expiry-near",)),
+    # Review of #678 at 6447829f: the reported expiry one day earlier stays
+    # in the near-expiry class (and in the old rule's one-to-three-day
+    # window), so only a comparison bound to the seeded value sees it.
+    Mutant("tunnel-near-expiry-day-earlier", "tunnel", "shim/src/cli/tunnel/mod.rs",
+           "                    quoted(text),\n                    bool_text(expired)\n",
+           "                    quoted(&(*instant - chrono::Duration::days(1))"
+           ".format(\"%Y-%m-%dT%H:%M:%SZ\").to_string()),\n"
+           "                    bool_text(expired)\n",
+           ("status-expiry-near",)),
+    Mutant("tunnel-stdout-refusal-ignored", "tunnel", "shim/src/cli/tunnel/mod.rs",
+           "    Some(if stdout_refused {\n", "    Some(if false && stdout_refused {\n",
+           ("status-pending-json-stdout-closed", "status-pending-text-stdout-closed",
+            "update-no-dir-stdout-closed")),
     Mutant("tunnel-key-presence-inverted", "tunnel", "shim/src/cli/tunnel/mod.rs",
            "            bool_text(key),\n", "            bool_text(!key),\n",
            ("status-pending-json",)),

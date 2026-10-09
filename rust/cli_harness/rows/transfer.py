@@ -647,7 +647,7 @@ def _lite_after(arm: core.Arm, obs: dict) -> None:
 
 
 def _export(cid, argv, bank=SRC, rules=("transfer-zip",), note="", existing=(),
-            dumped=True):
+            dumped=True, stdout_closed=False):
     def setup(arm: core.Arm) -> None:
         for name in existing:
             (arm.cwd / name).write_bytes(b"not yet an archive")
@@ -658,22 +658,24 @@ def _export(cid, argv, bank=SRC, rules=("transfer-zip",), note="", existing=(),
 
     after = _export_after(bank) if dumped else _lite_after
     return core.Case(cid, ["export", *argv], env=_dsn(bank), setup=setup, after=after,
-                     rules=rules, timeout=120, note=note)
+                     rules=rules, timeout=120, note=note, stdout_closed=stdout_closed)
 
 
-def _import(cid, archive, argv=(), rules=(), note="", **setup):
+def _import(cid, archive, argv=(), rules=(), note="", stdout_closed=False, **setup):
     # The input archive stays in the home: it compares as members, like an
     # exported one (rule transfer-zip), since its container bytes and the
     # oracle's version string are the setup's, not the CLI's.
     return core.Case(cid, ["import", "bank.zip", *argv], env=_dsn(TGT),
                      setup=_import_setup(archive, **setup), after=_import_after,
-                     rules=(*rules, "transfer-zip"), timeout=120, note=note)
+                     rules=(*rules, "transfer-zip"), timeout=120, note=note,
+                     stdout_closed=stdout_closed)
 
 
 # The cases kept in goldens (rows/transfer.md "Hosted CI and goldens"): the
 # whole row recorded is 14 MB of bank dumps. Every case runs live.
 GOLDEN_CASES = frozenset({"export-help", "import-help", "export-no-database",
                           "import-no-database", "export-float-ties", "import-float-ties"})
+CLOSED = ("python-stdout-closed-trailer",)
 
 
 def cases() -> list[core.Case]:
@@ -688,6 +690,15 @@ def _cases() -> list[core.Case]:
     return [
         core.Case("export-help", ["export", "--help"], note="argparse help at COLUMNS=80"),
         core.Case("import-help", ["import", "--help"], note="argparse help at COLUMNS=80"),
+        # A refused stdout (review of #678 at 6447829f): the oracle's buffered
+        # report fails only CPython's shutdown flush, exit 120, after the
+        # export or import itself completed.
+        core.Case("export-help-stdout-closed", ["export", "--help"], stdout_closed=True,
+                  rules=CLOSED, note="argparse help to a closed stdout: exit 120"),
+        _export("export-stdout-closed", ["--out", "bank.zip"], rules=("transfer-zip", *CLOSED),
+                stdout_closed=True, note="the archive is written; the report is refused"),
+        _import("import-stdout-closed", "current", rules=CLOSED, stdout_closed=True,
+                note="the bank is filled; the report is refused"),
         core.Case("export-no-database", ["export"],
                   note="no DSN, no lite bank: the no-database refusal"),
         core.Case("import-no-database", ["import", "x.zip", "--data-dir", "{HOME}" + _SEP + "none"],
@@ -823,6 +834,11 @@ MUTANTS = [
            "    let (mantissa, power) = scientific(&text);\n"
            "    let significant = mantissa.trim_end_matches('0');\n",
            ("export-float-ties", "import-float-ties")),
+    # Review of #678 at 6447829f: a refused stdout must change the status.
+    Mutant("transfer-stdout-refusal-ignored", ROW, "shim/src/cli/transfer.rs",
+           "            } else {\n                EXIT_STDOUT_REFUSED\n",
+           "            } else {\n                0\n",
+           ("export-help-stdout-closed", "export-stdout-closed", "import-stdout-closed")),
     # Review of #678 (2026-10-10): only a server ERROR at COMMIT is certain.
     Mutant("transfer-commit-fatal-certain", ROW, "shim/src/cli/transfer/sql.rs",
            "Some(db) if db.parsed_severity() == Some(Severity::Error) =>",

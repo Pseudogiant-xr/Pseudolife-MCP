@@ -23,6 +23,19 @@ Defaults: the oracle is this checkout with the running interpreter
 (`--oracle-source`, `--oracle-python`); the candidate is
 `$CARGO_TARGET_DIR/debug/pseudolife-stdio`.
 
+A golden names the oracle commit it was recorded from, and `--record`
+refuses an unbound recording before any arm runs. A git checkout binds to
+its HEAD (`oracle_commit_source: git`) and must have no uncommitted changes
+under `pseudolife_memory/`. Any other tree (an export) needs the commit it
+came from, as `--oracle-commit` or `CLI_HARNESS_ORACLE_COMMIT`: when this
+harness's checkout holds that commit, the tree's `pseudolife_memory/` must
+match it file for file (`verified-tree`); with no checkout to ask, the
+commit is recorded as `declared`.
+
+`--out` writes a JSON summary keyed by row name (each with its PARITY ID
+under `parity`); with `--record` it lists each row's recorded and skipped
+cases.
+
 ## Isolation
 
 - Each arm gets a fresh home under the default temporary directory (owner-only

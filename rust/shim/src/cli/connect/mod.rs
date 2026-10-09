@@ -10,6 +10,16 @@
 //! confirmation or token prompt, a Windows User-scope daemon URL, an
 //! unattended-update schedule, and every input whose Python reading this
 //! module cannot reproduce exactly (see `pyjson`, `url`, `paths`).
+//!
+//! A refused stdout (a closed pipe) changes only the final status: the
+//! oracle's stdout is block-buffered, so its prints succeed, every step
+//! runs, and CPython's interpreter-shutdown flush then fails and exits 120.
+//! That holds while the buffered output stays within CPython's 8192-byte
+//! buffer (measured 2026-10-10, CPython 3.11.9 on Windows: one print of
+//! more than 8192 encoded bytes raises at that print instead). connect's
+//! plan and JSON report are far smaller; a longer refused output is not
+//! modelled: this leaf still runs every step and exits 120.
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -51,6 +61,9 @@ const EXIT_UNVERIFIED: u8 = 5;
 /// CPython's exit when a print to stderr raised: the traceback cannot reach
 /// stderr either, and the interpreter-shutdown flush fails.
 const EXIT_STDERR_REFUSED: u8 = 120;
+/// CPython's exit when stdout refused its buffered prints at the
+/// interpreter-shutdown flush, whatever `main` returned.
+const EXIT_STDOUT_REFUSED: u8 = 120;
 
 const BOARD_HINT: &str = "to admit this principal, list it under coordination.allowed_principals in the daemon's config.yaml, or invite this machine with `pseudolife-mcp invite <machine>` on the daemon host (an invited principal is admitted to the board)";
 
@@ -82,6 +95,9 @@ struct Report {
     restart: Option<J>,
     rollback: Vec<J>,
     error: Option<String>,
+    /// A stdout write or flush failed: the run carries on, and the final
+    /// status becomes `EXIT_STDOUT_REFUSED`.
+    stdout_refused: Cell<bool>,
 }
 
 impl Report {
@@ -99,15 +115,23 @@ impl Report {
             restart: None,
             rollback: Vec::new(),
             error: None,
+            stdout_refused: Cell::new(false),
+        }
+    }
+
+    /// Write `line` to stdout, remembering a refusal for the final status.
+    fn out(&self, line: &str) {
+        if !emit(&mut std::io::stdout().lock(), line) {
+            self.stdout_refused.set(true);
         }
     }
 
     /// `print(line)`. The oracle's stdout is block-buffered on a pipe, so a
     /// refused stdout raises only at its exit, after every step has run:
-    /// this run carries on too.
+    /// this run carries on too, and `finish` returns the refusal's status.
     fn say(&self, line: &str) {
         if !self.json {
-            let _ = emit(&mut std::io::stdout().lock(), line);
+            self.out(line);
         }
     }
 
@@ -159,9 +183,13 @@ impl Report {
                 ("error".into(), text(&self.error)),
                 ("exit".into(), J::Int(code.to_string())),
             ]);
-            let _ = emit(&mut std::io::stdout().lock(), &pyjson::dumps(&data, true));
+            self.out(&pyjson::dumps(&data, true));
         }
-        code
+        if self.stdout_refused.get() {
+            EXIT_STDOUT_REFUSED
+        } else {
+            code
+        }
     }
 
     fn plan(&mut self, rows: &[Row]) {

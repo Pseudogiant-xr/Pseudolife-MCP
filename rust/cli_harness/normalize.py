@@ -212,6 +212,19 @@ def python_shutdown_flush_silent(obs: dict) -> None:
     _shutdown_flush(obs, 0)
 
 
+@rule("python-stdout-closed-trailer")
+def python_stdout_closed_trailer(obs: dict) -> None:
+    """Declared substitution: a run whose stdout refused its buffered prints
+    completes, then CPython's interpreter-shutdown flush fails, prints an
+    ignored-exception trailer and exits 120. The native CLI exits 120 with no
+    synthetic trailer. Only that exact final trailer, with exit 120, is
+    removed; the exit stays 120, so a candidate that returns its ordinary
+    code still differs."""
+    stderr = _get(obs, "stderr")
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
+
+
 def home_tokens(obs: dict, home: str) -> None:
     """Replace the disposable home path with {HOME} everywhere, so goldens
     recorded under one home compare against a run under another."""

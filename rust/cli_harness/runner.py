@@ -5,7 +5,11 @@ for ``--mutants``, when every mutant is caught)."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +19,9 @@ from . import compare, core, normalize, producers, rows
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 GOLDENS = HERE / "goldens"
+# The oracle commit of a recording from a tree that is not a git checkout.
+COMMIT_ENV = "CLI_HARNESS_ORACLE_COMMIT"
+ORACLE_PACKAGE = "pseudolife_memory"
 
 
 def _default_candidate() -> Path:
@@ -28,9 +35,9 @@ def _golden_path(row: str) -> Path:
     return GOLDENS / f"{row}.{core.PLATFORM}.json"
 
 
-def _select(row: str, wanted: list[str], bank: bool = True,
+def _select(loaded: list[core.Case], wanted: list[str], bank: bool = True,
             replay: bool = False) -> list[core.Case]:
-    selected = [c for c in rows.load(row) if c.runs_here() and (bank or not c.bank)
+    selected = [c for c in loaded if c.runs_here() and (bank or not c.bank)
                 and (c.golden or not replay)]
     if wanted:
         selected = [c for c in selected if c.id in wanted]
@@ -104,14 +111,84 @@ def _scrub(normal: dict, forms: list[tuple[bytes, bytes]]) -> None:
         normal[field] = base64.b64encode(data).decode()
 
 
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True)
+
+
+def _blob_sha(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def _tree_differences(source: Path, commit: str, repo: Path) -> list[str] | None:
+    """How ``source``'s oracle package differs from ``commit``'s, by git blob
+    id (a CRLF checkout of an LF blob counts as equal); ``None`` when ``repo``
+    is not a git checkout that could answer."""
+    if _git(repo, "rev-parse", "--git-dir").returncode != 0:
+        return None
+    listing = _git(repo, "ls-tree", "-r", "-z", commit, "--", ORACLE_PACKAGE)
+    if listing.returncode != 0:
+        return [f"commit {commit} is not in {repo}"]
+    expected = {}
+    for entry in listing.stdout.split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            expected[path.decode()] = meta.split()[2].decode()
+    if not expected:
+        return [f"commit {commit} has no {ORACLE_PACKAGE}/"]
+    found = {p.relative_to(source).as_posix(): p
+             for p in (source / ORACLE_PACKAGE).rglob("*")
+             if p.is_file() and "__pycache__" not in p.parts}
+    problems = [f"missing {rel}" for rel in sorted(set(expected) - set(found))]
+    problems += [f"not in the commit: {rel}" for rel in sorted(set(found) - set(expected))]
+    for rel in sorted(set(expected) & set(found)):
+        data = found[rel].read_bytes()
+        if expected[rel] not in (_blob_sha(data), _blob_sha(data.replace(b"\r\n", b"\n"))):
+            problems.append(f"changed {rel}")
+    return problems
+
+
+def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dict:
+    """The commit a recording's oracle ran from, or a refusal (SystemExit).
+
+    A git checkout binds to its HEAD, refusing uncommitted changes to the
+    oracle package. Any other tree (an export) needs the commit declared by
+    ``--oracle-commit`` or ``CLI_HARNESS_ORACLE_COMMIT``: when the harness's
+    own checkout holds that commit, the tree's package must match it file
+    for file (``verified-tree``); with no git checkout to ask, the commit is
+    recorded as ``declared``."""
+    declared = declared or os.environ.get(COMMIT_ENV) or None
+    top = _git(source, "rev-parse", "--show-toplevel")
+    if top.returncode == 0 and Path(top.stdout.decode().strip()).resolve() == source.resolve():
+        head = _git(source, "rev-parse", "HEAD").stdout.decode().strip()
+        if declared and declared != head:
+            raise SystemExit(f"--record: the declared oracle commit {declared} is not "
+                             f"{source}'s HEAD {head}")
+        dirty = _git(source, "status", "--porcelain", "--untracked-files=no", "--",
+                     ORACLE_PACKAGE).stdout
+        if dirty:
+            raise SystemExit(f"--record: {source} has uncommitted changes under "
+                             f"{ORACLE_PACKAGE}/, so its HEAD does not name the oracle; "
+                             "commit them first")
+        return {"oracle_commit": head, "oracle_commit_source": "git"}
+    if not declared:
+        raise SystemExit(f"--record: {source} is not a git checkout, so the oracle commit is "
+                         f"unbound; pass --oracle-commit or set {COMMIT_ENV} to the full commit "
+                         "the tree was exported from")
+    if not re.fullmatch(r"[0-9a-f]{40}", declared):
+        raise SystemExit(f"--record: the declared oracle commit must be a full 40-character "
+                         f"commit id, not {declared!r}")
+    problems = _tree_differences(source, declared, repo)
+    if problems is None:
+        return {"oracle_commit": declared, "oracle_commit_source": "declared"}
+    if problems:
+        raise SystemExit(f"--record: {source} is not commit {declared}'s {ORACLE_PACKAGE}/: "
+                         + "; ".join(problems[:10]))
+    return {"oracle_commit": declared, "oracle_commit_source": "verified-tree"}
+
+
 def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
-           commit: str | None) -> Path:
-    import subprocess
-    if not commit:
-        commit = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"],
-                                capture_output=True, text=True).stdout.strip() or "unknown"
-    golden = {"row": rows.ROWS[row], "platform": core.PLATFORM, "oracle_commit": commit,
-              "cases": {}}
+           binding: dict) -> Path:
+    golden = {"row": rows.ROWS[row], "platform": core.PLATFORM, **binding, "cases": {}}
     forms = _host_paths(source, oracle.command[0])
     for case in cases:
         obs = core.run_arm(case, oracle, core._home_root() / "h")
@@ -136,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oracle-python", default=sys.executable)
     parser.add_argument("--oracle-source", type=Path, default=REPO)
     parser.add_argument("--candidate", type=Path, default=None)
-    parser.add_argument("--oracle-commit", help="recorded in goldens when the source has no .git")
+    parser.add_argument("--oracle-commit",
+                        help=f"the full commit an exported oracle tree (no .git) came from; "
+                             f"also {COMMIT_ENV}")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record", action="store_true", help="write goldens from the oracle")
     mode.add_argument("--golden", action="store_true", help="compare against goldens")
@@ -159,14 +238,25 @@ def main(argv: list[str] | None = None) -> int:
         mutants.SKIP_BANK = args.skip_bank
         return mutants.main(args.row, args.mutant, oracle, args.verbose)
 
+    # Refuse an unbound recording before any arm runs.
+    binding = (oracle_binding(args.oracle_source.resolve(), args.oracle_commit)
+               if args.record else None)
+    # Keyed by row name: two rows may share a PARITY ID (invite and pair).
     summary: dict = {"platform": core.PLATFORM, "rows": {}}
     failed = 0
     for row in args.row:
-        cases = _select(row, args.case, bank=not (args.skip_bank or args.golden or args.record),
+        loaded = rows.load(row)
+        cases = _select(loaded, args.case,
+                        bank=not (args.skip_bank or args.golden or args.record),
                         replay=args.golden or args.record)
         print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
-            print(f"  wrote {record(row, cases, oracle, args.oracle_source.resolve(), args.oracle_commit)}")
+            path = record(row, cases, oracle, args.oracle_source.resolve(), binding)
+            print(f"  wrote {path}")
+            chosen = {c.id for c in cases}
+            summary["rows"][row] = {"parity": rows.ROWS[row], **binding,
+                                    "recorded": len(cases),
+                                    "skipped": [c.id for c in loaded if c.id not in chosen]}
             continue
         if not candidate_path.is_file():
             raise SystemExit(f"candidate binary not found: {candidate_path}")
@@ -176,8 +266,8 @@ def main(argv: list[str] | None = None) -> int:
                           args.verbose)
         bad = [k for k, v in results.items() if v["status"] != "match"]
         failed += len(bad)
-        summary["rows"][rows.ROWS[row]] = {"cases": len(results), "diffs": bad,
-                                          "results": results}
+        summary["rows"][row] = {"parity": rows.ROWS[row], "cases": len(results), "diffs": bad,
+                                "results": results}
         print(f"  {len(results) - len(bad)}/{len(results)} match", flush=True)
     if args.out:
         args.out.write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")

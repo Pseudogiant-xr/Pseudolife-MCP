@@ -691,15 +691,18 @@ def _with_temp(setup):
 
 def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=None, after=None,
          env=None, stdin: bytes = b"", platforms=("windows", "linux"), timeout: float = 120,
-         stderr_closed: bool = False, golden: bool = True, **daemon) -> Case:
+         stderr_closed: bool = False, stdout_closed: bool = False, golden: bool = True,
+         **daemon) -> Case:
     # With every client selected (no --client), the oracle reads the
     # unattended-update schedule: on Windows it runs this host's System32
     # schtasks /Query, which no PATH inside the home can hide.
     schedule = ("schtasks",) if WINDOWS and "--client" not in argv else ()
     return Case(case_id, ["connect", *argv], env=_env(**(env or {})), stdin=stdin,
                 setup=_with_temp(setup), during=_arm_pid, real_programs=schedule,
-                after=_after(url, after), timeout=timeout, rules=RULES, platforms=platforms,
-                stderr_closed=stderr_closed, golden=golden,
+                after=_after(url, after), timeout=timeout,
+                rules=RULES + (("python-stdout-closed-trailer",) if stdout_closed else ()),
+                platforms=platforms, stderr_closed=stderr_closed, stdout_closed=stdout_closed,
+                golden=golden,
                 daemon=_fixture(port, url, **daemon) if port is not None else None)
 
 
@@ -900,6 +903,16 @@ def cases() -> list[Case]:
     port, url = _target()
     add(case("apply-move-json", [url, "--yes", "--json"], url=url, port=port,
              setup=desktop_and_gemini()))
+    # A stdout that refuses the report (review of #678 at 6447829f): the
+    # oracle's block-buffered prints succeed, every request and write runs,
+    # and CPython's shutdown flush then exits 120. Text and JSON apply, beside
+    # their healthy controls apply-move-yes and apply-move-json (exit 0).
+    port, url = _target()
+    add(case("apply-move-yes-stdout-closed", [url, "--yes"], url=url, port=port,
+             setup=claude_registered(), stdout_closed=True))
+    port, url = _target()
+    add(case("apply-move-json-stdout-closed", [url, "--yes", "--json"], url=url, port=port,
+             setup=desktop_and_gemini(), stdout_closed=True))
     port, url = _target()
 
     def installer_apply(arm):
@@ -1161,6 +1174,11 @@ MUTANTS = [
            "if !self.json && !emit(&mut std::io::stderr().lock(), &line) {",
            "if !self.json && !emit(&mut std::io::stderr().lock(), &line) && false {",
            ("apply-remote-stderr-closed", "apply-board-off-stderr-closed")),
+    # Review of #678 at 6447829f: a refused stdout must change the status.
+    Mutant("connect-stdout-refusal-ignored", "connect", "shim/src/cli/connect/mod.rs",
+           "        if self.stdout_refused.get() {\n            EXIT_STDOUT_REFUSED\n",
+           "        if false && self.stdout_refused.get() {\n            EXIT_STDOUT_REFUSED\n",
+           ("apply-move-yes-stdout-closed", "apply-move-json-stdout-closed")),
     Mutant("connect-float-ties", "connect", "shim/src/cli/connect/pyjson.rs",
            "    let (digits, exponent) = shortest_digits(value.abs());\n"
            "    let significant = digits.as_str();\n",

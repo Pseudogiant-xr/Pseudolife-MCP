@@ -47,6 +47,16 @@ never starting with `-`. Everything else defers before any effect.
   stdout is block-buffered on a pipe and raises only at its exit, after
   every step, so the native leaf carries on too. Cases
   `apply-remote-stderr-closed`, `apply-board-off-stderr-closed`.
+- A refused stdout still changes the status: CPython's interpreter-shutdown
+  flush fails, prints an ignored-exception trailer and exits 120, whatever
+  `main` returned. The native leaf remembers the refusal and exits 120 at
+  the end (rule `python-stdout-closed-trailer` removes only that trailer, at
+  exit 120). Cases `apply-move-yes-stdout-closed` and
+  `apply-move-json-stdout-closed` compare status, files and requests beside
+  their healthy controls `apply-move-yes` and `apply-move-json`. Limit: this
+  holds while the refused output fits CPython's 8192-byte buffer (one print
+  over 8192 bytes raises at that print instead); connect's plan and report
+  are far smaller, and a longer one is not modelled.
 - Remote = not `_is_loopback_url` (`daemon_url.py` 58-71).
 - Discovery (667-677): Claude Code user scope (460-494) with the settings
   copy inserted after a writable registration (497-518), project scopes in

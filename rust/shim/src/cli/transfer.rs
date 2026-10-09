@@ -236,13 +236,27 @@ fn lite_bank(data_dir: Option<&OsString>) -> Option<bool> {
 }
 
 fn emit(stream: &mut dyn Write, text: &str) -> bool {
-    stream.write_all(&super::text_bytes(text)).is_ok()
+    stream
+        .write_all(&super::text_bytes(text))
+        .and_then(|()| stream.flush())
+        .is_ok()
 }
+
+/// CPython's exit when its interpreter-shutdown flush of a refused stdout
+/// fails: the oracle's few report lines (and argparse's help) sit in its
+/// 8192-byte stdout buffer until then, so the run itself completed.
+const EXIT_STDOUT_REFUSED: u8 = 120;
 
 fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
     let (ok, code) = match outcome {
         Outcome::Deferred => return None,
-        Outcome::Done(text) => (emit(&mut io::stdout().lock(), &text), 0),
+        Outcome::Done(text) => {
+            return Some(ExitCode::from(if emit(&mut io::stdout().lock(), &text) {
+                0
+            } else {
+                EXIT_STDOUT_REFUSED
+            }));
+        }
         Outcome::Refused(message) => (
             emit(
                 &mut io::stderr().lock(),

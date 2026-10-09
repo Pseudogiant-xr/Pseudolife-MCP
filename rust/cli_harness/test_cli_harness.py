@@ -321,3 +321,115 @@ def test_closed_stderr_arm_still_observes(tmp_path):
                                     "import sys; print('out'); sys.stderr.write('x')"])
     obs = core.run_arm(case, target, tmp_path / "root" / "h")
     assert core.decode(obs, "stdout").strip() == b"out" and core.decode(obs, "stderr") == b""
+
+
+_TRAILER = (b"Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' "
+            b"encoding='utf-8'>\r\nOSError: [Errno 22] Invalid argument\r\n")
+
+
+def test_stdout_closed_trailer_removes_only_the_trailer_and_keeps_120():
+    rule = ("python-stdout-closed-trailer",)
+    python = obs(exit=120, stderr=b"warning\r\n" + _TRAILER)
+    assert compare.diff(python, obs(exit=120, stderr=b"warning\r\n"), rule) == []
+    # The candidate's own code where CPython's shutdown flush made it 120.
+    assert compare.diff(python, obs(exit=0, stderr=b"warning\r\n"), rule)
+    # The trailer with another exit, or anything after it, stays.
+    assert compare.diff(obs(exit=1, stderr=_TRAILER), obs(exit=1), rule)
+    assert compare.diff(obs(exit=120, stderr=_TRAILER + b"x"), obs(exit=120), rule)
+
+
+def _near_obs(seed: str, start: float, shown: str | None = None, saved: str | None = None):
+    profile = b'{\n  "name": "dot",\n  "runtime_key_expires_at": "%s"\n}' % (saved or seed).encode()
+    stdout = b'{"key_expiry": {"known": true, "expires_at": "%s"}}\n' % (shown or seed).encode()
+    return obs(stdout=stdout, files={"tunnels/dot.profile.json": profile},
+               window=[start, start + 1], seeded_expiry=seed)
+
+
+def _midnight(days: int, now: float) -> str:
+    day = time.strftime("%Y-%m-%d", time.gmtime(now + days * 86_400))
+    return f"{day}T00:00:00Z"
+
+
+def test_tunnel_near_expiry_binds_to_the_exact_seed_and_field():
+    from cli_harness.rows import tunnel  # noqa: F401, PLC0415 - registers the rule
+    rule = ("tunnel-near-expiry",)
+    now = time.time()
+    today = _near_obs(_midnight(3, now), now)
+    # A golden recorded a day earlier seeded its own date: equal.
+    assert compare.diff(_near_obs(_midnight(2, now), now - 86_400), today, rule) == []
+    # The seed's date moved by a day, still near expiry: not hidden.
+    earlier = _midnight(2, now)
+    assert compare.diff(today, _near_obs(_midnight(3, now), now, shown=earlier), rule)
+    assert compare.diff(today, _near_obs(_midnight(3, now), now, saved=earlier), rule)
+    # A seed outside the near-expiry class is never tokenized.
+    far = _near_obs(_midnight(9, now), now)
+    assert compare.diff(far, _near_obs(_midnight(8, now), now - 86_400), rule)
+
+
+def _make_repo(path: Path) -> str:
+    import subprocess  # noqa: PLC0415
+    (path / "pseudolife_memory").mkdir(parents=True)
+    (path / "pseudolife_memory" / "cli.py").write_bytes(b"print('oracle')\n")
+    vcs = ["git", "-C", str(path), "-c", "user.name=t", "-c", "user.email=t@example.com",
+           "-c", "core.autocrlf=false"]
+    for args in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "x"]):
+        subprocess.run(vcs + args, check=True, capture_output=True)
+    return subprocess.run(vcs + ["rev-parse", "HEAD"], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def test_record_binds_a_checkout_to_its_clean_head(tmp_path, monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    head = _make_repo(tmp_path / "repo")
+    binding = runner.oracle_binding(tmp_path / "repo", None)
+    assert binding == {"oracle_commit": head, "oracle_commit_source": "git"}
+    with pytest.raises(SystemExit, match="is not"):
+        runner.oracle_binding(tmp_path / "repo", "0" * 40)
+    (tmp_path / "repo" / "pseudolife_memory" / "cli.py").write_bytes(b"changed\n")
+    with pytest.raises(SystemExit, match="uncommitted"):
+        runner.oracle_binding(tmp_path / "repo", None)
+
+
+def test_record_refuses_an_unbound_or_mismatched_export(tmp_path, monkeypatch):
+    import shutil  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    head = _make_repo(repo)
+    export = tmp_path / "export"
+    shutil.copytree(repo / "pseudolife_memory", export / "pseudolife_memory")
+    with pytest.raises(SystemExit, match="unbound"):
+        runner.oracle_binding(export, None, repo)
+    with pytest.raises(SystemExit, match="full 40-character"):
+        runner.oracle_binding(export, head[:8], repo)
+    monkeypatch.setenv(runner.COMMIT_ENV, head)
+    assert runner.oracle_binding(export, None, repo) == {
+        "oracle_commit": head, "oracle_commit_source": "verified-tree"}
+    # A CRLF export of an LF blob is the same file.
+    (export / "pseudolife_memory" / "cli.py").write_bytes(b"print('oracle')\r\n")
+    assert runner.oracle_binding(export, None, repo)["oracle_commit_source"] == "verified-tree"
+    (export / "pseudolife_memory" / "cli.py").write_bytes(b"print('other')\n")
+    with pytest.raises(SystemExit, match="changed pseudolife_memory/cli.py"):
+        runner.oracle_binding(export, None, repo)
+    (export / "pseudolife_memory" / "extra.py").write_bytes(b"")
+    with pytest.raises(SystemExit, match="not in the commit"):
+        runner.oracle_binding(export, None, repo)
+    # With no checkout to ask, the commit is recorded as declared.
+    assert runner.oracle_binding(export, None, export) == {
+        "oracle_commit": head, "oracle_commit_source": "declared"}
+
+
+def test_summary_keeps_rows_that_share_a_parity_id(tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.setattr(runner.rows, "ROWS", {"invite": "CLI-PAIRING", "pair": "CLI-PAIRING"})
+    monkeypatch.setattr(runner.rows, "load", lambda row: [])
+    monkeypatch.setattr(runner, "run_row", lambda row, *a: {f"{row}-case": {"status": "match"}})
+    out = tmp_path / "summary.json"
+    assert runner.main(["--row", "invite", "--row", "pair", "--candidate", sys.executable,
+                        "--out", str(out)]) == 0
+    summary = json.loads(out.read_text(encoding="utf-8"))["rows"]
+    assert set(summary) == {"invite", "pair"}
+    assert summary["invite"]["parity"] == summary["pair"]["parity"] == "CLI-PAIRING"
+    assert list(summary["pair"]["results"]) == ["pair-case"]

@@ -278,10 +278,13 @@ jobs:
       # starts its own throwaway clusters from that step's pg0 bundle and,
       # on Linux, disposable containers of the image built below. Declared
       # exceptions (each in its row's .md):
-      # - test_login has no Linux golden: recording needs pg0's initdb and a
-      #   Linux Docker engine, which the recording host's WSL lacks, so this
-      #   lane's live run is its Linux proof. Hosted Windows' Docker runs
-      #   Windows containers only, so its container cases skip there.
+      # - test_login's Linux golden is recorded on this lane: recording needs
+      #   pg0's initdb and a Linux Docker engine, which the recording host's
+      #   WSL lacks. While goldens/test_login.linux.json is absent, the golden
+      #   pass leaves test_login out and the step after it records the golden
+      #   as an artifact to commit; once it is committed, it replays like
+      #   every other row. Hosted Windows' Docker runs Windows containers
+      #   only, so its container cases skip there.
       # - Cases marked live-only (Case.golden False) are left out of goldens
       #   and run in the live pass: transfer keeps help, the no-database
       #   refusals and the float-tie cases (the whole row is 14 MB of bank
@@ -303,9 +306,38 @@ jobs:
           $live = $rows | ForEach-Object { '--row'; $_ }
           python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $golden = $rows | Where-Object { $IsWindows -or $_ -ne 'test_login' } | ForEach-Object { '--row'; $_ }
-          python rust/cli_harness @golden --golden --candidate $candidate -v
+          $platform = if ($IsWindows) { 'windows' } else { 'linux' }
+          $replayed = $rows | Where-Object { $_ -ne 'test_login' -or (Test-Path "rust/cli_harness/goldens/test_login.$platform.json") }
+          $golden = $replayed | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @golden --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c-golden.json')
           exit $LASTEXITCODE
+      - name: Record the Linux test_login golden while it is absent
+        id: test_login_linux_golden
+        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'cli' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'test-login-linux-record.json'
+          python rust/cli_harness --row test_login --record -v --out $summary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $row = (Get-Content -Raw $summary | ConvertFrom-Json).rows.test_login
+          "test_login Linux golden recorded at oracle $($row.oracle_commit) ($($row.oracle_commit_source)): $($row.recorded) cases executed, $(@($row.skipped).Count) skipped ($(@($row.skipped) -join ', '))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Retain the recorded Linux test_login golden
+        if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_login-linux-golden
+          path: |
+            rust/cli_harness/goldens/test_login.linux.json
+            ${{ runner.temp }}/test-login-linux-record.json
+          if-no-files-found: error
+      - name: Retain CLI harness summaries
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-harness-${{ runner.os }}
+          path: ${{ runner.temp }}/cli-harness*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4

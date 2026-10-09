@@ -90,11 +90,26 @@ None: every byte of stdout, stderr and the home is compared.
 `python rust/cli_harness --row tunnel`. Seeds use the oracle's writers.
 Rules: `tunnel-deferral` (deferral expectation), `tunnel-dpapi-key`
 (per-arm DPAPI ciphertext, tokenized only after the oracle's `_dpapi`
-unprotects it to the fixture key). No clock or uuid reaches any output: all
-expiry and refresh ids are seeded constants (the near-expiry date is fixed
-once per run), so none is tokenized. The DPAPI rule tokenizes a key file
+unprotects it to the fixture key), `tunnel-near-expiry` (below). No clock
+or uuid reaches any output: all expiry and refresh ids are seeded
+constants, so none other is tokenized. The DPAPI rule tokenizes a key file
 only when its bytes equal that arm's own seeded bytes (recorded before the
 arm ran), so a rewritten or re-encrypted key shows.
+
+The near-expiry date is three days from the day the row loads, so a golden
+replayed on a later day seeds a later date. Each arm records the exact
+value its setup seeded (`seeded_expiry`), and `tunnel-near-expiry` replaces
+only that value, and only in the saved profile's `runtime_key_expires_at`
+and the report's `"expires_at"` / `API key expiry:`; it does so only when
+the seed is a midnight UTC stamp one to three days after the arm's start
+and the profile still holds exactly that value. A reported or saved date
+moved by a day stays as written (mutant `tunnel-near-expiry-day-earlier`).
+
+A refused stdout fails only CPython's shutdown flush, which turns any exit
+into 120; with nothing on stdout (a refusal on stderr) the exit stays.
+Cases `status-pending-json-stdout-closed`, `status-pending-text-stdout-closed`,
+`update-no-dir-stdout-closed` and the control `verify-pending-stdout-closed`
+(rule `python-stdout-closed-trailer`).
 
 Guards, every arm:
 
