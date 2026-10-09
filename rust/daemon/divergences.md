@@ -62,7 +62,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Item | Python | Rust | Why / owner |
 |---|---|---|---|
 | Reference pool (Chroma documents from `document_ingest`, `ref_top_k` 3) | queried on every search once `<data_dir>/chromadb` holds a store | never queried: no reference hits, no `reference` components | the store is a private chromadb 1.5.9 on-disk format (HNSW segments); delegate ruling 2026-10-09: declared, harness banks hold no documents. `document_search` is declared with it. |
-| **Cutover blocker:** reference store | Chroma on-disk format | none | needs a maintainer decision (a Postgres table migrated at cutover, or an HNSW reader); owner W3-J |
+| **Cutover blocker:** reference store | Chroma on-disk format | none | needs v56 document table (Python change in flight; maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search); W2-D then ports the reference pool and `document_search` against it |
 | Cross-encoder model | `memory.reranker.model_name` from the Hugging Face cache, lazily | the ONNX export in `PSEUDOLIFE_DAEMON_RERANK_DIR` (same checkpoint; `model_name` is only logged) | model packaging is cutover work (W3-J); parity of the export is proven by `harness/w2d_rerank_check.py` |
 | Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
 | `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
