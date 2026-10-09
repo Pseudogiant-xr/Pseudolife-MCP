@@ -1,0 +1,11 @@
+usage: pseudolife-mcp export [-h] [--out OUT] [--data-dir DATA_DIR]
+
+Write a portable logical export of the bank (ZIP of JSONL tables + manifest).
+
+options:
+  -h, --help           show this help message and exit
+  --out OUT            destination .zip (default: ./pseudolife-
+                       export-<ts>.zip)
+  --data-dir DATA_DIR  bank data dir for the lite tier (default:
+                       PSEUDOLIFE_MCP_DATA_DIR, the lite per-user dir, or
+                       ./data)

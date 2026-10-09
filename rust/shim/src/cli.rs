@@ -10,6 +10,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_json;
 pub mod lease;
+mod transfer;
 mod version;
 pub mod wait_mail;
 
@@ -131,6 +132,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doctor"
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "export" | "import")
+        && let Some(code) = transfer::run(mode, std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
