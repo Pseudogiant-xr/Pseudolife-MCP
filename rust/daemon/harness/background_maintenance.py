@@ -4,6 +4,8 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+import copy
+import psycopg
 
 import daemons
 import dbstate
@@ -88,4 +90,46 @@ s.close()
                     normalized["catalog"][key] = "<unchanged seeded catalog>"
             return normalized
 
-    return {SweepPruning.name: SweepPruning}
+    class SweepRecovery(SweepPruning):
+        name = "sweep-recovery"
+        golden_replay = False
+        golden_db_state = False
+        config_yaml = SweepPruning.config_yaml + "embedding:\n  model_name: fixture/unavailable\n"
+
+        def normalize_db(self, state, before, side):
+            return super().normalize_db(state, self.before, side)
+
+        def prepare_template(self, dsn):
+            super().prepare_template(dsn)
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute("CREATE FUNCTION pl_w3i_prune_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture pruning refusal'; END $$")
+                conn.execute("CREATE TRIGGER pl_w3i_prune_failure BEFORE DELETE ON dream_runs FOR EACH STATEMENT EXECUTE FUNCTION pl_w3i_prune_failure()")
+            self.before = dbstate.dump(dsn)
+
+        def timeline(self, procs, holders):
+            rows, arms = [], {}
+            for side, daemon in procs.items():
+                deadline = time.monotonic() + 60
+                while "dream sweep error:" not in daemon.log.read_text(errors="replace"):
+                    if time.monotonic() > deadline: raise RuntimeError(f"{side} did not report the injected pruning refusal")
+                    time.sleep(0.1)
+                state = dbstate.dump(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
+                for table in ("dream_runs", "dream_run_slots"):
+                    if state["rows"]["public." + table] != self.before["rows"]["public." + table]:
+                        raise RuntimeError("failed pruning transaction changed durable rows")
+                clean = self.normalize_db(harness.scrub_declared_rows(state, self.before)["state"], self.before, side)
+                arms[side] = {"status": 200, "headers": {}, "json": clean}
+            c = harness.case("bank after refused pruning transaction", "OBSERVE", "/background/sweep-state")
+            c["_answers"] = (arms["python"], arms["rust"])
+            rows.append(c)
+            for daemon in procs.values():
+                with psycopg.connect(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
+                    conn.execute("DROP TRIGGER pl_w3i_prune_failure ON dream_runs")
+                    conn.execute("DROP FUNCTION pl_w3i_prune_failure()")
+            self.before = copy.deepcopy(self.before)
+            self.before["catalog"]["functions"] = [r for r in self.before["catalog"]["functions"] if r[1] != "pl_w3i_prune_failure"]
+            self.before["catalog"]["triggers"] = [r for r in self.before["catalog"]["triggers"] if r[2] != "pl_w3i_prune_failure"]
+            rows += super().timeline(procs, holders)
+            return rows
+
+    return {s.name: s for s in (SweepPruning, SweepRecovery)}

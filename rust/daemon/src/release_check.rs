@@ -189,6 +189,25 @@ async fn fetch_latest(client: &reqwest::Client) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn start_gates_and_health_snapshot_are_idempotent_without_network() {
+        let check = Arc::new(ReleaseCheck::default());
+        let stop = watch::channel(true).0;
+        assert!(check.start(false, None, 60.0, stop.subscribe()).is_none());
+        assert!(
+            check
+                .start(true, Some(" 0 "), 60.0, stop.subscribe())
+                .is_none()
+        );
+        assert!(!check.snapshot().enabled);
+        let task = check.start(true, None, 60.0, stop.subscribe()).unwrap();
+        assert!(check.start(true, None, 60.0, stop.subscribe()).is_none());
+        task.await.unwrap();
+        let snapshot = check.snapshot();
+        assert!(snapshot.enabled);
+        assert!(snapshot.latest_release.is_none());
+        assert_eq!(snapshot.checked_at, 0.0);
+    }
     #[test]
     fn live_python_notice_goldens() {
         let golden: Value =

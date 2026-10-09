@@ -240,4 +240,19 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(fake.reap.load(Ordering::SeqCst), stopped);
     }
+
+    #[tokio::test]
+    async fn sweep_enablement_and_trim_are_registered_once() {
+        let bg = Background::default();
+        let fake = Arc::new(Fake::default());
+        assert!(!bg.start_dream_sweep(fake.clone(), false, false, 3600.0));
+        assert!(bg.start_dream_sweep(fake.clone(), false, true, 3600.0));
+        assert!(!bg.start_dream_sweep(fake.clone(), true, true, 3600.0));
+        let before = bg.tasks.lock().unwrap().len();
+        bg.start_heap_trim(3600.0);
+        bg.start_heap_trim(3600.0);
+        let expected = before + usize::from(crate::heap_trim::available());
+        assert_eq!(bg.tasks.lock().unwrap().len(), expected);
+        bg.shutdown(fake.as_ref()).await;
+    }
 }
