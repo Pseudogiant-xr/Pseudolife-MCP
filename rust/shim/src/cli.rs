@@ -11,6 +11,7 @@ mod doorbell_seen;
 mod episode;
 mod hook_json;
 pub mod lease;
+mod pairing;
 mod version;
 pub mod wait_mail;
 
@@ -137,6 +138,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doctor"
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "invite" | "pair")
+        && let Some(code) = pairing::run(mode)
     {
         return Some(code);
     }
