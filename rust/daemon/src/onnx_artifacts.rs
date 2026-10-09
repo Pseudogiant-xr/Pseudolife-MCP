@@ -19,6 +19,22 @@ pub fn relative_parts(value: &str) -> Result<Vec<&str>> {
     Ok(parts)
 }
 
+fn expand_home(model: &str, home: Option<&Path>) -> Result<PathBuf> {
+    if model == "~" || model.starts_with("~/") || (cfg!(windows) && model.starts_with("~\\")) {
+        let home = home
+            .ok_or_else(|| anyhow::anyhow!("cannot resolve home-relative embedding.model_name"))?;
+        return Ok(if model == "~" {
+            home.to_path_buf()
+        } else {
+            home.join(&model[2..])
+        });
+    }
+    if model.starts_with('~') {
+        bail!("deferred: named-user embedding model home");
+    }
+    Ok(PathBuf::from(model))
+}
+
 pub fn existing_file(root: &Path, parts: &[&str], hub: bool) -> bool {
     let candidate: PathBuf = parts.iter().fold(root.to_path_buf(), |p, c| p.join(c));
     if !candidate.is_file() {
@@ -129,10 +145,12 @@ pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, b
     if !normalized.ends_with(".onnx") {
         bail!("embedding.onnx_file_name must be a relative .onnx path");
     }
-    let local = Path::new(model);
+    let home =
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let local = expand_home(model, home.as_deref())?;
     if local.is_dir() {
-        if layout_available(local, &normalized, false) {
-            return Ok((local.to_path_buf(), false));
+        if layout_available(&local, &normalized, false) {
+            return Ok((local, false));
         }
     } else {
         let candidates = if model.contains('/') {
@@ -160,6 +178,21 @@ pub fn resolve(model: &str, file_name: &str, cache: &Path) -> Result<(PathBuf, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_home_model_path_is_resolved_before_hub_lookup() {
+        let home = Path::new("fixture-home");
+        assert_eq!(
+            expand_home("~/models/minilm", Some(home)).unwrap(),
+            home.join("models/minilm")
+        );
+        assert_eq!(expand_home("~", Some(home)).unwrap(), home);
+        assert!(expand_home("~/models/minilm", None).is_err());
+        assert_eq!(
+            expand_home("example/model", Some(home)).unwrap(),
+            PathBuf::from("example/model")
+        );
+    }
 
     #[test]
     fn flat_artifact_is_admitted_but_unknown_module_is_not() {

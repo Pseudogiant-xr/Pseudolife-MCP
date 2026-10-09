@@ -46,6 +46,13 @@ fn metadata(root: &Path, relative: &str, hub: bool) -> Result<Value> {
     )?)?)
 }
 
+fn validate_saved_prompt(config: &Value) -> Result<()> {
+    if !config["default_prompt_name"].is_null() {
+        bail!("deferred: saved default sentence-transformer prompt");
+    }
+    Ok(())
+}
+
 fn cache_root() -> PathBuf {
     cache_root_from(|key| std::env::var_os(key))
 }
@@ -103,6 +110,9 @@ impl Embedder {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| config.model_name.clone());
         let (root, hub) = artifacts::resolve(&model, &file, &cache_root())?;
+        if root.join("config_sentence_transformers.json").exists() {
+            validate_saved_prompt(&metadata(&root, "config_sentence_transformers.json", hub)?)?;
+        }
         let mut transformer_path = String::new();
         let mut pooling_path = None;
         let mut always_normalize = false;
@@ -564,6 +574,22 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_default_prompts_are_explicitly_deferred() {
+        assert!(
+            validate_saved_prompt(
+                &serde_json::json!({"prompts": {"query": "query "}, "default_prompt_name": "query"})
+            )
+            .is_err()
+        );
+        assert!(
+            validate_saved_prompt(
+                &serde_json::json!({"prompts": {"query": "query "}, "default_prompt_name": null})
+            )
+            .is_ok()
+        );
+    }
 
     #[test]
     fn hub_cache_uses_xdg_and_respects_explicit_overrides() {

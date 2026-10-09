@@ -24,6 +24,9 @@ This slice implements the shipped Qwen last-token/1024 and MiniLM mean/384
 layouts, including optional Normalize. Other pooling modes, Dense heads,
 multiple Transformers, unsupported graph inputs and non-float32 hidden states
 refuse explicitly. These are named deferrals, not guessed postprocessing.
+Saved default SentenceTransformer prompts and named-user `~user` model paths
+also refuse explicitly; current-user `~/` model paths and the standard
+`XDG_CACHE_HOME` Hub location are supported.
 Model dimension is checked against metadata and hydrated vector widths before
 using vectors. The storage schema guard remains unchanged (1024); a configured
 MiniLM model cannot consume a populated Qwen bank. The embedding boundary writes

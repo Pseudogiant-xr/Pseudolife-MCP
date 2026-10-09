@@ -241,21 +241,33 @@ def run(args):
         for backend in ["torch", "onnx"]:
             print(f"embedding Python {backend}: starting CPU arm", flush=True)
             out = tmp / f"{backend}.json"
-            proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--oracle", backend,
-                                   "--request", str(req_path), "--out", str(out)],
-                                  env=env, capture_output=True, timeout=600)
+            try:
+                proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--oracle", backend,
+                                       "--request", str(req_path), "--out", str(out)],
+                                      env=env, capture_output=True, timeout=600)
+            except subprocess.TimeoutExpired:
+                report["arms"][backend] = {"error": f"TimeoutExpired: Python {backend} arm exceeded 600 seconds"}
+                print(f"embedding Python {backend}: timeout", flush=True)
+                continue
             data = json.loads(out.read_text()) if out.exists() else {"error": "oracle produced no artifact"}
             report["arms"][backend] = data
+            data["exit"] = proc.returncode
+            if proc.returncode and "error" not in data:
+                report["arms"][backend] = {"error": f"oracle exited {proc.returncode}", "partial": data}
             print(f"embedding Python {backend}: exit {proc.returncode}", flush=True)
         rs_env = dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1")
         if args.mutant:
             rs_env["PSEUDOLIFE_DAEMON_MUTANT"] = args.mutant
-        proc = subprocess.run([str(args.rust_bin.resolve())], env=rs_env, capture_output=True,
-                              input=json.dumps({"config_path": str(cfg_path), "operations": request["operations"]}).encode(),
-                              timeout=600)
-        if proc.returncode:
+        try:
+            proc = subprocess.run([str(args.rust_bin.resolve())], env=rs_env, capture_output=True,
+                                  input=json.dumps({"config_path": str(cfg_path), "operations": request["operations"]}).encode(),
+                                  timeout=600)
+        except subprocess.TimeoutExpired:
+            proc = None
+            report["arms"]["rust"] = {"error": "TimeoutExpired: Rust arm exceeded 600 seconds"}
+        if proc is not None and proc.returncode:
             report["arms"]["rust"] = {"error": proc.stderr.decode(errors="replace"), "exit": proc.returncode}
-        else:
+        elif proc is not None:
             candidate = json.loads(proc.stdout)
             candidate.pop("model_root", None)
             candidate.pop("graph", None)
@@ -432,6 +444,13 @@ def fixture(args):
                         env=dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1", **extra_env),
                         capture_output=True, timeout=120)
                     report["refusals"].append({"case": case, "refused": proc.returncode != 0 and not proc.stdout})
+                saved_prompt_file = root / "model/config_sentence_transformers.json"
+                saved_prompt_file.write_text(json.dumps({"prompts": {"query": "query "}, "default_prompt_name": "query"}), encoding="utf-8")
+                cfg_file.write_text(json.dumps({"embedding": dict(config, backend="onnx", device="cpu")}), encoding="utf-8")
+                proc = subprocess.run([str(args.rust_bin.resolve())], input=request_bytes,
+                    env=dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1"), capture_output=True, timeout=120)
+                report["refusals"].append({"case": "saved default prompt", "refused": proc.returncode != 0 and not proc.stdout})
+                saved_prompt_file.unlink()
         if args.record and not any(p["diffs"] for p in report["profiles"]):
             args.golden.write_text(json.dumps({"fixture": "embedding_fixture.py", "profiles": goldens}, indent=1) + "\n", encoding="utf-8")
     failures = [p for p in report["profiles"] if p["diffs"]]

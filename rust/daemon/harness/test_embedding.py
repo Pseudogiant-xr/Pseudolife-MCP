@@ -1,5 +1,10 @@
 """Comparator controls, independent of model inference or artifact downloads."""
 import numpy as np
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import embedding
 
 from embedding import compare, rankings
 
@@ -53,3 +58,27 @@ def test_fp32_near_tie_is_not_hidden_by_float64_scoring():
     b["operations"].append(a["operations"][1])
     assert not compare(a, b, max_abs=1e-6, cosine_floor=.99999999997)[0]
     assert rankings(a, b)["identical_full"] == 0
+
+
+def test_timeout_keeps_completed_arm_and_writes_failure_artifact(monkeypatch, tmp_path):
+    monkeypatch.setattr(embedding.os, "environ", {"CUDA_VISIBLE_DEVICES": "-1"})
+    monkeypatch.setattr(embedding.subprocess, "check_output", lambda *a, **kw: "fixture-head")
+    monkeypatch.setattr(embedding, "digest", lambda p: "0" * 64)
+
+    def run_arm(argv, **kwargs):
+        if "--oracle" in argv:
+            backend = argv[argv.index("--oracle") + 1]
+            if backend == "onnx":
+                raise subprocess.TimeoutExpired(argv, 600)
+            Path(argv[argv.index("--out") + 1]).write_text(json.dumps({"completed_marker": "retained", "dim": 2}))
+            return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"fixture refusal")
+
+    monkeypatch.setattr(embedding.subprocess, "run", run_arm)
+    args = argparse.Namespace(model="fixture-model", onnx_file="onnx/model.onnx", prefix="query ",
+        cap=32, ranking_banks=None, rust_bin=tmp_path / "candidate", mutant=None,
+        accepted_fp32=False, qwen_position_ids_deferred=False, out=tmp_path / "result.json")
+    assert embedding.run(args) == 1
+    report = json.loads(args.out.read_text())
+    assert report["arms"]["torch"]["completed_marker"] == "retained"
+    assert report["arms"]["onnx"]["error"].startswith("TimeoutExpired")
