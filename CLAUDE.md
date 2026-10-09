@@ -503,6 +503,16 @@ took 143 CUDA OOMs.
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;
   the pass is not optional because CI was green.
+- **Every review pass also runs a Codex second review, alongside it, not
+  instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
+  effort, started in the background over the same diff —
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o <scratchpad>/codex-review.md`
+  (`--uncommitted` or `--commit <sha>` for other targets). Pin the model and
+  effort on the command line, and check the log header names both. Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR, each finding labelled by source with its verdict. A missing,
+  signed-out or failed Codex run is stated in the PR as a single-reviewer
+  pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
