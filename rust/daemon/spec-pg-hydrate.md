@@ -24,6 +24,10 @@ tests reject source changes without regeneration. New literal schema additions
 (including the pending v56 document store) and constant-loop migrations are
 picked up by that command; new control flow requires an explicit compiler
 extension and review. Check current master again before opening the PR.
+The `--record-goldens <result.json>` option also builds and records oracle
+post-states for every historical cell, after the live control and five source
+mutants pass. CI compares the candidate to these committed snapshots as well
+as to the live Python constructor.
 
 ## Seam with W2-D/E
 
@@ -42,3 +46,5 @@ the startup hydration seam has executable differential coverage.
 Error wording is free except the dimension refusal text. Catalog shape, row
 values, transaction outcomes and refusal/no-write behavior are exact. Only
 `relations.created_at` is normalized between independent constructors.
+Every newly seeded timestamp must fit its own arm's captured invocation
+window before normalization; the same arm's restart timestamps stay exact.

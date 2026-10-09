@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -24,6 +25,26 @@ import dbstate
 import pgdisposable as pg
 import psycopg
 from pseudolife_memory.storage.schema import assert_disposable_database
+GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
+
+
+def golden_state(state):
+    from run import golden_scrub
+    return golden_scrub(state)
+
+
+def clock_diffs(state, before, window):
+    start, end = window
+    if not (math.isfinite(start) and math.isfinite(end) and start <= end):
+        return ["constructor invocation window is invalid"]
+    prior = {r[0] for r in before["rows"].get("public.relations", {}).get("rows", [])}
+    table = state["rows"].get("public.relations")
+    if not table:
+        return []
+    index = table["columns"].index("created_at")
+    return [f"relations.{r[0]}.created_at is outside its constructor window" for r in table["rows"]
+            if r[0] not in prior and (isinstance(r[index], bool) or not isinstance(r[index], (int, float))
+                                     or not start <= r[index] <= end)]
 
 
 def snapshot(dsn):
@@ -70,7 +91,7 @@ def refusal_cell(binary, number, version):
         pg.drop(name)
 
 
-def cell(binary, number, commit=None, dimension=1024):
+def cell(binary, number, commit=None, dimension=1024, expected=None):
     names = [f"{pg.PREFIX}{number + i}" for i in range(3)]
     created = []
     try:
@@ -87,10 +108,12 @@ def cell(binary, number, commit=None, dimension=1024):
             created.append(name)
         from pseudolife_memory.storage.postgres import PostgresStorage
         stages = []
+        recorded = []
         for restart in range(2):
             with psycopg.connect(dsns[0], autocommit=True) as conn:
                 assert_disposable_database(conn)
             before = [snapshot(d) for d in dsns]
+            python_start = time.time()
             if dimension != 1024:
                 try:
                     PostgresStorage(dsns[0]).close()
@@ -99,15 +122,23 @@ def cell(binary, number, commit=None, dimension=1024):
                         raise
                 else:
                     raise RuntimeError("Python unexpectedly upgraded a legacy embedding dimension")
-                rust_open(binary, dsns[1], f"vector({dimension})")
             else:
                 PostgresStorage(dsns[0]).close()
-                rust_open(binary, dsns[1])
+            python_window = [python_start, time.time()]
+            rust_start = time.time()
+            rust_open(binary, dsns[1], f"vector({dimension})" if dimension != 1024 else None)
+            rust_window = [rust_start, time.time()]
             python, rust = (snapshot(d) for d in dsns)
             rules = {("relations", "created_at"): "clock"}
             diffs = dbstate.diff(dbstate.normalize(python, rules, template_state),
                                  dbstate.normalize(rust, rules, template_state))
-            stages.append({"restart": restart, "diffs": diffs})
+            recorded.append(golden_state(dbstate.normalize(python, rules, template_state)))
+            clock_errors = clock_diffs(python, before[0], python_window) + clock_diffs(rust, before[1], rust_window)
+            stages.append({"restart": restart, "diffs": diffs, "clock_diffs": clock_errors,
+                           "windows": {"python": python_window, "rust": rust_window}})
+            if expected is not None:
+                stages[-1]["golden_diffs"] = dbstate.diff(
+                    expected[restart], golden_state(dbstate.normalize(rust, rules, template_state)))
             if dimension != 1024:
                 stages[-1]["refusal_state_diffs"] = [d for old, new in zip(before, (python, rust))
                                                      for d in dbstate.diff(old, new)]
@@ -122,7 +153,7 @@ def cell(binary, number, commit=None, dimension=1024):
                         table["rows"] = [r for r in table["rows"] if r[0] != "writer_lease_epoch"]
                     strict.extend(dbstate.diff(prior, state))
                 stages[-1]["idempotence_diffs"] = strict
-        return {"source_commit": commit, "stages": stages}
+        return {"source_commit": commit, "stages": stages, "_recorded": recorded}
     finally:
         for name in reversed(created):
             pg.drop(name)
@@ -135,20 +166,27 @@ def main(argv=None):
     ap.add_argument("--all-versions", action="store_true")
     ap.add_argument("--refusals", action="store_true")
     ap.add_argument("--mutants", action="store_true")
+    ap.add_argument("--record-goldens", action="store_true")
+    ap.add_argument("--check-goldens", action="store_true")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
     if pg.SLICE != "pgs":
         ap.error("schema cells require PL_HARNESS_SLICE=pgs")
     results = []
+    recorded = {}
+    goldens = json.loads(GOLDEN_FILE.read_text()) if args.check_goldens else None
     number = time.time_ns() // 1000
     sources = [{"commit": c, "embedding_dimension": 1024} for c in args.commit]
     if args.all_versions:
         sources += json.loads((HERE / "schema_history.json").read_text())["versions"]
     for i, source in enumerate([{"commit": None, "embedding_dimension": 1024}, *sources]):
         commit = source["commit"]
-        result = cell(args.rust_test_bin.resolve(), number + i * 3, commit, source["embedding_dimension"])
+        key = commit or "fresh"
+        expected = goldens["cases"][key] if goldens else None
+        result = cell(args.rust_test_bin.resolve(), number + i * 3, commit, source["embedding_dimension"], expected)
+        recorded[key] = result.pop("_recorded")
         results.append(result)
-        print(f"schema {commit or 'fresh'}: " + str(sum(len(s['diffs']) + len(s.get('idempotence_diffs', [])) + len(s.get('refusal_state_diffs', []))
+        print(f"schema {commit or 'fresh'}: " + str(sum(len(s['diffs']) + len(s['clock_diffs']) + len(s.get('idempotence_diffs', [])) + len(s.get('refusal_state_diffs', [])) + len(s.get('golden_diffs', []))
                                                        for s in result['stages'])) + " diffs", flush=True)
         args.out.write_text(json.dumps({"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                                        "cells": results}, indent=2), encoding="utf-8")
@@ -161,13 +199,13 @@ def main(argv=None):
         output = json.loads(args.out.read_text())
         output["refusals"] = refusals
         args.out.write_text(json.dumps(output, indent=2), encoding="utf-8")
-    failed = any(s["diffs"] or s.get("idempotence_diffs") or s.get("refusal_state_diffs")
+    failed = any(s["diffs"] or s["clock_diffs"] or s.get("idempotence_diffs") or s.get("refusal_state_diffs") or s.get("golden_diffs")
                  for r in results for s in r["stages"]) or any(r["diffs"] for r in refusals)
     if args.mutants and not failed:
         mutations = {}
         try:
             for i, mutant in enumerate(["drop-alter-tail", "skip-relation-seed", "skip-lease-epoch",
-                                        "schema-future-allowed"]):
+                                        "schema-future-allowed", "seed-clock-zero"]):
                 os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
                 try:
                     if mutant == "schema-future-allowed":
@@ -175,7 +213,7 @@ def main(argv=None):
                         caught = bool(result["diffs"])
                     else:
                         result = cell(args.rust_test_bin.resolve(), number + 1000 + i * 3)
-                        caught = any(s["diffs"] or s.get("idempotence_diffs") for s in result["stages"])
+                        caught = any(s["diffs"] or s["clock_diffs"] or s.get("idempotence_diffs") for s in result["stages"])
                 except RuntimeError as error:
                     # Only the expected source mutation can satisfy this
                     # control; infrastructure errors remain harness failures.
@@ -190,6 +228,15 @@ def main(argv=None):
         output["mutants"] = mutations
         args.out.write_text(json.dumps(output, indent=2), encoding="utf-8")
         failed = any(not r["caught"] for r in mutations.values())
+    if args.record_goldens and not failed:
+        # Oracle capture only; the candidate's state never becomes its own
+        # expectation. The existing golden scrub retains all row values and
+        # hashes complete catalogs rather than truncating them.
+        GOLDEN_FILE.write_text(json.dumps({"normalizers": {
+            "relations.created_at": "newly seeded rows only, against the common template",
+            "catalog": "golden_scrub: full catalog row counts and SHA-256 digests",
+        }, "oracle_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
+           "cases": recorded}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(failed)
 
 

@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path, help="schema evidence JSON path")
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
+    parser.add_argument("--record-goldens", action="store_true", help="record oracle post-state fixtures after a clean run")
     args = parser.parse_args(argv)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
@@ -90,9 +91,11 @@ def main(argv: list[str] | None = None) -> int:
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
+                   "--all-versions", "--refusals", "--mutants", "--out", str(output)]
+        command.append("--record-goldens" if args.record_goldens else "--check-goldens")
         return subprocess.run(
-            [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
-             "--all-versions", "--refusals", "--mutants", "--out", str(output)],
+            command,
             cwd=REPO, env=env,
         ).returncode
     except ValueError as exc:

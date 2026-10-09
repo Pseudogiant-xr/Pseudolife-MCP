@@ -14,6 +14,7 @@ import sys
 import ast
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -23,6 +24,11 @@ SOURCE = REPO / "pseudolife_memory/storage/schema.py"
 
 def unsupported(node):
     raise ValueError(f"unsupported schema construct at line {node.lineno}: {ast.dump(node)}")
+
+
+def is_docstring(node):
+    return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+        and isinstance(node.value.value, str)
 
 
 def value(node, env):
@@ -123,7 +129,7 @@ def statements(nodes, env, functions):
             elif ast.unparse(call) == "_backfill_trace_invalidations(cur)":
                 helper = functions["_backfill_trace_invalidations"]
                 body = helper.body
-                if len(body) != 3 or not isinstance(body[1], ast.Assign) \
+                if len(body) != 3 or not is_docstring(body[0]) or not isinstance(body[1], ast.Assign) \
                         or ast.unparse(body[1].targets[0]) != "result" \
                         or ast.unparse(body[2]) != "return max(result.rowcount, 0)":
                     unsupported(helper)
@@ -156,7 +162,8 @@ def render(source: bytes) -> dict[str, bytes]:
     functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     guard = functions["_refuse_on_embedding_dim_mismatch"]
     body = guard.body
-    if len(body) != 6 or ast.unparse(body[2]) != "row = cur.fetchone()" \
+    if len(body) != 6 or not is_docstring(body[0]) or not isinstance(body[1], ast.Expr) \
+            or ast.unparse(body[2]) != "row = cur.fetchone()" \
             or ast.unparse(body[3]) != "if row is None:\n    return" \
             or ast.unparse(body[4]) != "live_dim = row[0]" \
             or not isinstance(body[5], ast.If) \
@@ -202,6 +209,10 @@ def main() -> int:
     for name, content in generated.items():
         (TARGET.parent / name).write_bytes(content)
     print("generated " + ", ".join(generated))
+    if "--record-goldens" in sys.argv:
+        output = Path(sys.argv[sys.argv.index("--record-goldens") + 1])
+        return subprocess.run([sys.executable, str(Path(__file__).with_name("schema_ci.py")),
+                               "--record-goldens", "--out", str(output)], cwd=REPO).returncode
     return 0
 
 

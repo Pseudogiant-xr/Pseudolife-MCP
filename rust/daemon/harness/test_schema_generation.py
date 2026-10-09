@@ -4,6 +4,7 @@ import unittest
 import itertools
 import json
 import types
+import ast
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -29,6 +30,22 @@ class SchemaGeneration(unittest.TestCase):
             b"    return {}", b"    unexpected_migration()\n    return {}")
         with self.assertRaisesRegex(ValueError, "unsupported"):
             gen.render(source)
+
+    def test_helper_docstring_cannot_hide_an_executable_statement(self):
+        for helper in ("_refuse_on_embedding_dim_mismatch", "_backfill_trace_invalidations"):
+            tree = ast.parse(gen.SOURCE.read_bytes())
+            function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == helper)
+            function.body[0] = ast.parse("cur.execute('SELECT 424242 AS unexpected_probe')").body[0]
+            with self.assertRaisesRegex(ValueError, "unsupported"):
+                gen.render(ast.unparse(tree).encode())
+
+    def test_embedding_probe_statement_cannot_be_an_early_return(self):
+        tree = ast.parse(gen.SOURCE.read_bytes())
+        helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_refuse_on_embedding_dim_mismatch")
+        helper.body[1] = ast.Return(value=helper.body[1].value)
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            gen.render(ast.unparse(tree).encode())
 
     def test_every_branch_matches_oracle_statement_order_and_parameters(self):
         oracle = types.ModuleType("schema_oracle")
