@@ -312,39 +312,47 @@ class FixtureDaemon:
 _TOP = re.compile(rb'(\n  "(interpreter|source|pseudolife-mcp|mcp|daemon_version)": )'
                   rb'"((?:[^"\\\r\n]|\\.)*)"')
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*([.+-][0-9A-Za-z.+-]*)?$")
+# The oracle's MCP SDK line, with its line break and the comma after it (the
+# key is never last: credential_source follows it).
+_MCP_LINE = re.compile(rb'\r?\n  "mcp": "((?:[^"\\\r\n]|\\.)*)",')
 
 
 def _arm_of(fields: dict) -> str | None:
     interpreter = fields.get("interpreter", "")
     source = fields.get("source", "")
     own = fields.get("pseudolife-mcp", "")
-    mcp = fields.get("mcp", "")
+    mcp = fields.get("mcp")
     name = os.path.basename(interpreter).lower()
     if name in ("pseudolife-stdio", "pseudolife-stdio.exe"):
         # The candidate: its own executable, the directory it resolves
         # into, the Cargo version, and no Python MCP SDK.
         resolved = os.path.dirname(os.path.realpath(interpreter))
+        # Maintainer decision 2026-10-09: the native report has no `mcp`.
         if (os.path.normcase(resolved) == os.path.normcase(source) and own == CARGO_VERSION
-                and mcp == "not installed"):
+                and mcp is None):
             return "rust"
         return None
     if re.match(r"^python[0-9.]*(\.exe)?$", name) and os.path.isfile(interpreter):
         if (os.path.basename(source) == "pseudolife_memory" and os.path.isdir(source)
-                and _VERSION.match(own) and (mcp == "not installed" or _VERSION.match(mcp))):
+                and _VERSION.match(own) and mcp is not None and _VERSION.match(mcp)):
             return "python"
     return None
 
 
 @normalize.rule("doctor-runtime-identity")
 def runtime_identity(obs: dict) -> None:
-    """Declared substitution: the oracle reports its Python interpreter,
-    package directory, installed package and MCP SDK versions; the native
-    doctor reports its own executable, the directory it resolves into, its
-    Cargo version and ``mcp: not installed``. Each arm's four values are
-    validated against what that arm must report, then tokenized, together
-    with that arm's own version where the report or the shim's stderr
-    repeats it (``daemon_version`` when the fixture echoes it, the
-    version-mismatch recovery and the shim's mismatch warning)."""
+    """Declared substitution (maintainer decision 2026-10-09): the oracle
+    reports its Python interpreter, package directory, installed package and
+    MCP SDK versions; the native doctor reports its own executable, the
+    directory it resolves into and its Cargo version, and no ``mcp`` key.
+    Each arm's values are validated against what that arm must report
+    (the oracle's ``mcp`` must be a real version string; the native report
+    must not carry the key). The oracle's ``mcp`` line is then deleted, so
+    the native report must equal the rest of Python's byte for byte, and
+    the three shared fields are tokenized, together with that arm's own
+    version where the report or the shim's stderr repeats it
+    (``daemon_version`` when the fixture echoes it, the version-mismatch
+    recovery and the shim's mismatch warning)."""
     out = normalize._get(obs, "stdout")
     fields = {m.group(2).decode(): json.loads(b'"' + m.group(3) + b'"')
               for m in _TOP.finditer(out)}
@@ -352,6 +360,11 @@ def runtime_identity(obs: dict) -> None:
     if obs.get("arm") not in ("python", "rust") or _arm_of(fields) != obs["arm"]:
         return
     own = fields["pseudolife-mcp"]
+    if obs["arm"] == "python":
+        lines = _MCP_LINE.findall(out)
+        if len(lines) != 1 or json.loads(b'"' + lines[0] + b'"') != fields["mcp"]:
+            return
+        out = _MCP_LINE.sub(b"", out)
 
     def swap(match: re.Match) -> bytes:
         key = match.group(2).decode()
@@ -961,18 +974,18 @@ def cases() -> list[Case]:
 
 def _python_identity_mutant() -> Mutant:
     """The native report claiming the oracle interpreter's identity (this
-    interpreter and the oracle package directory, resolved at run time):
+    interpreter, the oracle package directory and an MCP SDK version,
+    resolved at run time):
     the identity rule must not tokenize another arm's identity."""
     source = (producers._SOURCE or RUST.parent) / "pseudolife_memory"
     return Mutant(
         "doctor-identity-claims-python", "doctor", "shim/src/cli/doctor/mod.rs",
         '        ("interpreter", interpreter),\n        ("source", source),\n'
-        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
-        '        ("mcp", "not installed".to_owned()),',
+        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n    ])',
         f'        ("interpreter", r"{sys.executable}".to_owned()),\n'
         f'        ("source", {{ let _ = (interpreter, source); r"{source}".to_owned() }}),\n'
         '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
-        '        ("mcp", "2.1.1".to_owned()),',
+        '        ("mcp", "2.1.1".to_owned()),\n    ])',
         ("unreachable",))
 
 

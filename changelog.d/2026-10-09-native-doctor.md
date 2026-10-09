@@ -7,8 +7,9 @@
   client's wake path. It also covers Codex's hook copy, Git Bash on Windows,
   `pseudolife-mcp` on PATH and the saved-instance nonce proof, with the
   Python report's bytes and request bytes.
-- Its runtime-identity fields name the native executable, its directory, its
-  Cargo version and `mcp: not installed`.
+- Its runtime-identity fields name the native executable, its directory and
+  its Cargo version. The report has no `mcp` (MCP SDK version) key, which
+  only the Python runtime has.
 - Some inputs still defer, always before the handshake starts the shim: a
   nonempty `--disposable-proof` database, saved tunnels, HTTP proxies and
   non-ASCII bearers. So do a `--timeout` past 1,000,000 seconds,

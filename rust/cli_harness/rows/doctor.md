@@ -69,17 +69,23 @@ argv shape (abbreviations, `=` forms, repeats, help, bad values).
 
 ## Declared substitutions and divergences
 
-- `doctor-runtime-identity` (harness rule): `interpreter`, `source`,
-  `pseudolife-mcp`, `mcp` describe the running runtime. The oracle reports
-  its Python interpreter, package directory, installed distribution and MCP
-  SDK versions; the native doctor reports its own executable, the directory
-  it resolves into, its Cargo version and `mcp: not installed`. The rule
-  checks that each arm reports its OWN identity (the native arm its
-  executable, resolved directory, Cargo version and no SDK; the oracle arm an
-  existing Python interpreter and package directory), then tokenizes them and
-  that arm's own version where the report or the shim's mismatch warning
-  repeats it. A native report carrying Python's identity stays a difference
-  (mutant `doctor-identity-claims-python`).
+- `doctor-runtime-identity` (harness rule; substitution accepted, maintainer
+  decision 2026-10-09): `interpreter`, `source` and `pseudolife-mcp`
+  describe the running runtime. The oracle reports its Python interpreter,
+  package directory and installed distribution version; the native doctor
+  reports its own executable, the directory it resolves into and its Cargo
+  version. Python's `mcp` key (its MCP SDK version) has no native
+  counterpart and the native report omits it entirely, by the same decision:
+  after cutover a placeholder such as `not installed` would read as a broken
+  install. The rule checks that each arm reports its OWN identity (the
+  native arm its executable, resolved directory, Cargo version and no `mcp`
+  key; the oracle arm an existing Python interpreter, its package directory
+  and a real version string in `mcp`), deletes the oracle's `mcp` line (its
+  line break and trailing comma, exactly once), then tokenizes the three
+  shared fields and that arm's own version where the report or the shim's
+  mismatch warning repeats it. Every other byte, key order included, must
+  equal Python's. A native report carrying Python's identity stays a
+  difference (mutant `doctor-identity-claims-python`).
   `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
   asserts `interpreter == sys.executable` and can never hold for a native
   runtime.

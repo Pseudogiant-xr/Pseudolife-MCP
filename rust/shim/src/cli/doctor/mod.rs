@@ -151,18 +151,20 @@ fn sendable(token: &str) -> bool {
 }
 
 /// This runtime's identity, in the fields the Python report fills from its
-/// interpreter (declared substitution `doctor-runtime-identity`).
-fn identity() -> Res<[(&'static str, String); 4]> {
+/// interpreter (declared substitution `doctor-runtime-identity`). Python's
+/// `mcp` (its MCP SDK version) has no native counterpart and is omitted:
+/// after cutover a placeholder would read as a broken install (maintainer
+/// decision 2026-10-09).
+fn identity() -> Res<Vec<(&'static str, String)>> {
     let executable = std::env::current_exe().map_err(|_| Defer)?;
     let interpreter = executable.to_str().ok_or(Defer)?.to_owned();
     let resolved = std::fs::canonicalize(&executable).map_err(|_| Defer)?;
     let source = resolved.parent().ok_or(Defer)?.to_str().ok_or(Defer)?;
     let source = source.strip_prefix("\\\\?\\").unwrap_or(source).to_owned();
-    Ok([
+    Ok(vec![
         ("interpreter", interpreter),
         ("source", source),
         ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),
-        ("mcp", "not installed".to_owned()),
     ])
 }
 

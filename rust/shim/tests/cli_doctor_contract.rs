@@ -317,7 +317,6 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
                 "interpreter",
                 "source",
                 "pseudolife-mcp",
-                "mcp",
                 "credential_source",
                 "board",
                 "maintainer_passkeys",
@@ -335,7 +334,8 @@ fn an_unreachable_daemon_is_reported_without_touching_the_home() {
             json!(env!("CARGO_BIN_EXE_pseudolife-stdio"))
         );
         assert_eq!(map["pseudolife-mcp"], json!(env!("CARGO_PKG_VERSION")));
-        assert_eq!(map["mcp"], json!("not installed"));
+        // Maintainer decision 2026-10-09: no MCP SDK line in the native report.
+        assert!(!map.contains_key("mcp"));
         assert_eq!(map["credential_source"], json!("none"));
         assert_eq!(
             map["board"],
