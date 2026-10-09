@@ -30,6 +30,25 @@ fn captured_public_help_precedes_bank_resolution() {
 }
 
 #[test]
+fn help_at_another_width_defers() {
+    let home = std::env::temp_dir().join(format!("backup-width-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    for columns in [Some("120"), None] {
+        let mut command = command(&home);
+        match columns {
+            Some(value) => command.env("COLUMNS", value),
+            None => command.env_remove("COLUMNS"),
+        };
+        let output = command.arg("--help").output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
 fn missing_directory_refusal_uses_the_real_filesystem() {
     let home = std::env::temp_dir().join(format!("backup-missing-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
@@ -107,7 +126,6 @@ fn noncanonical_spellings_defer_without_effects() {
         format!("{base}{separator}.{separator}missing-µ"),
         format!("{base}{separator}{separator}missing-µ"),
         format!("{base}{separator}missing-µ{separator}"),
-        format!("{base}/missing-µ").replace('\\', "/"),
         String::from("relative-missing-µ"),
     ] {
         assert_missing_spelling(&home, &argument, DEFERRED);
@@ -132,6 +150,7 @@ fn extended_and_unc_prefixes_defer_without_effects() {
     let home = std::env::temp_dir().join(format!("backup-prefix-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     for argument in [
+        format!("{}/missing-µ", home.display()),
         format!("\\\\?\\{}\\missing-µ", home.display()),
         String::from("\\\\localhost\\absent-share-µ\\missing"),
     ] {
