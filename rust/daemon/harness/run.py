@@ -36,12 +36,13 @@ import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[2]
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 
-REPO = HERE.parents[2]
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
                     "x-frame-options", "referrer-policy", "x-content-type-options", "x-pl-board")
@@ -617,7 +618,8 @@ class Reaper(Scenario):
 def assert_disposable(conn) -> None:
     """The server's own name for this database must be a disposable one
     before the harness alters or deletes anything in it."""
-    name = conn.execute("SELECT current_database()").fetchone()[0]
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    name = assert_disposable_database(conn)
     if not pg.DISPOSABLE_NAME.fullmatch(name):
         raise RuntimeError(f"refusing to modify non-disposable database {name!r}")
 
@@ -656,8 +658,9 @@ class DimMismatch(Scenario):
 
 
 class StampedBank(Scenario):
-    """A current bank stamped schema 99 with a non-numeric lease epoch."""
+    """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
+    settle = False
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -671,7 +674,20 @@ class StampedBank(Scenario):
             conn.execute("DELETE FROM relations WHERE name = 'uses'")
 
     def cases(self):
-        return [case("health on stamped bank", "GET", "/health")]
+        c = case("health on stamped bank", "GET", "/health")
+        c["future_schema_refusal"] = True
+        return [c]
+
+    def timeline(self, procs, holders):
+        if "python" in procs:
+            wait_settled([procs["python"].port])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            answer = call(procs["rust"].port, "GET", "/health")
+            if answer.get("json", {}).get("init_refusal"):
+                return self.cases()
+            time.sleep(0.1)
+        raise RuntimeError("future-schema Rust startup did not refuse")
 
 
 class SeededBank(Scenario):
@@ -1002,6 +1018,22 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c.get("future_schema_refusal"):
+        from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+        row["declared"] = "future-schema refusal: Python downgrades; Rust preserves the bank"
+        body = rs.get("json", {})
+        message = body.get("init_refusal", "")
+        if rs["status"] != 503 or body.get("status") != "degraded" \
+                or "99" not in message or str(SCHEMA_META_VERSION) not in message \
+                or "newer than" not in message or "db" in body:
+            row["diffs"].append("Rust must refuse future schema 99 before opening storage")
+        if py is not None and (py["status"] != 200 or py.get("json", {}).get("db") != "ok"):
+            row["diffs"].append("Python oracle must retain its recorded downgrade behavior")
+        for header, expected in [("content-type", "application/json; charset=utf-8"),
+                                 ("cache-control", "no-store"), ("x-content-type-options", "nosniff")]:
+            if rs["headers"].get(header) != expected:
+                row["diffs"].append(f"future-schema refusal has incorrect {header}")
+        return row
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1085,6 +1117,10 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
             scrubbed[side] = out["declared"]
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
+    if scn.name == "stamped":
+        # This declared divergence has an independent postcondition: Rust
+        # must leave every row/catalog entry identical to the prepared bank.
+        db_diffs = dbstate.diff(dbstate.normalize(before, DB_NONDETERMINISTIC, before), states["rust"])
     # A template seeded at record time holds run-specific values (pairing
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
@@ -1226,6 +1262,9 @@ def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["schema"]:
+        import schema_cases
+        return schema_cases.main(sys.argv[2:])
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["live", "golden", "mutants"])
     ap.add_argument("--rust-bin", required=True, type=Path)

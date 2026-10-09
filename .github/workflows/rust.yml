@@ -214,6 +214,19 @@ jobs:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Daemon schema startup parity
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/schema_ci.py --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon schema parity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-schema-parity-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-schema-parity.json
+          if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         timeout-minutes: 15
         shell: pwsh
