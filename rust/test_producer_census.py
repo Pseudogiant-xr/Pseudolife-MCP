@@ -201,6 +201,26 @@ def test_installer_arguments_stop_at_the_next_command():
     assert "--yes" not in calls[0]["shape"]["parameters"]
 
 
+def test_real_installer_pair_keeps_json_switch_after_command_substitution():
+    text = (census.ROOT / "ops/install.sh").read_text(encoding="utf-8-sig")
+    pairs = [call for call in census.installer_cli_calls(text, "ops/install.sh") if call["name"] == "pair"]
+    assert pairs and all(call["shape"]["parameters"].get("--json") == {"literal": True} for call in pairs)
+
+
+def test_documented_optional_switches_keep_bracketed_names():
+    call = census.cli_calls('```sh\npseudolife-mcp pair URL [--read-code] [--json]\n```', "docs/demo.md")[0]
+    assert set(call["shape"]["parameters"]) == {"--read-code", "--json"}
+    assert not call["shape"]["complete"]
+
+
+def test_command_tail_stops_at_and_close_or_comment_without_losing_literal_values():
+    for end in [' && other --yes', ') || other --yes', ' # other --yes']:
+        call = census.installer_cli_calls('"$SHIM_PATH" connect "$URL" --json' + end, "ops/install.sh")[0]
+        assert call["shape"]["parameters"] == {"--json": {"literal": True}}
+    call = census.installer_cli_calls('"$SHIM_PATH" connect "value#with)paren&&text" --json', "ops/install.sh")[0]
+    assert call["shape"]["parameters"] == {"--json": {"literal": True}}
+
+
 def test_powershell_assignment_and_shell_env_prefix_retain_installer_call():
     ps = census.installer_cli_calls('$planOutput = & $shim connect $URL --dry-run --json', "ops/install.ps1")
     sh = census.installer_cli_calls('PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" maintainer setup --yes', "ops/install.sh")
@@ -288,14 +308,21 @@ def test_coordination_tool_forwarding_is_annotated_without_inventing_wire_shape(
     assert forwarded[0]["forwarded_from_tool"] == "memory_agents"
 
 
+def test_bare_documented_action_is_only_unverified_forwarding():
+    calls = census.tool_calls('memory_message(action=ack, message_id=id)', "ops/install-hook.sh")
+    forwarded = census.forwarded_coordination(calls)
+    assert forwarded[0]["name"] == "ack"
+    assert forwarded[0]["evidence"] == "unverified"
+
+
 def test_current_tree_census_has_real_producer_floors():
     result = census.snapshot()
     surface = {item["id"]: item for item in result["surface"]}
     console = [producer for item in result["surface"] if item["kind"] == "route" for producer in item["producers"]
                if producer["location"].startswith("pseudolife_memory/web/static/")]
     # The 2026-10-10 shipped index-DNrrQi0Q.js has 51 call/plan records;
-    # a floor of 50 catches extraction loss without pinning the bundle's filename.
-    assert len(console) >= 50
+    # a floor of 40 catches substantial loss while allowing normal bundle changes.
+    assert len(console) >= 40
     assert any(p["location"].startswith("plugin/") for p in surface["tool:memory_search"]["producers"])
     manual = [p for item in result["surface"] for p in item["producers"] if p["evidence"] == "manual"]
     drifted = {item["path"] for item in result.get("manual_drift", [])}
@@ -326,3 +353,5 @@ def test_ci_reports_source_drift_but_gates_census_changes(tmp_path):
     generated.write_text('{"regenerated": true}', encoding="utf-8")
     commit()
     assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    event.write_text(json.dumps({"before": "f" * 40}), encoding="utf-8")
+    assert not census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})

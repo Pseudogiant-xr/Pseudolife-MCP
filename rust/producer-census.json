@@ -411,7 +411,14 @@
             "complete": false,
             "expression": "[-h] [--data-dir DATA_DIR] [--out OUT]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--data-dir": {
+                "expression": "DATA_DIR]"
+              },
+              "--out": {
+                "expression": "OUT]"
+              }
+            }
           }
         },
         {
@@ -1035,7 +1042,11 @@
             "complete": false,
             "expression": "[-h] [--max-unsure MAX_UNSURE]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--max-unsure": {
+                "expression": "MAX_UNSURE]"
+              }
+            }
           }
         },
         {
@@ -1061,7 +1072,17 @@
             "complete": false,
             "expression": "[-h] [--max-unsure MAX_UNSURE]\\n                               [--max-lessons MAX_LESSONS]\\n                               [--max-world MAX_WORLD] [--hook-json]\\n                               [--coordination]\\n\";",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--max-lessons": {
+                "expression": "MAX_LESSONS]\\n"
+              },
+              "--max-unsure": {
+                "expression": "MAX_UNSURE]\\n"
+              },
+              "--max-world": {
+                "expression": "MAX_WORLD]"
+              }
+            }
           }
         },
         {
@@ -1635,11 +1656,11 @@
           "evidence": "static",
           "location": "ops/install.sh:1886",
           "shape": {
-            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null)",
+            "argv_source": "connect \"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null)",
+            "expression": "\"$DAEMON_URL\" --token-file \"$TOKEN_FILE\" --client \"$connect_names\" --dry-run --json </dev/null",
             "omitted_optional": null,
             "parameters": {
               "--client": {
@@ -2568,7 +2589,17 @@
             "complete": false,
             "expression": "tailscale [--port 8765] [--yes] [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              },
+              "--port": {
+                "expression": "8765]"
+              },
+              "--yes": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -2581,7 +2612,17 @@
             "complete": false,
             "expression": "off [--port 8765] [--yes] [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              },
+              "--port": {
+                "expression": "8765]"
+              },
+              "--yes": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -2594,7 +2635,14 @@
             "complete": false,
             "expression": "status [--port 8765] [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              },
+              "--port": {
+                "expression": "8765]"
+              }
+            }
           }
         },
         {
@@ -2866,7 +2914,14 @@
             "complete": false,
             "expression": "<name> [--tier TIER] [--no-board] [--expires 15m]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--no-board": {
+                "expression": "[--expires"
+              },
+              "--tier": {
+                "expression": "TIER]"
+              }
+            }
           }
         },
         {
@@ -2899,6 +2954,9 @@
             "parameters": {
               "--revoke": {
                 "expression": "<name>"
+              },
+              "--yes": {
+                "literal": true
               }
             }
           }
@@ -3106,7 +3164,20 @@
             "complete": false,
             "expression": "run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              }
+            }
           }
         },
         {
@@ -3120,8 +3191,23 @@
             "expression": "hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]",
             "omitted_optional": null,
             "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              },
               "--while-pid": {
                 "expression": "PID"
+              },
+              "--worktree": {
+                "expression": "PATH]"
               }
             }
           }
@@ -3136,7 +3222,11 @@
             "complete": false,
             "expression": "check NAME [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3149,7 +3239,11 @@
             "complete": false,
             "expression": "list [NAME] [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3162,7 +3256,11 @@
             "complete": false,
             "expression": "delegate PROJECT AGENT [--for DURATION]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--for": {
+                "expression": "DURATION]"
+              }
+            }
           }
         },
         {
@@ -3279,7 +3377,11 @@
             "complete": false,
             "expression": "check [-h] [--json] NAME",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3292,7 +3394,11 @@
             "complete": false,
             "expression": "check [-h] [--json] NAME",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3305,7 +3411,11 @@
             "complete": false,
             "expression": "delegate [-h] [--for DURATION] PROJECT AGENT",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--for": {
+                "expression": "DURATION]"
+              }
+            }
           }
         },
         {
@@ -3318,7 +3428,11 @@
             "complete": false,
             "expression": "delegate [-h] [--for DURATION] PROJECT AGENT",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--for": {
+                "expression": "DURATION]"
+              }
+            }
           }
         },
         {
@@ -3332,8 +3446,23 @@
             "expression": "hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]",
             "omitted_optional": null,
             "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              },
               "--while-pid": {
                 "expression": "PID"
+              },
+              "--worktree": {
+                "expression": "PATH]"
               }
             }
           }
@@ -3349,8 +3478,23 @@
             "expression": "hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]",
             "omitted_optional": null,
             "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              },
               "--while-pid": {
                 "expression": "PID"
+              },
+              "--worktree": {
+                "expression": "PATH]"
               }
             }
           }
@@ -3365,7 +3509,11 @@
             "complete": false,
             "expression": "list [-h] [--json] [NAME]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3378,7 +3526,11 @@
             "complete": false,
             "expression": "list [-h] [--json] [NAME]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              }
+            }
           }
         },
         {
@@ -3391,7 +3543,20 @@
             "complete": false,
             "expression": "run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              }
+            }
           }
         },
         {
@@ -3404,7 +3569,20 @@
             "complete": false,
             "expression": "run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--expect": {
+                "expression": "DURATION]"
+              },
+              "--no-board": {
+                "expression": "[--timeout"
+              },
+              "--purpose": {
+                "expression": "TEXT]"
+              },
+              "--ttl": {
+                "expression": "SECONDS]"
+              }
+            }
           }
         },
         {
@@ -3599,6 +3777,9 @@
             "expression": "--to <ssh-target> [--target-checkout PATH]",
             "omitted_optional": null,
             "parameters": {
+              "--target-checkout": {
+                "expression": "PATH]"
+              },
               "--to": {
                 "expression": "<ssh-target>"
               }
@@ -3732,7 +3913,17 @@
             "complete": false,
             "expression": "<daemon-url> [<code> | --read-code] [--token-file PATH] [--json]",
             "omitted_optional": null,
-            "parameters": {}
+            "parameters": {
+              "--json": {
+                "literal": true
+              },
+              "--read-code": {
+                "literal": true
+              },
+              "--token-file": {
+                "expression": "PATH]"
+              }
+            }
           }
         },
         {
@@ -3790,13 +3981,16 @@
           "evidence": "static",
           "location": "ops/install.sh:1960",
           "shape": {
-            "argv_source": "pair \"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json)",
+            "argv_source": "pair \"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json",
             "channel": "argv",
             "complete": false,
             "executable_expression": "\"$SHIM_PATH\"",
-            "expression": "\"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json)",
+            "expression": "\"$DAEMON_URL\" --read-code --token-file \"$TOKEN_FILE\" --json",
             "omitted_optional": null,
             "parameters": {
+              "--json": {
+                "literal": true
+              },
               "--read-code": {
                 "literal": true
               },
@@ -5514,6 +5708,15 @@
             "parameters": {
               "--digest": {
                 "expression": "PATH]"
+              },
+              "--interval": {
+                "expression": "SECONDS]"
+              },
+              "--session-id": {
+                "expression": "ID"
+              },
+              "--timeout": {
+                "expression": "SECONDS]"
               }
             }
           }
@@ -18107,7 +18310,62 @@
         "message_id"
       ],
       "parameter_source": "pseudolife_memory/coordination.py:31",
-      "producers": []
+      "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_message",
+          "location": "ops/install-hook.ps1:44",
+          "mapping_source": "pseudolife_memory/mcp_server.py:650",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=ack, message_id=<id>",
+            "parameters": {
+              "action": {
+                "expression": "ack"
+              },
+              "message_id": {
+                "expression": "<id>"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_message",
+          "location": "ops/install-hook.sh:81",
+          "mapping_source": "pseudolife_memory/mcp_server.py:650",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=ack, message_id=<id>",
+            "parameters": {
+              "action": {
+                "expression": "ack"
+              },
+              "message_id": {
+                "expression": "<id>"
+              }
+            }
+          }
+        }
+      ]
     },
     {
       "id": "coordination:agents",
@@ -18348,7 +18606,7 @@
           "dynamic": "unresolved",
           "evidence": "unverified",
           "forwarded_from_tool": "memory_agents",
-          "location": "plugin/README.md:106",
+          "location": "ops/install-hook.ps1:44",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -18359,16 +18617,19 @@
           },
           "tool_shape": {
             "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
           }
         },
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
           "forwarded_from_tool": "memory_agents",
-          "location": "plugin/README.md:242",
+          "location": "ops/install-hook.sh:81",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -18379,16 +18640,19 @@
           },
           "tool_shape": {
             "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
           }
         },
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
           "forwarded_from_tool": "memory_agents",
-          "location": "plugin/hooks/lifecycle.ps1:446",
+          "location": "ops/setup-codex-hooks.py:926",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -18399,89 +18663,12 @@
           },
           "tool_shape": {
             "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "unverified",
-          "forwarded_from_tool": "memory_agents",
-          "location": "plugin/hooks/stop-wake.sh:445",
-          "mapping_source": "pseudolife_memory/coordination.py:835",
-          "shape": {
-            "channel": "body",
-            "complete": false,
-            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "tool_shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "unverified",
-          "forwarded_from_tool": "memory_agents",
-          "location": "plugin/hooks/subagent-board-guard.sh:109",
-          "mapping_source": "pseudolife_memory/coordination.py:835",
-          "shape": {
-            "channel": "body",
-            "complete": false,
-            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "tool_shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "unverified",
-          "forwarded_from_tool": "memory_agents",
-          "location": "plugin/hooks/subagent-board-guard.sh:82",
-          "mapping_source": "pseudolife_memory/coordination.py:835",
-          "shape": {
-            "channel": "body",
-            "complete": false,
-            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "tool_shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "unverified",
-          "forwarded_from_tool": "memory_agents",
-          "location": "plugin/hooks/subagent-board-guard.sh:96",
-          "mapping_source": "pseudolife_memory/coordination.py:835",
-          "shape": {
-            "channel": "body",
-            "complete": false,
-            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "tool_shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "parameters": {}
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
           }
         },
         {
@@ -19158,6 +19345,52 @@
               }
             }
           }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_message",
+          "location": "ops/install-hook.ps1:44",
+          "mapping_source": "pseudolife_memory/mcp_server.py:650",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "receive"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_message",
+          "location": "ops/install-hook.sh:81",
+          "mapping_source": "pseudolife_memory/mcp_server.py:650",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "receive"
+              }
+            }
+          }
         }
       ]
     },
@@ -19683,6 +19916,72 @@
             "parameters": {
               "action": {
                 "literal": "update"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_agents",
+          "location": "ops/install-hook.ps1:44",
+          "mapping_source": "pseudolife_memory/coordination.py:835",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=update, project=<project>, task=<task>, status=<status>",
+            "parameters": {
+              "action": {
+                "expression": "update"
+              },
+              "project": {
+                "expression": "<project>"
+              },
+              "status": {
+                "expression": "<status>"
+              },
+              "task": {
+                "expression": "<task>"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_agents",
+          "location": "ops/install-hook.sh:81",
+          "mapping_source": "pseudolife_memory/coordination.py:835",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "action=update, project=<project>, task=<task>, status=<status>",
+            "parameters": {
+              "action": {
+                "expression": "update"
+              },
+              "project": {
+                "expression": "<project>"
+              },
+              "status": {
+                "expression": "<status>"
+              },
+              "task": {
+                "expression": "<task>"
               }
             }
           }
@@ -60841,7 +61140,6 @@
     "config:ScopesConfig",
     "config:ScopesConfig.exclude",
     "config:ScopesConfig.rollup",
-    "coordination:ack",
     "environment:PSEUDOLIFE_BENCH_DB",
     "environment:PSEUDOLIFE_MODELS_DIR",
     "environment:PSEUDOLIFE_TUNNEL_LAUNCH_PROFILE",
@@ -75055,6 +75353,30 @@
       "dynamic": "unresolved",
       "location": "ops/install-hook.ps1:44",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:ack"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.ps1:44",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.ps1:44",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:receive"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.ps1:44",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.ps1:44",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
@@ -75218,6 +75540,30 @@
       "location": "ops/install-hook.sh:66",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.sh:81",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:ack"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.sh:81",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.sh:81",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:receive"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-hook.sh:81",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:update"
     },
     {
       "dynamic": "unresolved",
@@ -77592,6 +77938,12 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/setup-codex-hooks.py:926",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/shim_autostart.py:157",
       "reason": "environment key family construction"
     },
@@ -78088,12 +78440,6 @@
       "dynamic": "unresolved",
       "location": "plugin/README.md:106",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/README.md:106",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
@@ -78167,12 +78513,6 @@
       "location": "plugin/README.md:227",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/README.md:242",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
@@ -78494,12 +78834,6 @@
       "resolved_by": [
         "route:GET /api/hook/park-gate"
       ]
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/lifecycle.ps1:446",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
@@ -78833,12 +79167,6 @@
       "dynamic": "unresolved",
       "location": "plugin/hooks/stop-wake.sh:445",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/stop-wake.sh:445",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
@@ -78864,12 +79192,6 @@
       "location": "plugin/hooks/stop-wake.sh:94",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board-guard.sh:109",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
@@ -78917,12 +79239,6 @@
       "dynamic": "unresolved",
       "location": "plugin/hooks/subagent-board-guard.sh:82",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board-guard.sh:82",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
@@ -78930,12 +79246,6 @@
       "location": "plugin/hooks/subagent-board-guard.sh:83",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_message"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/hooks/subagent-board-guard.sh:96",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",

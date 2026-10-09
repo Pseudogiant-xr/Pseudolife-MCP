@@ -409,6 +409,11 @@ def cli_flags(tail: str) -> dict:
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        # Synopsis groups and shell command-substitution closers surround a
+        # switch name; never strip parentheses from an expression-valued operand.
+        surrounded = re.fullmatch(r"\[*(--[a-z][a-z-]*)[\])]*", token)
+        if surrounded:
+            token = surrounded[1]
         match = re.fullmatch(r"(--[a-z][a-z-]*)(?:=(.*))?", token)
         if not match:
             i += 1
@@ -444,7 +449,8 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
         if not command_position:
             continue
         tail, quote, escaped = [], None, False
-        for char in text[match.end():]:
+        remaining = text[match.end():]
+        for index, char in enumerate(remaining):
             if quote:
                 if escaped:
                     escaped = False
@@ -454,7 +460,7 @@ def installer_cli_calls(text: str, path: str) -> list[dict]:
                     quote = None
             elif char in "\"'":
                 quote = char
-            elif char in ";|\n":
+            elif char in ";|\n)#" or remaining.startswith("&&", index):
                 break
             tail.append(char)
         snippet = "pseudolife-mcp " + match[1] + "".join(tail)
@@ -507,8 +513,12 @@ def forwarded_coordination(calls: list[dict]) -> list[dict]:
         if call["kind"] != "tool" or call["name"] not in {"memory_agents", "memory_message"}:
             continue
         action = call["shape"]["parameters"].get("action", {}).get("literal")
+        bare = call["shape"]["parameters"].get("action", {}).get("expression")
+        unverified = action is None and bare in {"list", "update", "claim", "release", "send", "receive", "ack", "history"}
+        if unverified:
+            action = bare
         if call["name"] == "memory_agents":
-            if action is None and "action" not in call["shape"]["parameters"]:
+            if action is None and "action" not in call["shape"]["parameters"] and call["shape"]["complete"]:
                 action = "list"
             target = {"list": "agents", "update": "update", "claim": "lease", "release": "release"}.get(action)
             mapping = "pseudolife_memory/coordination.py:835"
@@ -519,7 +529,7 @@ def forwarded_coordination(calls: list[dict]) -> list[dict]:
             forwarded = record("coordination", target, call["location"].rsplit(":", 1)[0],
                                int(call["location"].rsplit(":", 1)[1]), complete=False, channel="body",
                                expression="Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.")
-            forwarded["evidence"] = call["evidence"]
+            forwarded["evidence"] = "unverified" if unverified else call["evidence"]
             forwarded["forwarded_from_tool"] = call["name"]
             forwarded["tool_shape"] = call["shape"]
             forwarded["mapping_source"] = mapping
@@ -993,7 +1003,12 @@ def ci_currency_required(root: Path = ROOT, env: dict | None = None) -> bool:
     base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
     if not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) or not base.strip("0"):
         return False  # A manual dispatch has no changed-file range; still report currency.
-    changed = subprocess.check_output(["git", "diff", "--name-only", "-z", base, "HEAD"], cwd=root).decode("utf-8").split("\0")
+    try:
+        changed = subprocess.check_output(["git", "diff", "--name-only", "-z", base, "HEAD"],
+                                          cwd=root, stderr=subprocess.PIPE).decode("utf-8").split("\0")
+    except subprocess.CalledProcessError:
+        print("currency range unavailable (for example, a force-push); reporting drift only")
+        return False
     return bool(CURRENCY_INPUTS.intersection(changed))
 
 
