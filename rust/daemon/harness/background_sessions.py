@@ -199,6 +199,15 @@ def normalize_closes(state, before, start, end):
     for value in close_times.values():
         if isinstance(value, bool) or not isinstance(value, float) or not math.isfinite(value) or not start <= value <= end:
             raise RuntimeError("close clock outside the arm's captured window")
+    roots = {ep["id"] for ep in records(state, "episodes") if ep["parent_id"] is None}
+    roots.update(meta.get("deferred_empty_roots", {}))
+    roots.update(meta.get("episode_tombstones", {}))
+    # Preserve semantic root-close ordering, including ties, before replacing
+    # per-row clocks. Consistent swaps across all associations must still diff.
+    groups = {}
+    for id in roots & close_times.keys():
+        groups.setdefault(close_times[id], []).append(id)
+    state["root_close_order"] = [sorted(groups[stamp]) for stamp in sorted(groups)]
     for table in ("episodes", "client_sessions"):
         t = state["rows"]["public." + table]
         idx = t["columns"].index("ended_at")
@@ -224,6 +233,6 @@ def graceful_stop(daemon):
         raise RuntimeError("owned daemon already exited before clean stop")
     daemon.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
     code = daemon.proc.wait(timeout=120)
-    if code not in (0, -signal.SIGTERM, -getattr(signal, "SIGBREAK", signal.SIGTERM)):
+    if code != 0:
         raise RuntimeError(f"clean stop exited {code}; log {daemon.log}")
     daemon.stop()

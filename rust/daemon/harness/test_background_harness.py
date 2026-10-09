@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from background_sessions import normalize_closes, validate_restart_clocks
+from background_sessions import normalize_closes, validate_restart_clocks, graceful_stop
 
 
 def state():
@@ -50,3 +50,24 @@ def test_restart_cannot_rewrite_all_clocks_consistently():
     changed["rows"]["public.client_sessions"]["rows"][0][2] = 101.0
     changed["rows"]["public.meta"]["rows"][0][1]["a" * 32] = 101.0
     with pytest.raises(RuntimeError): validate_restart_clocks(changed, closed)
+
+
+def test_consistently_reversed_root_close_order_is_rejected_by_comparison():
+    a, prior = state(), before()
+    a["rows"]["public.episodes"]["rows"][1][1:] = [None, 101.0]
+    prior["rows"]["public.episodes"]["rows"][1][1] = None
+    b = copy.deepcopy(a)
+    b["rows"]["public.episodes"]["rows"][0][2] = 101.0
+    b["rows"]["public.episodes"]["rows"][1][2] = 100.0
+    b["rows"]["public.client_sessions"]["rows"][0][2] = 101.0
+    b["rows"]["public.meta"]["rows"][0][1]["a" * 32] = 101.0
+    assert normalize_closes(a, prior, 90.0, 110.0) != normalize_closes(b, prior, 90.0, 110.0)
+
+
+def test_signal_termination_is_not_a_controlled_clean_exit():
+    import signal
+    from types import SimpleNamespace
+    proc = SimpleNamespace(poll=lambda: None, send_signal=lambda _: None,
+                           wait=lambda timeout: -signal.SIGTERM)
+    daemon = SimpleNamespace(proc=proc, log=Path("fixture.log"), stop=lambda: None)
+    with pytest.raises(RuntimeError): graceful_stop(daemon)

@@ -275,11 +275,17 @@ impl Service {
 
     /// `MemoryService.warmup`: retry only a retryable failure whose window
     /// is still below the cap; anything else waits for the next caller.
-    pub async fn warmup(&self) {
+    pub async fn warmup(&self, mut stop: tokio::sync::watch::Receiver<bool>) {
         loop {
+            if *stop.borrow() {
+                return;
+            }
             match self.ensure_init_inner().await {
                 Ok(_) => return,
                 Err(e) => {
+                    if *stop.borrow() {
+                        return;
+                    }
                     eprintln!("warmup init failed: {e}");
                     let (wait, backoff) = {
                         let inner = self.inner.lock().await;
@@ -295,7 +301,10 @@ impl Service {
                     {
                         return;
                     }
-                    tokio::time::sleep(wait).await;
+                    tokio::select! {
+                        _ = stop.changed() => return,
+                        _ = tokio::time::sleep(wait) => {}
+                    }
                 }
             }
         }
@@ -343,9 +352,9 @@ impl crate::background::Duties for Service {
         })
     }
 
-    fn warmup(&self) -> crate::background::Duty<'_> {
+    fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
         Box::pin(async {
-            Service::warmup(self).await;
+            Service::warmup(self, stop).await;
             Ok(())
         })
     }
@@ -410,6 +419,35 @@ impl crate::background::Duties for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shutdown_interrupts_warmup_retry_wait_without_another_init() {
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            "postgresql://nobody@127.0.0.1:9/pl_cf_w3i_unused".into(),
+            false,
+        ));
+        {
+            let mut inner = service.inner.lock().await;
+            inner.retry_at = Some(Instant::now() + Duration::from_secs(3600));
+            inner.failures = 1;
+            inner.backoff_s = 5.0;
+        }
+        service.update(|s| s.not_ready = Some("controlled retry refusal".into()));
+        let background = crate::background::Background::default();
+        background.start_background_durability(service.clone(), 3600.0);
+        tokio::task::yield_now().await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            background.shutdown(service.as_ref()),
+        )
+        .await
+        .expect("stop must interrupt the retry wait");
+        let inner = service.inner.lock().await;
+        assert_eq!(inner.failures, 1);
+        assert!(inner.storage.is_none());
+    }
 
     #[test]
     fn backoff_ladder_matches_python() {

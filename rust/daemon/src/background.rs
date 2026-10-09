@@ -15,7 +15,7 @@ pub type Duty<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>
 /// durable write is never abandoned half way through an await.
 pub trait Duties: Send + Sync + 'static {
     fn autosave(&self) -> Duty<'_>;
-    fn warmup(&self) -> Duty<'_>;
+    fn warmup(&self, stop: watch::Receiver<bool>) -> Duty<'_>;
     fn reap(&self, idle_seconds: f64) -> Duty<'_>;
     fn sweep(&self) -> Duty<'_>;
 }
@@ -115,8 +115,9 @@ impl Background {
             })
             .await;
         }));
+        let warmup_stop = self.stop.subscribe();
         self.push(tokio::spawn(async move {
-            if let Err(e) = duties.warmup().await {
+            if let Err(e) = duties.warmup(warmup_stop).await {
                 eprintln!("warmup error: {e}");
             }
         }));
@@ -199,7 +200,7 @@ mod tests {
                 Ok(())
             })
         }
-        fn warmup(&self) -> Duty<'_> {
+        fn warmup(&self, _stop: watch::Receiver<bool>) -> Duty<'_> {
             Box::pin(async {
                 self.warm.fetch_add(1, Ordering::SeqCst);
                 Ok(())
