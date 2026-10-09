@@ -28,9 +28,11 @@ PARITY_CHECKS = {
     "Bind the event-selected Python oracle": None,
     "Check CI coverage contract": "eval",
     "Run every eval harness test": "eval",
+    "Offline embedding golden and mutant row": "eval",
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "Principal store differential and golden harness": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -103,6 +105,33 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    embedding = parity["Offline embedding golden and mutant row"]
+    invocations = commands(embedding["run"])
+    require_command(invocations, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_embedding.py",), PYTEST_FILTERS)
+    require_command(invocations, ("python", "rust/daemon/harness/run.py", "embedding"),
+                    ("--fixture", "--golden", "rust/daemon/harness/goldens/embedding-fixture.json", "--rust-bin", "--out"),
+                    ("--record", "--model", "--mutant"))
+    assert "rust/target/release" in embedding["run"]
+    assert not any(words[:2] == ["cargo", "build"] for words in invocations)
+
+    principal = parity["Principal store differential and golden harness"]
+    invocations = commands(principal["run"])
+    for mode in ("live", "golden"):
+        require_command(invocations, ("python", "rust/daemon/harness/principals.py", mode),
+                        ("--rust-bin", "--out"), ("--record", "--mutants"))
+    assert "rust/target/release" in principal["run"]
+    assert not any(words[:2] == ["cargo", "build"] for words in invocations)
+    daemon_build = next(step for step in jobs["candidate"]["steps"]
+                        if step.get("name") == "Build embedding candidate")
+    invocation = next(words for words in commands(daemon_build["run"])
+                      if words[:2] == ["cargo", "build"])
+    assert {"mutants", "principal-harness"} <= set(
+        invocation[invocation.index("--features") + 1].split(","))
+    steps = jobs["parity-checks"]["steps"]
+    assert steps.index(parity["Prepare disposable PostgreSQL for CLI lease row"]) < steps.index(principal)
+    upload = next(step for step in steps if step.get("name") == "Retain principal store outcomes")
+    assert upload["if"] == "always() && matrix.suite == 'cli'"
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -174,7 +203,16 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     permission = next(s for s in job["steps"] if s.get("name") == "Restore executable permission")
     assert permission["if"] == "runner.os == 'Linux'"
-    assert permission["run"] == "chmod +x rust/target/release/pseudolife-stdio"
+    assert shlex.split(permission["run"]) == ["chmod", "+x",
+        "rust/target/release/pseudolife-stdio", "rust/target/release/pseudolife-daemon"]
+    candidate = workflow()["jobs"]["candidate"]
+    build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
+    require_command(commands(build["run"]), ("cargo", "build"),
+                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bin", "--features"))
+    invocation = next(words for words in commands(build["run"]) if words[:2] == ["cargo", "build"])
+    assert "mutants" in invocation[invocation.index("--features") + 1].split(",")
+    upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
@@ -197,6 +235,28 @@ def test_coverage_guard_rejects_a_removed_check(monkeypatch):
     changed = copy.deepcopy(workflow())
     steps = changed["jobs"]["parity-checks"]["steps"]
     steps[:] = [s for s in steps if s.get("name") != "CLI lease differential harness"]
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("condition", [None, "matrix.suite == 'eval'", "matrix.suite == 'judges'"])
+def test_principal_store_requires_the_postgres_shard(monkeypatch, condition):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Principal store differential and golden harness")
+    step["if"] = condition
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("features", ["mutants", "principal-harness", ""])
+def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["candidate"]["steps"]
+                if s.get("name") == "Build embedding candidate")
+    step["run"] = step["run"].replace("mutants,principal-harness", features)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
@@ -225,6 +285,12 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
+    ("Principal store differential and golden harness", "principals.py live", "principals.py oracle"),
+    ("Principal store differential and golden harness", "principals.py golden", "principals.py live"),
+    ("Principal store differential and golden harness", "rust/target/release", "rust/target/debug"),
+    ("Offline embedding golden and mutant row", "--fixture", ""),
+    ("Offline embedding golden and mutant row", "--golden", "--record"),
+    ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())
