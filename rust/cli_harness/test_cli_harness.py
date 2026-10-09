@@ -128,3 +128,16 @@ def test_rules_apply_to_copies_not_the_raw_observation():
     raw = obs(exit=120, stderr=b"x")
     normalize.apply(raw, ("python-shutdown-flush",), raw["home"])
     assert raw["exit"] == 120
+
+
+def test_home_removal_waits_out_a_briefly_held_file(tmp_path):
+    import threading
+    from cli_harness import core
+    home = tmp_path / "h"
+    (home / "d").mkdir(parents=True)
+    held = (home / "d" / "digest.txt").open("w")
+    held.write("7\n")
+    held.flush()
+    threading.Timer(0.5, held.close).start()
+    core._remove(home)
+    assert not home.exists()
