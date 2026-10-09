@@ -257,10 +257,12 @@ impl CortexStore {
 
     /// `members(entity, attribute)`: current members of a set slot, in
     /// insertion order.
+    #[allow(dead_code)] // read API for the write slice (W2-E) and the tests
     pub fn members(&self, entity: &str, attribute: &str) -> Vec<&CortexRecord> {
         self.members_by_key(&slot_key(entity, attribute))
     }
 
+    #[allow(dead_code)] // read API for the write slice (W2-E) and the tests
     pub fn members_by_key(&self, key: &SlotKey) -> Vec<&CortexRecord> {
         self.members
             .get(key)
