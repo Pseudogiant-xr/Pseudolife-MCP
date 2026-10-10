@@ -204,6 +204,7 @@
     "examples/hook-instructions.md": "63e99f370c3b24c904bb806308f98b7adba4a561b9c38a4eef1d7b80f317c22e",
     "ops/.env.example": "434d1933ae99775700abe53d529d223c75c5faea8de27da048fe1ffe6c45d39f",
     "ops/Dockerfile.daemon": "c8e8a08a1a6247ebd1517b214dc7afefaa442b000f3350a29947e9cab844621a",
+    "ops/Dockerfile.daemon-rust": "906c82fa8cf796f6fec24a38a5c12cd8951f048c35842d6c373e5d94f9ba4cfd",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.pg": "06308c96aaa3ceedf2fc988c1fccfe8573e4ae1836143546ce1fb7d996707201",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -216,6 +217,7 @@
     "ops/coordination_probe.py": "9fb8b31f002694021b5ad0aaaa4d8528187e833c8c7dac27812f9bd2a630df26",
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
+    "ops/docker-compose.rust.yml": "128ea0dd72104ef8f436115750e26be6417d24845027759086238cdf526411a1",
     "ops/docker-compose.yml": "07dffcb085a165fd65ff288b6f1f9cfedc15abd45f6719fcfd9c1d599f61bb95",
     "ops/gen_llms_txt.py": "de91c3fc65ea1960cb1dd25c913cf8bf7dfef6302454468fcd03e42a9bbb2803",
     "ops/install-autostart.ps1": "453da0472d4b9566f6774aca6128b531341a2ef91e79d44f980e0b571a22671b",
@@ -306,11 +308,11 @@
     "rust/shim/src/cli/backup/dump.rs": "8904e9827a5c0e3ae7d941d6755da3fe6a2f48a0897076f8ae36612a51fb5539",
     "rust/shim/src/cli/backup/mod.rs": "9362cc5cabdb0aa2af21a47d6f82bc804b5d926d66754b3150c9efcc5739cba8",
     "rust/shim/src/cli/backup_help.txt": "d93f92ce42d1dc4c46285fcea973d8812d6954808c1f7027d7b78c224278cb1c",
-    "rust/shim/src/cli/board_audit/archive.rs": "9473835a8b577fb5851d1b084569edb1a864bf577c5801a9437e222de7e4129e",
+    "rust/shim/src/cli/board_audit/archive.rs": "bcf9755350db6616102e2560602d9ead6ac1229698f84819479e9d8834773f34",
     "rust/shim/src/cli/board_audit/args.rs": "57e3af4802ccd8a0043072821c201a6d829b274121ef1eb6555f432be52f2810",
     "rust/shim/src/cli/board_audit/bank.rs": "c6308460df21cbb3d12938147d2e2cba0cfaa2c959d8b3a215ab343954e2e146",
     "rust/shim/src/cli/board_audit/chain.rs": "a2215b4a9d43ac698990849ea84f6e76e66f96701c3dc23aa5ad0e031b7d73ea",
-    "rust/shim/src/cli/board_audit/codec.rs": "d679456adeb7ff361c15c4b80ced17e0babb71740981763b7c3b8b1596331d1c",
+    "rust/shim/src/cli/board_audit/codec.rs": "828d3ca25676f77f060da248893f18ddc55ffa89aa2177d3a1b4c191d4f66dfd",
     "rust/shim/src/cli/board_audit/mod.rs": "143e7ece511e0ea8d8dd16e73f4daa4c0d1c32497488f87cea1569f63d31102e",
     "rust/shim/src/cli/board_audit/redact.rs": "a00b071631fcaddfccd0fc3abaa96bdcc3412cd037630294e683d8f976ad2cf4",
     "rust/shim/src/cli/briefing_help.txt": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638",
@@ -332,7 +334,7 @@
     "rust/shim/src/cli/doctor/pyenv.rs": "ea917b55dcce04ca82e5612413d73c2a9d19d334de87e421ea412b3d96a9ede3",
     "rust/shim/src/cli/doctor/pyjson.rs": "4a60384b4a0d3329c5b95de68d860d846f44acb67b35a79d64d248719dd57d1e",
     "rust/shim/src/cli/doorbell_files.rs": "a9b1fd8249271dc32d7e13e0316031e43ada21ca237c9544bcc0d7ec4146e87d",
-    "rust/shim/src/cli/doorbell_json.rs": "d636c0214e1e1cf969fad46fa42ce01d23bba7092b0390315b7831fa6f7a55a5",
+    "rust/shim/src/cli/doorbell_json.rs": "f98ca1cfc45d56d251894438b931b40b1d465d3654524f11babd32fd8e95bb33",
     "rust/shim/src/cli/doorbell_seen.rs": "dbfa57d6cd989f61114992bed3b4b78fff1f0597e4845397241148a35cd03f4d",
     "rust/shim/src/cli/episode.rs": "2e91f8a822f0cf79daa16276ded3430394e8606d08ab259d7ac9dbfa8022729a",
     "rust/shim/src/cli/episode_input.rs": "77def92a2ec55e376a2c9b9730b9e4730e276b98bf3db606db7ceadb94bbb57c",
@@ -417,7 +419,7 @@
     "rust/shim/src/pg/transport.rs": "d8e8130f874383e0466e6b52a56a37388963dcbf68079938638c5a933dc8a087",
     "rust/shim/src/raw_http.rs": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8",
     "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
-    "rust/shim/src/sent_config.rs": "00a4d30595b1de95be15b0cf3e514a514fd9c06b8b96b2c57d49539f3869ca08",
+    "rust/shim/src/sent_config.rs": "03cb07c81b860fe1f90cb823c67720a00a76c45b7d4520203198875d9b614387",
     "rust/shim/src/sent_json.rs": "83ca7dad88697835815de2f8fb850c1b2ac719db3be2cdaf9bc053e414c6a228",
     "rust/shim/src/sent_jsonb.rs": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e",
     "rust/shim/src/sent_serve.rs": "335fd96af4c5eac802e5102f09154552e32705899bc81f990ae95ddba0dd0234",
@@ -7524,7 +7526,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:169",
+          "location": "rust/shim/src/sent_config.rs:226",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7540,7 +7542,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:174",
+          "location": "rust/shim/src/sent_config.rs:231",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7556,7 +7558,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:176",
+          "location": "rust/shim/src/sent_config.rs:233",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7572,7 +7574,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:185",
+          "location": "rust/shim/src/sent_config.rs:242",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7588,7 +7590,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:194",
+          "location": "rust/shim/src/sent_config.rs:251",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7794,7 +7796,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:174",
+          "location": "rust/shim/src/sent_config.rs:231",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7807,7 +7809,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:176",
+          "location": "rust/shim/src/sent_config.rs:233",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -7820,7 +7822,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:185",
+          "location": "rust/shim/src/sent_config.rs:242",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -8079,7 +8081,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/sent_config.rs:169",
+          "location": "rust/shim/src/sent_config.rs:226",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -22513,6 +22515,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust.yml:25",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:93",
           "shape": {
             "channel": "environment",
@@ -22522,6 +22537,21 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:51",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$GIT_DIRTY"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -22549,6 +22579,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust.yml:24",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:92",
           "shape": {
             "channel": "environment",
@@ -22558,6 +22601,21 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:50",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$GIT_SHA"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -22584,6 +22642,21 @@
       "producers": [
         {
           "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:53",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$BUILD_SOURCE"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "ops/Dockerfile.daemon:138",
           "shape": {
             "channel": "environment",
@@ -22608,6 +22681,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust.yml:26",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-unknown}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:94",
           "shape": {
             "channel": "environment",
@@ -22617,6 +22703,21 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:52",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "$BUILD_TIME"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -29470,6 +29571,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/docker-compose.rust.yml:30",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "postgresql://w3j:w3j-disposable@postgres:5432/pl_cf_w3j_container",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.yml:142",
           "shape": {
             "channel": "environment",
@@ -30360,6 +30474,21 @@
         },
         {
           "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:35",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "/data"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "ops/Dockerfile.daemon:26",
           "shape": {
             "channel": "environment",
@@ -30473,6 +30602,21 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:33",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "0.0.0.0"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -31605,6 +31749,21 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:34",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "8765"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -32881,6 +33040,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/docker-compose.rust.yml:31",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "${W3J_RUST_TOKEN:?Set a disposable W3J_RUST_TOKEN}",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -37285,6 +37457,21 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/Dockerfile.daemon-rust:39",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "/app/plugin"
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -57877,7 +58064,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/sent_config.rs:194",
+      "location": "rust/shim/src/sent_config.rs:251",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -57891,7 +58078,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/sent_config.rs:196",
+      "location": "rust/shim/src/sent_config.rs:253",
       "name": "MaintainerConfig.rp_id",
       "shape": {
         "channel": "config",
@@ -57905,7 +58092,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/sent_config.rs:199",
+      "location": "rust/shim/src/sent_config.rs:256",
       "name": "MaintainerConfig.origin",
       "shape": {
         "channel": "config",
@@ -61058,6 +61245,20 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "ops/Dockerfile.daemon-rust:56",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "ops/Dockerfile.daemon:144",
       "method": null,
       "name": "/health",
@@ -62881,6 +63082,38 @@
         "parameters": {
           "value": {
             "literal": "0"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:36",
+      "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "/opt/models/qwen3"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/Dockerfile.daemon-rust:37",
+      "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "3"
           }
         }
       },
@@ -76835,6 +77068,22 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/Dockerfile.daemon-rust:22",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/Dockerfile.daemon-rust:56",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/Dockerfile.daemon-rust:56",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/Dockerfile.daemon:144",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
@@ -76981,6 +77230,36 @@
       "location": "ops/docker-compose.ghcr.yml:20",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:24",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_GIT_SHA"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_DIRTY"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:26",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BUILD_TIME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:30",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/docker-compose.rust.yml:31",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
@@ -83285,73 +83564,73 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:169",
+      "location": "rust/shim/src/sent_config.rs:226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:169",
+      "location": "rust/shim/src/sent_config.rs:226",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:174",
+      "location": "rust/shim/src/sent_config.rs:231",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:174",
+      "location": "rust/shim/src/sent_config.rs:231",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:176",
+      "location": "rust/shim/src/sent_config.rs:233",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:176",
+      "location": "rust/shim/src/sent_config.rs:233",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:185",
+      "location": "rust/shim/src/sent_config.rs:242",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:185",
+      "location": "rust/shim/src/sent_config.rs:242",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:194",
+      "location": "rust/shim/src/sent_config.rs:251",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:194",
+      "location": "rust/shim/src/sent_config.rs:251",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:196",
+      "location": "rust/shim/src/sent_config.rs:253",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:MaintainerConfig.rp_id"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/sent_config.rs:199",
+      "location": "rust/shim/src/sent_config.rs:256",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:MaintainerConfig.origin"
     },
