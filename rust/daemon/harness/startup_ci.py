@@ -1,7 +1,7 @@
 """Run startup hydration parity on CI's prepared disposable PostgreSQL fixture.
 
 The caller supplies the test-login environment and may set CARGO_TARGET_DIR.
-This helper checks generated schema inputs, runs the schema harness unit tests,
+This helper checks generated schema inputs, runs schema and startup fixture unit tests,
 builds the native daemon test executable, and checks startup goldens and mutants.
 It does not provision PostgreSQL or load an embedding model.
 """
@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         for command in (
             [sys.executable, str(HERE / "gen_schema_sql.py"), "--check"],
             [sys.executable, "-m", "unittest", "discover", "-s", str(HERE), "-p", "test_schema_*.py"],
+            [sys.executable, "-m", "unittest", "discover", "-s", str(HERE), "-p", "test_startup_*.py"],
         ):
             code = subprocess.run(command, cwd=REPO, env=env).returncode
             if code:
