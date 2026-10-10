@@ -135,7 +135,7 @@ def require_post_read(seconds: float):
         require_post(arm, observation)
         lo, hi = observation["window"]
         if hi - lo < seconds:
-            observation["vacuous"] = (f"left after {hi - lo:.1f} s, before the {seconds:.0f} s "
+            observation["vacuous"] = (f"left after {hi - lo:.1f} s, before the {seconds:g} s "
                                       "reply was read")
     return after
 

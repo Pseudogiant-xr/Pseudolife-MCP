@@ -10,25 +10,28 @@ use std::{
     time::Duration,
 };
 use tokio_tungstenite::tungstenite::Message;
+type HostGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
 async fn host_url(
     uncertain: bool,
     delay: Duration,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
-    host_url_gated(uncertain, delay, None).await
+    host_url_gated(uncertain, delay, None, None).await
 }
 async fn host_url_gated(
     uncertain: bool,
     delay: Duration,
-    verification: Option<(
-        tokio::sync::oneshot::Sender<()>,
-        tokio::sync::oneshot::Receiver<()>,
-    )>,
+    initialization: Option<HostGate>,
+    verification: Option<HostGate>,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let log = Arc::new(Mutex::new(vec![]));
     let recorded = log.clone();
     let task = tokio::spawn(async move {
+        let mut initialization = initialization;
         let mut verification = verification;
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
@@ -41,9 +44,12 @@ async fn host_url_gated(
             if method == "initialized" {
                 continue;
             }
-            if method == "thread/loaded/list"
-                && let Some((entered, released)) = verification.take()
-            {
+            let gate = match method {
+                "initialize" => initialization.take(),
+                "thread/loaded/list" => verification.take(),
+                _ => None,
+            };
+            if let Some((entered, released)) = gate {
                 let _ = entered.send(());
                 let _ = released.await;
             }
@@ -108,7 +114,8 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
     options.wake = true;
     let startup = Duration::from_secs(3);
     let phase_delay = Duration::from_millis(1700);
-    // Verification and registration each fit, but cannot share one startup budget.
+    // Connect, verification and registration each fit; neither adjacent pair
+    // can share one startup budget.
     assert!(phase_delay < startup && phase_delay * 2 > startup);
     options.timing.startup = startup;
     let (answer, mut registration) = Answer::json(
@@ -117,11 +124,14 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
     )
     .gated();
     fixture.answer("register", answer);
+    let (connect_entered, connect_seen) = tokio::sync::oneshot::channel();
+    let (connect_release, connect_released) = tokio::sync::oneshot::channel();
     let (verify_entered, verify_seen) = tokio::sync::oneshot::channel();
     let (verify_release, verify_released) = tokio::sync::oneshot::channel();
     let (url, log, server) = host_url_gated(
         false,
         Duration::ZERO,
+        Some((connect_entered, connect_released)),
         Some((verify_entered, verify_released)),
     )
     .await;
@@ -143,6 +153,12 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
             .prepare_call("memory_stats", None, &json!({"threadId":BANK}))
             .await
     });
+    tokio::time::timeout(startup, connect_seen)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::advance(phase_delay).await;
+    connect_release.send(()).unwrap();
     tokio::time::timeout(startup, verify_seen)
         .await
         .unwrap()
@@ -158,6 +174,7 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
     };
     assert!(call.operation.headers.contains_key("x-pl-agent-key"));
     assert!(started.elapsed() > startup);
+    assert_eq!(started.elapsed(), phase_delay * 3);
     tokio::time::resume();
     drop(clock_guard);
     clock_task.await.unwrap();
