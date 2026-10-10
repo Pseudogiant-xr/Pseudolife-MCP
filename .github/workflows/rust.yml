@@ -222,9 +222,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
     # Allow twice that whole-job estimate, including artifact retention,
-    # plus the W1-C rows' step budget (60m; about 45m live and golden on
-    # hosted Windows in run 38007737431, 2026-10-10).
-    timeout-minutes: 125
+    # plus the W1-C rows' step budget (110m; see that step).
+    timeout-minutes: 175
     steps:
       - uses: actions/checkout@v4
         with:
@@ -581,7 +580,11 @@ jobs:
         run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
       - name: CLI W1-C differential harness
         if: matrix.suite == 'cli'
-        timeout-minutes: 60
+        # Hosted Windows, live and golden: about 45m in run 38007737431
+        # (2026-10-10), then 55m26s and 53m37s for PRs #709 and #710
+        # (2026-10-11) after batch #707 added rows, and PR #712's run hit the
+        # old 60m limit while still passing cases. Twice the 55m measurement.
+        timeout-minutes: 110
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
