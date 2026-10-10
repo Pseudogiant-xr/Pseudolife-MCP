@@ -76,3 +76,5 @@ request paths, headers or payloads. A timeout or socket abort is never counted
 as a successful source control.
 
 Always-200 memory-changes, park-gate, woke, subagent and coordination-start replies also retain unread bodies for the same bounded cleanup. The additional twenty paired cases keep each hook's selected 200 response at 65536 and 262145 bytes, with headers-only and Expect variants; they do not dispatch a body or perform hook mutations. The old Windows release aborted the first unavailable-hook probe.
+
+At runtime candidate 1d718112, the expanded corpus passed 118 live and 118 golden cases on each platform, with five declarations and four unchanged fixture comparisons. All four source controls were caught on each platform by 16/15/6/4 response differences without scenario errors. Windows passed 100 native units and Linux 105; each platform passed Clippy, builds and 84 guards plus 10 subtests, with one explicit production-artifact skip. The first Windows golden attempt timed out; a focused 78-case replay and two complete 118-case replays subsequently passed. The earlier 98-case telemetry above retains its own measured-run identity.
