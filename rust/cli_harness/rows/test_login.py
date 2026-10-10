@@ -19,7 +19,7 @@ memberships, every database's owner, ACL and flags, template1's extensions,
 and the written login validated against that arm's server (the file's
 password authenticates as the role and its SCRAM verifier verifies it, the
 role cannot connect to the bank) plus the file's owner-only permissions (the
-Windows owner/protection/explicit DACL entries with symbolic identities and
+Windows owner/protection/all file DACL entries with symbolic identities and
 the directory's pre-command creator owner; POSIX mode
 and owner). Named rules: ``test-login-password`` (a newly drawn password,
 only once validated) and ``test-login-driver-error`` (the PostgreSQL client
@@ -175,8 +175,9 @@ def _sddl(path: Path) -> str:
     return _SID.sub(lambda m: "<me>" if m[0] == _my_sid() else m[0], value)
 
 
-def _acl_projection(sddl: str, *, creator_owner: str | None = None) -> object:
-    """Keep owner/protection/explicit ACEs; inherited ACEs belong to the host.
+def _acl_projection(sddl: str, *, creator_owner: str | None = None,
+                    directory: bool = False) -> object:
+    """Keep every file ACE; only directories omit host-inherited ACEs.
     Unknown identities share symbols across live arms, preserving distinctions
     and repeated trustees without recording environment-specific SID values."""
     def identity(value: str) -> str:
@@ -190,11 +191,13 @@ def _acl_projection(sddl: str, *, creator_owner: str | None = None) -> object:
 
     match = re.fullmatch(r"O:([^:]+)D:([A-Z]*)((?:\([^)]*\))*)", sddl)
     if not match:
-        return _SID.sub(lambda m: identity(m[0]), sddl)
+        raise ValueError("ACL capture failed or returned an unsupported descriptor")
     aces = []
     for ace in re.findall(r"\([^)]*\)", match[3]):
         fields = ace[1:-1].split(";")
-        if len(fields) >= 6 and "ID" in fields[1]:
+        if len(fields) < 6:
+            raise ValueError("ACL capture returned an unsupported ACE")
+        if directory and "ID" in fields[1]:
             continue
         if len(fields) >= 6:
             fields[5] = identity(fields[5])
@@ -207,20 +210,23 @@ def _acl_projection(sddl: str, *, creator_owner: str | None = None) -> object:
 def _creator_owner(home: Path) -> str | None:
     if not WINDOWS:
         return None
-    match = re.match(r"O:([^:]+?)(?=D:|$)", _sddl(home))
-    return match[1] if match else None
+    captured = _sddl(home)
+    _acl_projection(captured, directory=True)  # Refuse a failed pre-command capture too.
+    return re.match(r"O:([^:]+?)(?=D:|$)", captured)[1]
 
 
-def _permissions(path: Path, *, creator_owner: str | None = None) -> object:
+def _permissions(path: Path, *, creator_owner: str | None = None,
+                 directory: bool = False) -> object:
     if not path.exists():
         return None
     if WINDOWS:
-        # The command's ACL: owner, DACL protection and explicit ACEs.
-        # Inherited ACEs reflect the fixture's host parent directories.
+        # Every file ACE affects access to its password, even with ID set.
+        # Only directory inheritance reflects the host's fixture parents;
+        # directory owner, protection and explicit ACEs still compare.
         # The DACL's auto-inherited control bit
         # (SDDL "AI") grants nothing and is not compared: the oracle's
         # SetFileSecurityW leaves it clear, the crate's SetSecurityInfo sets it.
-        return _acl_projection(_sddl(path), creator_owner=creator_owner)
+        return _acl_projection(_sddl(path), creator_owner=creator_owner, directory=directory)
     info = path.stat()
     return {"mode": oct(info.st_mode & 0o7777), "mine": info.st_uid == os.geteuid()}
 
@@ -237,7 +243,7 @@ def _observe(server, home: Path, login: Path, before: str | None,
         "databases": server.rows(_DATABASES),
         "template1": server.rows(_EXTENSIONS, "template1"),
         "file_acl": _permissions(login),
-        "dir_acl": _permissions(login.parent, creator_owner=creator_owner),
+        "dir_acl": _permissions(login.parent, creator_owner=creator_owner, directory=True),
     }
     values = _read_login(login)
     user, password = values.get(USER_KEY), values.get(PASSWORD_KEY)
@@ -459,6 +465,11 @@ def _hand_edited(body: str | bytes):
         _seed_login(arm, server, with_file=False)
         path = _login_path(arm)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if WINDOWS:
+            # This case tests reading edited bytes. Bind its initial ACL to
+            # the oracle's private-file fixture, rather than host inheritance.
+            staged = _oracle()._write_private(path, "")
+            os.replace(staged, path)
         path.write_bytes(body if isinstance(body, bytes) else body.encode("utf-8"))
     return prepare
 

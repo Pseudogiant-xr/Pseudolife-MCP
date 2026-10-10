@@ -64,6 +64,8 @@ def _print(text: str, *, flush: bool = False) -> None:
 
 def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
             candidate: core.Target, golden: dict | None, verbose: bool) -> dict:
+    if golden is not None:
+        _validate_golden_acls(golden)
     results = {}
     for case in cases:
         started = time.monotonic()
@@ -338,9 +340,28 @@ def redact_golden(golden: dict) -> dict:
     return golden
 
 
+def _validate_golden_acls(golden: dict) -> None:
+    """Encounter symbols cannot bind identities across recording processes."""
+    if re.search(r"<sid-[0-9]+>", json.dumps(golden)):
+        raise SystemExit("refusing golden: unbound ACL identity")
+
+    def walk(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in ("file_acl", "dir_acl") and isinstance(item, str):
+                    raise SystemExit("refusing golden: failed ACL capture")
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(golden)
+
+
 def write_golden(path: Path, golden: dict, fixtures: tuple[str, ...] = ()) -> None:
     """Write a golden, refusing one that would still carry a SCRAM verifier
     or a drawn-shape login secret other than the row's ``fixtures``."""
+    _validate_golden_acls(golden)
     marks = normalize.scram_marks(golden)
     if marks:
         raise SystemExit(f"refusing to write {path}: SCRAM-SHA-256$ remains at "
