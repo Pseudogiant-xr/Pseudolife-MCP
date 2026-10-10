@@ -32,16 +32,16 @@ from ..mutants import Mutant
 from . import _bank
 
 ROW = "transfer"
-SRC = "pl_cf_w1c_transfer_src"
-TRICKY = "pl_cf_w1c_transfer_tricky"
-TGT = "pl_cf_w1c_transfer_tgt"
-INF = "pl_cf_w1c_transfer_inf"
-DEEP = "pl_cf_w1c_transfer_deep"
-NYC = "pl_cf_w1c_transfer_nyc"
-NYC_EMPTY = "pl_cf_w1c_transfer_nyc_empty"
-OLD54 = "pl_cf_w1c_transfer_old54"
-FUTURE = "pl_cf_w1c_transfer_future"
-TIES = "pl_cf_w1c_transfer_ties"
+SRC = _bank.name("pl_cf_w1c_transfer_src")
+TRICKY = _bank.name("pl_cf_w1c_transfer_tricky")
+TGT = _bank.name("pl_cf_w1c_transfer_tgt")
+INF = _bank.name("pl_cf_w1c_transfer_inf")
+DEEP = _bank.name("pl_cf_w1c_transfer_deep")
+NYC = _bank.name("pl_cf_w1c_transfer_nyc")
+NYC_EMPTY = _bank.name("pl_cf_w1c_transfer_nyc_empty")
+OLD54 = _bank.name("pl_cf_w1c_transfer_old54")
+FUTURE = _bank.name("pl_cf_w1c_transfer_future")
+TIES = _bank.name("pl_cf_w1c_transfer_ties")
 _CREATED: set[str] = set()
 _ARCHIVES: dict[str, bytes] = {}
 _EOL = "\r\n" if core.WINDOWS else "\n"

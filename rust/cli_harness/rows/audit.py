@@ -219,7 +219,7 @@ _CREATED: set[str] = set()
 
 
 def _name(kind: str) -> str:
-    return PREFIX + kind
+    return _bank.name(PREFIX + kind)
 
 
 def _drop_all() -> None:
@@ -606,7 +606,7 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
                      stdout_closed=stdout_closed)
 
 
-REDACT_DB = PREFIX + "rd"
+REDACT_DB = _bank.name(PREFIX + "rd")
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),

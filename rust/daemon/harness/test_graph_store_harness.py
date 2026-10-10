@@ -72,7 +72,7 @@ class ClockControls(unittest.TestCase):
         process.wait.return_value = 0
         process.stdout.readline.return_value = '{"value":null}\n'
         process.stdin.write.side_effect = lambda _: current.__setitem__(0, current[0] + 1)
-        native = graph_store.pg.PREFIX + str(os.getpid() * 10 + 2)
+        native = graph_store.pg.name(graph_store.pg.PREFIX + str(os.getpid() * 10 + 2))
 
         def observed(url):
             result = copy.deepcopy(initial)

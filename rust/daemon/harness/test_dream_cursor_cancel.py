@@ -35,7 +35,7 @@ def stop_owned(proc):
 class CancelledWaiter(unittest.TestCase):
     def test_panicked_writer_rolls_back_before_next_pull(self):
         binary = Path(os.environ["PL_DREAM_CONTRACT_BINARY"]).resolve()
-        names = [pg.PREFIX + "panic_t", pg.PREFIX + "panic_py", pg.PREFIX + "panic_rs"]
+        names = [pg.name(pg.PREFIX + "panic_" + side) for side in ("t", "py", "rs")]
         try:
             template = pg.create(names[0])
             seed(template, {"meta": {"dream_ack_secret_v1": "11" * 32},
@@ -67,7 +67,7 @@ class CancelledWaiter(unittest.TestCase):
 
     def test_admitted_commit_survives_cancel_and_next_pull(self):
         binary = Path(os.environ["PL_DREAM_CONTRACT_BINARY"]).resolve()
-        names = [pg.PREFIX + "cancel_t", pg.PREFIX + "cancel_py", pg.PREFIX + "cancel_rs"]
+        names = [pg.name(pg.PREFIX + "cancel_" + side) for side in ("t", "py", "rs")]
         proc = None
         try:
             template = pg.create(names[0])

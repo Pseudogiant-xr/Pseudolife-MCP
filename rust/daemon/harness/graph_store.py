@@ -327,7 +327,7 @@ def oracle_graph_store():
 def run(candidate, mode, mutant=None, row="store", metadata=None):
     from pseudolife_memory.storage.postgres import PostgresStorage
     import psutil
-    names = [pg.PREFIX + str(os.getpid() * 10 + n) for n in range(3)]
+    names = [pg.name(pg.PREFIX + str(os.getpid() * 10 + n)) for n in range(3)]
     proc = oracle = None
     cases = []
     skip_reason = None

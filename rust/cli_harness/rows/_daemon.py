@@ -22,7 +22,6 @@ import urllib.request
 from pathlib import Path
 
 from . import _bank
-from ..core import PLATFORM
 
 ORACLE: dict = {"python": None, "source": None}
 _POOL: dict[str, "RealDaemon"] = {}
@@ -136,40 +135,12 @@ class RealDaemon:
         shutil.rmtree(self.data, ignore_errors=True)
 
 
-def _sweep_dead_runs() -> None:
-    """Drop banks this platform's earlier harness runs left behind when they
-    were killed before their exit hook ran (names end in the run's pid)."""
-    import re  # noqa: PLC0415
-    try:
-        import psutil  # noqa: PLC0415
-    except ImportError:
-        return
-    prefix = PLATFORM[:3]
-    with _bank._admin() as conn:
-        names = [r[0] for r in conn.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE 'pl\\_cf\\_w1b\\_%'")]
-    for name in names:
-        match = re.fullmatch(rf"pl_cf_w1b_[a-z0-9_]+_{prefix}(\d+)", name)
-        if match and int(match.group(1)) != os.getpid() and not psutil.pid_exists(
-                int(match.group(1))):
-            _bank.drop(name)
-
-
-_SWEPT = False
-
-
 def shared(row: str):
     """A per-arm factory: ``core.run_arm`` calls it with the arm's name."""
     def factory(arm: str) -> RealDaemon:
-        global _SWEPT
         key = f"{row}_{arm}"
-        if not _SWEPT:
-            _SWEPT = True
-            _sweep_dead_runs()
         if key not in _POOL:
-            # Per host and process: two harness runs (say Windows and WSL)
-            # share the bench server and must never drop each other's banks.
-            _POOL[key] = RealDaemon(f"pl_cf_w1b_{key}_{PLATFORM[:3]}{os.getpid()}")
+            _POOL[key] = RealDaemon(_bank.name(f"pl_cf_w1b_{key}"))
         _POOL[key].settle()
         return _POOL[key]
     factory.per_arm = True

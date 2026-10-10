@@ -18,7 +18,17 @@ import os
 import re
 from urllib.parse import quote
 
+from ..pg_create import create_from_default_template
+from ..run_names import RunNames
+
 _NAME = re.compile(r"^pl_cf_[a-z0-9_]{1,40}$")
+NAMES = RunNames()
+
+
+def name(label: str) -> str:
+    if not _NAME.fullmatch(label):
+        raise ValueError(f"disposable database names start with pl_cf_: {label!r}")
+    return NAMES.name(label, max_length=46)
 
 
 def _login() -> tuple[str, str]:
@@ -60,6 +70,7 @@ def drop(name: str) -> None:
     import psycopg  # noqa: PLC0415
     from pseudolife_memory.storage.schema import (  # noqa: PLC0415
         assert_disposable_database, refuse_production_database)
+    NAMES.require_owned(name)
     url(name)  # validates the name
     with _admin() as conn:
         if not conn.execute(
@@ -98,7 +109,7 @@ def create(name: str, schema: bool = True) -> str:
     """A fresh empty database; with ``schema`` the oracle's ensure_schema ran."""
     drop(name)
     with _admin() as conn:
-        conn.execute(f'CREATE DATABASE "{name}"')
+        create_from_default_template(conn, f'CREATE DATABASE "{name}"')
     if schema:
         from pseudolife_memory.storage.schema import ensure_schema  # noqa: PLC0415
         with _connect(name, autocommit=False) as conn:

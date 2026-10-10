@@ -1086,8 +1086,8 @@ class DbLost(Scenario):
     def timeline(self, procs, holders):
         import psycopg
         out = self.partial = []
-        dbs = [f"{pg.PREFIX}db_lost_{side}" for side in ("py", "rs")]
-        with psycopg.connect(pg.dsn(f"{pg.PREFIX}db_lost_t"), autocommit=True) as conn:
+        dbs = [pg.name(f"{pg.PREFIX}db_lost_{side}") for side in ("py", "rs")]
+        with psycopg.connect(pg.dsn(pg.name(f"{pg.PREFIX}db_lost_t")), autocommit=True) as conn:
             assert_disposable(conn)
             for db in dbs:
                 if not pg.DISPOSABLE_NAME.fullmatch(db):
@@ -1557,18 +1557,18 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     finally:
         # Only this scenario's three exact names, including seed failure.
         for suffix in ("t", "py", "rs"):
-            pg.drop(f"{pg.PREFIX}{tag}_{suffix}")
+            pg.drop(pg.name(f"{pg.PREFIX}{tag}_{suffix}"))
 
 
 def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
-    template = f"{pg.PREFIX}{tag}_t"
+    template = pg.name(f"{pg.PREFIX}{tag}_t")
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
     # The banks' state before either daemon touched them: declared writes and
     # clock values are judged against it, so changes to existing rows show.
     before = dbstate.dump(dsn_t)
-    dbs = {"python": f"{pg.PREFIX}{tag}_py", "rust": f"{pg.PREFIX}{tag}_rs"}
+    dbs = {"python": pg.name(f"{pg.PREFIX}{tag}_py"), "rust": pg.name(f"{pg.PREFIX}{tag}_rs")}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     if scn.unreachable_database:
         dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/{pg.PREFIX}down" for k in dsns}

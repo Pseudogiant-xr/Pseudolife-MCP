@@ -42,7 +42,7 @@ from ..mutants import Mutant
 from . import _bank
 
 PREFIX = "pl_cf_w1c_pairing_"
-ARM_DB = PREFIX + "arm"
+ARM_DB = _bank.name(PREFIX + "arm")
 BANK_ID = "fixture-invite-bank"
 FINGERPRINT = hashlib.sha256(BANK_ID.encode()).hexdigest()[:16]
 OTHER_FINGERPRINT = "0123456789abcdef"
@@ -118,7 +118,7 @@ def _create(name: str, schema: bool = True) -> None:
 
 def ensure(kind: str) -> str:
     """The seeded bank of this kind (created once per harness process)."""
-    name = PREFIX + kind
+    name = _bank.name(PREFIX + kind)
     if name in _BASELINE:
         return name
     _CREATED.add(name)
@@ -262,7 +262,7 @@ def env(dsn_kind: str | None = "arm", **extra) -> dict:
     if dsn_kind == "arm":
         out["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(ARM_DB)
     elif dsn_kind is not None:
-        out["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(PREFIX + dsn_kind)
+        out["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(_bank.name(PREFIX + dsn_kind))
     out.update(extra)
     return out
 
@@ -438,7 +438,7 @@ def read_case(case_id, kind, argv, *, daemon=None, extra_env=None, rules=(), fil
 
     def after(arm, obs):
         _record(arm, obs, argv)
-        name = PREFIX + kind
+        name = _bank.name(PREFIX + kind)
         dump = _bank.dump(name)
         obs["db"] = "unchanged" if dump == _BASELINE[name] else dump
 

@@ -96,7 +96,7 @@ class Board:
 
     def __init__(self, scenario="free", bank=True):
         from pseudolife_memory.storage.coordination import CoordinationStore
-        self.name = f"pl_cf_lease_{uuid.uuid4().int % 10**18}" if bank else None
+        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
         self.conn = None
         self.records = []
         self.states = []

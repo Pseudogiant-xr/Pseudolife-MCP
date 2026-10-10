@@ -402,6 +402,7 @@ def daemon_tokens(obs: dict, url: str) -> None:
 def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
     out = json.loads(json.dumps(obs))
     out.setdefault("files", {})
+    bank_names(out)
     if home:
         home_tokens(out, home)
     if out.get("daemon_url"):
@@ -411,3 +412,32 @@ def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
     for name in rules:
         RULES[name](out)
     return out
+
+
+def bank_names(obs: dict) -> None:
+    """Only identifiers allocated in this run return to their fixture labels."""
+    from .rows import _bank  # noqa: PLC0415
+
+    def swap(data: bytes) -> bytes:
+        # Surrogate escapes preserve arbitrary binary file bytes.
+        return _bank.NAMES.normalize(data.decode("utf-8", "surrogateescape")).encode(
+            "utf-8", "surrogateescape")
+
+    for field in ("stdout", "stderr"):
+        _put(obs, field, swap(_get(obs, field)))
+    for rel, value in list(obs["files"].items()):
+        if value.startswith("file:"):
+            _set_file(obs, rel, swap(base64.b64decode(value[5:])))
+
+    def walk(value):
+        if isinstance(value, str):
+            return _bank.NAMES.normalize(value)
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    for field in ("db", "requests"):
+        if field in obs:
+            obs[field] = walk(obs[field])
