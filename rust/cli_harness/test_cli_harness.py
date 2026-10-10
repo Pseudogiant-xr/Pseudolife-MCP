@@ -121,6 +121,22 @@ def test_mail_renewal_can_rewrite_identical_expiry_bytes(tmp_path, monkeypatch):
     assert len(rings) == 1
 
 
+def test_episode_health_trickle_leaves_scheduler_headroom_without_a_total_deadline():
+    from cli_harness.rows import episode
+
+    case = next(c for c in episode.cases() if c.id == "start-health-trickle")
+    daemon = case.daemon()
+    try:
+        trickle = daemon.routes["/health"]
+        # Validate the intended schedule without spending a live socket's
+        # deadline on an artificial sleep. The wire row exercises both clients.
+        assert trickle.delay + 0.18 < 0.25
+        pieces = (len(trickle.raw()) + trickle.chunk - 1) // trickle.chunk
+        assert (pieces - 1) * trickle.delay > 0.25
+    finally:
+        daemon.close()
+
+
 def test_each_field_difference_is_reported():
     base = obs(stdout=b"a", stderr=b"e", files={"f": b"1"})
     assert compare.diff(base, obs(exit=1, stdout=b"a", stderr=b"e", files={"f": b"1"}), ())
