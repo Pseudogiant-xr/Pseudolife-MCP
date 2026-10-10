@@ -1,5 +1,5 @@
 //! Native offline operators. No agent HTTP or host Python storage bridge.
-mod secrets;
+pub(crate) mod secrets;
 pub mod store;
 
 use super::{args::Args, out, say};

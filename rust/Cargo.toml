@@ -40,7 +40,7 @@ rustls-pemfile = "2"
 percent-encoding = "2"
 regex = "=1.13.1"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
-hyper = { version = "=1.11.1", features = ["server", "http1"] }
+hyper = { version = "=1.11.1", features = ["server", "client", "http1"] }
 hyper-util = { version = "=0.1.21", features = ["tokio"] }
 http-body-util = "=0.1.5"
 bytes = "=1.12.1"
@@ -48,3 +48,5 @@ yaml-rust2 = { version = "=0.13.0", default-features = false }
 regex-lite = "=0.1.9"
 serde_stacker = "=0.1.14"
 stacker = "=0.1.25"
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
+tar = { version = "=0.4.46", default-features = false }

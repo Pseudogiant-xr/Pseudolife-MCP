@@ -3,11 +3,13 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod backup;
 pub mod board_audit;
 mod briefing_hook;
 mod doctor;
 mod doorbell_seen;
 mod episode;
+mod hook_http;
 mod hook_json;
 pub mod lease;
 mod version;
@@ -93,6 +95,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "backup"
+        && let Some(code) = backup::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
+    }
     if mode == "wait-mail" {
         return Some(ExitCode::from(wait_mail::run(
             std::env::args_os().skip(2).collect(),

@@ -17,7 +17,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
 
    **(a) Absence — is the new behavior documented at all?** List the
    behavior changes since the last tag (`git log vN.N.N..HEAD`, the
-   CHANGELOG's `[Unreleased]`) and ask of each: *which user-facing page
+   CHANGELOG's `[Unreleased]` plus the pending `changelog.d/` fragments) and
+   ask of each: *which user-facing page
    describes this?* A capability with no guide entry contradicts nothing,
    so no guard test and no re-verify pass will ever surface it — only this
    question will. Schema v16–v18 shipped undocumented exactly this way, and
@@ -59,7 +60,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    update experience"). The 2026-10-04 passkey and test-login changes held
    the release after 0.16.1 this way.
 
-1. **Version cut touches seven files together**: the CHANGELOG (`## [N.N.N]`
+1. **First fold the changelog fragments**: `python ops/assemble_changelog.py`
+   moves every `changelog.d/*.md` entry into `## [Unreleased]` (newest first)
+   and deletes the fragment files. Review the folded section, then commit it
+   with the cut. Fragments landed since 2026-10-09 exist only there until this
+   runs.
+
+   **Version cut touches seven files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
