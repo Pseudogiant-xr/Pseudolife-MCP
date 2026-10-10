@@ -296,6 +296,7 @@ class Scenario:
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
+    live_only = False
     read_only_bank = False
     files: dict[str, str] = {}  # extra files in each data dir
 
@@ -1249,12 +1250,14 @@ class SecurityTerminalByte(SecurityOpen):
 class SecurityRemoteOpen(SecurityOpen):
     name = "security-remote-open"
     loopback_bind_fixture = True
+    live_only = True
     env = {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_TRUST_BIND": "On"}
 
 
 class SecurityRemoteAuth(SecurityClosed):
     name = "security-remote-auth"
     loopback_bind_fixture = True
+    live_only = True
 
     def __init__(self):
         super().__init__()
@@ -1662,9 +1665,8 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
-            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
-                # Timing scenarios ask both daemons the same question at the
-                # same moment: live-only (README).
+            if mode == "golden" and (scn.live_only or type(scn).timeline is not Scenario.timeline):
+                # Timing and remote-policy fixtures require both live arms.
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)
                 continue
             try:

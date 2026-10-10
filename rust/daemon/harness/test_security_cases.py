@@ -15,6 +15,24 @@ ORDINARY = ("security-open", "security-closed", "security-encodings",
 REMOTE = ("security-remote-open", "security-remote-auth")
 
 
+def test_unfiltered_golden_replay_keeps_ordinary_security_and_skips_remote(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.argv", ["run.py", "golden", "--rust-bin", "not-executed"])
+    visited = []
+
+    def replay(scenario, *args):
+        visited.append(scenario.name)
+        if scenario.name in REMOTE:
+            run.load_golden(scenario.name)
+        return {"scenario": scenario.name, "cases": [], "db_diffs": []}
+
+    with patch.object(run.daemons, "scratch_root", return_value=tmp_path), \
+            patch.object(run, "run_scenario", side_effect=replay), \
+            patch.object(run.pg, "existing", return_value=[]):
+        assert run.main() == 0
+    assert set(ORDINARY) <= set(visited)
+    assert not set(REMOTE) & set(visited)
+
+
 def test_admission_cases_cannot_declare_a_security_refusal():
     ordinary = [c for name in ORDINARY for c in run.SCENARIOS[name]().cases()]
     assert len(ordinary) == 71

@@ -144,7 +144,7 @@ def check_executable_coverage(jobs):
                          "security-browser-last", "security-auth-first", "security-drop-latin1",
                          "security-unavailable-401")
         require_command(security, ("python", "rust/daemon/harness/run.py", mode),
-                        required, ("--record",))
+                        required, ("--record",) + (("--no-refusals",) if mode == "live" else ()))
     require_command(security, ("python", "rust/daemon/harness/run.py", "live"),
                     ("--rust-bin", "$bindFixture", "--only", "security-remote-open", "security-remote-auth", "--out"),
                     ("--record",))
@@ -352,6 +352,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 @pytest.mark.parametrize("name, old, new", [
     ("Check generated daemon schema", "--check", ""),
     ("Daemon security admission parity", "security-refusals", ""),
+    ("Daemon security admission parity", "security-refusals --out", "security-refusals --no-refusals --out"),
     ("Daemon security admission parity", "--mutants security-origin-open", "--mutants"),
     ("Daemon security admission parity", "rust/daemon/harness/test_security_cases.py", ""),
     ("Daemon security admission parity", "security-remote-open", ""),

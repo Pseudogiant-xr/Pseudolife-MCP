@@ -57,6 +57,8 @@ launch. It then gives both daemons the configured remote policy host while
 forcing their actual listeners to 127.0.0.1. Default and release mutants
 artifacts have no bind override and refuse these scenarios before launch.
 Remote success evidence must come from this guarded fixture.
+These two policy fixtures are explicitly live-only; unfiltered golden replay
+skips them while retaining all five ordinary security scenarios and recordings.
 
 HTTP scenarios retain the existing disposable-template allocation and
 unreachable loopback DSN. Equality of the untouched template databases is
