@@ -93,6 +93,27 @@ class ContainerTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertFalse(target.with_suffix(".onnx.partial").exists())
 
+    def test_provisioned_layout_matches_the_default_loader(self):
+        import tempfile
+        from unittest.mock import patch
+        provision = load("provision_container_model")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "qwen3"
+
+            def downloaded(url, destination, expected):
+                self.assertTrue(destination.parent.is_dir())
+                self.assertEqual(len(expected), 64)
+                destination.write_bytes(b"verified fixture")
+
+            with patch.object(provision, "download", side_effect=downloaded), \
+                 patch("sys.argv", ["provision_container_model.py", str(root)]):
+                provision.main()
+            for name in ("onnx/model.onnx", "onnx/model.onnx_data", "tokenizer.json",
+                         "config.json", "tokenizer_config.json"):
+                self.assertEqual((root / name).read_bytes(), b"verified fixture")
+            defaults = (ROOT / "rust/daemon/src/config.rs").read_text()
+            self.assertIn('onnx_file_name: "onnx/model.onnx".to_string()', defaults)
+
     def test_probe_requires_authenticated_search_and_refused_open_search(self):
         probe = load("container_probe")
         token = "disposable-test-token"
