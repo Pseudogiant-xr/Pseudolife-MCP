@@ -58,6 +58,7 @@ mod fs {
 
 const HELP: &str = include_str!("wait_mail_help.txt");
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+const INTERRUPT_SLICE: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Integer(String);
@@ -219,23 +220,54 @@ fn read_digest(path: &Path) -> io::Result<(Integer, Vec<u8>)> {
 }
 #[cfg(unix)]
 fn interruptible_read(path: &Path) -> io::Result<Vec<u8>> {
+    interruptible_read_with(path, || INTERRUPTED.load(AtomicOrdering::Relaxed))
+}
+#[cfg(unix)]
+fn interruptible_read_with(
+    path: &Path,
+    mut interrupted: impl FnMut() -> bool,
+) -> io::Result<Vec<u8>> {
     use rustix::{
+        event::{PollFd, PollFlags, Timespec, poll},
         fs::{Mode, OFlags, open},
         io::{Errno, read},
     };
     let file = loop {
-        match open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()) {
-            Err(Errno::INTR) if !INTERRUPTED.load(AtomicOrdering::Relaxed) => continue,
+        if interrupted() {
+            return Err(Errno::INTR.into());
+        }
+        // SIGINT can arrive after a flag check but before open/read starts.
+        // Nonblocking IO closes that lost-interrupt window for replaced FIFOs.
+        match open(
+            path,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        ) {
+            Err(Errno::INTR) if !interrupted() => continue,
             result => break result.map_err(io::Error::from)?,
         }
     };
     let mut result = Vec::new();
     let mut buffer = [0u8; 8192];
+    // Reuse the wait loop's interruptible-sleep cadence, including when a
+    // signal has already run its handler before readiness polling starts.
+    let timeout = Timespec::try_from(INTERRUPT_SLICE).unwrap();
     loop {
+        if interrupted() {
+            return Err(Errno::INTR.into());
+        }
+        let mut ready = [PollFd::new(&file, PollFlags::IN)];
+        match poll(&mut ready, Some(&timeout)) {
+            Ok(0) => continue,
+            Ok(_) => (),
+            Err(Errno::INTR) if !interrupted() => continue,
+            Err(error) => return Err(error.into()),
+        }
         match read(&file, &mut buffer) {
             Ok(0) => return Ok(result),
             Ok(size) => result.extend_from_slice(&buffer[..size]),
-            Err(Errno::INTR) if !INTERRUPTED.load(AtomicOrdering::Relaxed) => (),
+            Err(Errno::AGAIN) => (),
+            Err(Errno::INTR) if !interrupted() => (),
             Err(error) => return Err(error.into()),
         }
     }
@@ -719,7 +751,7 @@ fn wait(digest: &Path, timeout: f64, interval: f64) -> WaitResult {
             std::thread::sleep(
                 sleep_deadline
                     .saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(20)),
+                    .min(INTERRUPT_SLICE),
             );
         }
     }
@@ -750,7 +782,7 @@ impl InterruptGuard {
         {
             // SAFETY: initialized sigaction values, static atomic-only handler,
             // and restoration of this process's prior disposition. No SA_RESTART:
-            // a blocked digest open/read must return EINTR for owned cleanup.
+            // readiness polling returns EINTR promptly for owned cleanup.
             let previous = unsafe {
                 let mut action: libc::sigaction = std::mem::zeroed();
                 let mut previous: libc::sigaction = std::mem::zeroed();
@@ -1044,6 +1076,107 @@ pub fn run(argv: Vec<OsString>) -> u8 {
 mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_read_observes_interrupt_before_open_or_read() {
+        use std::process::{Command, Stdio};
+        const CHILD: &str = "PSEUDOLIFE_TEST_FIFO_INTERRUPT";
+        const AFTER: &str = "PSEUDOLIFE_TEST_FIFO_INTERRUPT_AFTER";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let after: usize = std::env::var(AFTER).unwrap().parse().unwrap();
+            // Deliver the interrupt after the caller's first flag check.
+            let mut checks = 0;
+            let error = interruptible_read_with(Path::new(&path), || {
+                checks += 1;
+                checks > after
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+            return;
+        }
+        let home =
+            std::env::temp_dir().join(format!("wait-mail-interrupt-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let fifo = home.join("digest");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        let mut results = Vec::new();
+        for after in [1, 2] {
+            // No writer blocks open; a connected, silent writer blocks read.
+            let writer = (after == 2).then(|| {
+                rustix::fs::open(
+                    &fifo,
+                    rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NONBLOCK,
+                    rustix::fs::Mode::empty(),
+                )
+                .unwrap()
+            });
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::wait_mail::tests::fifo_read_observes_interrupt_before_open_or_read",
+                ])
+                .env_clear()
+                .env(CHILD, &fifo)
+                .env(AFTER, after.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut forced = false;
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    forced = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let output = child.wait_with_output().unwrap();
+            drop(writer);
+            results.push((after, forced, output));
+        }
+        fs::remove_dir_all(home).unwrap();
+        for (after, forced, output) in results {
+            assert!(
+                !forced,
+                "an interrupt before a blocking FIFO syscall was lost (after={after})"
+            );
+            assert!(output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains("running 1 test"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof() {
+        let home = std::env::temp_dir().join(format!("wait-mail-read-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let fifo = home.join("digest");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        let path = fifo.clone();
+        let bytes = vec![b'p'; 10000];
+        let sent = bytes.clone();
+        let writer =
+            std::thread::spawn(move || OpenOptions::new().write(true).open(path)?.write_all(&sent));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let result = interruptible_read_with(&fifo, || Instant::now() >= deadline);
+        let written = writer.join().unwrap();
+        fs::remove_dir_all(home).unwrap();
+        written.unwrap();
+        assert_eq!(result.unwrap(), bytes);
+    }
 
     #[test]
     fn metadata_error_refuses_arming_and_retries_during_wait() {

@@ -211,17 +211,21 @@ def backup_files(obs: dict) -> None:
     for field in ("stdout", "stderr"):
         obs[field] = base64.b64encode(
             _stamp(base64.b64decode(obs[field]), window)).decode()
-    files = {}
-    for rel, value in obs["files"].items():
-        new_rel = _stamp(rel.encode(), window).decode()
-        if value.startswith("file:") and new_rel != rel:
-            data = base64.b64decode(value[5:])
-            view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
-            value = "file:" + base64.b64encode(view).decode()
-        while new_rel in files:
-            new_rel += " <normalized-collision>"
-        files[new_rel] = value
-    obs["files"] = files
+    # The same timestamped path keys both the content and permission snapshots.
+    for field in ("files", "modes"):
+        if field not in obs:
+            continue
+        values = {}
+        for rel, value in obs[field].items():
+            new_rel = _stamp(rel.encode(), window).decode()
+            if field == "files" and value.startswith("file:") and new_rel != rel:
+                data = base64.b64decode(value[5:])
+                view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
+                value = "file:" + base64.b64encode(view).decode()
+            while new_rel in values:
+                new_rel += " <normalized-collision>"
+            values[new_rel] = value
+        obs[field] = values
 
 
 _SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
