@@ -14,12 +14,14 @@ class RunNames:
         self._suffix = secrets.token_hex(8)
         self.labels: dict[str, str] = {}
 
-    def _after_fork(self) -> None:
+    def require_process(self) -> None:
+        """Inherited identifiers and fixture caches cannot be reused after fork."""
         if self._pid != os.getpid():
-            self.__init__()
+            raise RuntimeError("harness database state cannot be used after fork: "
+                               "start a fresh harness process")
 
     def name(self, label: str, *, max_length: int) -> str:
-        self._after_fork()
+        self.require_process()
         for allocated, original in self.labels.items():
             if original == label:
                 return allocated
@@ -35,7 +37,7 @@ class RunNames:
         return allocated
 
     def owns(self, name: str) -> bool:
-        self._after_fork()
+        self.require_process()
         return name in self.labels
 
     def require_owned(self, name: str) -> None:
@@ -43,7 +45,7 @@ class RunNames:
             raise ValueError(f"database is not owned by this harness run: {name!r}")
 
     def normalize(self, text: str) -> str:
-        self._after_fork()
+        self.require_process()
         if not self.labels:
             return text
         pattern = r"(?<!\w)(?:" + "|".join(

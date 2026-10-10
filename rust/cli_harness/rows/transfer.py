@@ -177,6 +177,7 @@ def _seed_ties(name: str) -> None:
 
 def _sources() -> None:
     """Both source banks and the oracle's archives, built once per process."""
+    _bank.NAMES.require_process()
     if _ARCHIVES:
         return
     import tempfile  # noqa: PLC0415

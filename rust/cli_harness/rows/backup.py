@@ -52,6 +52,7 @@ OLD = time.time() - 30 * 86400
 
 def _source() -> str:
     global _SEEDED, _BASELINE, _CREATED
+    _bank.NAMES.require_process()
     if not _SEEDED:
         _CREATED = True
         _bank.create(DB)

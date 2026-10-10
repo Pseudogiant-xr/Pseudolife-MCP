@@ -291,6 +291,7 @@ def ids(kind: str) -> dict:
 
 def export_bytes(kind: str) -> bytes:
     """The oracle's own ``board-audit export --out`` of a seeded bank."""
+    _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
         from pseudolife_memory.board_audit_cli import main  # noqa: PLC0415
         name = ensure(kind)

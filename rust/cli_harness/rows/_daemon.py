@@ -98,6 +98,7 @@ class RealDaemon:
         budget several times running: a daemon still warming its model can
         miss that budget, and both CLIs then stay silent by contract, which
         would make a bank case's outcome depend on load, not on the port."""
+        _bank.NAMES.require_process()
         deadline, run = time.time() + limit, 0
         while run < streak:
             if time.time() > deadline:
@@ -123,6 +124,7 @@ class RealDaemon:
         pass  # shared across the row; shutdown() at exit
 
     def shutdown(self) -> None:
+        _bank.NAMES.require_process()
         if self.proc is not None and self.proc.poll() is None:
             self.proc.terminate()
             try:
@@ -138,6 +140,7 @@ class RealDaemon:
 def shared(row: str):
     """A per-arm factory: ``core.run_arm`` calls it with the arm's name."""
     def factory(arm: str) -> RealDaemon:
+        _bank.NAMES.require_process()
         key = f"{row}_{arm}"
         if key not in _POOL:
             _POOL[key] = RealDaemon(_bank.name(f"pl_cf_w1b_{key}"))

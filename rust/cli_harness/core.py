@@ -323,6 +323,9 @@ def _reset(home: Path) -> None:
 
 
 def run_arm(case: Case, target: Target, home: Path) -> dict:
+    from .rows import _bank  # noqa: PLC0415
+    # Cases can retain fixture DSNs even when no setup accessor runs again.
+    _bank.NAMES.require_process()
     _reset(home)
     arm = Arm(target.name, home, home / "cwd")
     arm.cwd.mkdir()

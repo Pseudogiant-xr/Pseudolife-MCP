@@ -101,6 +101,8 @@ the rows already finished; `complete` is true only once every row ran.
 - Bank-backed rows use disposable databases on the bench PostgreSQL through
   the test login only, never the live bank. Every database and template name
   has a random run suffix; cleanup accepts only names allocated by that run.
+  Forked children refuse inherited names, fixture caches and case DSNs; start
+  a fresh harness interpreter instead.
   The normalizer maps exact allocated names back to their fixture labels for
   comparison with existing goldens. Cleanup does not sweep other runs' banks.
   Initial database creation briefly retries a busy shared extension template;

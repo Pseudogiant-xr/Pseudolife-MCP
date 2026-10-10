@@ -44,6 +44,7 @@ def _host_port() -> str:
 
 
 def url(name: str) -> str:
+    NAMES.require_process()
     if not _NAME.match(name):
         raise ValueError(f"disposable database names start with pl_cf_: {name!r}")
     user, password = _login()
@@ -59,6 +60,7 @@ def _connect(name: str, autocommit: bool = True):
 
 
 def _admin():
+    NAMES.require_process()
     import psycopg  # noqa: PLC0415
     user, password = _login()
     return psycopg.connect(

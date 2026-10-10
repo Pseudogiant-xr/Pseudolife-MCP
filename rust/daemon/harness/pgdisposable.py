@@ -58,6 +58,7 @@ def _check(name: str) -> str:
 
 
 def dsn(name: str) -> str:
+    NAMES.require_process()
     user, password = _login()
     host, port = HOST_PORT.rsplit(":", 1)
     return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
@@ -65,6 +66,7 @@ def dsn(name: str) -> str:
 
 
 def _admin():
+    NAMES.require_process()
     user, password = _login()
     host, port = HOST_PORT.rsplit(":", 1)
     return psycopg.connect(host=host, port=int(port), user=user, password=password,
