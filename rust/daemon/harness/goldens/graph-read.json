@@ -1,4 +1,6 @@
 {
+ "database_locale": {"lc_collate": "en_US.utf8", "lc_ctype": "en_US.utf8"},
+ "collation_cases": [155, 156, 157, 158, 159, 160, 161, 162, 163],
  "operations": [
   {
    "op": "alias_canonical_map",

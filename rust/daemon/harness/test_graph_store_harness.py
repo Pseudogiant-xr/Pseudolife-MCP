@@ -18,6 +18,43 @@ def state(clock=1.0):
 
 
 class ClockControls(unittest.TestCase):
+    def test_collation_gate_accepts_only_recorded_locale_aliases(self):
+        recorded = {"lc_collate": "en_US.utf8", "lc_ctype": "en_US.utf8"}
+        self.assertTrue(graph_store.same_locale(recorded, recorded))
+        self.assertTrue(graph_store.same_locale(recorded,
+                        {"lc_collate": "en_US.UTF-8", "lc_ctype": "en_US.UTF-8"}))
+        self.assertFalse(graph_store.same_locale(recorded,
+                         {"lc_collate": "C.UTF-8", "lc_ctype": "en_US.utf8"}))
+        self.assertFalse(graph_store.same_locale(recorded,
+                         {"lc_collate": "en_US.utf8", "lc_ctype": "C.UTF-8"}))
+
+    def test_collation_skip_has_declared_reason_and_count(self):
+        with tempfile.TemporaryDirectory() as home:
+            candidate = Path(home) / "candidate"
+            candidate.write_bytes(b"fixture")
+            report = Path(home) / "report.json"
+            with patch("sys.argv", ["graph_store", "golden", "--row", "read",
+                                    "--candidate", str(candidate), "--out", str(report)]), \
+                    patch("graph_store.subprocess.check_output", return_value="head"), \
+                    patch("graph_store.run", return_value=[{"index": i, "diffs": [],
+                          **({"skip_reason": "recorded en_US.utf8 differs from C.UTF-8"}
+                             if i >= 155 else {})} for i in range(164)]):
+                self.assertEqual(graph_store.main(), 0)
+            result = json.loads(report.read_text())
+            self.assertEqual(result["summary"]["cases"], 155)
+            self.assertEqual(result["summary"]["executed_cases"], 164)
+            self.assertEqual(result["summary"]["skipped_indices"], list(range(155, 164)))
+            self.assertIn("C.UTF-8", result["summary"]["skip_reason"])
+
+    def test_required_recorded_collation_fails_closed(self):
+        recorded = {"lc_collate": "en_US.utf8", "lc_ctype": "en_US.utf8"}
+        golden = {"database_locale": recorded, "collation_cases": list(range(155, 164))}
+        with patch.dict(os.environ, {"PL_GRAPH_REQUIRE_RECORDED_LOCALE": "1"}):
+            self.assertEqual(graph_store.golden_collation_skips(golden, recorded), ([], None))
+            with self.assertRaisesRegex(AssertionError, "recorded locale"):
+                graph_store.golden_collation_skips(golden,
+                    {"lc_collate": "C.UTF-8", "lc_ctype": "C.UTF-8"})
+
     def test_mutant_observer_failures_fail_the_run(self):
         with tempfile.TemporaryDirectory() as home:
             candidate = Path(home) / "candidate"
