@@ -1029,6 +1029,21 @@ STARTUP_REFUSALS = [
     ("dream sweep interval not a number", {}, "memory:\n  dream:\n    sweep_interval_seconds: abc\n", 1),
 ]
 
+# Each setting uses float(raw) in the oracle; malformed separators must
+# refuse after earlier startup guards and before binding the HTTP listener.
+for seconds_name in ("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "PSEUDOLIFE_SESSION_IDLE_SECONDS",
+                     "PSEUDOLIFE_SESSION_REAP_SECONDS"):
+    for malformed in ("1__0", "_10", "10_"):
+        STARTUP_REFUSALS.append((f"{seconds_name} malformed underscore {malformed}",
+                                 {seconds_name: malformed}, None, 1))
+STARTUP_REFUSALS.extend([
+    ("bind guard precedes malformed seconds",
+     {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1__0"}, None, 2),
+    ("token guard precedes malformed seconds",
+     {"PSEUDOLIFE_MCP_TOKENS": "junk,,x:default",
+      "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1__0"}, None, 2),
+])
+
 class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
