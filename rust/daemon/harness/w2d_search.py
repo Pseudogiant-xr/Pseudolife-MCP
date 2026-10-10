@@ -107,6 +107,8 @@ def default_cases() -> list[dict]:
     for i, text in enumerate(CRAFTED):
         out.append(case(f"crafted {i}", q(q=text, top_k=8), auth))
     out += [
+        case("aggregation across all chronicle events",
+             q(q="how many times did release bank daemon happen", top_k=8), auth),
         case("repeat crafted 5 (access counts)", q(q=CRAFTED[5], top_k=8), auth),
         case("top_k blank", q(q="deploy the daemon", top_k=""), auth),
         case("top_k 0", q(q="deploy the daemon", top_k=0), auth),
@@ -164,7 +166,7 @@ class Default(Scenario):
     require = {"with_entries": 40, "with_events": 3, "with_cortex": 30, "channels.dense": 1,
                "channels.bm25": 1, "channels.slot": 1, "rerank_fired": 1,
                "rerank_skips.candidate_budget_exceeded": 1, "sessions": 2, "episodes": 1,
-               "disconnects": 1}
+               "disconnects": 1, "chronicle_over_limit": 1}
 
 
 class Timeline(Scenario):
@@ -458,13 +460,14 @@ def coverage(responses: list[dict], state: dict) -> dict:
     cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
            "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
            "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
-           "low_confidence_false": 0, "disconnects": 0}
+           "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0}
     for r in responses:
         body = r.get("json") or {}
         if not isinstance(body, dict):
             continue
         cov["with_entries"] += bool(body.get("entries"))
         cov["with_events"] += bool(body.get("events"))
+        cov["chronicle_over_limit"] += len(body.get("events") or []) > 3
         cov["with_cortex"] += bool(body.get("cortex"))
         cov["disconnects"] += bool(r.get("disconnected"))
         if "low_confidence" in body and body.get("query"):
