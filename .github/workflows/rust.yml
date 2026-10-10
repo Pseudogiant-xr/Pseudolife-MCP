@@ -368,6 +368,34 @@ jobs:
           name: daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
           if-no-files-found: warn
+      - name: Daemon security admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $env:PL_SECURITY_DEFAULT_BIN = $candidate
+          $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
+          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --out (Join-Path $env:RUNNER_TEMP 'daemon-security-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py mutants --rust-bin $mutants --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --mutants security-origin-open security-host-open security-browser-last security-auth-first security-drop-latin1 security-unavailable-401 --out (Join-Path $env:RUNNER_TEMP 'daemon-security-mutants.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon security parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-security-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-security-*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4

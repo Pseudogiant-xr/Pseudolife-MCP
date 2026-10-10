@@ -309,7 +309,11 @@ pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) ->
     // re-encodes it as UTF-8 and, when possible, as latin-1.
     let utf8 = token.as_bytes().to_vec();
     let latin1: Option<Vec<u8>> = token.chars().map(|c| u8::try_from(c as u32).ok()).collect();
-    let candidates: Vec<Vec<u8>> = std::iter::once(utf8).chain(latin1).collect();
+    let candidates: Vec<Vec<u8>> = if crate::mutants::active("security-drop-latin1") {
+        vec![utf8]
+    } else {
+        std::iter::once(utf8).chain(latin1).collect()
+    };
     // principals.py:290-300: every map token against both candidates first,
     // then the singular token.
     let matches = |token: &str| candidates.iter().any(|c| ct_eq(c, token.as_bytes()));
