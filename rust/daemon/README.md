@@ -10,6 +10,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 |---|---|
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
 | `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `spec-principals.md` | Durable principal service operations, snapshot races and identity refusal policy |
 | `spec-http-static.md` | Root redirect, every committed Console asset, path containment, fallbacks and response headers |
 | `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
 | `spec-w3h-graph-read.md` | GraphStore subgraph and pure alias, suggestion, degree, inference and path helpers |
@@ -53,6 +54,32 @@ starts empty, since a seeded template carries run-specific values. `gen_schema_s
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
 
+The principal-store extension reuses the disposable database guard, catalog
+dumper and type-strict comparison. It runs service operations in the native
+process, using synthetic credentials and `pl_cf_prn_*` banks, without loading
+an embedder or exposing a diagnostic HTTP endpoint:
+
+```bash
+cargo build --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness,mutants -j 3
+python rust/daemon/harness/principals.py live --rust-bin <binary> --out principals-live.json
+python rust/daemon/harness/principals.py golden --rust-bin <binary> --out principals-golden.json
+python rust/daemon/harness/principals.py mutants --rust-bin <binary> --out principals-mutants.json
+```
+
+Every database mutation compares both catalogs and all durable rows. New
+timestamps must fall inside the arm's database-clock write window, including
+the invite TTL offset; unchanged timestamps retain their event identity.
+The concurrent-redemption case verifies two blocked callers and exactly one
+durable winner; only that case's validated winning hash becomes a symbol.
+Nine clock, ownership and fixture-version controls guard the normalizer. Goldens contain outputs
+and post-state, never bearer tokens, pairing codes or connection strings.
+Only a preinstalled vector extension's verified initial version is fixture
+metadata: extension names and namespaces remain exact, and changing its
+version during an arm fails. The principal store never uses that extension.
+The disposable admission control refuses six near-miss names before
+connection setup and kills two permissive-prefix source mutants in isolated
+module namespace, leaving the actual database guard unchanged.
+The `principal-harness` feature is absent from the serving release build.
 `--only static-build static-paths static-missing static-root-link` exercises the static layer
 without loading models: both daemons use an unreachable loopback DSN to
 isolate asset serving from bank startup. Set `PL_HARNESS_SLICE=http`

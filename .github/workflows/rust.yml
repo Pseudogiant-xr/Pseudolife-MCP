@@ -182,7 +182,7 @@ jobs:
           $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
       - name: Build embedding candidate
-        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness -j 3
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -433,6 +433,24 @@ jobs:
         with:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          if-no-files-found: error
+      - name: Principal store differential and golden harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/principals.py live --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/principals.py golden --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain principal store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-principals-${{ runner.os }}
+          path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
       - name: Daemon schema startup parity
         if: matrix.suite == 'cli'

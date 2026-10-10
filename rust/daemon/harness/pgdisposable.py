@@ -21,8 +21,8 @@ LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
 # Each port slice keeps its own prefix (PL_HARNESS_SLICE, default w1a), so
 # parallel slices running this harness never share a database.
 SLICE = os.environ.get("PL_HARNESS_SLICE", "w1a")
-if not re.fullmatch(r"w[0-9][a-z]|http|pgs", SLICE):
-    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g, http or pgs")
+if not re.fullmatch(r"w[0-9][a-z]|http|pgs|prn", SLICE):
+    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g, http, pgs or prn")
 PREFIX = f"pl_cf_{SLICE}_"
 DISPOSABLE_NAME = re.compile(re.escape(PREFIX) + r"[a-z0-9_]{1,40}")
 

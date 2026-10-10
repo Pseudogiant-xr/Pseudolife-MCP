@@ -113,10 +113,19 @@ struct Snapshot {
     bank: Option<String>,
     shadowed_rows: Vec<String>,
     invalid_rows: Vec<String>,
+    pending: Vec<(u64, StoredPrincipal)>,
+    sequence: u64,
 }
 
 pub struct PrincipalStore {
     snap: RwLock<Snapshot>,
+    shadowed: Vec<String>,
+}
+
+/// Capture before database I/O, so a concurrent committed redemption survives.
+pub struct RefreshRead {
+    pub started: Instant,
+    sequence: u64,
 }
 
 fn valid_name(name: &str) -> bool {
@@ -130,16 +139,79 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl PrincipalStore {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new() -> Self {
+        Self::new_with_shadowed(Vec::new())
+    }
+
+    pub fn new_with_shadowed(mut shadowed: Vec<String>) -> Self {
+        shadowed.extend(RESERVED_STORED.iter().map(|s| s.to_string()));
+        shadowed.sort();
+        shadowed.dedup();
         PrincipalStore {
             snap: RwLock::new(Snapshot::default()),
+            shadowed,
         }
+    }
+
+    #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+    pub fn excluded_names(&self) -> Vec<String> {
+        self.shadowed.clone()
+    }
+
+    pub fn begin_refresh(&self) -> RefreshRead {
+        self.begin_refresh_at(Instant::now())
+    }
+
+    pub fn begin_refresh_at(&self, started: Instant) -> RefreshRead {
+        RefreshRead {
+            sequence: self.snap.read().unwrap().sequence,
+            started,
+        }
+    }
+
+    #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+    pub fn finish_refresh(
+        &self,
+        read: RefreshRead,
+        rows: Vec<StoredPrincipal>,
+        bank: Option<String>,
+    ) {
+        self.finish_refresh_with_env(read, rows, bank, &[]);
+    }
+
+    /// A committed redemption replaces the old hash, without renewing freshness.
+    #[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+    pub fn add(&self, row: StoredPrincipal) {
+        let Some(row) = normalize_stored(row) else {
+            return;
+        };
+        if self.shadowed.contains(&row.principal) {
+            return;
+        }
+        let mut snap = self.snap.write().unwrap();
+        snap.sequence += 1;
+        let seq = snap.sequence;
+        if let Some(entry) = snap
+            .pending
+            .iter_mut()
+            .find(|(_, r)| r.principal == row.principal)
+        {
+            *entry = (seq, row.clone());
+        } else {
+            snap.pending.push((seq, row.clone()));
+        }
+        if crate::mutants::active("principal-add-replace") {
+            return;
+        }
+        merge_row(&mut snap.rows, row);
+        rebuild(&mut snap);
     }
 
     /// Replace the snapshot from `(principal, token_hash, revoked)` rows (no
     /// tier, board admitted): the spike's entry point, now used by the unit
     /// tests only. Same rules as [`Self::refresh`].
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn load(
         &self,
         rows: Vec<(String, Option<String>, bool)>,
@@ -168,6 +240,7 @@ impl PrincipalStore {
     /// Python dict update does). Only rows with a non-empty token hash that
     /// are not revoked authenticate. The snapshot is as old as the read's
     /// start, so a slow read cannot renew a stale snapshot.
+    #[cfg(test)]
     pub fn refresh(
         &self,
         rows: Vec<StoredPrincipal>,
@@ -175,6 +248,18 @@ impl PrincipalStore {
         env_principals: &[String],
         started: Instant,
     ) {
+        self.finish_refresh_with_env(self.begin_refresh_at(started), rows, bank, env_principals);
+    }
+
+    pub(crate) fn finish_refresh_with_env(
+        &self,
+        read: RefreshRead,
+        rows: Vec<StoredPrincipal>,
+        bank: Option<String>,
+        env_principals: &[String],
+    ) {
+        let mut snap = self.snap.write().unwrap();
+        snap.pending.retain(|(seq, _)| *seq > read.sequence);
         let mut merged: Vec<StoredPrincipal> = Vec::new();
         let mut at: HashMap<String, usize> = HashMap::new();
         let (mut shadowed, mut invalid) = (Vec::new(), Vec::new());
@@ -184,8 +269,8 @@ impl PrincipalStore {
                 invalid.push(raw);
                 continue;
             };
-            if RESERVED_STORED.contains(&row.principal.as_str())
-                || env_principals.contains(&row.principal)
+            if (self.shadowed.contains(&row.principal) || env_principals.contains(&row.principal))
+                && !crate::mutants::active("principal-shadow")
             {
                 shadowed.push(row.principal);
                 continue;
@@ -198,27 +283,21 @@ impl PrincipalStore {
                 }
             }
         }
-        // A hash two names share goes to the later name (dict comprehension).
-        let mut by_hash = HashMap::new();
-        for row in &merged {
-            if let Some(hash) = row.token_hash.as_deref().filter(|h| !h.is_empty())
-                && !row.revoked
-            {
-                by_hash.insert(hash.to_string(), row.principal.clone());
+        if !crate::mutants::active("principal-add-race") {
+            for (_, row) in &snap.pending {
+                merge_row(&mut merged, row.clone());
             }
         }
         for list in [&mut shadowed, &mut invalid] {
             list.sort();
             list.dedup();
         }
-        *self.snap.write().unwrap() = Snapshot {
-            rows: merged,
-            by_hash,
-            loaded_at: Some(started),
-            bank,
-            shadowed_rows: shadowed,
-            invalid_rows: invalid,
-        };
+        snap.rows = merged;
+        snap.loaded_at = Some(read.started);
+        snap.bank = bank;
+        snap.shadowed_rows = shadowed;
+        snap.invalid_rows = invalid;
+        rebuild(&mut snap);
     }
 }
 
@@ -268,11 +347,12 @@ impl PrincipalStore {
         self.len() == 0
     }
 
-    fn available(&self) -> bool {
-        matches!(self.snap.read().unwrap().loaded_at, Some(t) if t.elapsed() <= STALE_AFTER)
+    pub fn available(&self) -> bool {
+        crate::mutants::active("principal-unavailable")
+            || matches!(self.snap.read().unwrap().loaded_at, Some(t) if t.elapsed() <= STALE_AFTER)
     }
 
-    fn lookup(&self, hash: &str) -> Option<String> {
+    pub fn lookup(&self, hash: &str) -> Option<String> {
         self.snap.read().unwrap().by_hash.get(hash).cloned()
     }
 }
@@ -285,6 +365,52 @@ pub enum Resolved {
     Unavailable,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrincipalSource {
+    Open,
+    Environment,
+    Store,
+}
+
+#[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+pub fn operator_route(path: &str) -> bool {
+    matches!(path, "/api/config" | "/api/daemon-notice")
+}
+
+#[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+pub fn operator_allowed(source: Option<PrincipalSource>, method: &str, path: &str) -> bool {
+    method != "POST" || source != Some(PrincipalSource::Store) || !operator_route(path)
+}
+
+#[cfg_attr(not(feature = "principal-harness"), allow(dead_code))]
+pub fn principal_admitted(allowed: &[String], principal: &str, store: &PrincipalStore) -> bool {
+    !matches!(principal, "daemon" | "maintainer")
+        && (allowed.iter().any(|p| p == principal) || store.admitted(principal))
+}
+
+fn merge_row(rows: &mut Vec<StoredPrincipal>, row: StoredPrincipal) {
+    if let Some(existing) = rows.iter_mut().find(|r| r.principal == row.principal) {
+        *existing = row;
+    } else {
+        rows.push(row);
+    }
+}
+
+fn rebuild(snap: &mut Snapshot) {
+    // A hash two names share goes to the later name (dict comprehension).
+    snap.by_hash = snap
+        .rows
+        .iter()
+        .filter(|r| !r.revoked || crate::mutants::active("principal-revoked"))
+        .filter_map(|r| {
+            r.token_hash
+                .as_ref()
+                .filter(|h| !h.is_empty())
+                .map(|h| (h.clone(), r.principal.clone()))
+        })
+        .collect();
+}
+
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -294,16 +420,27 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 
 /// `header` is the raw Authorization value decoded as latin-1 (one char per byte).
 pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) -> Resolved {
+    resolve_detailed(header, env, store).0
+}
+
+pub fn resolve_detailed(
+    header: Option<&str>,
+    env: &EnvTokens,
+    store: &PrincipalStore,
+) -> (Resolved, Option<PrincipalSource>) {
     if !env.configured() {
-        return Resolved::Principal("default".into());
+        return (
+            Resolved::Principal("default".into()),
+            Some(PrincipalSource::Open),
+        );
     }
     let Some(header) = header else {
-        return Resolved::None;
+        return (Resolved::None, None);
     };
     let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
     let token = rest.trim_matches([' ', '\t']);
     if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
-        return Resolved::None;
+        return (Resolved::None, None);
     }
     // The header string is latin-1 decoded, so its chars are bytes. Python
     // re-encodes it as UTF-8 and, when possible, as latin-1.
@@ -315,35 +452,115 @@ pub fn resolve(header: Option<&str>, env: &EnvTokens, store: &PrincipalStore) ->
     let matches = |token: &str| candidates.iter().any(|c| ct_eq(c, token.as_bytes()));
     for (tok, principal) in &env.map {
         if matches(tok) && !crate::mutants::active("auth-candidate-order") {
-            return Resolved::Principal(principal.clone());
+            return (
+                Resolved::Principal(principal.clone()),
+                Some(PrincipalSource::Environment),
+            );
         }
     }
     if let Some(single) = &env.single
         && matches(single)
     {
-        return Resolved::Principal("default".into());
+        return (
+            Resolved::Principal("default".into()),
+            Some(PrincipalSource::Environment),
+        );
     }
     if crate::mutants::active("auth-candidate-order") {
         for (tok, principal) in &env.map {
             if matches(tok) {
-                return Resolved::Principal(principal.clone());
+                return (
+                    Resolved::Principal(principal.clone()),
+                    Some(PrincipalSource::Environment),
+                );
             }
         }
     }
     if !store.available() {
-        return Resolved::Unavailable;
+        return (Resolved::Unavailable, None);
     }
     for cand in &candidates {
         if let Some(p) = store.lookup(&hex::encode(Sha256::digest(cand))) {
-            return Resolved::Principal(p);
+            return (Resolved::Principal(p), Some(PrincipalSource::Store));
         }
     }
-    Resolved::None
+    (Resolved::None, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immediate_add_survives_older_refresh_and_replaces_token() {
+        let s = PrincipalStore::new();
+        s.refresh(vec![], None, &[], Instant::now());
+        let read = s.begin_refresh();
+        let old = hex::encode(Sha256::digest(b"synthetic-old"));
+        let new = hex::encode(Sha256::digest(b"synthetic-new"));
+        s.add(sp("laptop", Some(&old), Some("core"), true, false));
+        s.add(sp("laptop", Some(&new), Some("full"), false, false));
+        s.finish_refresh(read, vec![], None);
+        assert!(s.lookup(&old).is_none());
+        assert!(s.lookup(&new).as_deref() == Some("laptop"));
+        assert!(!s.admitted("laptop"));
+        assert_eq!(s.tier_of("laptop").as_deref(), Some("full"));
+        s.finish_refresh(s.begin_refresh(), vec![], None);
+        assert!(!s.has("laptop"));
+    }
+
+    #[test]
+    fn add_does_not_make_an_unloaded_or_stale_view_available() {
+        let s = PrincipalStore::new_with_shadowed(vec!["desk".into()]);
+        s.add(sp("desk", Some("synthetic-hash"), None, true, false));
+        s.add(sp("maintainer", Some("synthetic-hash"), None, true, false));
+        s.add(sp("../bad", Some("synthetic-hash"), None, true, false));
+        s.add(sp("laptop", Some("synthetic-hash"), None, true, false));
+        assert!(!s.available());
+        assert_eq!(s.len(), 1);
+        assert!(s.has("laptop") && !s.has("desk"));
+        let old = Instant::now()
+            .checked_sub(STALE_AFTER + Duration::from_secs(1))
+            .unwrap();
+        s.refresh(vec![], None, &[], old);
+        s.add(sp("laptop", Some("synthetic-hash"), None, true, false));
+        assert!(!s.available());
+        assert!(!principal_admitted(
+            &["daemon".into(), "maintainer".into()],
+            "daemon",
+            &s
+        ));
+        assert!(!principal_admitted(
+            &["maintainer".into()],
+            "maintainer",
+            &s
+        ));
+        assert!(principal_admitted(&["listed".into()], "listed", &s));
+        assert!(principal_admitted(&[], "laptop", &s));
+    }
+
+    #[test]
+    fn operator_policy_uses_resolution_source() {
+        for path in ["/api/config", "/api/daemon-notice"] {
+            assert!(!operator_allowed(
+                Some(PrincipalSource::Store),
+                "POST",
+                path
+            ));
+            assert!(operator_allowed(Some(PrincipalSource::Store), "GET", path));
+            assert!(operator_allowed(
+                Some(PrincipalSource::Environment),
+                "POST",
+                path
+            ));
+            assert!(operator_allowed(Some(PrincipalSource::Open), "POST", path));
+        }
+        assert!(operator_allowed(
+            Some(PrincipalSource::Store),
+            "POST",
+            "/api/stats"
+        ));
+    }
 
     #[test]
     fn every_map_token_is_tried_on_both_encodings_before_the_singular_token() {

@@ -20,6 +20,8 @@ required-features = ["graph-harness"]
 # Deliberate breaks for the harness mutant control; never in a release build.
 mutants = []
 contract-harness = []
+# Store differential driver; never enabled in the serving release binary.
+principal-harness = []
 graph-harness = []
 
 [[bin]]
