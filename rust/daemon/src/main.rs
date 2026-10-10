@@ -8,6 +8,7 @@ mod bank;
 mod config;
 mod embed;
 mod embedding_math;
+mod graph_read;
 mod health;
 mod http;
 mod mutants;

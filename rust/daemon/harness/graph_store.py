@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from functools import lru_cache
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -20,18 +22,37 @@ import tempfile
 import time
 from unittest.mock import patch
 
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
 os.environ["PL_HARNESS_SLICE"] = "w3h"
 import dbstate
 import pgdisposable as pg
 from daemons import base_env
 
-REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO))
 GOLDEN = Path(__file__).parent / "goldens" / "graph-store.json"
 MUTANTS = ["graph-confidence", "graph-origin", "graph-revive", "graph-bless",
            "graph-alias", "graph-relink", "graph-merge", "graph-normalize"]
 CLOCKS = {("entities", "created_at"), ("relations", "created_at"),
           ("edges", "asserted_at"), ("edges", "superseded_at")}
+
+
+def same_locale(recorded, actual):
+    def canonical(value):
+        return value.lower().replace(".utf-8", ".utf8")
+    return all(canonical(recorded[key]) == canonical(actual[key])
+               for key in ("lc_collate", "lc_ctype"))
+
+
+def golden_collation_skips(golden, locale):
+    if same_locale(golden["database_locale"], locale):
+        return [], None
+    reason = (f"graph-read golden requires recorded locale {golden['database_locale']}; "
+              f"disposable database has {locale}; live differential remains required")
+    if os.environ.get("PL_GRAPH_REQUIRE_RECORDED_LOCALE") == "1":
+        raise AssertionError(reason)
+    indices = golden["collation_cases"]
+    assert indices == list(range(155, 164)), "collation skip inventory is stale"
+    return indices, reason
 
 
 if os.name == "nt":
@@ -117,7 +138,10 @@ def seed(url):
             st.close()
 
 
-def operations():
+def operations(row="store"):
+    if row == "read":
+        from graph_read_profile import operations as read_operations
+        return read_operations()
     def op(operation, **kwargs):
         return {"op": operation, **kwargs}
     def edge(name="upsert_edge", src=1, dst=2, **kwargs):
@@ -262,6 +286,22 @@ def catalog_shape(state):
 def oracle_call(st, request):
     kwargs = {k: v for k, v in request.items() if k != "op"}
     try:
+        if request["op"] == "subgraph":
+            value = oracle_graph_store()(st).subgraph(request["root"],
+                depth=request.get("depth", 1), to_id=request.get("to"))
+            value["nodes"] = sorted(value["nodes"])
+            return {"value": value}
+        if request["op"] in {"degree_counts", "degrees_by_name", "shortest_path", "resolve_relation",
+                             "derive_edges", "build_subgraph"}:
+            from pseudolife_memory import graph
+            value = getattr(graph, request["op"])(**kwargs)
+            if request["op"] == "build_subgraph":
+                value["nodes"] = sorted(value["nodes"])
+            return {"value": value}
+        if request["op"] == "alias_canonical_map":
+            from pseudolife_memory.graph import alias_canonical_map
+            return {"value": alias_canonical_map(request["entities"],
+                {int(k): v for k, v in request["aliases"].items()})}
         if request["op"] == "norm_name":
             from pseudolife_memory.graph import norm_name
             return {"value": norm_name(request["raw"])}
@@ -272,23 +312,55 @@ def oracle_call(st, request):
         return {"sqlstate": error.sqlstate}
 
 
-def run(candidate, mode, mutant=None):
+@lru_cache(maxsize=1)
+def oracle_graph_store():
+    # Execute the actual checkout source without importing memory/__init__,
+    # whose unrelated eager imports require torch. This wrapper uses graph.py
+    # and the real PostgresStorage methods; no model or substitute oracle.
+    source = REPO / "pseudolife_memory/memory/graph_store.py"
+    spec = importlib.util.spec_from_file_location("graph_store_oracle", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.PostgresNetworkxGraphStore
+
+
+def run(candidate, mode, mutant=None, row="store", metadata=None):
     from pseudolife_memory.storage.postgres import PostgresStorage
     import psutil
     names = [pg.PREFIX + str(os.getpid() * 10 + n) for n in range(3)]
     proc = oracle = None
     cases = []
+    skip_reason = None
+    skipped_indices = []
     try:
         template = pg.create(names[0])
+        golden_path = GOLDEN if row == "store" else GOLDEN.with_name("graph-read.json")
+        golden = json.loads(golden_path.read_text(encoding="utf-8")) if mode == "golden" else None
+        if golden and golden["operations"] != operations(row):
+            raise AssertionError("golden input inventory is stale")
+        if row == "read":
+            import psycopg
+            with psycopg.connect(template) as conn:
+                collate, ctype = conn.execute("SELECT datcollate, datctype FROM pg_database "
+                                             "WHERE datname = current_database()").fetchone()
+            locale = {"lc_collate": collate, "lc_ctype": ctype}
+            print("graph-read database locale: " + json.dumps(locale), flush=True)
+            if metadata is not None:
+                metadata["database_locale"] = locale
+            # template1 carries vector for the restricted test login. Pinning
+            # template0's locale loses that untrusted extension; retain isolation
+            # and declare the recorded replay skip, while live runs still compare
+            # both implementations under the runner's actual collation.
+            if golden:
+                skipped_indices, skip_reason = golden_collation_skips(golden, locale)
+                if skipped_indices:
+                    print(f"SKIP golden comparisons for cases {skipped_indices}: {skip_reason}", flush=True)
         seed(template)
         urls = [pg.create(name, template=names[0]) for name in names[1:]]
         initial = dbstate.dump(urls[0])
         clocks = [ClockState("python"), ClockState("rust")]
         for clock in clocks:
             clock.initialize(initial)
-        golden = json.loads(GOLDEN.read_text(encoding="utf-8")) if mode == "golden" else None
-        if golden and golden["operations"] != operations():
-            raise AssertionError("golden input inventory is stale")
         with tempfile.TemporaryDirectory(prefix="pl-w3h-") as home, ThreadPoolExecutor(max_workers=1) as reader:
             env = {"PSEUDOLIFE_MCP_DATABASE_URL": urls[1]}
             if mutant:
@@ -306,9 +378,23 @@ def run(candidate, mode, mutant=None):
                         proc.terminate()
                         proc.wait(timeout=10)
                 lifetime.callback(stop_fixture)
-                if mode != "golden":
+                if mode != "golden" or skipped_indices:
+                    # Warm the oracle through every operation so fallback cases
+                    # retain exact response, row, sequence and catalog checks.
                     oracle = PostgresStorage(urls[0])
-                for index, request in enumerate(operations()):
+                for index, request in enumerate(operations(row)):
+                    context = request
+                    if request["op"] == "subgraph":
+                        if oracle:
+                            loaded = oracle.load_graph()
+                            context = {**request, "op": "build_subgraph", "edges": [
+                                dict(src=e["src_id"], relation=e["relation"], dst=e["dst_id"],
+                                     confidence=e["confidence"], origin=e["origin"])
+                                for e in loaded["edges"]], "relations": {r["name"]: dict(
+                                    transitive=r["transitive"], inverse_of=r["inverse_of"])
+                                    for r in oracle.load_relations()}}
+                        else:
+                            context = golden["cases"][index]["comparison_context"]
                     pstart = time.time()
                     expected = oracle_call(oracle, request) if oracle else golden["cases"][index]["response"]
                     pend = time.time()
@@ -322,7 +408,8 @@ def run(candidate, mode, mutant=None):
                     actual = strict_json(line)
                     sstate = clocks[1].state(dbstate.dump(urls[1]), index, (sstart, send))
                     if catalog_shape(sstate) != catalog_shape(initial):
-                        raise AssertionError("candidate unexpectedly changed the bank catalog")
+                        raise AssertionError("candidate unexpectedly changed the bank catalog: " +
+                                             str(dbstate.diff(catalog_shape(initial), catalog_shape(sstate))[:3]))
                     actual = clocks[1].response(actual)
                     if oracle:
                         pstate = clocks[0].state(dbstate.dump(urls[0]), index, (pstart, pend))
@@ -332,11 +419,23 @@ def run(candidate, mode, mutant=None):
                         state_diffs = dbstate.diff(pstate, sstate)
                         expected_hash = digest(pstate)
                     else:
+                        state_diffs = []
+                    if golden and index not in skipped_indices:
+                        expected = golden["cases"][index]["response"]
                         expected_hash = golden["cases"][index]["state_sha256"]
-                        state_diffs = [] if digest(sstate) == expected_hash else ["golden bank-state digest differs"]
-                    diffs = response_diff(expected, actual) + state_diffs
+                        if digest(sstate) != expected_hash:
+                            state_diffs.append("golden bank-state digest differs")
+                    if context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
+                        from graph_read_compare import compare
+                        diffs = compare(context, expected, actual, response_diff) + state_diffs
+                    else:
+                        diffs = response_diff(expected, actual) + state_diffs
                     cases.append(dict(index=index, op=request["op"], response=expected,
                                       state_sha256=expected_hash, diffs=diffs))
+                    if index in skipped_indices:
+                        cases[-1]["skip_reason"] = skip_reason
+                    if request["op"] == "subgraph":
+                        cases[-1]["comparison_context"] = context
                     if diffs:
                         print(f"case {index} {request['op']}: {diffs[:3]}", flush=True)
                 proc.stdin.close()
@@ -363,30 +462,48 @@ def main():
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--row", choices=["store", "read"], default="store")
     args = parser.parse_args()
     results = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO,
                                                text=True).strip(),
                "platform": sys.platform,
+               "mode": args.mode,
+               "row": args.row,
                "candidate_sha256": hashlib.sha256(args.candidate.read_bytes()).hexdigest()}
     try:
-        control = run(args.candidate, "golden" if args.mode == "golden" else "live")
+        control = run(args.candidate, "golden" if args.mode == "golden" else "live",
+                      row=args.row, metadata=results)
         failed = sum(bool(c["diffs"]) for c in control)
-        results["summary"] = {"cases": len(control), "diff_cases": failed}
+        skipped = [c["index"] for c in control if "skip_reason" in c]
+        results["summary"] = {"cases": len(control) - len(skipped), "diff_cases": failed}
+        if skipped:
+            results["summary"].update(executed_cases=len(control), skipped_indices=skipped,
+                                      live_fallback_cases=len(skipped),
+                                      skip_reason=next(c["skip_reason"] for c in control if "skip_reason" in c))
         print(json.dumps(results["summary"]), flush=True)
         if failed:
             return 1
         if args.record:
             if args.mode != "live":
                 parser.error("--record requires live mode")
-            GOLDEN.write_text(json.dumps(dict(operations=operations(), cases=control,
-                normalizers="ClockState in graph_store.py; operation-specific windows; JSON object order free"),
+            golden_path = GOLDEN if args.row == "store" else GOLDEN.with_name("graph-read.json")
+            locale_metadata = {"database_locale": results["database_locale"],
+                               "collation_cases": list(range(155, 164))} if args.row == "read" else {}
+            golden_path.write_text(json.dumps(dict(operations=operations(args.row), cases=control,
+                **locale_metadata,
+                normalizers="ClockState in graph_store.py; operation-specific windows; JSON object order free" +
+                    ("; graph_read_compare.py: derived multisets, inverse collision provenance, node sets, "
+                     "standalone minimum paths; subgraph selection exact" if args.row == "read" else "")),
                 indent=1, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n")
         if args.mode == "mutants":
             outcomes = {}
             failures = {}
-            for mutant in MUTANTS:
+            mutants = MUTANTS
+            if args.row == "read":
+                from graph_read_profile import MUTANTS as mutants
+            for mutant in mutants:
                 try:
-                    cases = run(args.candidate, "live", mutant)
+                    cases = run(args.candidate, "live", mutant, row=args.row)
                     outcomes[mutant] = sum(bool(c["diffs"]) for c in cases)
                 except Exception as error:
                     # Only a completed comparison can catch a source mutant.

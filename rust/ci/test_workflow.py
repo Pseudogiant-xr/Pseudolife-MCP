@@ -1,5 +1,6 @@
 """Keep every Rust gate while changing the workflow's execution graph."""
 
+import argparse
 import copy
 import json
 from pathlib import Path
@@ -186,11 +187,20 @@ def check_executable_coverage(jobs):
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
     graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    row_parser = argparse.ArgumentParser(add_help=False)
+    row_parser.add_argument("--row", choices=["store", "read"], default="store")
     for mode in ("live", "golden"):
-        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
-                        ("--candidate", "--out"), ("--record",))
+        for row in ("store", "read"):
+            matches = [words for words in graph if words[:3] ==
+                       ["python", "rust/daemon/harness/graph_store.py", mode]]
+            # Match argparse's default, equals form and last-selector-wins rule.
+            matches = [words for words in matches if
+                       row_parser.parse_known_args(words[3:])[0].row == row]
+            require_command(matches, ("python", "rust/daemon/harness/graph_store.py", mode),
+                            ("--candidate", "--out"), ("--record",))
     require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
     require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_read_compare.py"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -342,6 +352,45 @@ def test_coverage_guard_rejects_an_ungated_w1c_step(monkeypatch):
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("mode", ["live", "golden"])
+@pytest.mark.parametrize("row", ["store", "read"])
+def test_graph_coverage_rejects_each_removed_invocation(mode, row):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Graph store differential and recorded oracle")
+    prefix = f"python rust/daemon/harness/graph_store.py {mode} "
+    lines = step["run"].splitlines()
+    removed = [line for line in lines if line.strip().startswith(prefix)
+               and ("--row read" in line) == (row == "read")]
+    assert len(removed) == 1
+    step["run"] = "\n".join(line for line in lines if line not in removed)
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("selector", ["--row store --row read", "--row=read"])
+def test_graph_coverage_rejects_store_commands_selecting_read(selector):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Graph store differential and recorded oracle")
+    step["run"] = "\n".join(line + " " + selector if
+                            line.strip().startswith("python rust/daemon/harness/graph_store.py ")
+                            and "--row read" not in line else line
+                            for line in step["run"].splitlines())
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+def test_graph_postgres_initialization_pins_linux_locale():
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Prepare disposable PostgreSQL for CLI lease row")
+    assert step["env"]["LANG"] == "${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}"
+    assert step["env"]["LC_ALL"] == step["env"]["LANG"]
+    graph = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                 if s.get("name") == "Graph store differential and recorded oracle")
+    assert graph["env"]["PL_GRAPH_REQUIRE_RECORDED_LOCALE"] == "${{ runner.os == 'Linux' && '1' || '0' }}"
 
 
 @pytest.mark.parametrize("name, old, new", [

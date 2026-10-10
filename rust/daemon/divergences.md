@@ -81,4 +81,5 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Item | Python | Rust | Owner |
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
-| Traversal, communities, graph service/MCP wiring, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | graph store only; these services are not wired | W3-H, subsequent increments |
+| Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
+| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired | W3-H, subsequent increments |
