@@ -366,23 +366,31 @@ def test_tunnel_near_expiry_binds_to_the_exact_seed_and_field():
     assert compare.diff(far, _near_obs(_midnight(8, now), now - 86_400), rule)
 
 
-def test_validated_password_is_replaced_only_on_its_own_line(tmp_path):
+def test_validated_login_secret_is_replaced_only_on_its_single_line(tmp_path):
     from cli_harness.rows import test_login  # noqa: PLC0415
-    key = test_login.PASSWORD_KEY
+    field = f"{test_login._LOGIN_SECRET_FIELD}=".encode()
     seen = {"shape": "token_urlsafe32", "authenticates": "ok", "kept": False,
             "verifier": {"stored_key": "s", "server_key": "k"}}
     login = tmp_path / "test-pg.env"
-    other = f"{key}=other".encode()
-    login.write_bytes(b"A=1\r\n" + f"{key}=drawn".encode() + b"\r\n" + other + b"\nB=" +
-                      b"drawn\n")
-    test_login._redact_validated(login, "drawn", seen)
-    assert login.read_bytes() == (b"A=1\r\n" + f"{key}=<validated>".encode() + b"\n" +
-                                  other + b"\nB=drawn\n")
-    # A password that is not on the line, or a run not validated, stays.
-    login.write_bytes(f"{key}=drawn\n".encode())
-    test_login._redact_validated(login, "drawn2", seen)
-    test_login._redact_validated(login, "drawn", dict(seen, authenticates="refused"))
-    assert login.read_bytes() == f"{key}=drawn\n".encode()
+    # One line (CRLF here): replaced, its neighbours byte for byte as they were.
+    login.write_bytes(b"A=1\r\n" + field + b"drawn\r\nB=drawn\n")
+    test_login._redact_validated(login, seen)
+    assert login.read_bytes() == b"A=1\r\n" + field + b"<validated>\nB=drawn\n"
+    # LF.
+    login.write_bytes(field + b"drawn\n")
+    test_login._redact_validated(login, seen)
+    assert login.read_bytes() == field + b"<validated>\n"
+    # Two such lines: left as they are, so the comparison shows them.
+    doubled = field + b"drawn\n" + field + b"other\n"
+    login.write_bytes(doubled)
+    test_login._redact_validated(login, seen)
+    assert login.read_bytes() == doubled
+    # A run not validated, or one that kept the old value, changes nothing.
+    login.write_bytes(field + b"drawn\n")
+    for unvalidated in (dict(seen, authenticates="refused"), dict(seen, kept=True),
+                        dict(seen, shape="seeded"), dict(seen, verifier={"stored_key": "s"})):
+        test_login._redact_validated(login, unvalidated)
+    assert login.read_bytes() == field + b"drawn\n"
 
 
 def _make_repo(path: Path) -> str:
@@ -427,6 +435,81 @@ def test_record_refuses_untracked_or_ignored_oracle_modules(tmp_path, monkeypatc
     (package / stray).write_bytes(b"print('shadow')\n")
     with pytest.raises(SystemExit, match="not HEAD's"):
         runner.oracle_binding(repo, None)
+
+
+def test_record_reads_the_bytes_on_disk_not_the_index(tmp_path, monkeypatch):
+    import subprocess  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    _make_repo(repo)
+    subprocess.run(["git", "-C", str(repo), "update-index", "--assume-unchanged",
+                    "pseudolife_memory/cli.py"], check=True, capture_output=True)
+    (repo / "pseudolife_memory" / "cli.py").write_bytes(b"print('edited')\n")
+    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--ignored",
+                             "--untracked-files=all"], capture_output=True, text=True)
+    assert status.stdout == ""  # git itself no longer sees the edit
+    with pytest.raises(SystemExit, match="changed pseudolife_memory/cli.py"):
+        runner.oracle_binding(repo, None)
+
+
+@pytest.mark.parametrize("broken", ["git-file", "git-dir-env"])
+def test_record_refuses_when_git_fails(tmp_path, monkeypatch, broken):
+    from cli_harness import runner  # noqa: PLC0415
+    repo = tmp_path / "repo"
+    head = _make_repo(repo)
+    if broken == "git-file":
+        (repo / ".git").rename(tmp_path / "moved.git")
+        (repo / ".git").write_text("gitdir: nowhere\n")
+    else:
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "nowhere"))
+    # Even with the right commit declared, a failing git is never an export.
+    monkeypatch.setenv(runner.COMMIT_ENV, head)
+    with pytest.raises(SystemExit, match="git exited 128"):
+        runner.oracle_binding(repo, None, repo)
+
+
+def test_record_refuses_bytecode_without_its_source(tmp_path, monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    _make_repo(repo)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "exclude").write_text("__pycache__/\n")
+    cache = repo / "pseudolife_memory" / "__pycache__"
+    cache.mkdir()
+    (cache / "cli.cpython-311.pyc").write_bytes(b"bytecode")
+    assert runner.oracle_binding(repo, None)["oracle_commit_source"] == "git"
+    (cache / "gone.cpython-311.pyc").write_bytes(b"stale shadow")
+    with pytest.raises(SystemExit, match="cache without its source"):
+        runner.oracle_binding(repo, None)
+
+
+def test_oracle_arm_never_runs_in_tree_bytecode(tmp_path):
+    """A stale cache whose header matches its source (mtime and size) runs
+    in place of the source under CPython's default check; the oracle arm's
+    environment makes CPython ignore the tree's __pycache__ altogether."""
+    import importlib._bootstrap_external as bootstrap  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    package = tmp_path / "pkg"
+    package.mkdir()
+    module = package / "probe_mod.py"
+    module.write_text("print('source')\n")
+    stat = module.stat()
+    stale = compile("print('shadow')\n", str(module), "exec")
+    (package / "__pycache__").mkdir()
+    (package / "__pycache__" / f"probe_mod.{sys.implementation.cache_tag}.pyc").write_bytes(
+        bootstrap._code_to_timestamp_pyc(stale, int(stat.st_mtime), stat.st_size))
+    oracle_env = core.python_target(sys.executable, package).env
+
+    def run(env):
+        env = {**os.environ, **env, "PYTHONPATH": str(package)}
+        return subprocess.run([sys.executable, "-c", "import probe_mod"], env=env, cwd=tmp_path,
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    control = {k: v for k, v in oracle_env.items() if k != "PYTHONPYCACHEPREFIX"}
+    assert run(control) == "shadow"  # the stale cache is what a plain launch runs
+    assert run(oracle_env) == "source"
 
 
 def test_record_refuses_an_unbound_or_mismatched_export(tmp_path, monkeypatch):

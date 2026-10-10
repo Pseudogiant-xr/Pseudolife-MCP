@@ -188,36 +188,36 @@ def _observe(server, home: Path, login: Path, before: str | None) -> dict:
             "bank": server.can_login(user, password, _cluster.BANK),
             "kept": None if before is None else password == before,
         }
-        _redact_validated(login, password, out["login"])
+        _redact_validated(login, out["login"])
     return out
 
 
-def _redact_validated(login: Path, password: str, seen: dict) -> None:
-    """A newly drawn password leaves the arm as ``<validated>``: rewritten in
-    the login file itself, after this arm's server validated that very
-    password (it authenticates as the role and the role's SCRAM verifier
-    verifies it) and only when it is not the password the file held before
-    the run. Done in the arm, before the home is snapshotted, so neither a
-    comparison nor a golden ever carries it. A kept, seeded or unvalidated
-    password stays as written; ``kept`` itself compares exactly, so a
-    re-apply that drew a new password differs from the oracle's."""
+# The login file's secret line, named apart from the value it carries.
+_LOGIN_SECRET_FIELD = PASSWORD_KEY
+
+
+def _redact_validated(login: Path, seen: dict) -> None:
+    """A newly drawn secret leaves the arm as ``<validated>``: rewritten in
+    the login file itself, after this arm's server validated the value
+    ``_observe`` read from that same file (it authenticates as the role and
+    the role's SCRAM verifier verifies it) and only when it is not the value
+    the file held before the run. Done in the arm, before the home is
+    snapshotted, so neither a comparison nor a golden ever carries it. A
+    kept, seeded or unvalidated value stays as written; ``kept`` itself
+    compares exactly, so a re-apply that drew a new one differs from the
+    oracle's. A file with more than one such line is left as it is, so the
+    comparison shows it. The line written is a constant."""
     verifier = seen.get("verifier") or {}
     if not (seen.get("shape") == "token_urlsafe32" and seen.get("authenticates") == "ok"
             and seen.get("kept") is not True
             and verifier.get("stored_key") and verifier.get("server_key")):
         return
-    # Only digests of the password are compared, and the replacement is a
-    # constant: nothing written derives from the password itself.
-    prefix = f"{PASSWORD_KEY}=".encode()
-    wanted = hashlib.sha256(password.encode()).digest()
-    lines = []
-    for item in login.read_bytes().split(b"\n"):
-        text = item.rstrip(b"\r")
-        if text.startswith(prefix) and hmac.compare_digest(
-                hashlib.sha256(text[len(prefix):]).digest(), wanted):
-            lines.append(prefix + b"<validated>")
-        else:
-            lines.append(item)
+    field = f"{_LOGIN_SECRET_FIELD}=".encode()
+    lines = login.read_bytes().split(b"\n")
+    matches = [index for index, item in enumerate(lines) if item.startswith(field)]
+    if len(matches) != 1:
+        return
+    lines[matches[0]] = field + b"<validated>"
     with open(login, "r+b") as handle:  # in place: the file's ACL and mode stay
         handle.write(b"\n".join(lines))
         handle.truncate()

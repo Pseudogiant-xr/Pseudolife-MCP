@@ -24,15 +24,19 @@ Defaults: the oracle is this checkout with the running interpreter
 `$CARGO_TARGET_DIR/debug/pseudolife-stdio`.
 
 A golden names the oracle commit it was recorded from, and `--record`
-refuses an unbound recording before any arm runs. A git checkout binds to
-its HEAD (`oracle_commit_source: git`), and `pseudolife_memory/` must hold
-only HEAD's tracked content: a modified, untracked or ignored file there (a
-shadow module, a sourceless `.pyc`) is refused; only `__pycache__/` is
-allowed. Any other tree (an export) needs the commit it
-came from, as `--oracle-commit` or `CLI_HARNESS_ORACLE_COMMIT`: when this
-harness's checkout holds that commit, the tree's `pseudolife_memory/` must
-match it file for file (`verified-tree`); with no checkout to ask, the
-commit is recorded as `declared`.
+refuses an unbound recording before any arm runs. The binding is to the
+bytes the oracle imports: every file under `pseudolife_memory/`, read from
+disk (so an `assume-unchanged` edit counts), must equal the commit's blob,
+with no extra file (an untracked or ignored shadow module, a sourceless
+`.pyc`) and no `__pycache__` entry without its source. The oracle arm never
+runs in-tree bytecode: it reads caches only under an empty
+`PYTHONPYCACHEPREFIX`. A git checkout binds to its HEAD
+(`oracle_commit_source: git`), and any git command that fails there
+refuses. Any other tree (an export) needs the commit it came from, as
+`--oracle-commit` or `CLI_HARNESS_ORACLE_COMMIT`: when this harness's
+checkout holds that commit, the tree must match it file for file
+(`verified-tree`); with no checkout to ask, the commit is recorded as
+`declared`.
 
 `--out` writes a JSON summary keyed by row name (each with its PARITY ID
 under `parity`); with `--record` it lists each row's recorded and skipped

@@ -147,34 +147,61 @@ def _tree_differences(source: Path, commit: str, repo: Path) -> list[str] | None
     return problems
 
 
+def _cache_problems(source: Path) -> list[str]:
+    """``__pycache__`` entries that are not a ``<module>.<tag>.pyc`` beside
+    an existing ``<module>.py`` (an orphan's bytecode can be imported)."""
+    problems = []
+    for path in sorted((source / ORACLE_PACKAGE).rglob("*")):
+        if "__pycache__" not in path.parts or path.is_dir():
+            continue
+        rel = path.relative_to(source).as_posix()
+        module = path.parent.parent / (path.name.split(".", 1)[0] + ".py")
+        if path.parent.name != "__pycache__" or path.suffix != ".pyc" or not module.is_file():
+            problems.append(f"cache without its source: {rel}")
+    return problems
+
+
 def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dict:
     """The commit a recording's oracle ran from, or a refusal (SystemExit).
 
-    A git checkout binds to its HEAD, refusing uncommitted changes to the
-    oracle package. Any other tree (an export) needs the commit declared by
-    ``--oracle-commit`` or ``CLI_HARNESS_ORACLE_COMMIT``: when the harness's
-    own checkout holds that commit, the tree's package must match it file
-    for file (``verified-tree``); with no git checkout to ask, the commit is
-    recorded as ``declared``."""
+    What binds is the bytes the oracle imports: every file under the oracle
+    package as read from disk (not git's index, so an ``assume-unchanged``
+    edit counts), compared with the commit's blobs, with no file beyond them
+    (an untracked or ignored shadow module, a sourceless ``.pyc``) and no
+    ``__pycache__`` entry without its source. In-tree bytecode is never run:
+    the oracle arm reads caches only under an empty ``PYTHONPYCACHEPREFIX``
+    (``core.python_target``).
+
+    A git checkout (``source/.git`` present) binds to its HEAD, and any git
+    command there that fails refuses. Any other tree (an export) needs the
+    commit declared by ``--oracle-commit`` or ``CLI_HARNESS_ORACLE_COMMIT``:
+    when the harness's own checkout holds that commit, the tree must match it
+    file for file (``verified-tree``); with no git checkout to ask, the
+    commit is recorded as ``declared``."""
     declared = declared or os.environ.get(COMMIT_ENV) or None
-    top = _git(source, "rev-parse", "--show-toplevel")
-    if top.returncode == 0 and Path(top.stdout.decode().strip()).resolve() == source.resolve():
-        head = _git(source, "rev-parse", "HEAD").stdout.decode().strip()
+    if (source / ".git").exists():
+        top = _git(source, "rev-parse", "--show-toplevel")
+        head = _git(source, "rev-parse", "--verify", "HEAD^{commit}")
+        for done in (top, head):
+            if done.returncode != 0:
+                raise SystemExit(f"--record: git exited {done.returncode} in {source} "
+                                 f"({done.stderr.decode('utf-8', 'replace').strip()[:200]}), "
+                                 "so the oracle commit is unbound")
+        if Path(top.stdout.decode().strip()).resolve() != source.resolve():
+            raise SystemExit(f"--record: {source} is not the top of its git checkout")
+        head = head.stdout.decode().strip()
         if declared and declared != head:
             raise SystemExit(f"--record: the declared oracle commit {declared} is not "
                              f"{source}'s HEAD {head}")
-        # Anything but HEAD's tracked content can be imported: a modified
-        # file, an untracked shadow module, or an ignored one (a sourceless
-        # .pyc beside the sources). Only __pycache__ is allowed, whose
-        # bytecode Python uses only for a source that exists.
-        status = _git(source, "status", "--porcelain", "--untracked-files=all", "--ignored",
-                      "--", ORACLE_PACKAGE).stdout.decode("utf-8", "replace")
-        stray = [line for line in status.splitlines()
-                 if not (line.startswith("!! ") and "/__pycache__/" in line)]
-        if stray:
-            raise SystemExit(f"--record: {source} has content under {ORACLE_PACKAGE}/ that "
-                             f"is not HEAD's ({'; '.join(stray[:5])}), so its HEAD does not "
-                             "name the oracle; commit or remove it first")
+        problems = _tree_differences(source, head, source)
+        if problems is None:
+            raise SystemExit(f"--record: git cannot read {source}'s repository, so the "
+                             "oracle commit is unbound")
+        problems += _cache_problems(source)
+        if problems:
+            raise SystemExit(f"--record: {source}'s {ORACLE_PACKAGE}/ is not HEAD's "
+                             f"({'; '.join(problems[:5])}), so its HEAD does not name the "
+                             "oracle; commit or remove it first")
         return {"oracle_commit": head, "oracle_commit_source": "git"}
     if not declared:
         raise SystemExit(f"--record: {source} is not a git checkout, so the oracle commit is "
@@ -183,6 +210,10 @@ def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dic
     if not re.fullmatch(r"[0-9a-f]{40}", declared):
         raise SystemExit(f"--record: the declared oracle commit must be a full 40-character "
                          f"commit id, not {declared!r}")
+    orphans = _cache_problems(source)
+    if orphans:
+        raise SystemExit(f"--record: {source}'s {ORACLE_PACKAGE}/ has bytecode an import "
+                         f"could run: {'; '.join(orphans[:10])}")
     problems = _tree_differences(source, declared, repo)
     if problems is None:
         return {"oracle_commit": declared, "oracle_commit_source": "declared"}

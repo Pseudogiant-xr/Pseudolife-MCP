@@ -104,11 +104,28 @@ class Target:
     env: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
+_NO_PYCACHE: str | None = None
+
+
+def _empty_pycache_prefix() -> str:
+    """An empty directory for ``PYTHONPYCACHEPREFIX``: CPython then looks for
+    bytecode only there, never in the source tree's ``__pycache__``, so a
+    stale cache whose header matches its source cannot run in place of the
+    source. With ``PYTHONDONTWRITEBYTECODE`` nothing is written to it."""
+    global _NO_PYCACHE
+    if _NO_PYCACHE is None:
+        import atexit  # noqa: PLC0415
+        _NO_PYCACHE = tempfile.mkdtemp(prefix="cli-harness-no-pycache-")
+        atexit.register(shutil.rmtree, _NO_PYCACHE, True)
+    return _NO_PYCACHE
+
+
 def python_target(python: str, source: Path) -> Target:
     # -P keeps the arm's cwd off sys.path; PYTHONPATH selects the oracle source.
     return Target("python", [python, "-P", "-m", "pseudolife_memory.cli"],
                   {"PYTHONPATH": str(source), "PYTHONIOENCODING": "utf-8",
-                   "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+                   "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1",
+                   "PYTHONPYCACHEPREFIX": _empty_pycache_prefix()})
 
 
 def rust_target(binary: Path) -> Target:
