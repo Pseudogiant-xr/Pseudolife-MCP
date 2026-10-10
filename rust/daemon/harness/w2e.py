@@ -517,7 +517,7 @@ def prepare_template(scn: dict, tag: str, root: Path) -> str:
                               daemons.base_env(home, side_env(scn, dsn, scn.get("seed_env"))))
     d.start(300)
     try:
-        w1a.wait_settled([d.port])
+        w1a.wait_settled([d.port], token=TOKEN)
         mcp = Mcp(d.port)
         mcp.init()
         for op in scn["seed"]:
@@ -552,7 +552,7 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         for d in procs.values():
             d.start(300)
-        w1a.wait_settled([d.port for d in procs.values()])
+        w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         mcp = Mcp(procs["python"].port)
         mcp.init()
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
@@ -651,10 +651,10 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
         # The oracle's template was booted once to seed it and once to run,
         # so its writer-lease epoch is 2: boot the Rust bank twice as well.
         d.start(300)
-        w1a.wait_settled([d.port])
+        w1a.wait_settled([d.port], token=TOKEN)
         d.stop()
         d.start(300)
-        w1a.wait_settled([d.port])
+        w1a.wait_settled([d.port], token=TOKEN)
         for i, rec in enumerate(golden["steps"]):
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
