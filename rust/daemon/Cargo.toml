@@ -25,6 +25,7 @@ graph-harness = []
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1", "with-chrono-0_4"] }
 serde_json.workspace = true
+http-body-util.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 percent-encoding.workspace = true
@@ -44,3 +45,6 @@ windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
