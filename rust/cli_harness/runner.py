@@ -330,12 +330,17 @@ def redact_golden(golden: dict) -> dict:
     return golden
 
 
-def write_golden(path: Path, golden: dict) -> None:
-    """Write a golden, refusing one that would still carry a SCRAM verifier."""
+def write_golden(path: Path, golden: dict, fixtures: tuple[str, ...] = ()) -> None:
+    """Write a golden, refusing one that would still carry a SCRAM verifier
+    or a drawn-shape login secret other than the row's ``fixtures``."""
     marks = normalize.scram_marks(golden)
     if marks:
         raise SystemExit(f"refusing to write {path}: SCRAM-SHA-256$ remains at "
                          + ", ".join(marks[:5]))
+    drawn = normalize.drawn_login_secrets(golden, fixtures)
+    if drawn:
+        raise SystemExit(f"refusing to write {path}: a drawn login secret remains at "
+                         + ", ".join(drawn[:5]))
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n", encoding="utf-8",
                     newline="\n")
@@ -358,7 +363,7 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
     if verify is not None:
         verify()
     path = _golden_path(row)
-    write_golden(path, redact_golden(golden))
+    write_golden(path, redact_golden(golden), rows.fixture_login_secrets(row))
     return path
 
 

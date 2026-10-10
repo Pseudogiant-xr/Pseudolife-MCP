@@ -50,6 +50,9 @@ SEEDED_PASSWORD = "seeded-" + "s" * 36
 # keep it, which the shape alone cannot show. A throwaway cluster's test value.
 GENERATED_PASSWORD = base64.urlsafe_b64encode(
     hashlib.sha256(b"pl-cf-w1c test-login generated password").digest()).rstrip(b"=").decode()
+# The only drawn-shape login secrets a golden may carry as written: the
+# recorder refuses any other (a drawn value is <validated> or never recorded).
+FIXTURE_LOGIN_SECRETS = (SEEDED_PASSWORD, GENERATED_PASSWORD)
 TOKEN = secrets.token_hex(4)
 USER_KEY = "PSEUDOLIFE_TEST_PG_USER"
 PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"

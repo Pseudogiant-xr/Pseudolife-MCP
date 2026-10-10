@@ -232,24 +232,43 @@ def redact_scram_verifiers(obs: dict) -> None:
             _set_file(obs, rel, SCRAM_VERIFIER.sub(SCRAM_TOKEN, base64.b64decode(value[5:])))
 
 
-def scram_marks(node: Any, where: str = "") -> list[str]:
-    """Where ``SCRAM-SHA-256$`` appears in a golden, raw or inside any base64
-    string (streams, ``file:`` contents), so a writer can refuse it."""
+def _golden_bytes(node: Any, where: str = ""):
+    """Every string in a golden as ``(where, bytes)``: raw, and decoded when it
+    is base64 (streams, ``file:`` contents)."""
     if isinstance(node, dict):
-        return [hit for key, value in node.items() for hit in scram_marks(value, f"{where}/{key}")]
-    if isinstance(node, list):
-        return [hit for index, value in enumerate(node)
-                for hit in scram_marks(value, f"{where}[{index}]")]
-    if not isinstance(node, str):
-        return []
-    if SCRAM_MARK in node.encode():
-        return [where]
-    text = node[5:] if node.startswith("file:") else node
-    try:
-        decoded = base64.b64decode(text, validate=True)
-    except ValueError:
-        return []
-    return [where] if SCRAM_MARK in decoded else []
+        for key, value in node.items():
+            yield from _golden_bytes(value, f"{where}/{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _golden_bytes(value, f"{where}[{index}]")
+    elif isinstance(node, str):
+        yield where, node.encode()
+        text = node[5:] if node.startswith("file:") else node
+        try:
+            yield where, base64.b64decode(text, validate=True)
+        except ValueError:
+            pass
+
+
+def scram_marks(node: Any) -> list[str]:
+    """Where ``SCRAM-SHA-256$`` appears in a golden, raw or inside any base64
+    string, so a writer can refuse it."""
+    return sorted({where for where, data in _golden_bytes(node) if SCRAM_MARK in data})
+
+
+# A test login's secret line holding a value shaped like a drawn one
+# (secrets.token_urlsafe(32): 43 URL-safe characters). A validated drawn value
+# is rewritten to <validated> in the arm; any other must be a row's declared
+# fixture, never a value drawn for that run.
+_DRAWN_LOGIN_SECRET = re.compile(rb"PSEUDOLIFE_TEST_PG_PASSWORD=([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])")
+
+
+def drawn_login_secrets(node: Any, fixtures: tuple[str, ...] = ()) -> list[str]:
+    """Where a golden holds a drawn-shape login secret that is not one of
+    ``fixtures`` (the row's own fixed values), so a writer can refuse it."""
+    allowed = {value.encode() for value in fixtures}
+    return sorted({where for where, data in _golden_bytes(node)
+                   for value in _DRAWN_LOGIN_SECRET.findall(data) if value not in allowed})
 
 
 @rule("python-stdout-closed-trailer")

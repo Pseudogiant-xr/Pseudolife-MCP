@@ -34,6 +34,7 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "CLI W1-C differential harness": "cli",
     "Daemon static HTTP parity": "cli",
 
     "Daemon schema startup parity": "cli",
@@ -80,6 +81,35 @@ def row_commands(invocations, required_rows, golden):
     assert set(required_rows) <= covered, (required_rows, golden)
 
 
+# The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
+# row_commands() sees no --row there: the row list and how both passes are
+# built from it are pinned here instead.
+W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
+            "move", "tunnel")
+W1C_LINES = (
+    "$live = $rows | ForEach-Object { '--row'; $_ }",
+    "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "
+    "(Test-Path \"rust/cli_harness/goldens/test_login.$platform.json\") }",
+    "$golden = $replayed | ForEach-Object { '--row'; $_ }",
+)
+
+
+def check_w1c_rows(script):
+    lines = [line.strip() for line in script.splitlines()]
+    literals = [line for line in lines if line.startswith("$rows = @(")]
+    assert len(literals) == 1, literals
+    assert literals[0] == "$rows = @(" + ", ".join(f"'{row}'" for row in W1C_ROWS) + ")"
+    for line in W1C_LINES:
+        assert line in lines, line
+    invocations = commands(script)
+    require_command(invocations, ("python", "rust/cli_harness", "@live"), ("--candidate",),
+                    ("--golden", "--record", "--mutants", "--case", "--skip-bank"))
+    require_command(invocations, ("python", "rust/cli_harness", "@golden", "--golden"),
+                    ("--candidate",), ("--record", "--mutants", "--case"))
+    assert [words[:3] for words in invocations if words[:2] == ["python", "rust/cli_harness"]] \
+        == [["python", "rust/cli_harness", "@live"], ["python", "rust/cli_harness", "@golden"]]
+
+
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
     require_command(commands(rust["Check generated daemon schema"]["run"]),
@@ -99,6 +129,7 @@ def check_executable_coverage(jobs):
             require_command(commands(rust[label]["run"]), prefix, required, forbidden)
 
     parity = {step.get("name"): step for step in jobs["parity-checks"]["steps"]}
+    check_w1c_rows(parity["CLI W1-C differential harness"]["run"])
     require_command(commands(parity["Run every eval harness test"]["run"]),
                     ("python", "-m", "pytest"),
                     ("evals/rust_port", "evals/rust_baseline", "-p",
@@ -295,6 +326,16 @@ def test_coverage_guard_rejects_a_removed_check(monkeypatch):
         test_original_checks_remain_gated_on_the_expected_shards()
 
 
+def test_coverage_guard_rejects_an_ungated_w1c_step(monkeypatch):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "CLI W1-C differential harness")
+    del step["if"]
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
 @pytest.mark.parametrize("name, old, new", [
     ("Run every eval harness test", "--junitxml", "--durations=10 --junitxml"),
     ("CLI differential harness", "--row episode", "--row episode --row doctor"),
@@ -329,6 +370,16 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
+    # Review of #678 (round 6): the W1-C rows pass through arrays.
+    ("CLI W1-C differential harness",
+     "'transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', "
+     "'tunnel'", "'move'"),
+    ("CLI W1-C differential harness", "'invite', 'pair', ", "'invite', "),
+    ("CLI W1-C differential harness", "python rust/cli_harness @golden",
+     "# python rust/cli_harness @golden"),
+    ("CLI W1-C differential harness", "@golden --golden", "@golden"),
+    ("CLI W1-C differential harness", "@live --candidate", "@live --skip-bank --candidate"),
+    ("CLI W1-C differential harness", "$golden = $replayed |", "$golden = @('move') |"),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())

@@ -13,8 +13,9 @@ those deferrals. This row compares answered cases only.
 Contract per arm: exit code, both streams byte-exact, every file under the
 home (written configs, backups, created token files), and the requests the
 stand-in daemon received: connect's own requests (attributed by the client
-process holding each connection) raw and in order, every header field and
-the body, and of its handshake child, whose transport is the shim's own
+process holding each connection) in order, each with method, target, every
+header field by name (repeats flagged) and the body, and of its handshake
+child, whose transport is the shim's own
 row, the ``Authorization`` values its MCP posts carried. The fixture
 credentials are generated per process and replaced by placeholders in
 each arm's observation (``redact_credentials``). Named rules:
@@ -134,8 +135,9 @@ class Daemon:
 
             def _record(self, body: bytes = b"") -> None:
                 """The request as it arrived, in the harness's wire shape:
-                every header field in order (values as http.server decodes
-                them, Latin-1) and the body."""
+                every header field as received (values as http.server
+                decodes them, Latin-1) and the body. The comparison
+                (``normalize.wire``) takes the fields by name."""
                 owner = daemon._owner(self.client_address[1])
                 entry = {"method": self.command, "target": self.path,
                          "headers": [[name, value] for name, value in self.headers.items()],
@@ -255,9 +257,9 @@ class Daemon:
         return None
 
     def requests(self) -> list:
-        """Connect's own requests in order, each raw: method, target, every
-        header field in order and the body (the harness's wire projection
-        compares every field). Of the handshake child (the shim, whose
+        """Connect's own requests in order, each with method, target, every
+        header field and the body (the harness's wire projection compares
+        every field, by name). Of the handshake child (the shim, whose
         transport is its own row) only the ``Authorization`` values its MCP
         posts carried, as one summary entry whose headers are already
         projected. Credentials are tokenized later, per arm, by

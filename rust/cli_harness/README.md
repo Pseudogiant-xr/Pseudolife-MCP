@@ -38,6 +38,17 @@ checkout holds that commit, the tree must match it file for file
 (`verified-tree`); with no checkout to ask, the commit is recorded as
 `declared`.
 
+Goldens recorded before the binding existed carry `oracle_commit` without
+`oracle_commit_source`, and the Linux ones from an exported tree carry the
+8-character ids `846ccd38` (invite, move, pair, transfer) and `9ff2c8cd`
+(episode, hook). None is stale: checked on 2026-10-10 (`git rev-parse
+<commit>:pseudolife_memory`), every golden's commit has the same
+`pseudolife_memory/` tree as this branch (`78c12208`): `846ccd38`,
+`9ff2c8cd`, `306b5515`, `6034e5c3`, `35b8f5d2`, `7cd78741`, `8263e7e3`,
+`9bddd207`, `e4f350d5`, `992847be`, `f92dd048`, and `2ee86df5` (the
+pull-request merge commit CI recorded `test_login.linux.json` from; not on
+this branch, fetchable by id). `lease.linux.json` says `unknown`.
+
 The harness process imports oracle code itself (writers, seeders,
 observers), so `python rust/cli_harness` relaunches itself once with an
 empty `PYTHONPYCACHEPREFIX` and `PYTHONDONTWRITEBYTECODE=1`. A recording

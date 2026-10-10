@@ -63,7 +63,12 @@ own options (`_parser`, 456-482).
   `<validated>` once its server has validated it, before the home is
   snapshotted, so no comparison or golden carries a drawn password. The
   re-apply fixture `GENERATED_PASSWORD` is a fixed token-shaped constant, the
-  same in every harness process.
+  same in every harness process. The recorder enforces this: it refuses to
+  write a golden holding a token-shaped `PSEUDOLIFE_TEST_PG_PASSWORD` value
+  other than `<validated>` and the row's declared fixtures
+  (`FIXTURE_LOGIN_SECRETS`: the seeded and generated constants); an
+  unvalidated drawn value therefore stops the recording instead of reaching
+  a golden.
 - A verifier echoed by the server's error CONTEXT when the role change fails
   (its salt and keys come from a password drawn for that run and never
   kept). Rule `test-login-verifier-echo` maps a verifier of the exact shape

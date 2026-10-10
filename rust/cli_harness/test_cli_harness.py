@@ -448,13 +448,40 @@ def test_golden_writer_refuses_a_scram_verifier_anywhere(tmp_path):
         assert not (tmp_path / "g.json").exists()
 
 
-def test_no_committed_golden_carries_a_scram_verifier():
+def test_no_committed_golden_carries_a_verifier_or_a_drawn_login_secret():
     import json  # noqa: PLC0415
+    from cli_harness import rows  # noqa: PLC0415
     goldens = sorted((Path(__file__).resolve().parent / "goldens").glob("*.json"))
     assert goldens
-    found = {path.name: normalize.scram_marks(json.loads(path.read_text(encoding="utf-8")))
-             for path in goldens}
+    found = {}
+    for path in goldens:
+        golden = json.loads(path.read_text(encoding="utf-8"))
+        fixtures = rows.fixture_login_secrets(path.name.split(".")[0])
+        found[path.name] = (normalize.scram_marks(golden)
+                            + normalize.drawn_login_secrets(golden, fixtures))
     assert {name: marks for name, marks in found.items() if marks} == {}
+
+
+def test_golden_writer_refuses_a_drawn_login_secret(tmp_path):
+    import secrets  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    field = f"{test_login._LOGIN_SECRET_FIELD}=".encode()
+    drawn = secrets.token_urlsafe(32)
+    assert len(drawn) == 43
+    path = tmp_path / "g.json"
+    for value in (drawn.encode(), field + drawn.encode()):
+        golden = {"cases": {"c": obs(stdout=field + drawn.encode() + b"\n",
+                                     files={"test-pg.env": b"A=1\n" + value + b"\n"})}}
+        with pytest.raises(SystemExit, match="drawn login secret"):
+            runner.write_golden(path, golden, test_login.FIXTURE_LOGIN_SECRETS)
+        assert not path.exists()
+    # The row's fixtures and a validated value are written as they are.
+    for value in (*test_login.FIXTURE_LOGIN_SECRETS, "<validated>"):
+        golden = {"cases": {"c": obs(files={"test-pg.env": field + value.encode() + b"\n"})}}
+        runner.write_golden(path, golden, test_login.FIXTURE_LOGIN_SECRETS)
+        assert path.exists()
+        path.unlink()
 
 
 def test_verifier_echo_rule_meets_the_recorded_token():

@@ -132,7 +132,8 @@ never starting with `-`. Everything else defers before any effect.
 - The handshake child's own transport (its MCP request order and count,
   its own `/health` and episode posts, its request fields, how it encodes a
   non-ASCII bearer) belongs to the shim's rows: the harness compares
-  connect's own requests raw and in order and, of the child, only the
+  connect's own requests in order, each with method, target, every header
+  field by name (repeats flagged) and the body, and, of the child, only the
   `Authorization` values its MCP posts carry.
 - The temporary file name beside a written file (removed before exit).
 - Proxy discovery: urllib reads the proxy environment variables and the

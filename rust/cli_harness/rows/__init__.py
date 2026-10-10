@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 
 ROWS = {
     "mail": "CLI-MAIL",
@@ -25,6 +26,16 @@ ROWS = {
 
 def load(row: str):
     return importlib.import_module(f"{__name__}.{row}").cases()
+
+
+def fixture_login_secrets(row: str) -> tuple[str, ...]:
+    """The fixed login secrets a row's goldens may carry as written (its
+    ``FIXTURE_LOGIN_SECRETS``); a drawn one never reaches a golden. A row
+    with no module of its own declares none."""
+    if importlib.util.find_spec(f"{__name__}.{row}") is None:
+        return ()
+    return tuple(getattr(importlib.import_module(f"{__name__}.{row}"),
+                         "FIXTURE_LOGIN_SECRETS", ()))
 
 
 def mutants(row: str) -> list:
