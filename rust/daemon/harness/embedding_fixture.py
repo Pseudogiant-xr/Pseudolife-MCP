@@ -10,9 +10,9 @@ import json
 from pathlib import Path
 
 
-def fixture_weights(size):
+def fixture_weights(size, dimension=4):
     import numpy as np
-    weights = np.zeros((size, 4), dtype="f4")
+    weights = np.zeros((size, dimension), dtype="f4")
     # Two active columns keep the exact fp32 norm arithmetic simple while
     # retaining direction changes, mixed signs and nonzero padding values.
     weights[:, 0] = 4
@@ -20,7 +20,7 @@ def fixture_weights(size):
     return weights
 
 
-def create(root: Path, *, last_token=False):
+def create(root: Path, *, last_token=False, dimension=4):
     import numpy as np
     import onnx
     from onnx import TensorProto, helper, numpy_helper
@@ -37,7 +37,7 @@ def create(root: Path, *, last_token=False):
         "tokenizer_class": "PreTrainedTokenizerFast", "pad_token": "[PAD]",
         "unk_token": "[UNK]", "model_max_length": 128,
         "padding_side": "left" if last_token else "right"}), encoding="utf-8")
-    (root / "config.json").write_text(json.dumps({"model_type": "bert", "hidden_size": 4,
+    (root / "config.json").write_text(json.dumps({"model_type": "bert", "hidden_size": dimension,
         "num_hidden_layers": 1, "num_attention_heads": 1, "intermediate_size": 4,
         "max_position_embeddings": 128, "vocab_size": len(vocab)}), encoding="utf-8")
     (root / "sentence_bert_config.json").write_text(json.dumps({"max_seq_length": 128,
@@ -49,10 +49,10 @@ def create(root: Path, *, last_token=False):
     if last_token:
         modules.append({"idx": 2, "name": "2", "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"})
     (root / "modules.json").write_text(json.dumps(modules), encoding="utf-8")
-    (root / "1_Pooling/config.json").write_text(json.dumps({"word_embedding_dimension": 4,
+    (root / "1_Pooling/config.json").write_text(json.dumps({"word_embedding_dimension": dimension,
         "pooling_mode_mean_tokens": not last_token, "pooling_mode_lasttoken": last_token,
         "pooling_mode_cls_token": False}), encoding="utf-8")
-    weights = fixture_weights(len(vocab))
+    weights = fixture_weights(len(vocab), dimension)
     inputs = [helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "tokens"])]
     nodes = []
     constants = [numpy_helper.from_array(weights, "weights")]
@@ -71,7 +71,7 @@ def create(root: Path, *, last_token=False):
     nodes.append(helper.make_node("Gather", ["weights", ids], ["last_hidden_state"], axis=0))
     graph = helper.make_graph(nodes,
         "offline-embedding-fixture", inputs,
-        [helper.make_tensor_value_info("last_hidden_state", TensorProto.FLOAT, ["batch", "tokens", 4])],
+        [helper.make_tensor_value_info("last_hidden_state", TensorProto.FLOAT, ["batch", "tokens", dimension])],
         constants)
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 9
