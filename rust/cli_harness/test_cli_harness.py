@@ -366,16 +366,36 @@ def test_tunnel_near_expiry_binds_to_the_exact_seed_and_field():
     assert compare.diff(far, _near_obs(_midnight(8, now), now - 86_400), rule)
 
 
+def test_redaction_keeps_a_secret_lines_ending_difference(tmp_path):
+    """An oracle writing the secret line with LF and a candidate writing it
+    with CRLF must still differ once both are redacted."""
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    field = f"{test_login._LOGIN_SECRET_FIELD}=".encode()
+    seen = {"shape": "token_urlsafe32", "authenticates": "ok", "kept": False,
+            "verifier": {"stored_key": "s", "server_key": "k"}}
+    redacted = {}
+    for name, ending in (("lf", b"\n"), ("crlf", b"\r\n")):
+        login = tmp_path / f"{name}.env"
+        login.write_bytes(b"A=1\n" + field + b"drawn" + ending)
+        test_login._redact_validated(login, seen)
+        redacted[name] = login.read_bytes()
+    assert redacted["lf"] == b"A=1\n" + field + b"<validated>\n"
+    assert redacted["crlf"] == b"A=1\n" + field + b"<validated>\r\n"
+    assert compare.diff(obs(files={"test-pg.env": redacted["lf"]}),
+                        obs(files={"test-pg.env": redacted["crlf"]}), ())
+
+
 def test_validated_login_secret_is_replaced_only_on_its_single_line(tmp_path):
     from cli_harness.rows import test_login  # noqa: PLC0415
     field = f"{test_login._LOGIN_SECRET_FIELD}=".encode()
     seen = {"shape": "token_urlsafe32", "authenticates": "ok", "kept": False,
             "verifier": {"stored_key": "s", "server_key": "k"}}
     login = tmp_path / "test-pg.env"
-    # One line (CRLF here): replaced, its neighbours byte for byte as they were.
+    # One line (CRLF here): replaced with its own terminator kept, its
+    # neighbours byte for byte as they were.
     login.write_bytes(b"A=1\r\n" + field + b"drawn\r\nB=drawn\n")
     test_login._redact_validated(login, seen)
-    assert login.read_bytes() == b"A=1\r\n" + field + b"<validated>\nB=drawn\n"
+    assert login.read_bytes() == b"A=1\r\n" + field + b"<validated>\r\nB=drawn\n"
     # LF.
     login.write_bytes(field + b"drawn\n")
     test_login._redact_validated(login, seen)
@@ -627,6 +647,36 @@ def test_parent_process_records_the_source_not_a_stale_seeder_cache(tmp_path):
     assert golden["oracle_commit"] == head
     seeded = golden["cases"]["seeded"]["files"]["seeded.txt"]
     assert base64.b64decode(seeded[5:]) == b"source"
+
+
+def test_record_refuses_an_oracle_file_edited_between_rows(tmp_path, monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import _daemon  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    _make_repo(repo)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for name in [n for n in sys.modules if n.split(".")[0] == "pseudolife_memory"]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "pycache_prefix", str(empty))
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(_daemon, "ORACLE", dict(_daemon.ORACLE))
+    goldens = tmp_path / "goldens"
+    monkeypatch.setattr(runner, "GOLDENS", goldens)
+    monkeypatch.setattr(runner.rows, "ROWS", {"first": "CLI-A", "second": "CLI-B"})
+
+    def load(row):
+        if row == "second":  # an oracle subprocess of this row would import the edit
+            (repo / "pseudolife_memory" / "cli.py").write_bytes(b"print('edited')\n")
+        return []
+
+    monkeypatch.setattr(runner.rows, "load", load)
+    with pytest.raises(SystemExit, match="changed pseudolife_memory/cli.py"):
+        runner.main(["--row", "first", "--row", "second", "--record",
+                     "--oracle-source", str(repo)])
+    assert [p.name.split(".")[0] for p in goldens.glob("*.json")] == ["first"]
 
 
 def test_parent_module_check_refuses_an_unisolated_or_foreign_load(tmp_path, monkeypatch):

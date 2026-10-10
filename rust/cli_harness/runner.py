@@ -177,7 +177,12 @@ def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dic
     commit declared by ``--oracle-commit`` or ``CLI_HARNESS_ORACLE_COMMIT``:
     when the harness's own checkout holds that commit, the tree must match it
     file for file (``verified-tree``); with no git checkout to ask, the
-    commit is recorded as ``declared``."""
+    commit is recorded as ``declared``.
+
+    A recording repeats the whole-tree check (``tree_problems``) at its
+    start and after every row, before that row's golden is written, so a
+    file edited during the run is refused. An edit made and reverted between
+    two checks is out of scope: the tree is checked, not snapshotted."""
     declared = declared or os.environ.get(COMMIT_ENV) or None
     if (source / ".git").exists():
         top = _git(source, "rev-parse", "--show-toplevel")
@@ -233,6 +238,18 @@ def _commit_blobs(repo: Path, commit: str) -> dict[str, str]:
             meta, path = entry.split(b"\t", 1)
             blobs[path.decode()] = meta.split()[2].decode()
     return blobs
+
+
+def tree_problems(source: Path, binding: dict) -> list[str]:
+    """``oracle_binding``'s whole-tree check, repeated during a recording:
+    bytecode without its source and, where a checkout can answer, any file
+    under the oracle package that is not the bound commit's."""
+    problems = _cache_problems(source)
+    where = {"git": source, "verified-tree": REPO}.get(binding["oracle_commit_source"])
+    if where is not None:
+        found = _tree_differences(source, binding["oracle_commit"], where)
+        problems += [f"git cannot read {where}"] if found is None else found
+    return problems
 
 
 def _binding_blobs(source: Path, binding: dict) -> dict[str, str] | None:
@@ -386,6 +403,13 @@ def main(argv: list[str] | None = None) -> int:
         blobs = _binding_blobs(source, binding)
 
         def verify() -> None:
+            # At the start and after every row's arms, before its golden is
+            # written: the tree the oracle subprocesses import from, and the
+            # oracle modules loaded in this process.
+            problems = tree_problems(source, binding)
+            if problems:
+                raise SystemExit(f"--record: {source}'s {ORACLE_PACKAGE}/ is no longer the "
+                                 "bound commit's: " + "; ".join(problems[:5]))
             problems = parent_module_problems(source, blobs)
             if problems:
                 raise SystemExit("--record: the harness process's own oracle code is not the "

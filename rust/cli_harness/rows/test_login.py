@@ -217,7 +217,10 @@ def _redact_validated(login: Path, seen: dict) -> None:
     matches = [index for index, item in enumerate(lines) if item.startswith(field)]
     if len(matches) != 1:
         return
-    lines[matches[0]] = field + b"<validated>"
+    # The line keeps its own terminator: a CRLF line stays CRLF, so a
+    # line-ending difference between the arms still shows.
+    ending = b"\r" if lines[matches[0]].endswith(b"\r") else b""
+    lines[matches[0]] = field + b"<validated>" + ending
     with open(login, "r+b") as handle:  # in place: the file's ACL and mode stay
         handle.write(b"\n".join(lines))
         handle.truncate()
