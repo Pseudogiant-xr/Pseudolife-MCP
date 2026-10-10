@@ -386,12 +386,17 @@ mod tests {
     fn entry(id: i64, text: &str, source: &str, superseded: bool) -> Entry {
         Entry {
             id,
+            embedding: vec![],
             band: "flat".into(),
             stored_band: "flat".into(),
             text: text.into(),
             surprise: 0.5,
+            surprise_value: 0.5,
             ts: 0.0,
             access_count: 0,
+            reinforcements: 0,
+            last_logical_turn: None,
+            dream_state: None,
             source: source.into(),
             superseded_at: superseded.then_some(1.0),
             superseded_by_text: None,

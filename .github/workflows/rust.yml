@@ -64,6 +64,12 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
+      - name: Check generated daemon schema
+        working-directory: .
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/gen_schema_sql.py --check
+          exit $LASTEXITCODE
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
@@ -372,7 +378,7 @@ jobs:
         timeout-minutes: 10
         shell: pwsh
         run: |
-          python rust/daemon/harness/schema_ci.py --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
         if: always() && matrix.suite == 'cli'
@@ -389,6 +395,26 @@ jobs:
           path: |
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
+          if-no-files-found: error
+      - name: Daemon resident startup parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') -Raw).Trim()
+          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon resident startup parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-startup-parity-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-startup-parity.json
+            ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
+            ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'

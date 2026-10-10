@@ -126,3 +126,21 @@ padded raw batches; the latter consumes attention-mask, token-type and position
 inputs. Its Python fixture adapter supplies position IDs explicitly, with that
 adjustment recorded; the real Qwen wrapper remains unmodified.
 It certifies the process/cache/tokenization seam, not real-model equivalence.
+
+The resident startup seam reuses the same storage test executable:
+
+```bash
+python rust/daemon/harness/startup_ci.py --out startup-parity.json
+```
+
+It compares complete entry, episode, canonical-store and identity snapshots
+with whole database state after hydration/restart. The separate clock cell
+uses the existing tiny CPU ONNX fixture to drive the actual native service:
+loaded stores survive a malformed late clock, the next init retries only the
+clock, and healthy calls skip reseeding. Required loader failures still
+abandon all stores. Eight source mutants cover these boundaries, including
+an abandoned writer transaction before seating. No real model is downloaded.
+The fixture requires the pinned ONNX packages used by the embedding CI row.
+CI reuses the schema step's selected executable with `--no-build`.
+`StartupState.clock_state()` exposes the high-water input and pending flag
+atomically; W2-E must not tick until the pending flag is false.
