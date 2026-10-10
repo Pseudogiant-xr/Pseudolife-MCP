@@ -69,6 +69,9 @@ MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-r
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
            "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default"]
 
+import security_cases
+
+MUTANTS += list(security_cases.CONTROLS)
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
 T_COLON = "tok:with:colons-0003"
@@ -293,6 +296,7 @@ class Scenario:
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
+    live_only = False
     read_only_bank = False
     files: dict[str, str] = {}  # extra files in each data dir
 
@@ -1190,7 +1194,82 @@ class BodyPairBudget(BodyLimits):
         return body_cases.pair_budget_cases(case)
 
 
-SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
+class SecurityOpen(Scenario):
+    name = "security-open"
+    settle = False
+    unreachable_database = True
+    read_only_bank = True
+
+    def cases(self):
+        import security_cases
+        return security_cases.open_cases(case)
+
+
+class SecurityClosed(SecurityOpen):
+    name = "security-closed"
+
+    def __init__(self):
+        import security_cases
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": security_cases.TOKEN,
+                    "PSEUDOLIFE_MCP_TOKENS": "junk,rejected-map-token:default"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.closed_cases(case)
+
+
+class SecurityEncodings(SecurityOpen):
+    name = "security-encodings"
+    config_yaml = "coordination:\n  allowed_principals: [alice]\n"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "tok-security-fixture-0001",
+           "PSEUDOLIFE_MCP_TOKENS": "caf\u00e9:alice"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.encoding_cases(case)
+
+
+class SecurityEncodingPriority(SecurityEncodings):
+    name = "security-encoding-priority"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "caf\u00c3\u00a9",
+           "PSEUDOLIFE_MCP_TOKENS": "caf\u00e9:alice"}
+
+    def cases(self):
+        return [c for c in super().cases() if c["name"] == "map before singular authority"]
+
+
+class SecurityTerminalByte(SecurityOpen):
+    name = "security-terminal-byte"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "caf\u00e0"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.ending_cases(case)
+
+
+class SecurityRemoteOpen(SecurityOpen):
+    name = "security-remote-open"
+    loopback_bind_fixture = True
+    live_only = True
+    env = {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_TRUST_BIND": "On"}
+
+
+class SecurityRemoteAuth(SecurityClosed):
+    name = "security-remote-auth"
+    loopback_bind_fixture = True
+    live_only = True
+
+    def __init__(self):
+        super().__init__()
+        self.env["PSEUDOLIFE_MCP_HOST"] = "0.0.0.0"
+
+
+STARTUP_REFUSALS += security_cases.startup_cases()
+
+
+SCENARIOS = {s.name: s for s in (SecurityOpen, SecurityClosed, SecurityEncodings,
+                                  SecurityEncodingPriority, SecurityTerminalByte, SecurityRemoteOpen, SecurityRemoteAuth,
+                                  Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
@@ -1273,6 +1352,12 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
         return row
     if "expected_status" in c and py is not None and py["status"] != c["expected_status"]:
         row["diffs"].append(f"oracle status {py['status']} differs from contract {c['expected_status']}")
+    if "expected_error" in c and c["expected_error"] is not None and py is not None:
+        got = py.get("json", {}).get("error")
+        if got != c["expected_error"]:
+            row["diffs"].append(f"oracle error {got!r} differs from contract {c['expected_error']!r}")
+    if "security_priority" in c:
+        row["security_priority"] = c["security_priority"]
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1435,9 +1520,9 @@ def scrub_declared_rows(state: dict, before: dict) -> dict:
     return {"state": state, "declared": declared}
 
 
-def run_refusals(binary: Path, root: Path) -> list[dict]:
+def run_refusals(binary: Path, root: Path, selected=None) -> list[dict]:
     rows = []
-    for name, env, extra, code in STARTUP_REFUSALS:
+    for name, env, extra, code in STARTUP_REFUSALS if selected is None else selected:
         exits = {}
         for side in ("python", "rust"):
             home = daemons.make_home(root, f"refusal-{side}", None)
@@ -1570,7 +1655,7 @@ def main() -> int:
     args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
     names = args.only or list(SCENARIOS) + ["refusals"]
-    unknown = [n for n in names if n not in SCENARIOS and n != "refusals"]
+    unknown = [n for n in names if n not in SCENARIOS and n not in {"refusals", "security-refusals"}]
     if unknown or not names:
         ap.error(f"unknown scenario(s) {unknown}; choose from {sorted(SCENARIOS)} or refusals")
 
@@ -1580,9 +1665,8 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
-            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
-                # Timing scenarios ask both daemons the same question at the
-                # same moment: live-only (README).
+            if mode == "golden" and (scn.live_only or type(scn).timeline is not Scenario.timeline):
+                # Timing and remote-policy fixtures require both live arms.
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)
                 continue
             try:
@@ -1606,6 +1690,8 @@ def main() -> int:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
         refusals = (run_refusals(args.rust_bin, root) + run_config_differential(args.rust_bin, root)
                     if "refusals" in names and mode != "golden" and not args.no_refusals else [])
+        if "security-refusals" in names and mode != "golden" and not args.no_refusals:
+            refusals += run_refusals(args.rust_bin, root, security_cases.startup_cases())
         return results, refusals
 
     if args.mode == "mutants":
@@ -1625,10 +1711,19 @@ def main() -> int:
             outcome[m] = {"diff_cases": diff_cases, "db_diff_scenarios": db, "scenario_errors": errors,
                           "changed_cases": [f"{r['scenario']}: {c['case']}" for r in results
                                             for c in r["cases"] if c["diffs"]]}
+            if m in security_cases.CONTROLS:
+                scenario, witness, py_status, rs_status = security_cases.CONTROLS[m]
+                observed = [c for r in results if r["scenario"] == scenario
+                            for c in r["cases"] if c["case"] == witness]
+                row = observed[0] if len(observed) == 1 else None
+                outcome[m]["witness_response"] = row
+                outcome[m]["witness_caught"] = bool(row and row["diffs"]
+                    and row["python_status"] == py_status and row["rust_status"] == rs_status)
             print(f"mutant {m}: {diff_cases} case diffs, {db} bank-state diffs", flush=True)
         os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
         survivors = [m for m, o in outcome.items()
-                     if o["scenario_errors"] or not (o["diff_cases"] or o["db_diff_scenarios"])]
+                     if o["scenario_errors"] or not (o["diff_cases"] or o["db_diff_scenarios"])
+                     or o.get("witness_caught") is False]
         if args.out:
             args.out.write_text(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1), encoding="utf-8")
         print("survivors:", survivors or "none")

@@ -145,12 +145,20 @@ fn latin1(v: &HeaderValue) -> String {
 
 /// `_hdr`: the first value.
 fn first_header(h: &HeaderMap, name: &str) -> Option<String> {
-    h.get(name).map(latin1)
+    if crate::mutants::active("security-browser-last") {
+        h.get_all(name).iter().next_back().map(latin1)
+    } else {
+        h.get(name).map(latin1)
+    }
 }
 
 /// The resolver reads headers through a dict: the last value wins.
 fn last_header(h: &HeaderMap, name: &str) -> Option<String> {
-    h.get_all(name).iter().next_back().map(latin1)
+    if crate::mutants::active("security-auth-first") {
+        h.get(name).map(latin1)
+    } else {
+        h.get_all(name).iter().next_back().map(latin1)
+    }
 }
 
 /// `urllib.parse.urlsplit(value).netloc` (Python 3.11): leading C0 and
@@ -238,11 +246,13 @@ fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static str>, ()> {
     };
     if let Some(o) = first_header(h, "origin")
         && !loopback(&o)?
+        && !crate::mutants::active("security-origin-open")
     {
         return Ok(Some("forbidden_origin"));
     }
     if let Some(host) = first_header(h, "host")
         && !loopback(&host)?
+        && !crate::mutants::active("security-host-open")
     {
         return Ok(Some("forbidden_host"));
     }
@@ -270,7 +280,11 @@ fn unauthorized() -> Response {
 }
 
 fn principals_unavailable() -> Response {
-    json_response(503, &json!({"error": "principals_unavailable"}))
+    if crate::mutants::active("security-unavailable-401") {
+        unauthorized()
+    } else {
+        json_response(503, &json!({"error": "principals_unavailable"}))
+    }
 }
 
 fn method_not_allowed() -> Response {
