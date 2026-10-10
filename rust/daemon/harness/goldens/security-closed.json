@@ -1,0 +1,415 @@
+{
+ "db_state": {
+  "unchanged_from_before": true
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "table",
+    "retrieval_events",
+    null,
+    "the warmup search logs a retrieval event (W2-D telemetry)"
+   ],
+   [
+    "sequence",
+    "retrieval_events_id_seq",
+    null,
+    "advanced by that retrieval event (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "method_not_allowed"
+   },
+   "status": 405
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "unauthorized",
+    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"
+   },
+   "status": 401
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 200
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "method_not_allowed"
+   },
+   "status": 405
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  }
+ ]
+}

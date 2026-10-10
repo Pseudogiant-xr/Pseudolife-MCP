@@ -150,6 +150,16 @@ jobs:
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           Get-Content $daemonReleaseLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
+          exit $LASTEXITCODE
+      - name: Retain debug bind fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: |
+            rust/target/debug/pseudolife-daemon
+            rust/target/debug/pseudolife-daemon.exe
+          if-no-files-found: error
 
   candidate:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
@@ -202,7 +212,7 @@ jobs:
   parity-checks:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: candidate
+    needs: [candidate, rust]
     strategy:
       fail-fast: false
       matrix:
@@ -241,6 +251,12 @@ jobs:
         with:
           name: rust-shim-${{ runner.os }}
           path: rust/target/release
+      - name: Download debug bind fixture
+        if: matrix.suite == 'cli'
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: rust/target/debug
       - name: Restore executable permission
         if: runner.os == 'Linux'
         run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon rust/target/release/pseudolife-daemon-static
@@ -434,6 +450,38 @@ jobs:
         with:
           name: daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
+          if-no-files-found: warn
+      - name: Daemon security admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $bindFixture = (Resolve-Path (Join-Path 'rust/target/debug' $mutantName)).Path
+          if (-not $IsWindows) { chmod +x $bindFixture }
+          $env:PL_SECURITY_DEFAULT_BIN = $candidate
+          $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
+          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --out (Join-Path $env:RUNNER_TEMP 'daemon-security-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py mutants --rust-bin $mutants --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --mutants security-origin-open security-host-open security-browser-last security-auth-first security-drop-latin1 security-unavailable-401 --out (Join-Path $env:RUNNER_TEMP 'daemon-security-mutants.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon security parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-security-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-security-*.json
           if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'

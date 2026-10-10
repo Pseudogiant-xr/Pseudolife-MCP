@@ -48,6 +48,7 @@ PARITY_CHECKS = {
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
     "Daemon body admission parity": "cli",
+    "Daemon security admission parity": "cli",
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -194,6 +195,25 @@ def check_executable_coverage(jobs):
                         ("--record", "--mutants"))
     require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in body)
+    security = commands(parity["Daemon security admission parity"]["run"])
+    require_command(security, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_security_cases.py",), PYTEST_FILTERS)
+    security_rows = ("security-open", "security-closed", "security-encodings",
+                     "security-encoding-priority", "security-terminal-byte")
+    for mode in ("live", "golden", "mutants"):
+        required = ("--rust-bin", "--only", "--out") + security_rows
+        if mode == "live":
+            required += ("security-refusals",)
+        if mode == "mutants":
+            required += ("--mutants", "security-origin-open", "security-host-open",
+                         "security-browser-last", "security-auth-first", "security-drop-latin1",
+                         "security-unavailable-401")
+        require_command(security, ("python", "rust/daemon/harness/run.py", mode),
+                        required, ("--record",) + (("--no-refusals",) if mode == "live" else ()))
+    require_command(security, ("python", "rust/daemon/harness/run.py", "live"),
+                    ("--rust-bin", "$bindFixture", "--only", "security-remote-open", "security-remote-auth", "--out"),
+                    ("--record",))
+    assert not any(words[0] == "cargo" for words in security)
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
@@ -296,7 +316,20 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == "candidate"
+    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    rust_steps = jobs["rust"]["steps"]
+    override = commands(next(step["run"] for step in rust_steps
+                             if step.get("name") == "Daemon override build configurations"))
+    require_command(override, ("cargo", "+1.94.0", "build"),
+                    ("--locked", "-p", "pseudolife-daemon", "--features", "mutants"), ("--release",))
+    produced = next(step for step in rust_steps if step.get("name") == "Retain debug bind fixture")
+    consumed = next(step for step in jobs["parity-checks"]["steps"]
+                    if step.get("name") == "Download debug bind fixture")
+    assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
+    assert produced["with"]["if-no-files-found"] == "error"
+    assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
+    assert consumed["if"] == "matrix.suite == 'cli'"
+    assert consumed["with"]["path"] == "rust/target/debug"
     assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges"]
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
@@ -501,6 +534,11 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml.py", ""),
     ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml_mutants.py", ""),
     ("Check generated daemon schema", "--check", ""),
+    ("Daemon security admission parity", "security-refusals", ""),
+    ("Daemon security admission parity", "security-refusals --out", "security-refusals --no-refusals --out"),
+    ("Daemon security admission parity", "--mutants security-origin-open", "--mutants"),
+    ("Daemon security admission parity", "rust/daemon/harness/test_security_cases.py", ""),
+    ("Daemon security admission parity", "security-remote-open", ""),
     ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
     ("Daemon resident startup parity", "--no-build", ""),
     ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
