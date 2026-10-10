@@ -5,6 +5,7 @@
 use crate::bank::Bank;
 use crate::config::{Config, DaemonEnv};
 use crate::embed::Embedder;
+use crate::startup::StartupState;
 use crate::storage::{OpenError, Storage};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -22,6 +23,9 @@ pub struct Ready {
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<Bank>,
+    /// Complete durable startup inputs for the read/write slices.
+    #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
+    pub startup: Arc<StartupState>,
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -168,10 +172,25 @@ impl Service {
     async fn ensure_init_inner(&self) -> Result<Arc<Ready>, String> {
         let mut inner = self.inner.lock().await;
         if let Some(r) = &inner.ready {
-            return Ok(r.clone());
+            if crate::mutants::active("startup-clock-reloads")
+                && r.startup.clock_state().hlc_reseed_pending
+            {
+                inner.ready = None;
+            } else {
+                if r.startup.clock_state().hlc_reseed_pending {
+                    r.startup
+                        .reseed(r.storage.client())
+                        .await
+                        .map_err(|error| format!("{error:#}"))?;
+                }
+                return Ok(r.clone());
+            }
         }
         self.refuse_while_backing_off(&inner)?;
         let storage = self.ensure_storage(&mut inner).await?;
+        let metadata = crate::startup::metadata(storage.client())
+            .await
+            .map_err(|e| format!("startup metadata failed: {e}"))?;
         if inner.embedder.is_none() {
             // Built once and kept across failed attempts; a failure here
             // records nothing, as in Python (it is outside the abandon path).
@@ -191,14 +210,15 @@ impl Service {
             });
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
-        match crate::bank::hydrate(
+        let candidate = crate::startup::candidate(
             storage.client(),
-            &self.config.memory.bands,
+            &self.config.memory,
+            metadata,
             embedder.embedding_dim(),
         )
-        .await
-        {
-            Ok(bank) => {
+        .await;
+        match candidate {
+            Ok((bank, startup)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -210,8 +230,16 @@ impl Service {
                     storage,
                     embedder,
                     bank: Arc::new(bank),
+                    startup: Arc::new(startup),
                 });
                 inner.ready = Some(ready.clone());
+                // Python publishes every loaded store before the late reseed.
+                // Failure here keeps them and retries only the clock next time.
+                ready
+                    .startup
+                    .reseed(ready.storage.client())
+                    .await
+                    .map_err(|error| format!("{error:#}"))?;
                 Ok(ready)
             }
             Err(e) => {
@@ -226,7 +254,7 @@ impl Service {
                 // `_abandon_partial_init`: retryable unless it is the refusal
                 // already recorded.
                 // `hydrate_cms` failures are re-raised as this RuntimeError (service.py:1543).
-                let reason = format!("entry hydration failed: {e}");
+                let reason = format!("{e:#}");
                 let refusal = self.snapshot().init_refusal;
                 self.update(|s| {
                     s.not_ready = if refusal.as_deref() == Some(reason.as_str()) {
@@ -319,5 +347,132 @@ mod tests {
             seen.push(inner.backoff_s);
         }
         assert_eq!(seen, vec![5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0]);
+    }
+
+    // A real Service with the existing tiny CPU ONNX fixture exercises the
+    // clock-only fast path without loading or encoding a real model.
+    #[tokio::test]
+    async fn db_clock_reseed_retry() {
+        let Ok(dsn) = std::env::var("PL_PGS_CLOCK_RETRY_DSN") else {
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|name| name.starts_with("pl_cf_pgs_"))
+        );
+        let config_path = PathBuf::from(std::env::var("PL_PGS_CLOCK_CONFIG").unwrap());
+        let config = crate::config::load(&config_path).unwrap();
+        let env = DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            config,
+            env,
+            config_path.parent().unwrap().to_path_buf(),
+            dsn,
+            false,
+        ));
+        fn dump_db(phase: &str) {
+            let result = std::process::Command::new(std::env::var("PL_PGS_CLOCK_PYTHON").unwrap())
+                .args([
+                    std::env::var("PL_PGS_CLOCK_DB_DUMP_SCRIPT").unwrap(),
+                    "--dump-db".into(),
+                    phase.into(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "DB snapshot helper failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        fn retained(ready: &Ready) -> Value {
+            json!({"startup": ready.startup.dump(), "entries": ready.bank.entries_dump()})
+        }
+        let first = service.ensure_init().await;
+        let first_ready = service.inner.lock().await.ready.clone();
+        let mut attempts = vec![json!({
+            "ok": first.is_ok(), "error": first.err(),
+            "retained": first_ready.as_deref().map(retained), "same_as_first": null,
+        })];
+        let storage = service
+            .snapshot()
+            .storage
+            .expect("storage opened before clock reseed");
+        let actual =
+            crate::storage::schema::simple_value(storage.client(), "SELECT current_database()")
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        assert!(actual.starts_with("pl_cf_pgs_"));
+        dump_db("initial");
+        storage
+            .client()
+            .execute(
+                "UPDATE meta SET value = $1 WHERE key = 'coordination_hlc_highwater'",
+                &[&json!([20000, 2])],
+            )
+            .await
+            .unwrap();
+        dump_db("clock-corrected");
+        // Losing this required column makes a second loader pass observable.
+        storage
+            .client()
+            .batch_execute("ALTER TABLE entries DROP COLUMN text")
+            .await
+            .unwrap();
+        dump_db("column-dropped");
+        for (index, phase) in [(1, "retry"), (2, "healthy")] {
+            if index == 2 {
+                storage
+                    .client()
+                    .execute(
+                        "UPDATE meta SET value = $1 WHERE key = 'coordination_hlc_highwater'",
+                        &[&json!("malformed")],
+                    )
+                    .await
+                    .unwrap();
+                dump_db("healthy-clock-broken");
+            }
+            let result = service.ensure_init().await;
+            attempts.push(match result {
+                Ok(ready) => {
+                    let same = first_ready.as_ref().map(|original| {
+                        json!({
+                            "bank": Arc::ptr_eq(&original.bank, &ready.bank),
+                            "startup": Arc::ptr_eq(&original.startup, &ready.startup),
+                            "storage": Arc::ptr_eq(&original.storage, &ready.storage),
+                            "embedder": Arc::ptr_eq(&original.embedder, &ready.embedder),
+                        })
+                    });
+                    json!({"ok": true, "startup": ready.startup.dump(),
+                           "entries": ready.bank.entries_dump(), "same_as_first": same})
+                }
+                Err(error) => json!({"ok": false, "error": error,
+                    "retained": service.inner.lock().await.ready.as_deref().map(retained),
+                    "same_as_first": null}),
+            });
+            dump_db(phase);
+        }
+        std::fs::write(
+            std::env::var("PL_PGS_CLOCK_OUT").unwrap(),
+            serde_json::to_vec(&json!({"attempts": attempts})).unwrap(),
+        )
+        .unwrap();
+        drop(first_ready);
+        {
+            let mut inner = service.inner.lock().await;
+            inner.ready = None;
+            inner.storage = None;
+        }
+        service.update(|snapshot| snapshot.storage = None);
+        drop(service);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("fixture owns the writer session")
+            .close()
+            .await;
     }
 }

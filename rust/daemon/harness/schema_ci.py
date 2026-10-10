@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path, help="schema evidence JSON path")
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
+    parser.add_argument("--test-bin-out", type=Path, help="write the selected executable path for another parity step")
     parser.add_argument("--record-goldens", action="store_true", help="record oracle post-state fixtures after a clean run")
     args = parser.parse_args(argv)
     if args.no_build != (args.rust_test_bin is not None):
@@ -88,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             binary = test_artifact(build.stdout)
         if not binary.is_file():
             raise ValueError("daemon test executable does not exist")
+        if args.test_bin_out:
+            handoff = args.test_bin_out.resolve()
+            handoff.parent.mkdir(parents=True, exist_ok=True)
+            handoff.write_text(str(binary) + "\n", encoding="utf-8")
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)

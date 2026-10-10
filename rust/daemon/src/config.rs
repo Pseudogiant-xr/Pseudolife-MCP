@@ -42,12 +42,21 @@ pub struct MemoryConfig {
     pub recency_base_half_life_s: f64,
     pub preset: String,
     pub bands: Vec<String>,
+    pub band_specs: Vec<StartupBandSpec>,
+    pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupBandSpec {
+    pub name: String,
+    pub max_entries: usize,
+    pub retention_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -302,6 +311,12 @@ impl Default for MemoryConfig {
             recency_base_half_life_s: LIBRARY_HALF_LIFE_S,
             preset: "flat".to_string(),
             bands: vec!["flat".to_string()],
+            band_specs: vec![StartupBandSpec {
+                name: "flat".into(),
+                max_entries: 5250,
+                retention_policy: "balanced".into(),
+            }],
+            retention_boost: 1.0,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -1142,6 +1157,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             let (preset, bands) = read_miras(miras)?;
             memory.preset = preset;
             memory.bands = bands;
+            memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
+        }
+        if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;
@@ -1257,6 +1276,63 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
         }
     };
     Ok((preset, bands))
+}
+
+fn read_startup_bands(
+    miras: &[(Node, Node)],
+    preset: &str,
+    names: &[String],
+) -> Result<Vec<StartupBandSpec>, ConfigError> {
+    // presets.py: the flat capacity is the 2026-08-15 ablation's retained
+    // 5,250-entry total; continuum keeps the same published tier capacities.
+    if preset == "flat" {
+        return Ok(vec![StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 5250,
+            retention_policy: "balanced".into(),
+        }]);
+    }
+    if preset != "custom" {
+        return Ok(names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| StartupBandSpec {
+                name: name.clone(),
+                max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
+                retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+            })
+            .collect());
+    }
+    let Some(Node::Seq(items)) = lookup(miras, "bands") else {
+        return Err(refuse("memory.miras.bands must be a list"));
+    };
+    items
+        .iter()
+        .zip(names)
+        .map(|(item, name)| {
+            let Node::Map(fields) = item else {
+                return Err(refuse("memory.miras.bands[] must be a mapping"));
+            };
+            let cap = want_int(fields, "max_entries", "memory.miras.bands[]", 5000)?;
+            let max_entries = usize::try_from(cap)
+                .map_err(|_| refuse("band max_entries must be non-negative"))?;
+            let retention_policy = want_str(
+                fields,
+                "retention_policy",
+                "memory.miras.bands[]",
+                "balanced",
+            )?;
+            if !["balanced", "recency_heavy", "surprise_heavy"].contains(&retention_policy.as_str())
+            {
+                return Err(refuse("unknown band retention_policy"));
+            }
+            Ok(StartupBandSpec {
+                name: name.clone(),
+                max_entries,
+                retention_policy,
+            })
+        })
+        .collect()
 }
 
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
