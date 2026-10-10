@@ -331,6 +331,12 @@ def _send_index(rows, message_id) -> int:
 
 def archive(variant: str) -> bytes:
     """An export of a seeded bank, unchanged or edited one way."""
+    if variant == "head-19-digits":
+        from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
+        row = export_rows("rich")[0]
+        row["seq"] = 1000000000000000000
+        row["hash"] = audit_hash(row["prev_hash"], row)
+        return _lines([row])
     if variant.startswith("reserved-number-key-"):
         from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
         # Keep one complete exported row, hashed by the oracle with an ordinary
@@ -687,6 +693,13 @@ def cases() -> list[core.Case]:
                      _Lazy(lambda: head("rich", digest="0" * 64))),
         archive_case("input-head-missing", "rich", "--expect-head",
                      _Lazy(lambda: head("rich", seq=9999))),
+        archive_case("input-head-19-digits", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=1000000000000000000))),
+        archive_case("input-head-i64-max", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=9223372036854775807))),
+        archive_case("input-head-19-digits-matches", "head-19-digits", "--expect-head",
+                     _Lazy(lambda: "1000000000000000000:" +
+                           json.loads(archive("head-19-digits"))["hash"])),
         archive_case("input-head-earlier", "rich", "--expect-head",
                      _Lazy(lambda: f"3:{export_rows('rich')[2]['hash']}")),
         archive_case("input-rich-crlf", "rich-crlf"),
@@ -745,6 +758,11 @@ def cases() -> list[core.Case]:
         read_case("export-since-iso", "rich",
                   ["export", "--since", "2023-11-14T22:14:20+00:00", "--until",
                    "2023-11-14T23:15:00+01:00"]),
+        read_case("export-since-iso-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.500000+00:00", "--until",
+                   "2023-11-14T23:15:00.000001+01:00"]),
+        read_case("export-since-iso-long-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.123456789+00:00"]),
         read_case("export-agent-full", "rich", ["export", "--agent", _rich("b")]),
         read_case("export-agent-prefix", "rich", ["export", "--agent", _rich("a", cut=8)]),
         read_case("export-agent-literal", "rich", ["export", "--agent", "alice"]),
