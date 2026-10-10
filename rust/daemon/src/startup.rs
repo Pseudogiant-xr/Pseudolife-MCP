@@ -423,7 +423,38 @@ mod tests {
         {
             Ok((bank, startup)) => match startup.reseed(storage.client()).await {
                 Ok(()) => {
-                    json!({"ok": true, "startup": startup.dump(), "entries": bank.entries_dump()})
+                    let mut output = json!({"ok": true, "startup": startup.dump(), "entries": bank.entries_dump()});
+                    let case = std::env::var("PL_PGS_CASE").unwrap_or_default();
+                    if matches!(
+                        case.as_str(),
+                        "surprise-real-text-rounding" | "startup-tags-non-string-preservation"
+                    ) {
+                        let mut query = vec![0.0; bank.dim];
+                        query[0] = 1.0;
+                        let params = crate::search::Params {
+                            query: String::new(),
+                            k: 12,
+                            sources: None,
+                            tags: (case == "startup-tags-non-string-preservation")
+                                .then(|| ["valid".to_string()].into()),
+                            min_score: Some(0.0),
+                            default_floor: 0.0,
+                            bm25: None,
+                            hide_superseded: false,
+                            bands: None,
+                        };
+                        output["search_entries"] = json!(
+                            crate::search::rank(&bank, &query, &params)
+                                .iter()
+                                .map(|hit| crate::search::entry_json(
+                                    &bank,
+                                    &bank.entries[hit.idx],
+                                    hit.score
+                                ))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    output
                 }
                 Err(error) => json!({"ok": false, "error": format!("{error:#}"),
                         "retained": {"startup": startup.dump(), "entries": bank.entries_dump()}}),

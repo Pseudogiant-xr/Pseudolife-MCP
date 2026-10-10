@@ -28,7 +28,7 @@ pub struct Entry {
     pub superseded_by_text: Option<String>,
     pub episode_id: Option<String>,
     pub episode_title: Option<String>,
-    pub tags: Vec<String>,
+    pub tags: Vec<Value>,
     /// `[entity, attribute, value, polarity]` rows as stored.
     pub slots: Vec<Value>,
     pub authority: Option<String>,
@@ -64,6 +64,18 @@ fn normalize(v: &mut [f32]) {
     // torch F.normalize(p=2, eps=1e-12)
     let n = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
     v.iter_mut().for_each(|x| *x /= n);
+}
+
+fn load_clock() -> Result<f64> {
+    // The startup cell fixes the same oracle entry and retention clocks.
+    // This override is absent from daemon builds.
+    #[cfg(test)]
+    if std::env::var("PL_PGS_CASE").is_ok_and(|case| case == "zero-timestamp-seating") {
+        return Ok(1000.0);
+    }
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs_f64())
 }
 
 /// `hydrate_cms` (`storage/sync.py:107-155`): every row in id order, seated
@@ -163,7 +175,15 @@ async fn hydrate_locked(
             text: r.get(2),
             surprise: surprise_value as f32,
             surprise_value,
-            ts: r.get::<_, Option<f64>>(5).unwrap_or(0.0),
+            ts: {
+                let timestamp = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
+                // MemoryEntry.__post_init__ replaces zero before retention seating.
+                if timestamp == 0.0 && !crate::mutants::active("startup-keep-zero-timestamp") {
+                    load_clock()?
+                } else {
+                    timestamp
+                }
+            },
             access_count: r.get::<_, Option<i32>>(6).unwrap_or(0),
             reinforcements: r.try_get(16)?,
             last_logical_turn: r.try_get(17)?,
@@ -174,10 +194,13 @@ async fn hydrate_locked(
             episode_id: r.get(10),
             episode_title: r.get(11),
             tags: match tags {
-                Some(Value::Array(a)) => a
-                    .into_iter()
-                    .filter_map(|t| t.as_str().map(String::from))
-                    .collect(),
+                Some(Value::Array(a)) => {
+                    if crate::mutants::active("startup-drop-non-string-tags") {
+                        a.into_iter().filter(Value::is_string).collect()
+                    } else {
+                        a
+                    }
+                }
                 _ => Vec::new(),
             },
             slots: match slots {
@@ -189,9 +212,7 @@ async fn hydrate_locked(
         });
     }
     if let Some(memory) = memory {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs_f64();
+        let now = load_clock()?;
         let (seats, moves) =
             seating_plan(&entries, &memory.band_specs, now, memory.retention_boost);
         for (index, depth) in moves {
