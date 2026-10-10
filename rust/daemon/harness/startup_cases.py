@@ -140,8 +140,16 @@ def seed(storage, case):
         surprises = (0.50005, 0.00005, 0.12325, 0.87505) if case == "surprise-real-text-rounding" else (0.0,)
         timestamps = (0.0, LOAD_CLOCK - 100) if case == "zero-timestamp-seating" else (LOAD_CLOCK,) * len(surprises)
         for index, timestamp in enumerate(timestamps):
+            embedding = vector(0)
+            if case == "surprise-real-text-rounding":
+                # band.retrieve uses torch.topk, with no stable-order guarantee for ties.
+                # Distinct cosines keep this cell about REAL surprise serialization.
+                # https://docs.pytorch.org/docs/stable/generated/torch.topk.html
+                embedding[0], embedding[1] = (
+                    (1.0, 0.0), (0.8, 0.6), (0.6, 0.8), (0.0, 1.0),
+                )[index]
             row = sync.entry_to_row(MemoryEntry(
-                text=f"Fidelity entry {index}", embedding=vector(0),
+                text=f"Fidelity entry {index}", embedding=embedding,
                 timestamp=LOAD_CLOCK, access_count=1, source="agent",
                 bank="hot" if case == "zero-timestamp-seating" else "flat",
                 surprise_score=surprises[index] if len(surprises) > 1 else surprises[0],
