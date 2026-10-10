@@ -1707,6 +1707,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "hex",
+ "http-body-util",
  "libc",
  "ndarray",
  "ort",

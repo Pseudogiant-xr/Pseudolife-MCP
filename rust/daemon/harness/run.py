@@ -30,6 +30,7 @@ import os
 import re
 import tempfile
 import shutil
+import socket
 import sys
 import time
 import urllib.parse
@@ -77,7 +78,7 @@ T_COLON = "tok:with:colons-0003"
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
          timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False,
-         chunked: bool = False) -> dict:
+         chunked: bool = False, headers_only: bool = False) -> dict:
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
@@ -86,7 +87,9 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     if body is not None:
         c.putheader("Transfer-Encoding", "chunked") if chunked else c.putheader("Content-Length", str(len(body)))
     try:
-        if chunked and body is not None:
+        if headers_only:
+            c.endheaders()
+        elif chunked and body is not None:
             width = max(1, (len(body) + 3) // 4)
             c.endheaders((body[i:i + width] for i in range(0, len(body), width)), encode_chunked=True)
         else:
@@ -95,6 +98,22 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
         # A server can send its refusal before the request finishes. Read
         # that response; a missing or failed response remains a case error.
         pass
+    if headers_only:
+        try:
+            c.sock.settimeout(min(timeout, 5.0))
+            deadline = time.monotonic() + min(timeout, 5.0)
+            while True:
+                prefix = c.sock.recv(16, socket.MSG_PEEK)
+                if len(prefix) >= 12:
+                    if prefix[9:12] == b"100":
+                        raise RuntimeError("early refusal sent an interim 100 Continue")
+                    break
+                if not prefix or time.monotonic() >= deadline:
+                    raise RuntimeError("early refusal did not send a final status")
+                time.sleep(0.001)
+        except Exception:
+            c.close()
+            raise
     r = c.getresponse()
     raw = r.read()
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
@@ -1335,10 +1354,10 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                 compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
-                            chunked=c.get("chunked", False)) if "python" in procs else golden["responses"][i]
+                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False)) if "python" in procs else golden["responses"][i]
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
-                            chunked=c.get("chunked", False))
+                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
                     if type(scn).prepare_template is not Scenario.prepare_template:

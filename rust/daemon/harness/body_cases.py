@@ -42,6 +42,17 @@ def cases(case, auth):
             case("JSON error", "POST", "/api/nope", a + [js], b'{'),
             case("ordinary UTF8 error", "POST", "/api/nope", a + [js], b'\xff'),
             case("board UTF8 error", "POST", "/api/coordination/nope", a + [js], b'\xff')]
+    for suffix, size, headers_only, expect_continue in [("65536 full", 65536, False, False),
+                                                      ("262145 full", 262145, False, False),
+                                                      ("headers only", 262145, True, False),
+                                                      ("Expect", 262145, True, True)]:
+        headers = [("Authorization", "Bearer unknown-body-fixture")]
+        if expect_continue:
+            headers.append(("Expect", "100-continue"))
+        item = expect(case("unavailable bearer unread " + suffix, "POST", "/api/nope",
+                           headers, b' ' * size), 503)
+        item["headers_only"] = headers_only
+        out.append(item)
     end = "/api/hook/session-end"
     out += [case("end exact limit no session", "POST", end, a, object_body(16384)),
             case("end next byte", "POST", end, a, object_body(16385)),
@@ -82,6 +93,17 @@ def view_cases(case):
             case("open board POST JSON before admission", "POST", "/api/agents?view=coordination",
                  [("Content-Type", "application/json")], b'{'),
             case("open agents default POST", "POST", "/api/agents?view=")]
+    for suffix, size, headers_only, expect_continue in [("65536 full", 65536, False, False),
+                                                      ("262145 full", 262145, False, False),
+                                                      ("headers only", 262145, True, False),
+                                                      ("Expect", 262145, True, True)]:
+        headers = [("Origin", "http://evil.example"), ("Host", "evil.example")]
+        if expect_continue:
+            headers.append(("Expect", "100-continue"))
+        item = case("foreign origin unread " + suffix, "PUT", "/api/nope",
+                    headers, b' ' * size)
+        item.update(headers_only=headers_only, expected_status=403)
+        out.append(item)
     return out
 
 

@@ -422,6 +422,50 @@
     "x-content-type-options": "nosniff"
    },
    "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
     "ok": true
    },
    "status": 200

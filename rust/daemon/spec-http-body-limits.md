@@ -39,3 +39,38 @@ an additional instrumented read-count control, rather than a network claim.
 Unreachable storage isolates these probes; unchanged fixture snapshots do
 not prove application bank-write behavior. Actual session mutation and the
 authenticated agents roster remain declared handler deferrals.
+
+## Early refusal cleanup
+
+The response is selected before cleanup; cleanup never parses or dispatches
+an unread body. The handler retains the body and counts received data frames.
+For a refusal it discards remaining frames until the route budget or one
+absolute 250 ms deadline is reached, then returns the selected response with
+Connection: close. It never polls another application frame after a cap or
+reader failure. An early Expect: 100-continue refusal skips cleanup, so Hyper
+does not send an interim 100. Headers-only probes use a five-second client
+bound and reject an interim response rather than silently consuming it.
+
+This is **cap enforced at frame granularity** (delegate ruling 2026-10-10).
+A frame already being received may cross the byte budget; parsing still
+rejects the first over-limit frame. Hyper 1.11.1 independently prefetches and
+may make one final drain poll after the body is dropped. The structural
+overshoot is one in-flight application frame plus that single framework poll;
+its configured HTTP/1 read-buffer maximum is 417792 bytes (proto/h1/io.rs),
+so this frame bound is not a promise of an exact raw-socket byte ceiling.
+
+In the Windows 98-case release live/golden corpus, measured application
+overshoot was at most 1 byte in one crossing frame; the largest observed data
+frame was 417792 bytes. The synthetic 200000/70000/1000 reader control crosses
+262144 by 7856 bytes in its second frame, and cleanup leaves its third frame
+unpolled. An oversized single-frame control also stops before another frame.
+Pending and continuously ready empty streams share the same absolute deadline.
+Linux measurements remain pending and retain their own evidence identity.
+
+The hosted corpus includes foreign-Origin PUT and unavailable-bearer POST at
+65536 and the unchanged 262145 bytes, plus headers-only and Expect variants.
+The old Windows binary failed the unread-body probe; the repaired release
+passed all 98 live/golden cases with no response or fixture-state differences.
+Beyond-cap, deadline and read-failure cleanup outcomes are recorded without
+request paths, headers or payloads. A timeout or socket abort is never counted
+as a successful source control.

@@ -61,3 +61,30 @@ def test_oracle_stream_stops_after_the_first_over_limit_frame():
     with pytest.raises(ValueError, match="request_too_large"):
         asyncio.run(_read_body(receive, max_bytes=262144))
     assert len(seen) == 2
+
+
+def test_header_only_refusal_sends_no_body_and_preserves_the_response():
+    connection = Mock()
+    connection.sock.recv.return_value = b"HTTP/1.1 503 Ser"
+    response = connection.getresponse.return_value
+    response.status = 503
+    response.read.return_value = b'{"error":"principals_unavailable"}'
+    response.getheaders.return_value = [("Content-Type", "application/json")]
+    with patch("http.client.HTTPConnection", return_value=connection):
+        result = run.call(1, "POST", "/api/nope", body=b"unsent", headers_only=True)
+    assert result["status"] == 503
+    connection.endheaders.assert_called_once_with()
+    connection.putheader.assert_called_with("Content-Length", "6")
+    connection.close.assert_called_once()
+
+
+def test_expect_refusal_cannot_hide_an_interim_continue():
+    connection = Mock()
+    connection.sock.recv.return_value = b"HTTP/1.1 100 Con"
+    with patch("http.client.HTTPConnection", return_value=connection), \
+            pytest.raises(RuntimeError, match="interim 100 Continue"):
+        run.call(1, "POST", "/api/nope", [("Expect", "100-continue")],
+                 body=b"unsent", headers_only=True)
+    connection.endheaders.assert_called_once_with()
+    connection.getresponse.assert_not_called()
+    connection.close.assert_called_once()

@@ -6,10 +6,11 @@ use crate::auth::{self, Resolved};
 use crate::routes::RouteTable;
 use crate::service::Service;
 use crate::{health, search, static_files};
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use http_body_util::{BodyExt, Limited};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -24,6 +25,7 @@ const TEXT_BODY_LIMIT: usize = 4 * 1024 * 1024;
 const COORDINATION_BODY_LIMIT: usize = 32 * 1024;
 const SESSION_END_BODY_LIMIT: usize = 16 * 1024;
 const PAIR_BODY_LIMIT: usize = 1024;
+const REFUSAL_DRAIN_DEADLINE: Duration = Duration::from_millis(250);
 const TEXT_BODY_PATHS: [&str; 3] = ["/api/facts/set", "/api/consolidate", "/api/supersede"];
 const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice"];
 /// `principal_store.FAILED_REDEMPTIONS_PER_MINUTE`, `REDEMPTION_SLOTS`.
@@ -275,8 +277,79 @@ fn method_not_allowed() -> Response {
     json_response(405, &json!({"error": "method_not_allowed"}))
 }
 
+struct RequestBody {
+    inner: Body,
+    received: usize,
+    frames: usize,
+    max_frame: usize,
+    read_failed: bool,
+}
+
+impl RequestBody {
+    fn new(inner: Body) -> Self {
+        Self {
+            inner,
+            received: 0,
+            frames: 0,
+            max_frame: 0,
+            read_failed: false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DrainOutcome {
+    Complete,
+    Cap,
+    Deadline,
+    ReadFailed,
+}
+
+/// Discard remaining frames without parsing, after the response is selected.
+/// Frames are indivisible: never poll another frame after reaching the cap.
+async fn finish_unread_body(
+    body: &mut RequestBody,
+    cap: usize,
+    deadline: tokio::time::Instant,
+) -> DrainOutcome {
+    if body.read_failed {
+        return DrainOutcome::ReadFailed;
+    }
+    loop {
+        if body.received > cap {
+            return DrainOutcome::Cap;
+        }
+        if body.inner.is_end_stream() {
+            return DrainOutcome::Complete;
+        }
+        if body.received >= cap {
+            return DrainOutcome::Cap;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return DrainOutcome::Deadline;
+        }
+        match tokio::time::timeout_at(deadline, body.inner.frame()).await {
+            Err(_) => return DrainOutcome::Deadline,
+            Ok(None) => return DrainOutcome::Complete,
+            Ok(Some(Err(_))) => {
+                body.read_failed = true;
+                return DrainOutcome::ReadFailed;
+            }
+            Ok(Some(Ok(frame))) => {
+                let bytes = frame.data_ref().map_or(0, |b| b.len());
+                body.received = body.received.saturating_add(bytes);
+                body.frames = body.frames.saturating_add(1);
+                body.max_frame = body.max_frame.max(bytes);
+                if bytes == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+    }
+}
+
 /// `_read_body(receive, max_bytes)`: None when over the limit.
-async fn read_body(body: Body, limit: usize) -> Option<Vec<u8>> {
+async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Vec<u8>> {
     let limit = if crate::mutants::active("body-limit-inclusive") {
         limit.saturating_sub(1)
     } else {
@@ -287,11 +360,29 @@ async fn read_body(body: Body, limit: usize) -> Option<Vec<u8>> {
     } else {
         limit
     };
-    axum::body::to_bytes(body, read_limit)
-        .await
-        .ok()
-        .filter(|b| b.len() <= limit)
-        .map(|b| b.to_vec())
+    let RequestBody {
+        inner,
+        received,
+        frames,
+        max_frame,
+        read_failed,
+    } = body;
+    let counted = (&mut *inner).inspect_frame(|frame| {
+        let bytes = frame.data_ref().map_or(0, |b| b.len());
+        *received = received.saturating_add(bytes);
+        *frames = frames.saturating_add(1);
+        *max_frame = (*max_frame).max(bytes);
+    });
+    match Limited::new(counted, read_limit).collect().await {
+        Ok(collected) => {
+            let bytes = collected.to_bytes();
+            (bytes.len() <= limit).then(|| bytes.to_vec())
+        }
+        Err(_) => {
+            *read_failed = true;
+            None
+        }
+    }
 }
 
 fn media_type(h: &HeaderMap) -> String {
@@ -336,7 +427,7 @@ fn is_sha256_hex(v: &Value) -> bool {
     })
 }
 
-async fn pair(app: &App, method: &str, h: &HeaderMap, body: Body) -> Response {
+async fn pair(app: &App, method: &str, h: &HeaderMap, body: &mut RequestBody) -> Response {
     if method != "POST" {
         return method_not_allowed();
     }
@@ -373,7 +464,13 @@ async fn pair(app: &App, method: &str, h: &HeaderMap, body: Body) -> Response {
 }
 
 /// `/api/hook/*`, routed before the bearer gate (`web/api.py:464-697`).
-async fn hook(app: &App, path: &str, method: &str, h: &HeaderMap, body: Body) -> Response {
+async fn hook(
+    app: &App,
+    path: &str,
+    method: &str,
+    h: &HeaderMap,
+    body: &mut RequestBody,
+) -> Response {
     match browser_gate(app, h) {
         Err(()) => return uvicorn_500(),
         Ok(Some(denied)) => return json_response(403, &json!({"error": denied})),
@@ -511,7 +608,7 @@ async fn api(
     method: &str,
     h: &HeaderMap,
     raw_query: Option<&str>,
-    body: Body,
+    body: &mut RequestBody,
 ) -> Response {
     match browser_gate(app, h) {
         Err(()) => return uvicorn_500(),
@@ -620,6 +717,51 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     let (parts, body) = req.into_parts();
     let h = parts.headers;
 
+    let expect_continue = h
+        .get_all("expect")
+        .iter()
+        .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
+    let cap = match path.as_str() {
+        "/api/pair" => PAIR_BODY_LIMIT,
+        "/api/hook/session-end" => SESSION_END_BODY_LIMIT,
+        _ => body_limit(&path),
+    };
+    let mut body = RequestBody::new(body);
+    let mut response = dispatch(&app, &path, &method, &h, raw_query.as_deref(), &mut body).await;
+    if response.status().as_u16() >= 400 && !body.inner.is_end_stream() {
+        // Polling an Expect body would send 100 Continue after admission refused it.
+        if !expect_continue {
+            let outcome = finish_unread_body(
+                &mut body,
+                cap,
+                tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE,
+            )
+            .await;
+            if outcome != DrainOutcome::Complete || body.received > cap {
+                eprintln!(
+                    "http refusal cleanup: outcome={outcome:?} received={} cap={cap} overshoot={} frames={} max_frame={}",
+                    body.received,
+                    body.received.saturating_sub(cap),
+                    body.frames,
+                    body.max_frame
+                );
+            }
+        }
+        response
+            .headers_mut()
+            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+    }
+    response
+}
+
+async fn dispatch(
+    app: &Arc<App>,
+    path: &str,
+    method: &str,
+    h: &HeaderMap,
+    raw_query: Option<&str>,
+    body: &mut RequestBody,
+) -> Response {
     if path == "/health" {
         let payload = health::payload(&app.service).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
@@ -645,7 +787,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     if path == "/ui" || path.starts_with("/ui/") {
         let served = match &app.static_dir {
             Some(dir) => {
-                let (dir, p) = (dir.clone(), path.clone());
+                let (dir, p) = (dir.clone(), path.to_string());
                 tokio::task::spawn_blocking(move || static_files::serve(&dir, &p))
                     .await
                     .ok()
@@ -678,7 +820,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     }
     if path.starts_with("/api/hook/")
         && matches!(
-            path.as_str(),
+            path,
             "/api/hook/session-start"
                 | "/api/hook/memory-policy"
                 | "/api/hook/memory-changes"
@@ -689,21 +831,21 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/subagent"
         )
     {
-        return hook(&app, &path, &method, &h, body).await;
+        return hook(app, path, method, h, body).await;
     }
     if path == "/api/pair" {
-        return pair(&app, &method, &h, body).await;
+        return pair(app, method, h, body).await;
     }
     if path.starts_with("/api/") || path == "/api" {
-        return api(&app, &path, &method, &h, raw_query.as_deref(), body).await;
+        return api(app, path, method, h, raw_query, body).await;
     }
-    match resolve(&app, &h) {
+    match resolve(app, h) {
         Resolved::Unavailable => return principals_unavailable(),
         Resolved::None => return unauthorized(),
         Resolved::Principal(..) => {}
     }
     if path == "/mcp" || path.starts_with("/mcp/") {
-        return not_implemented(&path);
+        return not_implemented(path);
     }
     // The MCP app's own router: `/mcp` is its only route.
     text_response(
@@ -873,16 +1015,147 @@ mod tests {
                     Ok::<_, std::io::Error>(chunk)
                 },
             );
-        assert!(
-            read_body(Body::from_stream(stream), CONTROL_BODY_LIMIT)
-                .await
-                .is_none()
-        );
+        let mut body = RequestBody::new(Body::from_stream(stream));
+        assert!(read_body(&mut body, CONTROL_BODY_LIMIT).await.is_none());
         assert_eq!(seen.load(Ordering::SeqCst), 2);
         assert_eq!(
-            read_body(Body::from("0123456789"), 10).await.unwrap(),
-            b"0123456789"
+            finish_unread_body(
+                &mut body,
+                CONTROL_BODY_LIMIT,
+                tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+            )
+            .await,
+            DrainOutcome::ReadFailed
         );
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+        let mut exact = RequestBody::new(Body::from("0123456789"));
+        assert_eq!(read_body(&mut exact, 10).await.unwrap(), b"0123456789");
+    }
+
+    #[tokio::test]
+    async fn refusal_cleanup_stops_at_the_first_budget_crossing_frame() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for (chunks, expected_polls, expected_bytes) in [
+            (vec![vec![0; 2], vec![0; 2], vec![0; 1]], 2, 4),
+            (vec![vec![0; 5], vec![0; 1]], 1, 5),
+        ] {
+            let seen = Arc::new(AtomicUsize::new(0));
+            let count = seen.clone();
+            let stream = futures::stream::iter(chunks).map(move |chunk| {
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, std::io::Error>(chunk)
+            });
+            let mut body = RequestBody::new(Body::from_stream(stream));
+            assert_eq!(
+                finish_unread_body(
+                    &mut body,
+                    4,
+                    tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+                )
+                .await,
+                DrainOutcome::Cap
+            );
+            assert_eq!(seen.load(Ordering::SeqCst), expected_polls);
+            assert_eq!(body.received, expected_bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn refusal_cleanup_does_not_probe_eof_past_an_exact_opaque_budget() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = Arc::new(AtomicUsize::new(0));
+        let count = seen.clone();
+        let stream = futures::stream::unfold(false, move |done| {
+            count.fetch_add(1, Ordering::SeqCst);
+            async move { (!done).then_some((Ok::<_, std::io::Error>(vec![0; 4]), true)) }
+        });
+        let mut body = RequestBody::new(Body::from_stream(stream));
+        assert_eq!(
+            finish_unread_body(
+                &mut body,
+                4,
+                tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+            )
+            .await,
+            DrainOutcome::Cap
+        );
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+        assert_eq!(body.received, 4);
+        let mut known = RequestBody::new(Body::from("1234"));
+        assert_eq!(
+            finish_unread_body(
+                &mut known,
+                4,
+                tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+            )
+            .await,
+            DrainOutcome::Complete
+        );
+    }
+
+    #[tokio::test]
+    async fn refusal_cleanup_keeps_one_deadline_for_pending_and_empty_frames() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut pending = RequestBody::new(Body::from_stream(futures::stream::pending::<
+            Result<Vec<u8>, std::io::Error>,
+        >()));
+        assert_eq!(
+            finish_unread_body(
+                &mut pending,
+                4,
+                tokio::time::Instant::now() + Duration::from_millis(10)
+            )
+            .await,
+            DrainOutcome::Deadline
+        );
+        let seen = Arc::new(AtomicUsize::new(0));
+        let count = seen.clone();
+        let stream = futures::stream::repeat_with(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, std::io::Error>(Vec::<u8>::new())
+        });
+        let mut empty = RequestBody::new(Body::from_stream(stream));
+        assert_eq!(
+            finish_unread_body(
+                &mut empty,
+                4,
+                tokio::time::Instant::now() + Duration::from_millis(10)
+            )
+            .await,
+            DrainOutcome::Deadline
+        );
+        assert!(seen.load(Ordering::SeqCst) > 0);
+        assert_eq!(empty.received, 0);
+    }
+
+    #[tokio::test]
+    async fn refusal_cleanup_does_not_retry_a_failed_stream() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = Arc::new(AtomicUsize::new(0));
+        let count = seen.clone();
+        let stream = futures::stream::iter([
+            Err(std::io::Error::other("fixture body failure")),
+            Ok(vec![0; 1]),
+        ])
+        .map(move |chunk| {
+            count.fetch_add(1, Ordering::SeqCst);
+            chunk
+        });
+        let mut body = RequestBody::new(Body::from_stream(stream));
+        for _ in 0..2 {
+            assert_eq!(
+                finish_unread_body(
+                    &mut body,
+                    4,
+                    tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+                )
+                .await,
+                DrainOutcome::ReadFailed
+            );
+        }
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
     }
 
     #[test]
