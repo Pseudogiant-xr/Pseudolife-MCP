@@ -393,6 +393,60 @@ def test_validated_login_secret_is_replaced_only_on_its_single_line(tmp_path):
     assert login.read_bytes() == field + b"drawn\n"
 
 
+_SCRAM = (b"SCRAM-SHA-256$4096:" + base64.b64encode(b"s" * 16) + b"$"
+          + base64.b64encode(b"k" * 32) + b":" + base64.b64encode(b"v" * 32))
+
+
+def test_recorder_writes_no_scram_verifier(tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    echo = b"test-login: ... PASSWORD '" + _SCRAM + b"'\n"
+    monkeypatch.setattr(runner.rows, "ROWS", {"probe": "CLI-PROBE"})
+    monkeypatch.setattr(runner, "_golden_path", lambda row: tmp_path / f"{row}.json")
+    monkeypatch.setattr(core, "run_arm", lambda case, target, home: obs(
+        exit=1, stdout=echo, stderr=echo, files={"login.env": b"V=" + _SCRAM + b"\n"},
+        home=str(home)))
+    path = runner.record("probe", [core.Case("c", [])], core.Target("python", [sys.executable]),
+                         tmp_path, {"oracle_commit": "0" * 40, "oracle_commit_source": "git"})
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    assert normalize.scram_marks(golden) == []
+    case = golden["cases"]["c"]
+    for field in ("stdout", "stderr"):
+        assert base64.b64decode(case[field]) == b"test-login: ... PASSWORD '" + \
+            normalize.SCRAM_TOKEN + b"'\n"
+    assert base64.b64decode(case["files"]["login.env"][5:]) == b"V=" + normalize.SCRAM_TOKEN + b"\n"
+    assert golden["oracle_commit"] == "0" * 40
+
+
+def test_golden_writer_refuses_a_scram_verifier_anywhere(tmp_path):
+    from cli_harness import runner  # noqa: PLC0415
+    for golden in ({"cases": {"c": obs(stdout=b"x " + _SCRAM)}},
+                   {"cases": {"c": obs(files={"f": _SCRAM})}},
+                   {"cases": {}, "note": "SCRAM-SHA-256$1:a$b:c"}):
+        with pytest.raises(SystemExit, match="SCRAM-SHA-256"):
+            runner.write_golden(tmp_path / "g.json", golden)
+        assert not (tmp_path / "g.json").exists()
+
+
+def test_no_committed_golden_carries_a_scram_verifier():
+    import json  # noqa: PLC0415
+    goldens = sorted((Path(__file__).resolve().parent / "goldens").glob("*.json"))
+    assert goldens
+    found = {path.name: normalize.scram_marks(json.loads(path.read_text(encoding="utf-8")))
+             for path in goldens}
+    assert {name: marks for name, marks in found.items() if marks} == {}
+
+
+def test_verifier_echo_rule_meets_the_recorded_token():
+    from cli_harness.rows import test_login  # noqa: F401, PLC0415 - registers the rule
+    rule = ("test-login-verifier-echo",)
+    native = obs(exit=1, stdout=b"PASSWORD '" + _SCRAM + b"'\n")
+    golden = obs(exit=1, stdout=b"PASSWORD '" + normalize.SCRAM_TOKEN + b"'\n")
+    assert compare.diff(golden, native, rule) == []
+    # A malformed verifier is not mapped, so it still differs from the token.
+    assert compare.diff(golden, obs(exit=1, stdout=b"PASSWORD '" + _SCRAM[:-2] + b"'\n"), rule)
+
+
 def _make_repo(path: Path) -> str:
     import subprocess  # noqa: PLC0415
     (path / "pseudolife_memory").mkdir(parents=True)
@@ -510,6 +564,86 @@ def test_oracle_arm_never_runs_in_tree_bytecode(tmp_path):
     control = {k: v for k, v in oracle_env.items() if k != "PYTHONPYCACHEPREFIX"}
     assert run(control) == "shadow"  # the stale cache is what a plain launch runs
     assert run(oracle_env) == "source"
+
+
+_PARENT_DRIVER = '''
+import sys
+from pathlib import Path
+sys.path.insert(0, {rust!r})
+from cli_harness import core, rows, runner
+
+runner.GOLDENS = Path(sys.argv[1])
+
+
+def seed(arm):
+    from pseudolife_memory.seeder import VALUE  # a seeder helper, imported here
+    (arm.home / "seeded.txt").write_text(VALUE)
+
+
+rows.ROWS["parent_cache_probe"] = "CLI-PROBE"
+rows.load = lambda row: [core.Case("seeded", ["x"], setup=seed)]
+relaunch = getattr(runner, "isolated_relaunch", lambda: None)  # as __main__ does
+code = relaunch()
+if code is None:
+    code = runner.main(["--row", "parent_cache_probe", "--record", "--oracle-source", sys.argv[2]])
+raise SystemExit(code)
+'''
+
+
+def test_parent_process_records_the_source_not_a_stale_seeder_cache(tmp_path):
+    """The harness process imports oracle seeders itself. A stale cache for
+    one, headed with its source's mtime and size, is what a plain import
+    runs; the recorded bytes must come from the bound source instead."""
+    import importlib._bootstrap_external as bootstrap  # noqa: PLC0415
+    import json  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    repo = tmp_path / "oracle"
+    package = repo / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "cli.py").write_text("print('oracle')\n")
+    seeder = package / "seeder.py"
+    seeder.write_text('VALUE = "source"\n')
+    vcs = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com",
+           "-c", "core.autocrlf=false"]
+    for args in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "x"]):
+        subprocess.run(vcs + args, check=True, capture_output=True)
+    head = subprocess.run(vcs + ["rev-parse", "HEAD"], check=True, capture_output=True,
+                          text=True).stdout.strip()
+    stat = seeder.stat()
+    (package / "__pycache__").mkdir()
+    (package / "__pycache__" / f"seeder.{sys.implementation.cache_tag}.pyc").write_bytes(
+        bootstrap._code_to_timestamp_pyc(compile('VALUE = "shadow"\n', str(seeder), "exec"),
+                                         int(stat.st_mtime), stat.st_size))
+    driver = tmp_path / "driver.py"
+    driver.write_text(_PARENT_DRIVER.format(rust=str(Path(__file__).resolve().parent.parent)))
+    goldens = tmp_path / "goldens"
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "CLI_HARNESS_PYCACHE_PREFIX")}
+    done = subprocess.run([sys.executable, str(driver), str(goldens), str(repo)], env=env,
+                          cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    golden = json.loads(next(goldens.glob("parent_cache_probe.*.json")).read_text("utf-8"))
+    assert golden["oracle_commit"] == head
+    seeded = golden["cases"]["seeded"]["files"]["seeded.txt"]
+    assert base64.b64decode(seeded[5:]) == b"source"
+
+
+def test_parent_module_check_refuses_an_unisolated_or_foreign_load(tmp_path, monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.setattr(sys, "pycache_prefix", None)
+    assert "cached bytecode" in runner.parent_module_problems(tmp_path, None)[0]
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setattr(sys, "pycache_prefix", str(empty))
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    assert runner.parent_module_problems(tmp_path, None) == []
+    # An oracle module loaded from somewhere other than the bound source.
+    foreign = type(sys)("pseudolife_memory")
+    foreign.__spec__ = type("Spec", (), {"origin": str(tmp_path / "elsewhere" / "__init__.py"),
+                                         "has_location": True, "cached": None})()
+    monkeypatch.setitem(sys.modules, "pseudolife_memory", foreign)
+    assert "was loaded from" in runner.parent_module_problems(tmp_path, None)[0]
 
 
 def test_record_refuses_an_unbound_or_mismatched_export(tmp_path, monkeypatch):

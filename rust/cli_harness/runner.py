@@ -223,8 +223,111 @@ def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dic
     return {"oracle_commit": declared, "oracle_commit_source": "verified-tree"}
 
 
+def _commit_blobs(repo: Path, commit: str) -> dict[str, str]:
+    listing = _git(repo, "ls-tree", "-r", "-z", commit, "--", ORACLE_PACKAGE)
+    if listing.returncode != 0:
+        raise SystemExit(f"--record: git exited {listing.returncode} listing {commit} in {repo}")
+    blobs = {}
+    for entry in listing.stdout.split(b"\0"):
+        if entry:
+            meta, path = entry.split(b"\t", 1)
+            blobs[path.decode()] = meta.split()[2].decode()
+    return blobs
+
+
+def _binding_blobs(source: Path, binding: dict) -> dict[str, str] | None:
+    """The bound commit's blob ids, where a checkout can answer."""
+    where = {"git": source, "verified-tree": REPO}.get(binding["oracle_commit_source"])
+    return None if where is None else _commit_blobs(where, binding["oracle_commit"])
+
+
+# Set by isolated_relaunch for the relaunched harness process.
+ISOLATION_ENV = "CLI_HARNESS_PYCACHE_PREFIX"
+
+
+def _same_path(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def isolated_relaunch() -> int | None:
+    """Run this harness invocation again, once, with an empty
+    ``PYTHONPYCACHEPREFIX`` and ``PYTHONDONTWRITEBYTECODE``: every oracle
+    module the harness process imports itself (writers, seeders, observers)
+    is then compiled from the source on disk, never from a ``__pycache__``.
+    Returns the relaunch's exit code, or ``None`` in the relaunched process."""
+    prefix = os.environ.get(ISOLATION_ENV)
+    if (prefix and sys.pycache_prefix and _same_path(sys.pycache_prefix, prefix)
+            and sys.dont_write_bytecode):
+        return None
+    import shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    empty = tempfile.mkdtemp(prefix="cli-harness-parent-pycache-")
+    try:
+        env = dict(os.environ, PYTHONPYCACHEPREFIX=empty, PYTHONDONTWRITEBYTECODE="1")
+        env[ISOLATION_ENV] = empty
+        return subprocess.run([sys.executable, *sys.orig_argv[1:]], env=env).returncode
+    finally:
+        shutil.rmtree(empty, ignore_errors=True)
+
+
+def parent_module_problems(source: Path, blobs: dict[str, str] | None) -> list[str]:
+    """Why the oracle code loaded in this (the harness's) process might not be
+    the bound source: not isolated from bytecode caches, a module loaded from
+    elsewhere or through a cache outside the empty prefix, or (where the
+    commit's blobs are known) source bytes on disk that differ from them."""
+    prefix = sys.pycache_prefix
+    if not (prefix and sys.dont_write_bytecode):
+        return ["it may run cached bytecode: start it as `python rust/cli_harness`, which "
+                "relaunches itself with an empty PYTHONPYCACHEPREFIX"]
+    if any(Path(prefix).rglob("*.pyc")):
+        return [f"its bytecode cache prefix {prefix} is not empty"]
+    root, problems = source / ORACLE_PACKAGE, []
+    for name, module in sorted(sys.modules.items()):
+        if name != ORACLE_PACKAGE and not name.startswith(ORACLE_PACKAGE + "."):
+            continue
+        spec = getattr(module, "__spec__", None)
+        origin = getattr(spec, "origin", None)
+        if not origin or not getattr(spec, "has_location", False):
+            problems.append(f"{name} has no source file")
+            continue
+        path = Path(origin).resolve()
+        if not path.is_relative_to(root):
+            problems.append(f"{name} was loaded from {path}")
+            continue
+        cached = getattr(spec, "cached", None)
+        if cached and not Path(cached).resolve().is_relative_to(Path(prefix).resolve()):
+            problems.append(f"{name} may have run {cached}")
+        if blobs is not None:
+            rel = path.relative_to(source).as_posix()
+            data = path.read_bytes()
+            if blobs.get(rel) not in (_blob_sha(data), _blob_sha(data.replace(b"\r\n", b"\n"))):
+                problems.append(f"{name}'s source {rel} is not the bound commit's")
+    return problems
+
+
+def redact_golden(golden: dict) -> dict:
+    """Every case of a golden with its SCRAM verifiers replaced by the fixed
+    token (``normalize.redact_scram_verifiers``); bindings and metadata kept."""
+    for normal in golden["cases"].values():
+        normalize.redact_scram_verifiers(normal)
+    return golden
+
+
+def write_golden(path: Path, golden: dict) -> None:
+    """Write a golden, refusing one that would still carry a SCRAM verifier."""
+    marks = normalize.scram_marks(golden)
+    if marks:
+        raise SystemExit(f"refusing to write {path}: SCRAM-SHA-256$ remains at "
+                         + ", ".join(marks[:5]))
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n", encoding="utf-8",
+                    newline="\n")
+
+
 def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
-           binding: dict) -> Path:
+           binding: dict, verify=None) -> Path:
+    """Record ``row``'s cases from the oracle; ``verify`` runs after the last
+    arm and before anything is written (it may refuse with SystemExit)."""
     golden = {"row": rows.ROWS[row], "platform": core.PLATFORM, **binding, "cases": {}}
     forms = _host_paths(source, oracle.command[0])
     for case in cases:
@@ -235,10 +338,10 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
         _scrub(normal, forms)
         golden["cases"][case.id] = normal
         print(f"  recorded {_label(case)} (exit {obs['exit']})", flush=True)
+    if verify is not None:
+        verify()
     path = _golden_path(row)
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n", encoding="utf-8",
-                    newline="\n")
+    write_golden(path, redact_golden(golden))
     return path
 
 
@@ -273,21 +376,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="write a JSON summary")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
+    source = args.oracle_source.resolve()
 
-    producers.use_oracle(args.oracle_source.resolve())
+    # Refuse an unbound recording before the oracle is importable here, and
+    # before any writer, seeder or observer runs in this process.
+    binding = verify = None
+    if args.record:
+        binding = oracle_binding(source, args.oracle_commit)
+        blobs = _binding_blobs(source, binding)
+
+        def verify() -> None:
+            problems = parent_module_problems(source, blobs)
+            if problems:
+                raise SystemExit("--record: the harness process's own oracle code is not the "
+                                 "bound source: " + "; ".join(problems[:5]))
+
+        verify()
+
+    producers.use_oracle(source)
     from .rows import _daemon  # noqa: PLC0415
-    _daemon.ORACLE.update(python=args.oracle_python, source=args.oracle_source.resolve())
-    oracle = core.python_target(args.oracle_python, args.oracle_source.resolve())
+    _daemon.ORACLE.update(python=args.oracle_python, source=source)
+    oracle = core.python_target(args.oracle_python, source)
     candidate_path = args.candidate or _default_candidate()
 
     if args.mutants:
         from . import mutants  # noqa: PLC0415
         mutants.SKIP_BANK = args.skip_bank
         return mutants.main(args.row, args.mutant, oracle, args.verbose)
-
-    # Refuse an unbound recording before any arm runs.
-    binding = (oracle_binding(args.oracle_source.resolve(), args.oracle_commit)
-               if args.record else None)
     # Keyed by row name: two rows may share a PARITY ID (invite and pair).
     # Written after every row, so a later row's crash keeps the earlier ones;
     # ``complete`` turns true only once every selected row has finished.
@@ -300,7 +415,9 @@ def main(argv: list[str] | None = None) -> int:
                         replay=args.golden or args.record)
         print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
-            path = record(row, cases, oracle, args.oracle_source.resolve(), binding)
+            # verify again after the row's arms: its seeders imported oracle
+            # modules lazily, and the golden is written only if they are bound.
+            path = record(row, cases, oracle, source, binding, verify)
             print(f"  wrote {path}")
             chosen = {c.id for c in cases}
             summary["rows"][row] = {"parity": rows.ROWS[row], **binding,

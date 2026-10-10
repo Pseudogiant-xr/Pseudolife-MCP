@@ -66,7 +66,13 @@ own options (`_parser`, 456-482).
   same in every harness process.
 - A verifier echoed by the server's error CONTEXT when the role change fails
   (its salt and keys come from a password drawn for that run and never
-  kept); the iteration count stays exact. Rule `test-login-verifier-echo`.
+  kept). Rule `test-login-verifier-echo` maps a verifier of the exact shape
+  (16-byte salt, 32-byte keys) to `<scram-sha-256-verifier>`, the token the
+  recorder writes in place of every SCRAM verifier before any golden is
+  written (the repo is public, and secret scanners flag verifiers), so a
+  live comparison and a golden replay compare the same token. The echoed
+  iteration count is not compared; `tl-scram-iterations` is caught by the
+  stored verifier's check in `admin-fresh` and `container-reapply`.
 - The staged file's pid (never observable after a successful rename).
 - The DACL's auto-inherited control bit (SDDL `AI`), which grants nothing.
 - The SQL text itself (ported verbatim, compared through its effects).

@@ -38,6 +38,18 @@ checkout holds that commit, the tree must match it file for file
 (`verified-tree`); with no checkout to ask, the commit is recorded as
 `declared`.
 
+The harness process imports oracle code itself (writers, seeders,
+observers), so `python rust/cli_harness` relaunches itself once with an
+empty `PYTHONPYCACHEPREFIX` and `PYTHONDONTWRITEBYTECODE=1`. A recording
+checks, before any row runs and again before each golden is written, that
+every `pseudolife_memory` module loaded in the harness process came from
+the bound source, through no cache outside that prefix, with source bytes
+equal to the bound commit's.
+
+The recorder replaces every SCRAM verifier in recorded streams and files
+with `<scram-sha-256-verifier>` and refuses to write a golden in which
+`SCRAM-SHA-256$` still appears, raw or base64-encoded.
+
 `--out` writes a JSON summary keyed by row name (each with its PARITY ID
 under `parity`); with `--record` it lists each row's recorded and skipped
 cases. The file is replaced atomically after every row, so a crash keeps

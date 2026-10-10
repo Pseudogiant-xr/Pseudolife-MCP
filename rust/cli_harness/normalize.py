@@ -11,7 +11,7 @@ import base64
 import json
 import re
 import time
-from typing import Callable
+from typing import Any, Callable
 
 Rule = Callable[[dict], None]
 RULES: dict[str, Rule] = {}
@@ -210,6 +210,46 @@ def python_shutdown_flush_silent(obs: dict) -> None:
     (briefing_cli.py:248-251), then CPython's shutdown flush prints the
     trailer and exits 120. The native hook stays silent with exit 0."""
     _shutdown_flush(obs, 0)
+
+
+# A PostgreSQL SCRAM verifier (a server echoing a CREATE/ALTER ROLE statement).
+# The repo is public and secret scanners flag these, so no golden keeps one:
+# the recorder writes this fixed token instead, and compare-time rules that
+# validate a verifier's shape map it to the same token.
+SCRAM_VERIFIER = re.compile(rb"SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+")
+SCRAM_TOKEN = b"<scram-sha-256-verifier>"
+SCRAM_MARK = b"SCRAM-SHA-256$"
+
+
+def redact_scram_verifiers(obs: dict) -> None:
+    """Replace every SCRAM verifier in a recorded observation's streams and
+    files with ``SCRAM_TOKEN`` (the recorder runs this on every row)."""
+    for field in ("stdout", "stderr"):
+        if field in obs:
+            _put(obs, field, SCRAM_VERIFIER.sub(SCRAM_TOKEN, _get(obs, field)))
+    for rel, value in list(obs.get("files", {}).items()):
+        if value.startswith("file:"):
+            _set_file(obs, rel, SCRAM_VERIFIER.sub(SCRAM_TOKEN, base64.b64decode(value[5:])))
+
+
+def scram_marks(node: Any, where: str = "") -> list[str]:
+    """Where ``SCRAM-SHA-256$`` appears in a golden, raw or inside any base64
+    string (streams, ``file:`` contents), so a writer can refuse it."""
+    if isinstance(node, dict):
+        return [hit for key, value in node.items() for hit in scram_marks(value, f"{where}/{key}")]
+    if isinstance(node, list):
+        return [hit for index, value in enumerate(node)
+                for hit in scram_marks(value, f"{where}[{index}]")]
+    if not isinstance(node, str):
+        return []
+    if SCRAM_MARK in node.encode():
+        return [where]
+    text = node[5:] if node.startswith("file:") else node
+    try:
+        decoded = base64.b64decode(text, validate=True)
+    except ValueError:
+        return []
+    return [where] if SCRAM_MARK in decoded else []
 
 
 @rule("python-stdout-closed-trailer")

@@ -245,11 +245,14 @@ def verifier_echo_rule(obs: dict) -> None:
     """A failure inside the role change: the server's error CONTEXT quotes the
     statement, including the verifier of a password drawn for this run (its
     salt and keys are random by design, and the password is never kept). Only
-    a span with a verifier's exact shape maps, and its iteration count stays."""
+    a span with a verifier's exact shape (16-byte salt, 32-byte keys) maps,
+    to the same fixed token the recorder writes into goldens
+    (``normalize.SCRAM_TOKEN``), so a live comparison and a golden replay
+    compare the same thing; a malformed verifier stays and shows."""
     if obs["exit"] != 1:
         return
     stdout = base64.b64decode(obs["stdout"])
-    obs["stdout"] = base64.b64encode(_VERIFIER.sub(rb"\1<salt>$<keys>", stdout)).decode()
+    obs["stdout"] = base64.b64encode(_VERIFIER.sub(normalize.SCRAM_TOKEN, stdout)).decode()
 
 
 _NL = b"\r\n" if WINDOWS else b"\n"
