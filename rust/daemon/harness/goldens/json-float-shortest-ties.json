@@ -15,7 +15,7 @@
    },
    "extensions": {
     "rows": 2,
-    "sha256": "f58378ad9e787652d80b1192"
+    "sha256": "379f1d04a33d23de5113afa2"
    },
    "functions": {
     "rows": 0,
@@ -27,7 +27,7 @@
    },
    "owners_and_comments": {
     "rows": 161,
-    "sha256": "221ce8131afb68c41151a482"
+    "sha256": "bd1345be267ad0a154b31d31"
    },
    "schemas": {
     "rows": 1,
@@ -39,7 +39,7 @@
    },
    "sequences": {
     "rows": 19,
-    "sha256": "e49b4f629f8d6aec19572196"
+    "sha256": "bbeec59aa91b80fc6983115c"
    },
    "triggers": {
     "rows": 0,
@@ -433,7 +433,7 @@
       1,
       "flat",
       "memory tie 0",
-      "<vector sha256:827b68c6d5c9b491>",
+      "<vector sha256:52e6134ca673db5b>",
       0.0,
       -847044394961070.2,
       0,
@@ -455,7 +455,7 @@
       2,
       "flat",
       "memory tie 1",
-      "<vector sha256:827b68c6d5c9b491>",
+      "<vector sha256:18b7734b2833133e>",
       0.0,
       93026504287663.12,
       0,
@@ -746,7 +746,7 @@
       false,
       null,
       true,
-      1791604891.4712093
+      1791633924.3825548
      ],
      [
       "configures",
@@ -756,7 +756,7 @@
       false,
       null,
       true,
-      1791604891.4671512
+      1791633924.3815923
      ],
      [
       "depends-on",
@@ -766,7 +766,7 @@
       true,
       null,
       true,
-      1791604891.4632955
+      1791633924.3799734
      ],
      [
       "hosts",
@@ -776,7 +776,7 @@
       false,
       null,
       true,
-      1791604891.4651172
+      1791633924.3808737
      ],
      [
       "implements",
@@ -786,7 +786,7 @@
       false,
       null,
       true,
-      1791604891.4691813
+      1791633924.3820112
      ],
      [
       "part-of",
@@ -796,7 +796,7 @@
       true,
       null,
       true,
-      1791604891.464597
+      1791633924.3806481
      ],
      [
       "prefers",
@@ -806,7 +806,7 @@
       false,
       null,
       true,
-      1791604891.470706
+      1791633924.382376
      ],
      [
       "related-to",
@@ -816,7 +816,7 @@
       false,
       null,
       true,
-      1791604891.4698677
+      1791633924.3822007
      ],
      [
       "runs-on",
@@ -826,7 +826,7 @@
       false,
       "hosts",
       true,
-      1791604891.4656398
+      1791633924.3810704
      ],
      [
       "stores-data-in",
@@ -836,7 +836,7 @@
       false,
       null,
       true,
-      1791604891.4686594
+      1791633924.3818722
      ],
      [
       "uses",
@@ -846,7 +846,7 @@
       false,
       null,
       true,
-      1791604891.4666452
+      1791633924.3814201
      ]
     ]
    },
@@ -862,7 +862,194 @@
      "params",
      "served_facts"
     ],
-    "rows": []
+    "rows": [
+     [
+      1,
+      "warmup probe",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "bm25": 0.0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 0,
+        "score": 1.0,
+        "via": null
+       }
+      ],
+      1791633930.6241415,
+      {
+       "band_count": 1,
+       "bm25": {
+        "b": 0.75,
+        "enabled": true,
+        "k1": 1.5,
+        "min_score": 0.1,
+        "top_n": 20,
+        "weight": 0.3
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 1,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.25,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 1,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 1
+      },
+      null
+     ],
+     [
+      2,
+      "memory",
+      "search",
+      null,
+      null,
+      [
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "bm25": 1.0,
+         "channel": "dense",
+         "dense": 1.0,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 1,
+        "rank": 0,
+        "score": 1.3,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "bm25": 1.0,
+         "channel": "dense",
+         "dense": 0.800000011920929,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 2,
+        "rank": 1,
+        "score": 1.1,
+        "via": null
+       },
+       {
+        "bank": "flat",
+        "components": {
+         "band": "flat",
+         "band_depth": 0,
+         "bm25": 1.0,
+         "channel": "dense",
+         "dense": 0.2800000309944153,
+         "recency": 0.0,
+         "recency_boost": 0.0,
+         "source_mult": 1.0,
+         "supersession_mult": 1.0,
+         "surprise": 0.0
+        },
+        "entry_id": 3,
+        "rank": 2,
+        "score": 0.58,
+        "via": null
+       }
+      ],
+      1791633931.969839,
+      {
+       "band_count": 1,
+       "bm25": {
+        "b": 0.75,
+        "enabled": true,
+        "k1": 1.5,
+        "min_score": 0.1,
+        "top_n": 20,
+        "weight": 0.3
+       },
+       "candidate_pool": {
+        "fusion": "weighted_sum",
+        "multiplier": 1,
+        "pool_size": 3,
+        "rerank_position": "after_cut"
+       },
+       "contiguity_neighbors": 0,
+       "filters": {
+        "bands": null,
+        "episodes": null,
+        "min_logical_turn": null,
+        "sources": null,
+        "tags": null
+       },
+       "hide_superseded": false,
+       "min_score": 0.25,
+       "min_score_explicit": false,
+       "recency_base_half_life_s": 86400.0,
+       "recency_boost": false,
+       "reranker": {
+        "candidate_count": 3,
+        "enabled": false,
+        "fired": false,
+        "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+        "skip_reason": null,
+        "top_n": 20
+       },
+       "timeline": {
+        "enabled": false,
+        "fired": false
+       },
+       "top_k": 3
+      },
+      null
+     ]
+    ]
    },
    "public.retrieval_uses": {
     "columns": [
@@ -949,16 +1136,10 @@
     "the listing-spelling carry-over stamps the clock (W2-E)"
    ],
    [
-    "table",
+    "warmup",
     "retrieval_events",
     null,
-    "the warmup search logs a retrieval event (W2-D telemetry)"
-   ],
-   [
-    "sequence",
-    "retrieval_events_id_seq",
-    null,
-    "advanced by that retrieval event (W2-D telemetry)"
+    "one warmup probe and its sequence increment (W2-D telemetry)"
    ]
   ],
   "db_nondeterministic": [

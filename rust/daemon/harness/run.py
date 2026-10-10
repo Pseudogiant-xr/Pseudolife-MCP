@@ -889,10 +889,13 @@ class JsonFloatTies(Scenario):
         import psycopg
         from pseudolife_memory.storage.postgres import PostgresStorage
         PostgresStorage(dsn).close()
-        vector = json.dumps([0.8, -0.6] + [0.0] * 1022)
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             for index, token in enumerate(self.timestamps):
+                # The offline "memory" query is (0.8, 0.6). Keep cosines
+                # distinct so torch.topk tie order cannot affect float tokens.
+                direction = [(0.8, 0.6), (1.0, 0.0), (0.8, -0.6)][index]
+                vector = json.dumps([*direction] + [0.0] * 1022)
                 conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
                              "VALUES ('flat', %s, %s::vector, %s, 'agent')",
                              (f"memory tie {index}", vector, float(token)))
