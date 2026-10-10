@@ -462,20 +462,45 @@ def test_no_committed_golden_carries_a_verifier_or_a_drawn_login_secret():
     assert {name: marks for name, marks in found.items() if marks} == {}
 
 
-def test_golden_writer_refuses_a_drawn_login_secret(tmp_path):
+def _drawn_login_line() -> bytes:
     import secrets  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    drawn = secrets.token_urlsafe(32)
+    assert len(drawn) == 43
+    return f"{test_login._LOGIN_SECRET_FIELD}={drawn}".encode()
+
+
+def test_golden_writer_refuses_a_drawn_login_secret_in_a_stream(tmp_path):
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    path = tmp_path / "g.json"
+    golden = {"cases": {"c": obs(stdout=_drawn_login_line() + b"\n",
+                                 files={"test-pg.env": b"A=1\n"})}}
+    with pytest.raises(SystemExit, match=r"drawn login secret remains at /cases/c/stdout$"):
+        runner.write_golden(path, golden, test_login.FIXTURE_LOGIN_SECRETS)
+    assert not path.exists()
+
+
+def test_golden_writer_refuses_a_drawn_login_secret_in_a_file(tmp_path):
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    path = tmp_path / "g.json"
+    # Only inside the file's base64 content: both streams are clean.
+    golden = {"cases": {"c": obs(stdout=b"wrote test-pg.env\n",
+                                 files={"test-pg.env": b"A=1\n" + _drawn_login_line() + b"\n"})}}
+    stored = golden["cases"]["c"]["files"]["test-pg.env"]
+    assert stored.startswith("file:") and b"PASSWORD" not in stored.encode()
+    with pytest.raises(SystemExit,
+                       match=r"drawn login secret remains at /cases/c/files/test-pg\.env$"):
+        runner.write_golden(path, golden, test_login.FIXTURE_LOGIN_SECRETS)
+    assert not path.exists()
+
+
+def test_golden_writer_keeps_fixture_and_validated_login_secrets(tmp_path):
     from cli_harness import runner  # noqa: PLC0415
     from cli_harness.rows import test_login  # noqa: PLC0415
     field = f"{test_login._LOGIN_SECRET_FIELD}=".encode()
-    drawn = secrets.token_urlsafe(32)
-    assert len(drawn) == 43
     path = tmp_path / "g.json"
-    for value in (drawn.encode(), field + drawn.encode()):
-        golden = {"cases": {"c": obs(stdout=field + drawn.encode() + b"\n",
-                                     files={"test-pg.env": b"A=1\n" + value + b"\n"})}}
-        with pytest.raises(SystemExit, match="drawn login secret"):
-            runner.write_golden(path, golden, test_login.FIXTURE_LOGIN_SECRETS)
-        assert not path.exists()
     # The row's fixtures and a validated value are written as they are.
     for value in (*test_login.FIXTURE_LOGIN_SECRETS, "<validated>"):
         golden = {"cases": {"c": obs(files={"test-pg.env": field + value.encode() + b"\n"})}}
@@ -704,6 +729,44 @@ def test_record_refuses_an_oracle_file_edited_between_rows(tmp_path, monkeypatch
         runner.main(["--row", "first", "--row", "second", "--record",
                      "--oracle-source", str(repo)])
     assert [p.name.split(".")[0] for p in goldens.glob("*.json")] == ["first"]
+
+
+def test_record_refuses_an_oracle_file_edited_after_binding(tmp_path, monkeypatch):
+    """The tree is bound, then a tracked file changes before the first row:
+    the start-of-run verify refuses, and nothing is recorded."""
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import _daemon  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    head = _make_repo(repo)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for name in [n for n in sys.modules if n.split(".")[0] == "pseudolife_memory"]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "pycache_prefix", str(empty))
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(_daemon, "ORACLE", dict(_daemon.ORACLE))
+    goldens = tmp_path / "goldens"
+    monkeypatch.setattr(runner, "GOLDENS", goldens)
+    monkeypatch.setattr(runner.rows, "ROWS", {"only": "CLI-A"})
+    monkeypatch.setattr(runner.rows, "load", lambda row: [])
+    bind = runner.oracle_binding
+    bound = []
+
+    def bind_then_edit(source, declared, *rest):
+        binding = bind(source, declared, *rest)
+        bound.append(binding)
+        (repo / "pseudolife_memory" / "cli.py").write_bytes(b"print('edited')\n")
+        return binding
+
+    monkeypatch.setattr(runner, "oracle_binding", bind_then_edit)
+    with pytest.raises(SystemExit) as refused:
+        runner.main(["--row", "only", "--record", "--oracle-source", str(repo)])
+    assert bound == [{"oracle_commit": head, "oracle_commit_source": "git"}]
+    assert str(refused.value) == (f"--record: {repo.resolve()}'s pseudolife_memory/ is no "
+                                  "longer the bound commit's: changed pseudolife_memory/cli.py")
+    assert not goldens.exists() or not list(goldens.iterdir())
 
 
 def test_parent_module_check_refuses_an_unisolated_or_foreign_load(tmp_path, monkeypatch):
