@@ -6,13 +6,12 @@
 //! `_error_payload` builds for a non-code `ValueError` (400) or any other
 //! failure (500). Argument binding is not reproduced: canonical calls only.
 
-use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use serde_json::{Value, json};
 
 use crate::episodes::Caller;
-use crate::http::{App, json_response};
+use crate::http::{App, RequestBody, json_response, read_body};
 use crate::store::{self, ToolError};
 
 const BODY_LIMIT: usize = 4 * 1024 * 1024;
@@ -35,9 +34,9 @@ fn transport_session(h: &HeaderMap) -> Option<String> {
     on.then(|| last_header(h, "mcp-session-id")).flatten()
 }
 
-pub async fn call(app: &App, path: &str, h: &HeaderMap, body: Body) -> Response {
+pub async fn call(app: &App, path: &str, h: &HeaderMap, body: &mut RequestBody) -> Response {
     let name = path.trim_start_matches("/api/_harness/tool/");
-    let Ok(raw) = axum::body::to_bytes(body, BODY_LIMIT).await else {
+    let Some(raw) = read_body(body, BODY_LIMIT).await else {
         return json_response(413, &json!({"error": "request_too_large"}));
     };
     let args = match serde_json::from_slice::<Value>(&raw) {
