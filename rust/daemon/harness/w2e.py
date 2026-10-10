@@ -424,6 +424,9 @@ def state_diff(a: dict, b: dict) -> list[str]:
     for d in dbstate.diff(a, b):
         if d.startswith("/catalog/"):
             key = d.split(":", 1)[0].rsplit("/", 1)[1]
+            if key not in a["catalog"] or key not in b["catalog"]:
+                out.append(d)
+                continue
             ra = {json.dumps(r) for r in a["catalog"][key]}
             rb = {json.dumps(r) for r in b["catalog"][key]}
             out += [f"/catalog/{key}: python {r}" for r in sorted(ra - rb)]
