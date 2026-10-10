@@ -4,9 +4,7 @@ use serde_json::{Value, ser::Formatter};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write as _, io};
 
-#[path = "../../../../shared/float_repr.rs"]
-mod float_repr;
-use float_repr::finite_float;
+use crate::float_repr::finite_float;
 
 struct AuditFormatter;
 

@@ -576,9 +576,15 @@ impl Listener {
                 .saturating_duration_since(Instant::now())
                 .as_secs_f64()
                 .min(60.0);
+        self.write_expiry(expiry);
+    }
+    fn write_expiry(&self, expiry: f64) {
+        let Ok(expiry) = crate::float_repr::finite_float(expiry) else {
+            return;
+        };
         let _ = atomic_write(
             &self.path,
-            format!("{}\n{expiry:?}\n", self.token).as_bytes(),
+            format!("{}\n{expiry}\n", self.token).as_bytes(),
             true,
         );
     }
@@ -1214,6 +1220,29 @@ mod tests {
         let mut output = Vec::new();
         write_output(&mut output, b"peer\n").unwrap();
         assert_eq!(output, b"peer\n");
+    }
+    #[test]
+    fn python_float_shortest_ties() {
+        let home = std::env::temp_dir().join(format!("wait-mail-float-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        // Python writer: pseudolife_memory/wake_liveness.py:68.
+        let armed = Listener::new(&home.join("digest.md"), 60.0);
+        let mut wrong = Vec::new();
+        for (bits, expected) in [
+            (0x430c6bf526340002, "1000000000000000.2"),
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+        ] {
+            armed.write_expiry(f64::from_bits(bits));
+            let actual = fs::read_to_string(&armed.path).unwrap();
+            let expected = format!("{}\n{expected}\n", armed.token);
+            if actual != expected {
+                wrong.push(format!("{bits:016x}: {actual:?} != {expected:?}"));
+            }
+        }
+        drop(armed);
+        fs::remove_dir_all(home).unwrap();
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
     #[test]
     fn temporary_collisions_keep_existing_files_and_directories() {
