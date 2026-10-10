@@ -151,10 +151,11 @@ fn head(value: &str) -> Option<Head> {
 /// explicit `+HH:MM`/`-HH:MM` offset (never a local-time reading).
 fn time(value: &str) -> Option<f64> {
     let decimal = |text: &str| !text.is_empty() && text.bytes().all(|c| c.is_ascii_digit());
-    if let Some((whole, fraction)) = value.split_once('.') {
-        if decimal(whole) && decimal(fraction) {
-            return value.parse::<f64>().ok().filter(|v| v.is_finite());
-        }
+    if let Some((whole, fraction)) = value.split_once('.')
+        && decimal(whole)
+        && decimal(fraction)
+    {
+        return value.parse::<f64>().ok().filter(|v| v.is_finite());
     }
     if decimal(value) {
         return value.parse::<f64>().ok().filter(|v| v.is_finite());
