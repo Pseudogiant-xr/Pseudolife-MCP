@@ -227,10 +227,11 @@ fn iso(value: &str) -> Option<f64> {
     let days = era * 146097 + day_of_era - 719468;
     let sign = if bytes[19] == b'-' { -1 } else { 1 };
     let offset = sign * (offset_hours * 3600 + offset_minutes * 60);
-    Some(
-        (days * 86400 + hour * 3600 + minute * 60 + second - offset) as f64
-            + microseconds as f64 / 1_000_000.0,
-    )
+    let seconds = days * 86400 + hour * 3600 + minute * 60 + second - offset;
+    // Python divides total integer microseconds. Decimal parsing rounds that
+    // ratio once, including dates whose microseconds exceed exact f64 integers.
+    let total_microseconds = seconds * 1_000_000 + microseconds;
+    format!("{total_microseconds}e-6").parse().ok()
 }
 
 #[cfg(test)]
@@ -331,6 +332,8 @@ mod tests {
     fn fractional_iso_seconds_keep_the_explicit_offset() {
         // datetime.fromisoformat(...).timestamp(), CPython 3.11, 2026-10-10.
         for (value, expected) in [
+            ("1970-01-01T00:00:59.999999+00:01", -0.000001),
+            ("2300-01-01T00:00:00.000001+00:00", 10413792000.000002),
             ("2026-10-10T00:00:00.500000+00:00", 1791590400.5),
             ("1970-01-01T00:33:20.5+00:00", 2000.5),
             ("1970-01-01T02:03:20.000001+01:30", 2000.000001),
