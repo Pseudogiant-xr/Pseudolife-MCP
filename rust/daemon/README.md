@@ -80,6 +80,15 @@ The disposable admission control refuses six near-miss names before
 connection setup and kills two permissive-prefix source mutants in isolated
 module namespace, leaving the actual database guard unchanged.
 The `principal-harness` feature is absent from the serving release build.
+
+`--only json-float-shortest-ties` seeds three fixed DOUBLE PRECISION timestamps
+and serves them with a small offline ONNX fixture. It requires `onnx` and the
+Python ONNX backend dependencies. New JSON recordings retain exact number
+tokens at key/index paths; declared free cells remain normalized. Goldens
+recorded before this evidence was added need re-recording to check numeric
+spelling. The `golden-float-token` mutant changes a decimal token without
+changing its decoded binary64 value and must fail both live and golden replay.
+
 `--only static-build static-paths static-missing static-root-link` exercises the static layer
 without loading models: both daemons use an unreachable loopback DSN to
 isolate asset serving from bank startup. Set `PL_HARNESS_SLICE=http`

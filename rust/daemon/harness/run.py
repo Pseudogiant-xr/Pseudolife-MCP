@@ -68,7 +68,8 @@ NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
-           "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default"]
+           "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default",
+           "golden-float-token"]
 
 import security_cases
 
@@ -227,6 +228,47 @@ def _raw_tree(text: str):
 
 def _free(v) -> bool:
     return isinstance(v, str) and v.startswith("<") and (">" in v)
+
+
+def number_tokens(resp: dict, normalized: dict) -> list[dict]:
+    """Portable wire tokens at exact JSON paths, excluding declared free cells.
+
+    Keep paths as key/index arrays (keys may themselves contain dots). A
+    recording carries only numeric spellings, never the raw response text.
+    Filter again at comparison time for replay's seeded-clock normalizer.
+    """
+    def exact(path):
+        value = normalized.get("json")
+        for key in path:
+            if _free(value):
+                return False
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            elif isinstance(value, list) and isinstance(key, int) and 0 <= key < len(value):
+                value = value[key]
+            else:
+                return False
+        return not _free(value)
+
+    if "number_tokens" in resp:
+        return [item for item in resp["number_tokens"] if exact(item["path"])]
+    out = []
+
+    def walk(value, path):
+        if not exact(path):
+            return
+        if isinstance(value, tuple) and value[0] == "obj":
+            for key, child in value[1]:
+                walk(child, path + [key])
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, path + [index])
+        elif isinstance(value, tuple) and value[0] == "num":
+            out.append({"path": path, "token": value[1]})
+
+    if "raw" in resp:
+        walk(_raw_tree(resp["raw"]), [])
+    return out
 
 
 def raw_diffs(py: dict, rs: dict, normalized: dict) -> list[str]:
@@ -786,6 +828,51 @@ class SeededBank(Scenario):
                                           "bearer tokens for remote clients", "schema version bump"])]
 
 
+class JsonFloatTies(Scenario):
+    """Fixed binary64 timestamps through real storage, hydration and HTTP.
+
+    The small offline graph supplies 1,024-dimensional vectors for this
+    serialization case; it makes no claim about real-model parity.
+    """
+    name = "json-float-shortest-ties"
+    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+    timestamps = ["-847044394961070.2", "93026504287663.12", "1000000000000000.2"]
+
+    def prepare_template(self, dsn):
+        import psycopg
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        PostgresStorage(dsn).close()
+        vector = json.dumps([0.8, -0.6] + [0.0] * 1022)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
+            for index, token in enumerate(self.timestamps):
+                conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
+                             "VALUES ('flat', %s, %s::vector, %s, 'agent')",
+                             (f"memory tie {index}", vector, float(token)))
+
+    def prepare_home(self, home):
+        import onnxruntime
+        from embedding_fixture import create
+        model = home / "model"
+        create(model, dimension=1024)
+        config = {"embedding": {"model_name": str(model), "backend": "onnx", "device": "cpu",
+                                "cpu_dtype": "fp32", "query_prefix": "", "max_seq_length": 32},
+                  "memory": {"recency_boost_enabled": False, "search_confidence_floor": 0.0}}
+        (home / "data/config.yaml").write_text(json.dumps(config), encoding="utf-8")
+        runtime = Path(onnxruntime.__file__).parent / "capi"
+        library = runtime / "onnxruntime.dll" if os.name == "nt" else next(runtime.glob("libonnxruntime.so.*"))
+        return {"ORT_DYLIB_PATH": str(library), "PSEUDOLIFE_DAEMON_ONNX_DIR": str(model),
+                "PSEUDOLIFE_DAEMON_ORT_THREADS": "1",
+                "OMP_NUM_THREADS": "1", "TOKENIZERS_PARALLELISM": "false"}
+
+    def cases(self):
+        c = case("json-float-shortest-ties", "GET",
+                 "/api/search?q=memory&top_k=3&disable_recency_boost=true", [bearer(T_DEFAULT)])
+        c["exact_seed_timestamps"] = True
+        c["expected_timestamps"] = self.timestamps
+        return [c]
+
+
 CONFIG_PROFILES = {
     "no file": None,
     "empty": "",
@@ -1283,7 +1370,7 @@ STARTUP_REFUSALS += security_cases.startup_cases()
 SCENARIOS = {s.name: s for s in (SecurityOpen, SecurityClosed, SecurityEncodings,
                                   SecurityEncodingPriority, SecurityTerminalByte, SecurityRemoteOpen, SecurityRemoteAuth,
                                   Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
-                                  DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
+                                  DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank, JsonFloatTies,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
                                   StaticRootLink, BodyLimits, BodyViewOpen, BodyPairBudget, BodyTextWindow)}
@@ -1301,7 +1388,7 @@ def rust_env(extra: dict[str, str]) -> dict[str, str]:
     for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT",
                 "PSEUDOLIFE_DAEMON_ORT_THREADS"):
         if os.environ.get(key):
-            out[key] = os.environ[key]
+            out.setdefault(key, os.environ[key])
     out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(REPO / "pseudolife_memory" / "web" / "static"))
     return out
 
@@ -1376,6 +1463,13 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
             row["diffs"].append(f"oracle error {got!r} differs from contract {c['expected_error']!r}")
     if "security_priority" in c:
         row["security_priority"] = c["security_priority"]
+
+    if "expected_timestamps" in c:
+        for side, response in (("python", py), ("rust", rs)):
+            entries = response.get("json", {}).get("entries", []) if response else []
+            expected = sorted(float(token) for token in c["expected_timestamps"])
+            if sorted(entry.get("timestamp", 0) for entry in entries) != expected:
+                row["diffs"].append(f"{side}: fixed timestamp rows are missing or changed")
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1390,7 +1484,11 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     b = normalize_response(rs, c["path"], [])
     a.pop("raw", None)
     b.pop("raw", None)
+    a.pop("number_tokens", None)
+    b.pop("number_tokens", None)
     row["diffs"] += diff_values(a, b)
+    if "number_tokens" in py:
+        row["diffs"] += diff_values(number_tokens(py, a), number_tokens(rs, b), "number_tokens")
     if not row["diffs"]:
         row["diffs"] = raw_diffs(py, rs, a)
     row["declared_omissions"] = declared
@@ -1476,7 +1574,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                             chunked=c.get("chunked", False), headers_only=c.get("headers_only", False))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
-                    if type(scn).prepare_template is not Scenario.prepare_template:
+                    if type(scn).prepare_template is not Scenario.prepare_template and not c.get("exact_seed_timestamps"):
                         # A seeded template's entries carry the seeding moment.
                         py_r, rs_r = seed_clock_scrub(py_r), seed_clock_scrub(rs_r)
             rows.append(compare_case(c, py_r, rs_r))
@@ -1629,7 +1727,8 @@ def _machine_paths() -> list[str]:
 def golden_scrub(value):
     """What a committed golden may hold: no raw bodies, no machine paths
     (refusal texts and /api/config echo the data dir), and vectors as a
-    digest, so the file stays small and portable."""
+    digest, so the file stays small and portable. Exact JSON number tokens
+    survive separately from decoded values."""
     import hashlib
     paths = _machine_paths()
 
@@ -1639,6 +1738,8 @@ def golden_scrub(value):
     def walk(v):
         if isinstance(v, dict):
             out = {}
+            if isinstance(v.get("raw"), str) and "json" in v:
+                out["number_tokens"] = number_tokens(v, v)
             for k, x in v.items():
                 if k == "raw":
                     continue
