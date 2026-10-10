@@ -77,7 +77,7 @@ Commands ran from `rust/`, with `-j 2` on Windows and `-j 3` on the Linux fixtur
 | Linux `w2e.py live` | `91d389b8` | Exit 0: 4 scenarios, 69 steps, 0 differing steps. Full DB state compared after every operation. |
 | Linux golden replay | `91d389b8` | Exit 1: 61 executed steps, 3 differing steps, all at scenario initialization; current catalog includes `column_types` and changed `owners_and_comments`/`sequence_bounds` shapes. The seeded scenario is skipped by the existing replay rule. No crash. |
 | Linux store mutants, `--only store-defaults` | `91d389b8` | Exit 0: all 5 caught, none uncaught; tags 62 diffs, session episode 158, hint 6, surprise 31, cancellation 11. |
-| Publication check over `origin/master..HEAD` | Final checklist head | Pending final check. |
+| Publication check over `origin/master..HEAD` | Checklist payload, checked again after final commit | Exit 0; no public push. |
 
 Live numerical observations: response-surprise gap 0; maximum embedding difference `7.03999999990268e-7`; minimum cosine `0.9999999999927007`; stored-surprise gap `1.250000000008189e-6`. The original tolerances were retained.
 
@@ -99,4 +99,18 @@ The optional PostgreSQL unit fixtures controlled by `PL_W1A_*` and `PL_PGS_*` we
 
 ## Mutual branch merge
 
-Pending final scratch merge after both checklists are complete. The implementation-only scratch merge of `08974997` with slots `ebcb00be` exited 1 with conflicts in `Cargo.lock`, `daemon/Cargo.toml`, `daemon/divergences.md`, `daemon/src/bank.rs`, `daemon/src/config.rs`, `daemon/src/labels.rs`, `daemon/src/main.rs`, `daemon/src/meta_filter.rs`, and `daemon/src/service.rs`. The scratch merge was aborted; neither original branch was modified. Slot and contradiction implementations are byte-identical between the two branches.
+The scratch merge of store checklist head `0e1481c7` with slots checklist head `6f05ae78` exited 1: the two forwards do not merge cleanly. Its 11 conflicted files are:
+
+- `rust/Cargo.lock`
+- `rust/daemon/Cargo.toml`
+- `rust/daemon/FORWARD-w2e.md`
+- `rust/daemon/divergences.md`
+- `rust/daemon/src/bank.rs`
+- `rust/daemon/src/config.rs`
+- `rust/daemon/src/http.rs`
+- `rust/daemon/src/labels.rs`
+- `rust/daemon/src/main.rs`
+- `rust/daemon/src/meta_filter.rs`
+- `rust/daemon/src/service.rs`
+
+The scratch merge was aborted and both forward worktrees are clean. Neither original branch was modified. Both slot/contradiction implementations remain byte-identical; the conflicting checklists describe the two independent branches. The final follow-up commits change checklist text only.
