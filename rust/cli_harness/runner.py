@@ -163,12 +163,18 @@ def oracle_binding(source: Path, declared: str | None, repo: Path = REPO) -> dic
         if declared and declared != head:
             raise SystemExit(f"--record: the declared oracle commit {declared} is not "
                              f"{source}'s HEAD {head}")
-        dirty = _git(source, "status", "--porcelain", "--untracked-files=no", "--",
-                     ORACLE_PACKAGE).stdout
-        if dirty:
-            raise SystemExit(f"--record: {source} has uncommitted changes under "
-                             f"{ORACLE_PACKAGE}/, so its HEAD does not name the oracle; "
-                             "commit them first")
+        # Anything but HEAD's tracked content can be imported: a modified
+        # file, an untracked shadow module, or an ignored one (a sourceless
+        # .pyc beside the sources). Only __pycache__ is allowed, whose
+        # bytecode Python uses only for a source that exists.
+        status = _git(source, "status", "--porcelain", "--untracked-files=all", "--ignored",
+                      "--", ORACLE_PACKAGE).stdout.decode("utf-8", "replace")
+        stray = [line for line in status.splitlines()
+                 if not (line.startswith("!! ") and "/__pycache__/" in line)]
+        if stray:
+            raise SystemExit(f"--record: {source} has content under {ORACLE_PACKAGE}/ that "
+                             f"is not HEAD's ({'; '.join(stray[:5])}), so its HEAD does not "
+                             "name the oracle; commit or remove it first")
         return {"oracle_commit": head, "oracle_commit_source": "git"}
     if not declared:
         raise SystemExit(f"--record: {source} is not a git checkout, so the oracle commit is "
@@ -203,6 +209,16 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
     path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n", encoding="utf-8",
                     newline="\n")
     return path
+
+
+def _write_summary(out: Path | None, summary: dict) -> None:
+    """Replace ``out`` with ``summary`` in one step, so neither a reader nor
+    a crash mid-write leaves a partial file."""
+    if out is None:
+        return
+    partial = out.with_name(out.name + ".partial")
+    partial.write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
+    os.replace(partial, out)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -242,7 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     binding = (oracle_binding(args.oracle_source.resolve(), args.oracle_commit)
                if args.record else None)
     # Keyed by row name: two rows may share a PARITY ID (invite and pair).
-    summary: dict = {"platform": core.PLATFORM, "rows": {}}
+    # Written after every row, so a later row's crash keeps the earlier ones;
+    # ``complete`` turns true only once every selected row has finished.
+    summary: dict = {"platform": core.PLATFORM, "complete": False, "rows": {}}
     failed = 0
     for row in args.row:
         loaded = rows.load(row)
@@ -257,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
             summary["rows"][row] = {"parity": rows.ROWS[row], **binding,
                                     "recorded": len(cases),
                                     "skipped": [c.id for c in loaded if c.id not in chosen]}
+            _write_summary(args.out, summary)
             continue
         if not candidate_path.is_file():
             raise SystemExit(f"candidate binary not found: {candidate_path}")
@@ -269,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         summary["rows"][row] = {"parity": rows.ROWS[row], "cases": len(results), "diffs": bad,
                                 "results": results}
         print(f"  {len(results) - len(bad)}/{len(results)} match", flush=True)
-    if args.out:
-        args.out.write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
+        _write_summary(args.out, summary)
+    summary["complete"] = True
+    _write_summary(args.out, summary)
     return 1 if failed else 0

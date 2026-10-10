@@ -206,10 +206,18 @@ def _redact_validated(login: Path, password: str, seen: dict) -> None:
             and seen.get("kept") is not True
             and verifier.get("stored_key") and verifier.get("server_key")):
         return
-    data = login.read_bytes()
-    line = f"{PASSWORD_KEY}={password}".encode()
-    lines = [f"{PASSWORD_KEY}=<validated>".encode() if item.rstrip(b"\r") == line else item
-             for item in data.split(b"\n")]
+    # Only digests of the password are compared, and the replacement is a
+    # constant: nothing written derives from the password itself.
+    prefix = f"{PASSWORD_KEY}=".encode()
+    wanted = hashlib.sha256(password.encode()).digest()
+    lines = []
+    for item in login.read_bytes().split(b"\n"):
+        text = item.rstrip(b"\r")
+        if text.startswith(prefix) and hmac.compare_digest(
+                hashlib.sha256(text[len(prefix):]).digest(), wanted):
+            lines.append(prefix + b"<validated>")
+        else:
+            lines.append(item)
     with open(login, "r+b") as handle:  # in place: the file's ACL and mode stay
         handle.write(b"\n".join(lines))
         handle.truncate()

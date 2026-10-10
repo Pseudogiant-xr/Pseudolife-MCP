@@ -25,8 +25,10 @@ Defaults: the oracle is this checkout with the running interpreter
 
 A golden names the oracle commit it was recorded from, and `--record`
 refuses an unbound recording before any arm runs. A git checkout binds to
-its HEAD (`oracle_commit_source: git`) and must have no uncommitted changes
-under `pseudolife_memory/`. Any other tree (an export) needs the commit it
+its HEAD (`oracle_commit_source: git`), and `pseudolife_memory/` must hold
+only HEAD's tracked content: a modified, untracked or ignored file there (a
+shadow module, a sourceless `.pyc`) is refused; only `__pycache__/` is
+allowed. Any other tree (an export) needs the commit it
 came from, as `--oracle-commit` or `CLI_HARNESS_ORACLE_COMMIT`: when this
 harness's checkout holds that commit, the tree's `pseudolife_memory/` must
 match it file for file (`verified-tree`); with no checkout to ask, the
@@ -34,7 +36,8 @@ commit is recorded as `declared`.
 
 `--out` writes a JSON summary keyed by row name (each with its PARITY ID
 under `parity`); with `--record` it lists each row's recorded and skipped
-cases.
+cases. The file is replaced atomically after every row, so a crash keeps
+the rows already finished; `complete` is true only once every row ran.
 
 ## Isolation
 

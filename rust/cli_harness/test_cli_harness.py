@@ -366,6 +366,25 @@ def test_tunnel_near_expiry_binds_to_the_exact_seed_and_field():
     assert compare.diff(far, _near_obs(_midnight(8, now), now - 86_400), rule)
 
 
+def test_validated_password_is_replaced_only_on_its_own_line(tmp_path):
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    key = test_login.PASSWORD_KEY
+    seen = {"shape": "token_urlsafe32", "authenticates": "ok", "kept": False,
+            "verifier": {"stored_key": "s", "server_key": "k"}}
+    login = tmp_path / "test-pg.env"
+    other = f"{key}=other".encode()
+    login.write_bytes(b"A=1\r\n" + f"{key}=drawn".encode() + b"\r\n" + other + b"\nB=" +
+                      b"drawn\n")
+    test_login._redact_validated(login, "drawn", seen)
+    assert login.read_bytes() == (b"A=1\r\n" + f"{key}=<validated>".encode() + b"\n" +
+                                  other + b"\nB=drawn\n")
+    # A password that is not on the line, or a run not validated, stays.
+    login.write_bytes(f"{key}=drawn\n".encode())
+    test_login._redact_validated(login, "drawn2", seen)
+    test_login._redact_validated(login, "drawn", dict(seen, authenticates="refused"))
+    assert login.read_bytes() == f"{key}=drawn\n".encode()
+
+
 def _make_repo(path: Path) -> str:
     import subprocess  # noqa: PLC0415
     (path / "pseudolife_memory").mkdir(parents=True)
@@ -387,8 +406,27 @@ def test_record_binds_a_checkout_to_its_clean_head(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="is not"):
         runner.oracle_binding(tmp_path / "repo", "0" * 40)
     (tmp_path / "repo" / "pseudolife_memory" / "cli.py").write_bytes(b"changed\n")
-    with pytest.raises(SystemExit, match="uncommitted"):
+    with pytest.raises(SystemExit, match="not HEAD's"):
         runner.oracle_binding(tmp_path / "repo", None)
+
+
+@pytest.mark.parametrize("stray", ["shadow.py", "sub/shadow.py", "shadow.pyc"])
+def test_record_refuses_untracked_or_ignored_oracle_modules(tmp_path, monkeypatch, stray):
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.delenv(runner.COMMIT_ENV, raising=False)
+    repo = tmp_path / "repo"
+    _make_repo(repo)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "exclude").write_text("*.pyc\n__pycache__/\n")
+    package = repo / "pseudolife_memory"
+    (package / "__pycache__").mkdir()
+    (package / "__pycache__" / "cli.cpython-311.pyc").write_bytes(b"bytecode")
+    # Bytecode under __pycache__ alone still binds.
+    assert runner.oracle_binding(repo, None)["oracle_commit_source"] == "git"
+    (package / stray).parent.mkdir(parents=True, exist_ok=True)
+    (package / stray).write_bytes(b"print('shadow')\n")
+    with pytest.raises(SystemExit, match="not HEAD's"):
+        runner.oracle_binding(repo, None)
 
 
 def test_record_refuses_an_unbound_or_mismatched_export(tmp_path, monkeypatch):
@@ -418,6 +456,28 @@ def test_record_refuses_an_unbound_or_mismatched_export(tmp_path, monkeypatch):
     # With no checkout to ask, the commit is recorded as declared.
     assert runner.oracle_binding(export, None, export) == {
         "oracle_commit": head, "oracle_commit_source": "declared"}
+
+
+def test_summary_keeps_completed_rows_when_a_later_row_crashes(tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    monkeypatch.setattr(runner.rows, "ROWS", {"first": "CLI-A", "second": "CLI-B"})
+    monkeypatch.setattr(runner.rows, "load", lambda row: [])
+
+    def run_row(row, *a):
+        if row == "second":
+            raise RuntimeError("row crashed")
+        return {"case": {"status": "match"}}
+
+    monkeypatch.setattr(runner, "run_row", run_row)
+    out = tmp_path / "summary.json"
+    with pytest.raises(RuntimeError, match="row crashed"):
+        runner.main(["--row", "first", "--row", "second", "--candidate", sys.executable,
+                     "--out", str(out)])
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    assert summary["complete"] is False and list(summary["rows"]) == ["first"]
+    assert summary["rows"]["first"]["results"] == {"case": {"status": "match"}}
+    assert [p.name for p in tmp_path.iterdir()] == ["summary.json"]
 
 
 def test_summary_keeps_rows_that_share_a_parity_id(tmp_path, monkeypatch):
