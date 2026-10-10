@@ -482,17 +482,36 @@ def restart_pid(obs: dict) -> None:
 
 def _runtime_image_binding(path: Path, seed: bytes, root: Path) -> dict:
     """Expected input and metadata safety, without reading/writing its bytes.
-    Byte validation uses the core's captured observation after this hook."""
-    safe = False
+    ``root`` is resolved and captured before the command. Keep that boundary
+    fixed; a later reparse-point replacement must not rebind it. Byte validation
+    uses the core's captured observation after this hook."""
+    checks = dict.fromkeys(("stat", "not_symlink", "regular", "single_link", "no_reparse",
+                           "contained"))
+    relation = {"lexical_containment": path.is_relative_to(root),
+                "image_short_form": bool(re.search(r"~[0-9]+(?:[./\\]|$)", str(path))),
+                "root_short_form": bool(re.search(r"~[0-9]+(?:[./\\]|$)", str(root)))}
+    relative = ""
     try:
         info = path.lstat()
-        safe = (not path.is_symlink() and path.is_file() and info.st_nlink == 1
-                and not (getattr(info, "st_file_attributes", 0) & 0x400)
-                and path.resolve().is_relative_to(root))
-    except OSError:
-        pass
-    return {"path": path.relative_to(root).as_posix() if path.is_relative_to(root) else "",
-            "sha256": hashlib.sha256(seed).hexdigest(), "safe": safe, "validated": False}
+        resolved = path.resolve()
+        checks.update(stat=True, not_symlink=not path.is_symlink(), regular=path.is_file(),
+                      single_link=info.st_nlink == 1,
+                      no_reparse=not (getattr(info, "st_file_attributes", 0) & 0x400),
+                      contained=resolved.is_relative_to(root))
+        relation.update(resolved_containment=checks["contained"],
+                        same_drive=os.path.normcase(resolved.drive) == os.path.normcase(root.drive),
+                        image_resolution_changed=path != resolved,
+                        root_resolution_changed=root != root.resolve())
+        if checks["contained"]:
+            # Use the same resolved path for the snapshot key and containment.
+            # A Windows 8.3 spelling otherwise yields an empty or aliased key.
+            relative = resolved.relative_to(root).as_posix()
+    except (OSError, RuntimeError) as error:
+        checks["stat"] = False
+        relation["metadata_error"] = type(error).__name__
+    return {"path": relative,
+            "sha256": hashlib.sha256(seed).hexdigest(), "safe": all(checks.values()),
+            "checks": checks, "path_relation": relation, "validated": False}
 
 
 _RUNTIME_MARKER = b"<validated-fixture-runtime-image>\n"
@@ -509,12 +528,23 @@ def runtime_image(obs: dict) -> None:
     rel = binding.get("path")
     data = normalize._file(obs, rel) if isinstance(rel, str) else None
     expected = binding.get("sha256", "")
-    valid = (binding.get("safe") is True and isinstance(expected, str)
-             and re.fullmatch(r"[0-9a-f]{64}", expected))
+    valid_seed = isinstance(expected, str) and bool(re.fullmatch(r"[0-9a-f]{64}", expected))
+    valid = binding.get("safe") is True and valid_seed
     if valid and binding.get("validated") is True and data == _RUNTIME_MARKER:
         return  # A recorded or already projected observation.
-    if not valid or data is None or hashlib.sha256(data).hexdigest() != expected:
-        obs["vacuous"] = "runtime fixture image failed seed/type/containment validation"
+    captured_hash = hashlib.sha256(data).hexdigest() if data is not None else None
+    validation = {"relative_key": isinstance(rel, str) and bool(rel),
+                  "seed_hash": valid_seed,
+                  "captured": data is not None,
+                  "hash_match": data is not None and captured_hash == expected,
+                  "expected_sha256": expected if valid_seed else None,
+                  "captured_sha256": captured_hash}
+    binding["validation"] = validation
+    if not valid or data is None or captured_hash != expected:
+        detail = {"safe": binding.get("safe") is True,
+                  "checks": binding.get("checks"), "path_relation": binding.get("path_relation"),
+                  **validation}
+        obs["vacuous"] = "runtime fixture image failed validation: " + json.dumps(detail, sort_keys=True)
         return
     normalize._set_file(obs, rel, _RUNTIME_MARKER)
     binding["validated"] = True

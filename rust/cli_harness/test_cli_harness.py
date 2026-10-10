@@ -243,6 +243,113 @@ def test_connect_runtime_image_projection_refuses_a_path_outside_its_bound_home(
     assert image.read_bytes() == b"fixture"
 
 
+@pytest.mark.parametrize("failure, check", [("symlink", "not_symlink"),
+                                          ("directory", "regular"),
+                                          ("hardlink", "single_link"),
+                                          ("reparse", "no_reparse"),
+                                          ("outside", "contained"), ("missing", "stat")])
+def test_runtime_image_refusal_names_each_metadata_predicate(tmp_path, monkeypatch, failure, check):
+    from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness.rows import connect  # noqa: PLC0415
+    root = tmp_path / "home"
+    root.mkdir()
+    image = root / "runtime"
+    image.write_bytes(b"seed")
+    if failure == "directory":
+        image.unlink()
+        image.mkdir()
+    elif failure == "missing":
+        image.unlink()
+    elif failure == "hardlink":
+        os.link(image, root / "second")
+    elif failure == "outside":
+        image = tmp_path / "outside"
+        image.write_bytes(b"seed")
+    elif failure == "symlink":
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == image)
+    elif failure == "reparse":
+        original = Path.lstat
+        info = image.lstat()
+        altered = SimpleNamespace(st_mode=info.st_mode, st_nlink=info.st_nlink,
+                                  st_file_attributes=0x400)
+        monkeypatch.setattr(Path, "lstat", lambda path: altered if path == image else original(path))
+    captured = obs(files={"runtime": b"seed"})
+    captured["runtime_image"] = connect._runtime_image_binding(image, b"seed", root.resolve())
+    projected = normalize.apply(captured, ("connect-runtime-image",), None)
+    assert projected["runtime_image"]["checks"][check] is False
+    detail = compare.diff(captured, captured, ("connect-runtime-image",))
+    assert any(check in line for line in detail)
+    assert all(str(tmp_path) not in line for line in detail)
+
+
+@pytest.mark.parametrize("data", [None, b"changed"])
+def test_runtime_image_refusal_names_capture_and_hash_checks(tmp_path, data):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    image = tmp_path / "runtime"
+    image.write_bytes(b"seed")
+    captured = obs(files={} if data is None else {"runtime": data})
+    captured["runtime_image"] = connect._runtime_image_binding(image, b"seed", tmp_path.resolve())
+    projected = normalize.apply(captured, ("connect-runtime-image",), None)
+    check = "captured" if data is None else "hash_match"
+    assert projected["runtime_image"]["validation"][check] is False
+    assert check in projected["vacuous"]
+    assert str(tmp_path) not in projected["vacuous"]
+
+
+def test_runtime_image_key_uses_the_resolved_contained_path(tmp_path):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    (tmp_path / "subdirectory").mkdir()
+    image = tmp_path / "subdirectory" / ".." / "runtime"
+    image.write_bytes(b"seed")
+    binding = connect._runtime_image_binding(image, b"seed", tmp_path.resolve())
+    assert binding["safe"] is True
+    assert binding["path"] == "runtime"
+    captured = obs(files={"runtime": b"seed"}, runtime_image=binding)
+    assert "vacuous" not in normalize.apply(captured, ("connect-runtime-image",), None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short-path alias")
+def test_runtime_image_short_path_matches_the_snapshot_key(tmp_path):
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+    from cli_harness.rows import connect  # noqa: PLC0415
+    root = tmp_path / "long runtime fixture directory"
+    root.mkdir()
+    get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    get_short.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    count = get_short(str(root), buffer, len(buffer))
+    assert count and count < len(buffer)
+    short = Path(buffer.value)
+    if short == root:
+        pytest.skip("filesystem does not supply 8.3 aliases")
+    image = short / "runtime"
+    image.write_bytes(b"seed")
+    binding = connect._runtime_image_binding(image, b"seed", root.resolve())
+    assert binding["safe"] is True
+    assert binding["path"] == "runtime"
+    captured = obs(runtime_image=binding)
+    captured["files"] = core.snapshot(short)
+    assert "vacuous" not in normalize.apply(captured, ("connect-runtime-image",), None)
+
+
+def test_runtime_image_does_not_follow_a_rebound_home(tmp_path, monkeypatch):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    root = tmp_path / "home"
+    root.mkdir()
+    image = root / "runtime"
+    image.write_bytes(b"seed")
+    bound_root = root.resolve()  # Captured before the command can change the home.
+    outside = tmp_path / "outside"
+    original = Path.resolve
+    monkeypatch.setattr(Path, "resolve", lambda path: outside / "runtime" if path == image
+                        else outside if path == root else original(path))
+    binding = connect._runtime_image_binding(image, b"seed", bound_root)
+    assert binding["safe"] is False
+    assert binding["checks"]["contained"] is False
+
+
 def test_recording_runtime_input_projection_refuses_the_final_marker_as_a_mutation(tmp_path,
                                                                                  monkeypatch):
     from cli_harness import runner  # noqa: PLC0415
