@@ -3,7 +3,9 @@
 The oracle uses sync.hydrate_cms and the required slot-store hydrators. Identity
 metadata follows service.py:1308-1329; HLC input selection follows
 service.py:1638-1664, before observe() adds the process's wall clock. Complete
-storage.load_* rows preserve durable IDs, nullable fields and float32 vectors.
+storage.load_* rows preserve durable IDs, nullable fields and float32 vectors;
+entry snapshots expose resident timestamps and tags after construction. The
+zero-timestamp cell fixes both entry and seating clocks to 1000 seconds.
 Dimension fault cells remove owned-column typmods before producer writes;
 world/lesson vector lengths remain accepted by the source's startup guard.
 This is startup evidence, not a claim that PG-HYDRATE is closed.
@@ -19,7 +21,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -43,6 +47,17 @@ CUSTOM_CONFIG = """memory:
       - {name: middle, max_entries: 2, retention_policy: surprise_heavy}
       - {name: deep, max_entries: 2, retention_policy: surprise_heavy}
 """
+ZERO_TIME_CONFIG = """memory:
+  embedding_dim: 1024
+  miras:
+    preset: custom
+    bands:
+      - {name: hot, max_entries: 1, retention_policy: balanced}
+      - {name: deep, max_entries: 2, retention_policy: balanced}
+"""
+LOAD_CLOCK = 1000.0
+FIDELITY_CASES = ("zero-timestamp-seating", "surprise-real-text-rounding",
+                  "startup-tags-non-string-preservation")
 CASES = (
     "empty", "seeded", "record-highwater", "preset-rename", "deep-overflow",
     "malformed-highwater-bool", "malformed-highwater-short",
@@ -51,7 +66,7 @@ CASES = (
     "required-entry-loader-failure", "required-cortex-loader-failure",
     "required-world-loader-failure", "required-episode-loader-failure",
     "stale-entry-dims", "stale-cortex-dims", "stale-combined-dims",
-    "world-lesson-dims-accepted",
+    "world-lesson-dims-accepted", *FIDELITY_CASES,
 )
 EPISODES = tuple(f"{index + 1:032x}" for index in range(3))
 REQUIRED_FAILURES = {
@@ -86,6 +101,9 @@ MUTANTS = {
     "startup-skip-seating": ("preset-rename", "/entries:"),
     "startup-skip-stamp": ("preset-rename", "/rows/public.entries/rows:"),
     "startup-skip-cortex-dims": ("stale-cortex-dims", "/ok:"),
+    "startup-keep-zero-timestamp": ("zero-timestamp-seating", "/entries:"),
+    "search-surprise-float32": ("surprise-real-text-rounding", "/search_entries:"),
+    "startup-drop-non-string-tags": ("startup-tags-non-string-preservation", "/entries:"),
 }
 
 
@@ -117,6 +135,30 @@ def seed(storage, case):
         result = torch.zeros(dimension, dtype=torch.float32, device="cpu")
         result[index] = 1.0
         return result
+
+    if case in FIDELITY_CASES:
+        surprises = (0.50005, 0.00005, 0.12325, 0.87505) if case == "surprise-real-text-rounding" else (0.0,)
+        timestamps = (0.0, LOAD_CLOCK - 100) if case == "zero-timestamp-seating" else (LOAD_CLOCK,) * len(surprises)
+        for index, timestamp in enumerate(timestamps):
+            embedding = vector(0)
+            if case == "surprise-real-text-rounding":
+                # band.retrieve uses torch.topk, with no stable-order guarantee for ties.
+                # Distinct cosines keep this cell about REAL surprise serialization.
+                # https://docs.pytorch.org/docs/stable/generated/torch.topk.html
+                embedding[0], embedding[1] = (
+                    (1.0, 0.0), (0.8, 0.6), (0.6, 0.8), (0.0, 1.0),
+                )[index]
+            row = sync.entry_to_row(MemoryEntry(
+                text=f"Fidelity entry {index}", embedding=embedding,
+                timestamp=LOAD_CLOCK, access_count=1, source="agent",
+                bank="hot" if case == "zero-timestamp-seating" else "flat",
+                surprise_score=surprises[index] if len(surprises) > 1 else surprises[0],
+                tags=["valid", 7, True] if case == "startup-tags-non-string-preservation" else [],
+            ))
+            # insert_entry accepts zero directly; MemoryEntry construction would replace it.
+            row["ts"] = timestamp
+            storage.insert_entry(row)
+        return
 
     for index, ended in enumerate((1010.25, None, None)):
         storage.upsert_episode({
@@ -230,7 +272,10 @@ def python_hydrate(storage, config_path, resident_service=None):
     if resident_service is not None:
         resident_service._cms = cms
     try:
-        sync.hydrate_cms(cms, storage)
+        clock = (patch("time.time", return_value=LOAD_CLOCK)
+                 if os.environ.get("PL_PGS_CASE") == "zero-timestamp-seating" else nullcontext())
+        with clock:
+            sync.hydrate_cms(cms, storage)
     except Exception as error:
         raise RuntimeError(f"entry hydration failed: {error}") from error
     cortex, world, lessons = CortexStore(), WorldCortexStore(), LessonStore()
@@ -270,9 +315,12 @@ def python_hydrate(storage, config_path, resident_service=None):
     deferred = {str(key): float(value or 0.0)
                 for key, value in (raw.items() if isinstance(raw, dict) else ())}
     entries = storage.load_entries()
+    residents = {entry.db_id: entry for band in cms.bands for entry in band.entries}
     seating = {entry.db_id: band.name for band in cms.bands for entry in band.entries}
     for row in entries:
         row["band"] = seating[row["id"]]
+        row["ts"] = residents[row["id"]].timestamp
+        row["tags"] = residents[row["id"]].tags
     snapshot = plain({"startup": {
         "episodes": storage.load_episodes(), "current_episode": cms.episodes.current_id,
         "cortex": storage.load_facts(), "world": storage.load_world_facts(),
@@ -283,6 +331,15 @@ def python_hydrate(storage, config_path, resident_service=None):
             "cortex_dream_cursor": cortex.dream_cursor,
         }, "hlc_highwater": [0, 0], "hlc_reseed_pending": True,
     }, "entries": entries})
+    if os.environ.get("PL_PGS_CASE") in {"surprise-real-text-rounding", "startup-tags-non-string-preservation"}:
+        from pseudolife_memory.service import _entry_to_dict
+        query = torch.zeros(dimension)
+        query[0] = 1.0
+        hits = cms.retrieve(query, top_k=12, min_score=0.0, bm25=False, rerank=False,
+                            timeline=False, disable_recency_boost=True, count_access=False,
+                            tags=["valid"] if os.environ["PL_PGS_CASE"] == "startup-tags-non-string-preservation" else None)
+        snapshot["search_entries"] = [_entry_to_dict(entry, score)
+                                      for entry, score in zip(hits.entries, hits.scores)]
     if resident_service is not None:
         resident_service._clock_retry_snapshot = snapshot
         return snapshot
@@ -335,16 +392,18 @@ def oracle_cell(seed_case=None):
         json.dumps(result, allow_nan=False), encoding="utf-8")
 
 
-def invoke(binary, kind, dsn, home, output, seed_case=None, mutant=None):
+def invoke(binary, kind, dsn, home, output, seed_case=None, mutant=None, case=None):
     env = daemons.base_env(home, {
         "PL_PGS_STARTUP_DSN": dsn, "PL_PGS_STARTUP_OUT": str(output),
         "PL_PGS_CONFIG": str(home / "data" / "config.yaml"),
         "PL_HARNESS_SLICE": "pgs", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+        "PL_PGS_CASE": case or seed_case or "",
     })
     # Prevent an unrelated harness invocation leaking a bank or output path.
     for key in list(env):
         if key.startswith("PL_") and key not in {
             "PL_PGS_STARTUP_DSN", "PL_PGS_STARTUP_OUT", "PL_PGS_CONFIG", "PL_HARNESS_SLICE",
+            "PL_PGS_CASE",
         }:
             env.pop(key)
     if kind == "python":
@@ -441,7 +500,8 @@ def cell(binary, number, case, result, mutant=None):
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-startup-") as scratch:
             root = Path(scratch)
-            config = CUSTOM_CONFIG if case in {"preset-rename", "deep-overflow"} else None
+            config = (ZERO_TIME_CONFIG if case == "zero-timestamp-seating" else
+                      CUSTOM_CONFIG if case in {"preset-rename", "deep-overflow"} else None)
             homes = [daemons.make_home(root, kind, config) for kind in ("seed", "python", "rust")]
             template = pg.create(names[0])
             created.append(names[0])
@@ -462,7 +522,7 @@ def cell(binary, number, case, result, mutant=None):
             for restart in range(2):
                 outputs, states, windows = [], [], []
                 for kind, dsn, home in zip(("python", "rust"), dsns, homes[1:]):
-                    output, window = invoke(binary, kind, dsn, home, root / f"{kind}-{restart}.json", mutant=mutant)
+                    output, window = invoke(binary, kind, dsn, home, root / f"{kind}-{restart}.json", mutant=mutant, case=case)
                     outputs.append(output)
                     states.append(dbstate.dump(dsn))  # immediately after each arm
                     windows.append(window)
@@ -472,7 +532,7 @@ def cell(binary, number, case, result, mutant=None):
                                   else REQUIRED_FAILURES[case][3] if case in REQUIRED_FAILURES
                                   else "coordination-highwater")
                 semantic_diffs = dbstate.diff(*(normalized_result(output) for output in outputs))
-                for kind, output in zip(("python", "rust"), outputs):
+                for kind, output, state in zip(("python", "rust"), outputs, states):
                     if output["ok"] != expected_ok:
                         semantic_diffs.append(f"{kind}: expected ok={expected_ok}")
                     elif not expected_ok and normalized_result(output)["error"] != expected_error:
@@ -480,6 +540,28 @@ def cell(binary, number, case, result, mutant=None):
                     if case in STALE_FAILURES:
                         semantic_diffs.extend(dbstate.diff(
                             STALE_FAILURES[case], output.get("stale_dims"), f"/{kind}/expected_stale_dims"))
+                    if output["ok"] and case == "zero-timestamp-seating":
+                        semantic_diffs.extend(dbstate.diff(
+                            [("hot", LOAD_CLOCK), ("deep", LOAD_CLOCK - 100)],
+                            [(row["band"], row["ts"]) for row in output["entries"]],
+                            f"/{kind}/zero_timestamp_seats"))
+                        table = state["rows"]["public.entries"]
+                        columns = table["columns"]
+                        durable = sorted(table["rows"], key=lambda row: row[columns.index("id")])
+                        semantic_diffs.extend(dbstate.diff(
+                            [("hot", 0.0), ("deep", LOAD_CLOCK - 100)],
+                            [(row[columns.index("band")], row[columns.index("ts")]) for row in durable],
+                            f"/{kind}/durable_zero_timestamp_seats"))
+                    if output["ok"] and case == "surprise-real-text-rounding":
+                        semantic_diffs.extend(dbstate.diff(
+                            [0.5, 0.0001, 0.1232, 0.875],
+                            [row["surprise_score"] for row in output.get("search_entries", [])],
+                            f"/{kind}/surprise_scores"))
+                    if output["ok"] and case == "startup-tags-non-string-preservation":
+                        semantic_diffs.extend(dbstate.diff(
+                            json.dumps([["valid", 7, True]]),
+                            json.dumps([row["tags"] for row in output["entries"]]),
+                            f"/{kind}/resident_tags"))
                 rules = {("relations", "created_at"): "clock"}
                 stage = {
                     "restart": restart, "snapshots": dict(zip(("python", "rust"), outputs)),

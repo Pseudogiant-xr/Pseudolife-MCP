@@ -9,6 +9,35 @@ use tokio_postgres::NoTls;
 // deliberately exercising that marker concurrently with each other.
 static TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+pub(crate) async fn background_recovers_before_write(
+    operation: impl for<'a> FnOnce(&'a Client) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>>,
+) {
+    let _test = TESTS.lock().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        // Refuse recovery: no background statement may be sent after it.
+        assert_eq!(query(&mut stream).await, "ROLLBACK");
+        terminal_error(&mut stream, "57014").await;
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(connection);
+    // Same marker left by a cancelled BEGIN or a failed transaction exit.
+    OPEN.store(true, Ordering::SeqCst);
+    operation(&client).await;
+    let observed = server.await;
+    drop(client);
+    connection_task.abort();
+    OPEN.store(false, Ordering::SeqCst); // isolated peer is gone
+    observed.unwrap();
+}
+
 async fn nested_writer_adapter_case(outer_run: bool, inner_run: bool) {
     let _test = TESTS.lock().await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

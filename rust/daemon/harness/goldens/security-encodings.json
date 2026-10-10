@@ -1,0 +1,121 @@
+{
+ "db_state": {
+  "unchanged_from_before": true
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "table",
+    "retrieval_events",
+    null,
+    "the warmup search logs a retrieval event (W2-D telemetry)"
+   ],
+   [
+    "sequence",
+    "retrieval_events_id_seq",
+    null,
+    "advanced by that retrieval event (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "bytes": "Not Found",
+   "headers": {
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "bytes": "Not Found",
+   "headers": {
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "bytes": "Not Found",
+   "headers": {
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "principals_unavailable"
+   },
+   "status": 503
+  },
+  {
+   "bytes": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently. When to send: Before using something shared (anything only one of you can use at a time, or that slows down for everyone), look for whoever holds it or has it booked. If someone does, message them that you are next and what you need, even when their status says when they expect to finish: a status line is not a queue. If the board shows it free, use it and say so in your status. Keep your status true: what you hold, what you are waiting on, when you expect to finish. A peer may not see mail until its next turn. Subagents never send board mail. A Claude Code subagent shares its parent's board address, so it only reads the board (list, receive without ack, memory_search); a Codex subagent has its own address and keeps its own status and mail. The board lists a session's subagents by itself; name yours with memory_agents(action=update, children=[...]) only if they do not appear.\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8",
+    "x-pl-board": "on"
+   },
+   "status": 200
+  }
+ ]
+}

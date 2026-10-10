@@ -331,6 +331,21 @@ def _send_index(rows, message_id) -> int:
 
 def archive(variant: str) -> bytes:
     """An export of a seeded bank, unchanged or edited one way."""
+    if variant.startswith("reserved-number-key-"):
+        from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
+        # Keep one complete exported row, hashed by the oracle with an ordinary
+        # payload key that happens to match serde's internal number transport.
+        row = export_rows("rich")[0]
+        row["payload"]["$serde_json::private::Number"] = "1"
+        row["hash"] = audit_hash(row["prev_hash"], row)
+        raw = _lines([row])
+        if variant == "reserved-number-key-single":
+            return raw
+        key = (b'"\\u0024serde_json::private::\\u004eumber"'
+               if variant == "reserved-number-key-escaped" else
+               b'"$serde_json::private::Number"')
+        return raw.replace(b'"$serde_json::private::Number": "1"',
+                           b'"$serde_json::private::Number": "1", ' + key + b': "1"', 1)
     if variant == "pruned":
         return export_bytes("pruned")
     if variant == "legacy-v45":
@@ -499,14 +514,18 @@ def audit_stdout_closed_trailer(obs: dict) -> None:
 
 # --- cases -----------------------------------------------------------------------
 
+SEP = "\\" if core.WINDOWS else "/"
 GUARDS = {
     # Never the daemon container or a lite bank on the host running this.
     "PSEUDOLIFE_DAEMON_EXEC": "1",
     "PSEUDOLIFE_DOCKER": "{HOME}/no-docker",
     "PSEUDOLIFE_MCP_DATA_DIR": "{HOME}/no-bank",
     "PSEUDOLIFE_MCP_DATABASE_URL": None,
+    # No-bank paths re-run in the daemon container through docker
+    # (daemon_exec): a PATH inside the home finds none (core's preflight).
+    "PATH": "{HOME}" + SEP + "no-bin",
 }
-SEP = "\\" if core.WINDOWS else "/"
+PROGRAMS = ("docker",)
 
 
 def _home(rel: str) -> str:
@@ -560,7 +579,8 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     environment = {**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name(kind))}
     environment.update(env or {})
     case = core.Case(case_id, list(original), env=environment, setup=setup,
-                     after=after, rules=rules, stdout_closed=stdout_closed, note=note)
+                     after=after, rules=rules, stdout_closed=stdout_closed, note=note,
+                     programs=PROGRAMS)
     return case
 
 
@@ -575,7 +595,8 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
         _stash(arm)
 
     case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
-                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note)
+                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
+                     programs=PROGRAMS)
     return case
 
 
@@ -623,7 +644,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
     case = core.Case(case_id, list(original),
                      env={**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(REDACT_DB)},
                      setup=setup, after=after, rules=rules, timeout=60,
-                     stdout_closed=stdout_closed, note=note)
+                     stdout_closed=stdout_closed, note=note, programs=PROGRAMS)
     return case
 
 
@@ -682,6 +703,15 @@ def cases() -> list[core.Case]:
         archive_case("input-wrong-type-cr", "wrong-type-cr"),
         archive_case("input-seq-string", "seq-string"),
         archive_case("input-duplicate", "duplicate"),
+        file_case("audit-reserved-number-key-duplicates",
+                  ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b'{"payload":{"$serde_json::private::Number":"1",'
+                         b'"$serde_json::private::Number":"1"}}\n'}),
+        archive_case("audit-reserved-number-key-duplicates-exported",
+                     "reserved-number-key-duplicates"),
+        archive_case("audit-reserved-number-key-duplicates-escaped",
+                     "reserved-number-key-escaped"),
+        archive_case("audit-reserved-number-key-single", "reserved-number-key-single"),
         archive_case("input-payload-edit", "payload-edit"),
         archive_case("input-late-garbage", "late-garbage"),
         archive_case("input-gap", "gap"),

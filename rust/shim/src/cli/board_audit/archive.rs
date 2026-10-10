@@ -98,7 +98,10 @@ const COLUMNS: &[&str] = &[
 
 pub(super) fn row(text: &str) -> Result<(Value, i64, f64), Error> {
     let duplicate = Cell::new(false);
-    let mut deserializer = serde_json::Deserializer::from_str(text);
+    // Real object keys cannot be mistaken for arbitrary_precision's number
+    // transport, including when their spelling uses JSON escapes.
+    let encoded = scalar_json::protect_keys(text);
+    let mut deserializer = serde_json::Deserializer::from_str(&encoded);
     if Unique(&duplicate).deserialize(&mut deserializer).is_err() || deserializer.end().is_err() {
         return Err(if duplicate.get() {
             Error::Duplicate
@@ -175,6 +178,23 @@ mod tests {
         }
         assert!(matches!(row("{}"), Err(Error::InvalidRow)));
         assert!(blank("\u{1c}\u{85}\u{2000}\r\n"));
+    }
+
+    #[test]
+    fn reserved_number_key_duplicates_are_object_keys() {
+        for text in [
+            r#"{"payload":{"$serde_json::private::Number":"1","$serde_json::private::Number":"1"}}"#,
+            r#"{"payload":{"$serde_json::private::Number":"1","\u0024serde_json::private::Number":"1"}}"#,
+            r#"{"payload":{"\u0024serde_json::private::Number":"1","$serde_json::private::\u004eumber":"1"}}"#,
+            r#"{"payload":[{"$serde_json::private::Number":{},"$serde_json::private::Number":{}}]}"#,
+        ] {
+            assert!(matches!(row(text), Err(Error::Duplicate)), "{text}");
+        }
+        // A single key is ordinary data, irrespective of its value's type.
+        for value in [r#""1""#, "{}", "[]", "1", "true", "null"] {
+            let text = format!(r#"{{"payload":{{"$serde_json::private::Number":{value}}}}}"#);
+            assert!(matches!(row(&text), Err(Error::InvalidRow)), "{text}");
+        }
     }
 
     #[test]

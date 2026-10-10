@@ -4,17 +4,26 @@
 //! background warmup and the HTTP server. See `spec-w1a-foundation.md`.
 
 mod auth;
+mod background;
+mod background_sessions;
 mod bank;
 mod config;
+mod dream;
 mod embed;
 mod embedding_math;
+mod graph_read;
 mod health;
+mod heap_trim;
 mod http;
+mod maintenance;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
+#[cfg(feature = "principal-harness")]
+mod principal_probe;
 mod principals;
 mod pyjson;
+mod release_check;
 mod routes;
 mod search;
 mod service;
@@ -53,6 +62,14 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
+    #[cfg(feature = "principal-harness")]
+    if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        if runtime.block_on(principal_probe::run()).is_err() {
+            fail(1, "principal harness refused");
+        }
+        return;
+    }
     if cfg!(feature = "mutants")
         && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
     {
@@ -152,20 +169,24 @@ fn main() {
     let seconds = |name: &str, default: f64| -> f64 {
         match std::env::var(name) {
             Err(_) => default,
-            Ok(raw) => crate::storage::py_strip(&raw)
-                .replace('_', "")
-                .parse::<f64>()
+            Ok(raw) => crate::background::seconds(Some(&raw), default)
                 .unwrap_or_else(|_| fail(1, &format!("{name}={raw:?} is not a number"))),
         }
     };
-    seconds("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", 30.0);
+    let autosave_every = seconds("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", 30.0);
     if (config.dream.enabled || config.memory.retrieval_log_enabled)
         && !config.dream.sweep_interval_ok
     {
         fail(1, "memory.dream.sweep_interval_seconds is not a number");
     }
-    seconds("PSEUDOLIFE_SESSION_IDLE_SECONDS", 1800.0);
+    let idle_seconds = seconds("PSEUDOLIFE_SESSION_IDLE_SECONDS", 1800.0);
     let reap_every = seconds("PSEUDOLIFE_SESSION_REAP_SECONDS", 300.0);
+    let trim_every = heap_trim::interval(
+        std::env::var("PSEUDOLIFE_MALLOC_TRIM_SECONDS")
+            .ok()
+            .as_deref(),
+    )
+    .unwrap_or_else(|e| fail(1, &e));
     let static_dir = std::env::var_os("PSEUDOLIFE_DAEMON_STATIC_DIR").map(PathBuf::from);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -185,8 +206,10 @@ fn main() {
             eprintln!("bind {host}:{}: port out of range", env.port);
             return 1;
         };
-        let store = Arc::new(auth::PrincipalStore::new());
-        let env_principals = tokens.map.iter().map(|(_, p)| p.clone()).collect();
+        let env_principals: Vec<String> = tokens.map.iter().map(|(_, p)| p.clone()).collect();
+        let store = Arc::new(auth::PrincipalStore::new_with_shadowed(
+            env_principals.clone(),
+        ));
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
         let service = Arc::new(service::Service::new(
             config,
@@ -195,25 +218,54 @@ fn main() {
             dsn,
             auth_configured,
         ));
-        tokio::spawn(service.clone().warmup());
-        tokio::spawn(service.clone().reaper(reap_every));
-        let app = Arc::new(http::App::new(service, tokens, store, static_dir));
+        let background = background::Background::default();
+        background.start_background_durability(service.clone(), autosave_every);
+        background.start_session_reaper(service.clone(), reap_every, idle_seconds);
+        background.start_dream_sweep(
+            service.clone(),
+            service.config.dream.enabled,
+            service.config.memory.retrieval_log_enabled,
+            service.config.dream.sweep_interval_seconds,
+        );
+        background.start_release_check(service.release_check.clone(), &service.config.updates);
+        background.start_heap_trim(trim_every);
+        let app = Arc::new(http::App::new(service.clone(), tokens, store, static_dir));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("bind {host}:{port}: {e}");
+                background.shutdown(service.as_ref()).await;
                 return 1;
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        match axum::serve(listener, router).await {
+        let code = match axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+        {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("serve: {e}");
                 1
             }
-        }
+        };
+        background.shutdown(service.as_ref()).await;
+        code
     });
     std::process::exit(code);
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+    }
+    #[cfg(windows)]
+    {
+        let mut break_signal = tokio::signal::windows::ctrl_break().expect("CTRL_BREAK handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = break_signal.recv() => {} }
+    }
 }

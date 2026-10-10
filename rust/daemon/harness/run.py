@@ -24,6 +24,7 @@ and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` (the verified fp32 Qwen3 export).
 from __future__ import annotations
 
 import argparse
+import copy
 import http.client
 import json
 import os
@@ -53,12 +54,12 @@ HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-securi
 # (table, column) values that are wall-clock or random by construction.
 DB_NONDETERMINISTIC = {("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)"}
 # State only the Python side writes during init, owned by later slices. Kind
-# "row": a meta row by key; "table": every row; "sequence": its last_value.
+# "row": a new meta row by key; "warmup": one identified probe and its
+# matching sequence increment. Pre-existing primary keys are never waived.
 DB_DECLARED = [
     ("row", "meta", "dream_ack_secret_v1", "dream tracking init writes a random secret (W3-H)"),
     ("row", "meta", "curation_listing_spelling_v2", "the listing-spelling carry-over stamps the clock (W2-E)"),
-    ("table", "retrieval_events", None, "the warmup search logs a retrieval event (W2-D telemetry)"),
-    ("sequence", "retrieval_events_id_seq", None, "advanced by that retrieval event (W2-D telemetry)"),
+    ("warmup", "retrieval_events", None, "one warmup probe and its sequence increment (W2-D telemetry)"),
 ]
 # /health keys only Python can emit, owned by later slices (each is conditional there).
 HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
@@ -67,8 +68,12 @@ NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
            "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
-           "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default"]
+           "static-json-whitespace", "static-string-prefix", "body-limit-inclusive", "text-limit-control", "agents-view-default",
+           "golden-float-token"]
 
+import security_cases
+
+MUTANTS += list(security_cases.CONTROLS)
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
 T_COLON = "tok:with:colons-0003"
@@ -136,7 +141,52 @@ def bearer(token: str) -> tuple[str, str]:
 
 # ---- normalizers (rule-based, recorded with the goldens) -------------------------------
 
-def normalize_health(body: dict, declared: list[str]) -> dict:
+def normalize_memory(reading: dict) -> dict:
+    """Free readings retain the oracle's per-source keys and scalar kinds."""
+    invalid = {"invalid_memory": reading}
+    rss = {"rss_bytes", "rss_peak_bytes"}
+    source = reading.get("source")
+    if source == "unavailable":
+        return reading if set(reading) == {"source"} else invalid
+    if source == "process":
+        required, optional = {"source", "near_limit"}, rss
+        if reading.get("near_limit") is not None or not (rss & set(reading)):
+            return invalid
+    elif source == "cgroup":
+        required = {"source", "current_bytes", "working_set_bytes", "limit_bytes",
+                    "used_fraction", "near_limit", "events"}
+        optional = rss | {"anon_bytes", "file_bytes"}
+        limit, fraction, flag = (reading.get(k) for k in ("limit_bytes", "used_fraction", "near_limit"))
+        if limit is not None and type(limit) is not int:
+            return invalid
+        if limit:
+            if type(fraction) is not float or type(flag) is not bool:
+                return invalid
+        elif fraction is not None or flag is not None:
+            return invalid
+        events = reading.get("events")
+        if not isinstance(events, dict) or not set(events) <= {"max", "oom", "oom_kill"} \
+                or any(type(v) is not int for v in events.values()):
+            return invalid
+    else:
+        return invalid
+    if not required <= set(reading) <= required | optional:
+        return invalid
+    counts = (rss | {"current_bytes", "working_set_bytes", "anon_bytes", "file_bytes"}) & set(reading)
+    if any(type(reading[k]) is not int for k in counts):
+        return invalid
+    out = dict(reading)
+    for k in counts:
+        out[k] = "<free int>"
+    if source == "cgroup":
+        out["limit_bytes"] = None if limit is None else "<free int>"
+        out["used_fraction"] = None if fraction is None else "<free float>"
+        out["near_limit"] = None if flag is None else "<free bool>"
+        out["events"] = {k: "<free int>" for k in events}
+    return out
+
+
+def normalize_health(body: dict, declared: list[str], *, golden: bool = False) -> dict:
     body = json.loads(json.dumps(body))
     for k in sorted(HEALTH_DECLARED_ONLY_PYTHON & set(body)):
         declared.append(f"health.{k} (python only)")
@@ -154,8 +204,10 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
     if isinstance(lb, dict) and isinstance(lb.get("age_hours"), (int, float)) \
             and not isinstance(lb.get("age_hours"), bool):
         lb["age_hours"] = "<free number>"  # measured against the clock at answer time
-    if isinstance(body.get("memory"), dict):
-        body["memory"] = {"source": body["memory"].get("source")}
+    # A recorded oracle is already normalized. The raw candidate always
+    # validates its kinds, including strings that imitate our placeholders.
+    if not golden and isinstance(body.get("memory"), dict):
+        body["memory"] = normalize_memory(body["memory"])
     if isinstance(body.get("db"), str) and body["db"].startswith("error: "):
         body["db"] = "error: <free>"
     for key in ("init_refusal", "not_ready"):
@@ -195,10 +247,10 @@ def normalize_search(body: dict) -> dict:
     return body
 
 
-def normalize_response(resp: dict, path: str, declared: list[str]) -> dict:
+def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
-        resp["json"] = normalize_health(resp["json"], declared)
+        resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
         resp["json"] = normalize_search(resp["json"])
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
@@ -223,6 +275,47 @@ def _raw_tree(text: str):
 
 def _free(v) -> bool:
     return isinstance(v, str) and v.startswith("<") and (">" in v)
+
+
+def number_tokens(resp: dict, normalized: dict) -> list[dict]:
+    """Portable wire tokens at exact JSON paths, excluding declared free cells.
+
+    Keep paths as key/index arrays (keys may themselves contain dots). A
+    recording carries only numeric spellings, never the raw response text.
+    Filter again at comparison time for replay's seeded-clock normalizer.
+    """
+    def exact(path):
+        value = normalized.get("json")
+        for key in path:
+            if _free(value):
+                return False
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            elif isinstance(value, list) and isinstance(key, int) and 0 <= key < len(value):
+                value = value[key]
+            else:
+                return False
+        return not _free(value)
+
+    if "number_tokens" in resp:
+        return [item for item in resp["number_tokens"] if exact(item["path"])]
+    out = []
+
+    def walk(value, path):
+        if not exact(path):
+            return
+        if isinstance(value, tuple) and value[0] == "obj":
+            for key, child in value[1]:
+                walk(child, path + [key])
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, path + [index])
+        elif isinstance(value, tuple) and value[0] == "num":
+            out.append({"path": path, "token": value[1]})
+
+    if "raw" in resp:
+        walk(_raw_tree(resp["raw"]), [])
+    return out
 
 
 def raw_diffs(py: dict, rs: dict, normalized: dict) -> list[str]:
@@ -293,8 +386,11 @@ class Scenario:
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
+    live_only = False
     read_only_bank = False
     files: dict[str, str] = {}  # extra files in each data dir
+    golden_replay = False
+    golden_db_state = False
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
         """Scenarios whose answers depend on time (lease, backoff, reaper):
@@ -313,6 +409,12 @@ class Scenario:
 
     def cases(self) -> list[dict]:
         return []
+
+    def normalize_db(self, state: dict, before: dict, side: str) -> dict:
+        return dbstate.normalize(state, DB_NONDETERMINISTIC, before)
+
+    def configure_daemons(self, procs: dict) -> None:
+        """Optional explicit dependency seams, declared by the scenario."""
 
 
 
@@ -773,6 +875,51 @@ class SeededBank(Scenario):
                                           "bearer tokens for remote clients", "schema version bump"])]
 
 
+class JsonFloatTies(Scenario):
+    """Fixed binary64 timestamps through real storage, hydration and HTTP.
+
+    The small offline graph supplies 1,024-dimensional vectors for this
+    serialization case; it makes no claim about real-model parity.
+    """
+    name = "json-float-shortest-ties"
+    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+    timestamps = ["-847044394961070.2", "93026504287663.12", "1000000000000000.2"]
+
+    def prepare_template(self, dsn):
+        import psycopg
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        PostgresStorage(dsn).close()
+        vector = json.dumps([0.8, -0.6] + [0.0] * 1022)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            assert_disposable(conn)
+            for index, token in enumerate(self.timestamps):
+                conn.execute("INSERT INTO entries (band, text, embedding, ts, source) "
+                             "VALUES ('flat', %s, %s::vector, %s, 'agent')",
+                             (f"memory tie {index}", vector, float(token)))
+
+    def prepare_home(self, home):
+        import onnxruntime
+        from embedding_fixture import create
+        model = home / "model"
+        create(model, dimension=1024)
+        config = {"embedding": {"model_name": str(model), "backend": "onnx", "device": "cpu",
+                                "cpu_dtype": "fp32", "query_prefix": "", "max_seq_length": 32},
+                  "memory": {"recency_boost_enabled": False, "search_confidence_floor": 0.0}}
+        (home / "data/config.yaml").write_text(json.dumps(config), encoding="utf-8")
+        runtime = Path(onnxruntime.__file__).parent / "capi"
+        library = runtime / "onnxruntime.dll" if os.name == "nt" else next(runtime.glob("libonnxruntime.so.*"))
+        return {"ORT_DYLIB_PATH": str(library), "PSEUDOLIFE_DAEMON_ONNX_DIR": str(model),
+                "PSEUDOLIFE_DAEMON_ORT_THREADS": "1",
+                "OMP_NUM_THREADS": "1", "TOKENIZERS_PARALLELISM": "false"}
+
+    def cases(self):
+        c = case("json-float-shortest-ties", "GET",
+                 "/api/search?q=memory&top_k=3&disable_recency_boost=true", [bearer(T_DEFAULT)])
+        c["exact_seed_timestamps"] = True
+        c["expected_timestamps"] = self.timestamps
+        return [c]
+
+
 CONFIG_PROFILES = {
     "no file": None,
     "empty": "",
@@ -818,6 +965,10 @@ print(json.dumps({
  "memory.bm25.enabled": b.enabled, "memory.bm25.k1": b.k1, "memory.bm25.b": b.b, "memory.bm25.weight": b.weight,
  "memory.bm25.top_n": b.top_n, "memory.bm25.min_score": b.min_score,
  "memory.reranker.enabled": c.memory.reranker.enabled, "memory.retrieval_log.enabled": c.memory.retrieval_log.enabled,
+ "memory.retrieval_log.retention_days": float(c.memory.retrieval_log.retention_days),
+ "memory.compaction.enabled": c.memory.compaction.enabled,
+ "memory.compaction.keep_per_slot": c.memory.compaction.keep_per_slot,
+ "memory.compaction.min_age_days": float(c.memory.compaction.min_age_days),
  "embedding.model_name": e.model_name, "embedding.device": e.device, "embedding.query_prefix": e.query_prefix,
  "embedding.max_seq_length": e.max_seq_length,
  "embedding.backend": e.backend,
@@ -1190,11 +1341,91 @@ class BodyPairBudget(BodyLimits):
         return body_cases.pair_budget_cases(case)
 
 
-SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
-                                  DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
+class SecurityOpen(Scenario):
+    name = "security-open"
+    settle = False
+    unreachable_database = True
+    read_only_bank = True
+
+    def cases(self):
+        import security_cases
+        return security_cases.open_cases(case)
+
+
+class SecurityClosed(SecurityOpen):
+    name = "security-closed"
+
+    def __init__(self):
+        import security_cases
+        self.env = {"PSEUDOLIFE_MCP_TOKEN": security_cases.TOKEN,
+                    "PSEUDOLIFE_MCP_TOKENS": "junk,rejected-map-token:default"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.closed_cases(case)
+
+
+class SecurityEncodings(SecurityOpen):
+    name = "security-encodings"
+    config_yaml = "coordination:\n  allowed_principals: [alice]\n"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "tok-security-fixture-0001",
+           "PSEUDOLIFE_MCP_TOKENS": "caf\u00e9:alice"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.encoding_cases(case)
+
+
+class SecurityEncodingPriority(SecurityEncodings):
+    name = "security-encoding-priority"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "caf\u00c3\u00a9",
+           "PSEUDOLIFE_MCP_TOKENS": "caf\u00e9:alice"}
+
+    def cases(self):
+        return [c for c in super().cases() if c["name"] == "map before singular authority"]
+
+
+class SecurityTerminalByte(SecurityOpen):
+    name = "security-terminal-byte"
+    env = {"PSEUDOLIFE_MCP_TOKEN": "caf\u00e0"}
+
+    def cases(self):
+        import security_cases
+        return security_cases.ending_cases(case)
+
+
+class SecurityRemoteOpen(SecurityOpen):
+    name = "security-remote-open"
+    loopback_bind_fixture = True
+    live_only = True
+    env = {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_TRUST_BIND": "On"}
+
+
+class SecurityRemoteAuth(SecurityClosed):
+    name = "security-remote-auth"
+    loopback_bind_fixture = True
+    live_only = True
+
+    def __init__(self):
+        super().__init__()
+        self.env["PSEUDOLIFE_MCP_HOST"] = "0.0.0.0"
+
+
+STARTUP_REFUSALS += security_cases.startup_cases()
+
+
+SCENARIOS = {s.name: s for s in (SecurityOpen, SecurityClosed, SecurityEncodings,
+                                  SecurityEncodingPriority, SecurityTerminalByte, SecurityRemoteOpen, SecurityRemoteAuth,
+                                  Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
+                                  DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank, JsonFloatTies,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
                                   StaticRootLink, BodyLimits, BodyViewOpen, BodyPairBudget, BodyTextWindow)}
+
+from background_sessions import register as register_background_sessions
+SCENARIOS.update(register_background_sessions(sys.modules[__name__]))
+from background_maintenance import register as register_background_maintenance
+SCENARIOS.update(register_background_maintenance(sys.modules[__name__]))
 
 
 # ---- running ---------------------------------------------------------------------------
@@ -1204,7 +1435,7 @@ def rust_env(extra: dict[str, str]) -> dict[str, str]:
     for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT",
                 "PSEUDOLIFE_DAEMON_ORT_THREADS"):
         if os.environ.get(key):
-            out[key] = os.environ[key]
+            out.setdefault(key, os.environ[key])
     out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(REPO / "pseudolife_memory" / "web" / "static"))
     return out
 
@@ -1242,7 +1473,7 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
-def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
+def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
@@ -1273,6 +1504,19 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
         return row
     if "expected_status" in c and py is not None and py["status"] != c["expected_status"]:
         row["diffs"].append(f"oracle status {py['status']} differs from contract {c['expected_status']}")
+    if "expected_error" in c and c["expected_error"] is not None and py is not None:
+        got = py.get("json", {}).get("error")
+        if got != c["expected_error"]:
+            row["diffs"].append(f"oracle error {got!r} differs from contract {c['expected_error']!r}")
+    if "security_priority" in c:
+        row["security_priority"] = c["security_priority"]
+
+    if "expected_timestamps" in c:
+        for side, response in (("python", py), ("rust", rs)):
+            entries = response.get("json", {}).get("entries", []) if response else []
+            expected = sorted(float(token) for token in c["expected_timestamps"])
+            if sorted(entry.get("timestamp", 0) for entry in entries) != expected:
+                row["diffs"].append(f"{side}: fixed timestamp rows are missing or changed")
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1283,11 +1527,15 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
                 ("application/json; charset=utf-8", "no-store", "nosniff"):
             row["diffs"].append(f"declared case: JSON transport headers wrong: {h}")
         return row
-    a = normalize_response(py, c["path"], declared)
+    a = normalize_response(py, c["path"], declared, golden=golden)
     b = normalize_response(rs, c["path"], [])
     a.pop("raw", None)
     b.pop("raw", None)
+    a.pop("number_tokens", None)
+    b.pop("number_tokens", None)
     row["diffs"] += diff_values(a, b)
+    if "number_tokens" in py:
+        row["diffs"] += diff_values(number_tokens(py, a), number_tokens(rs, b), "number_tokens")
     if not row["diffs"]:
         row["diffs"] = raw_diffs(py, rs, a)
     row["declared_omissions"] = declared
@@ -1303,6 +1551,16 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                                env=daemons.base_env(root, {"PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES": "1"}))
         if probe.returncode != 0 or probe.stdout.strip() != b"true":
             raise RuntimeError("trust-bind requires a debug --features mutants binary: refuse before any wildcard listener")
+    tag = scn.name.replace("-", "_")
+    try:
+        return _run_scenario(scn, binary, root, mode, record)
+    finally:
+        # Only this scenario's three exact names, including seed failure.
+        for suffix in ("t", "py", "rs"):
+            pg.drop(f"{pg.PREFIX}{tag}_{suffix}")
+
+
+def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     template = f"{pg.PREFIX}{tag}_t"
     dsn_t = pg.create(template)
@@ -1335,6 +1593,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             env["PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND"] = "1"
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(env)))
+        scn.configure_daemons(procs)
         for d in procs.values():
             d.start(240)
         if scn.settle:
@@ -1348,6 +1607,8 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for i, c in enumerate(cases):
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
+                if py_r is None and mode == "golden":
+                    py_r, rs_r = golden["responses"][i], golden_scrub(rs_r)
             else:
                 # The empty root redirect is chunked by uvicorn, fixed-length
                 # by hyper. Static entities use fixed lengths in both arms.
@@ -1360,10 +1621,10 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                             chunked=c.get("chunked", False), headers_only=c.get("headers_only", False))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
-                    if type(scn).prepare_template is not Scenario.prepare_template:
+                    if type(scn).prepare_template is not Scenario.prepare_template and not c.get("exact_seed_timestamps"):
                         # A seeded template's entries carry the seeding moment.
                         py_r, rs_r = seed_clock_scrub(py_r), seed_clock_scrub(rs_r)
-            rows.append(compare_case(c, py_r, rs_r))
+            rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
     finally:
@@ -1378,7 +1639,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for side, name in sides.items():
             raw = dbstate.dump(pg.dsn(name))
             out = scrub_declared_rows(raw, before)
-            states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
+            states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
             if scn.read_only_bank:
                 # Static serving has no bank writes. Compare the complete
@@ -1397,13 +1658,11 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
     seeded_template = type(scn).prepare_template is not Scenario.prepare_template
-    if mode == "golden" and golden.get("db_state") and not seeded_template:
+    if mode == "golden" and golden.get("db_state") and (not seeded_template or scn.golden_db_state):
         db_diffs += dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if record:
         save_golden(golden_name, rows, states.get("python"))
-    for name in [template, *dbs.values()]:
-        pg.drop(name)
     return result
 
 
@@ -1412,32 +1671,50 @@ def scrub_declared_rows(state: dict, before: dict) -> dict:
     only where they are NEW against the pre-start state ``before``; a change
     to or a deletion of an existing row is never scrubbed. The record is
     reported, never diffed."""
+    state = copy.deepcopy(state)
     declared = []
     for kind, table, key, why in DB_DECLARED:
-        if kind == "sequence":
-            prior = {r[1]: r for r in before["catalog"]["sequences"]}
-            for row in state["catalog"]["sequences"]:
-                # A sequence absent before the run (a fresh bank) started unused.
-                was = prior[table][5] if table in prior else None
-                if row[1] == table and row[5] != was:
-                    row[5] = was
-                    declared.append(f"sequence {table}: {why}")
-            continue
         t = state["rows"].get(f"public.{table}")
         if not t:
             continue
-        old = {json.dumps(r, sort_keys=True) for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
-        keep = [r for r in t["rows"]
-                if json.dumps(r, sort_keys=True) in old or (kind == "row" and r[0] != key)]
+        identity = t["columns"].index("key" if table == "meta" else "id")
+        old = {json.dumps(r[identity], sort_keys=True)
+               for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
+        new = [r for r in t["rows"] if json.dumps(r[identity], sort_keys=True) not in old]
+        if kind == "warmup":
+            # The oracle warmup runs search("warmup probe") once. A row alone
+            # does not excuse sequence drift: require exactly its one nextval,
+            # the original sequence definition, and no extra allocation.
+            sequence = table + "_id_seq"
+            prior = next((r for r in before["catalog"]["sequences"]
+                          if r[:2] == ["public", sequence]), None)
+            current = next((r for r in state["catalog"]["sequences"]
+                            if r[:2] == ["public", sequence]), None)
+            cols = t["columns"]
+            probes = [r for r in new if r[cols.index("query_text")] == "warmup probe"
+                      and r[cols.index("origin")] == "search"]
+            if len(probes) != 1 or current is None:
+                continue
+            # A fresh bank has no sequence until schema init, whose shipped
+            # BIGSERIAL definition is checked here before admitting id 1.
+            expected = prior or ["public", sequence, "bigint", 1, 1, None]
+            next_id = expected[3] if expected[5] is None else expected[5] + expected[4]
+            if current[:5] != expected[:5] or current[5] != next_id or probes[0][identity] != next_id:
+                continue
+            current[5] = expected[5]
+            keep = [r for r in t["rows"] if r is not probes[0]]
+        else:
+            keep = [r for r in t["rows"]
+                    if json.dumps(r[identity], sort_keys=True) in old or r[identity] != key]
         if len(keep) != len(t["rows"]):
             declared.append(f"{table}{'.' + key if key else ''}: {why}")
             t["rows"] = keep
     return {"state": state, "declared": declared}
 
 
-def run_refusals(binary: Path, root: Path) -> list[dict]:
+def run_refusals(binary: Path, root: Path, selected=None) -> list[dict]:
     rows = []
-    for name, env, extra, code in STARTUP_REFUSALS:
+    for name, env, extra, code in STARTUP_REFUSALS if selected is None else selected:
         exits = {}
         for side in ("python", "rust"):
             home = daemons.make_home(root, f"refusal-{side}", None)
@@ -1497,7 +1774,8 @@ def _machine_paths() -> list[str]:
 def golden_scrub(value):
     """What a committed golden may hold: no raw bodies, no machine paths
     (refusal texts and /api/config echo the data dir), and vectors as a
-    digest, so the file stays small and portable."""
+    digest, so the file stays small and portable. Exact JSON number tokens
+    survive separately from decoded values."""
     import hashlib
     paths = _machine_paths()
 
@@ -1507,6 +1785,8 @@ def golden_scrub(value):
     def walk(v):
         if isinstance(v, dict):
             out = {}
+            if isinstance(v.get("raw"), str) and "json" in v:
+                out["number_tokens"] = number_tokens(v, v)
             for k, x in v.items():
                 if k == "raw":
                     continue
@@ -1570,7 +1850,7 @@ def main() -> int:
     args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
     names = args.only or list(SCENARIOS) + ["refusals"]
-    unknown = [n for n in names if n not in SCENARIOS and n != "refusals"]
+    unknown = [n for n in names if n not in SCENARIOS and n not in {"refusals", "security-refusals"}]
     if unknown or not names:
         ap.error(f"unknown scenario(s) {unknown}; choose from {sorted(SCENARIOS)} or refusals")
 
@@ -1580,9 +1860,9 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
-            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
-                # Timing scenarios ask both daemons the same question at the
-                # same moment: live-only (README).
+            if mode == "golden" and (scn.live_only or
+                                    (type(scn).timeline is not Scenario.timeline and not scn.golden_replay)):
+                # Remote-policy and timing fixtures without replay require both live arms.
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)
                 continue
             try:
@@ -1606,6 +1886,8 @@ def main() -> int:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
         refusals = (run_refusals(args.rust_bin, root) + run_config_differential(args.rust_bin, root)
                     if "refusals" in names and mode != "golden" and not args.no_refusals else [])
+        if "security-refusals" in names and mode != "golden" and not args.no_refusals:
+            refusals += run_refusals(args.rust_bin, root, security_cases.startup_cases())
         return results, refusals
 
     if args.mode == "mutants":
@@ -1625,10 +1907,19 @@ def main() -> int:
             outcome[m] = {"diff_cases": diff_cases, "db_diff_scenarios": db, "scenario_errors": errors,
                           "changed_cases": [f"{r['scenario']}: {c['case']}" for r in results
                                             for c in r["cases"] if c["diffs"]]}
+            if m in security_cases.CONTROLS:
+                scenario, witness, py_status, rs_status = security_cases.CONTROLS[m]
+                observed = [c for r in results if r["scenario"] == scenario
+                            for c in r["cases"] if c["case"] == witness]
+                row = observed[0] if len(observed) == 1 else None
+                outcome[m]["witness_response"] = row
+                outcome[m]["witness_caught"] = bool(row and row["diffs"]
+                    and row["python_status"] == py_status and row["rust_status"] == rs_status)
             print(f"mutant {m}: {diff_cases} case diffs, {db} bank-state diffs", flush=True)
         os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
         survivors = [m for m, o in outcome.items()
-                     if o["scenario_errors"] or not (o["diff_cases"] or o["db_diff_scenarios"])]
+                     if o["scenario_errors"] or not (o["diff_cases"] or o["db_diff_scenarios"])
+                     or o.get("witness_caught") is False]
         if args.out:
             args.out.write_text(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1), encoding="utf-8")
         print("survivors:", survivors or "none")

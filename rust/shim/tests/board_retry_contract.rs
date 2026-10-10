@@ -55,7 +55,11 @@ async fn forward(board: &Board, required: bool) -> pseudolife_stdio::board::Prep
     call
 }
 async fn registered(board: &Board) -> pseudolife_stdio::board::PreparedCall {
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // Hosted Windows on 2026-10-09 reached recovery but exceeded the old 2 s
+    // observer (runs 37987593201/1 and 37992417769). Allow one production retry
+    // attempt and its validation; the identity and one-shot hint stay required.
+    let timing = pseudolife_stdio::board::Timing::default();
+    tokio::time::timeout(timing.retry_attempt + timing.startup, async {
         loop {
             if let Ok(Preparation::Forward(call)) = board
                 .prepare_call(
@@ -335,6 +339,16 @@ async fn board_retry_cancelled_attach_waits_out_attachment_busy() {
 }
 async fn late_probe(codex: bool, ready: bool) {
     let fixture = Fixture::new(0);
+    if ready {
+        fixture.answer(
+            "register",
+            Answer::json(
+                200,
+                json!({"agent_id":"fixture-agent","credential":"fixture-agent-key"}),
+            )
+            .delayed(Duration::from_millis(350)),
+        );
+    }
     fixture.answer("coordination-start", outage("refused"));
     let (answer, mut gate) = Answer::text(
         if ready { 200 } else { 401 },
@@ -345,10 +359,12 @@ async fn late_probe(codex: bool, ready: bool) {
     let home = Home::new();
     let runtime = runtime(&fixture, codex);
     let mut timing = fast(&runtime, &home, "");
-    if codex && ready {
-        // This probe-recovery case uses the production per-thread setup budget.
-        timing.timing.startup = pseudolife_stdio::board::Timing::default().startup;
-    }
+    // This case forces probe recovery, not a registration timeout. The 350 ms
+    // reply proves the old 300 ms accelerated retry needlessly re-registered;
+    // use the production setup budgets in both host modes.
+    let production = pseudolife_stdio::board::Timing::default();
+    timing.timing.startup = production.startup;
+    timing.timing.retry_attempt = production.retry_attempt;
     let board = Board::attach_options(runtime.clone(), timing).await;
     assert!(!board.board_checkin().await);
     gate.wait().await;
@@ -357,6 +373,7 @@ async fn late_probe(codex: bool, ready: bool) {
     if ready {
         let call = registered(&board).await;
         assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
+        assert_eq!(fixture.count("/register"), 1);
         let mut result = rmcp::model::CallToolResult::success(vec![]);
         assert!(
             board

@@ -1,7 +1,9 @@
 """Keep every Rust gate while changing the workflow's execution graph."""
 
+import argparse
 import copy
 import json
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -29,16 +31,24 @@ PARITY_CHECKS = {
     "Install checkout and test dependencies": None,
     "Bind the event-selected Python oracle": None,
     "Check CI coverage contract": "eval",
+    "Compare sent YAML startup with PyYAML": "cli",
     "Run every eval harness test": "eval",
     "Offline embedding golden and mutant row": "eval",
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
+    "CLI W1-C differential harness": "cli",
+    "Daemon background pruning golden": "cli",
+    "Dream cursor differential harness": "cli",
+
+
+    "Principal store differential and golden harness": "cli",
     "Daemon static HTTP parity": "cli",
 
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
     "Daemon body admission parity": "cli",
+    "Daemon security admission parity": "cli",
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -51,12 +61,17 @@ def commands(script):
     result = []
     for line in script.splitlines():
         line = line.strip()
-        if not line.startswith(("python ", "cargo ", "& $oraclePython ")):
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
+            # PowerShell here-string delimiters are not standalone commands.
             continue
-        words = shlex.split(line, comments=True)
-        if words[0] == "&":
+        if words and words[0] == "&":
             words = words[1:]
-        result.append(words)
+        if words and words[0] == "cargo.exe":
+            words[0] = "cargo"
+        if words and words[0] in ("python", "cargo", "$oraclePython"):
+            result.append(words)
     return result
 
 
@@ -81,6 +96,35 @@ def row_commands(invocations, required_rows, golden):
     assert set(required_rows) <= covered, (required_rows, golden)
 
 
+# The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
+# row_commands() sees no --row there: the row list and how both passes are
+# built from it are pinned here instead.
+W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
+            "move", "tunnel")
+W1C_LINES = (
+    "$live = $rows | ForEach-Object { '--row'; $_ }",
+    "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "
+    "(Test-Path \"rust/cli_harness/goldens/test_login.$platform.json\") }",
+    "$golden = $replayed | ForEach-Object { '--row'; $_ }",
+)
+
+
+def check_w1c_rows(script):
+    lines = [line.strip() for line in script.splitlines()]
+    literals = [line for line in lines if line.startswith("$rows = @(")]
+    assert len(literals) == 1, literals
+    assert literals[0] == "$rows = @(" + ", ".join(f"'{row}'" for row in W1C_ROWS) + ")"
+    for line in W1C_LINES:
+        assert line in lines, line
+    invocations = commands(script)
+    require_command(invocations, ("python", "rust/cli_harness", "@live"), ("--candidate",),
+                    ("--golden", "--record", "--mutants", "--case", "--skip-bank"))
+    require_command(invocations, ("python", "rust/cli_harness", "@golden", "--golden"),
+                    ("--candidate",), ("--record", "--mutants", "--case"))
+    assert [words[:3] for words in invocations if words[:2] == ["python", "rust/cli_harness"]] \
+        == [["python", "rust/cli_harness", "@live"], ["python", "rust/cli_harness", "@golden"]]
+
+
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
     require_command(commands(rust["Check generated daemon schema"]["run"]),
@@ -99,7 +143,22 @@ def check_executable_coverage(jobs):
             forbidden = ("--features", "--all-features") if no_defaults else ("--no-default-features",)
             require_command(commands(rust[label]["run"]), prefix, required, forbidden)
 
-    parity = {step.get("name"): step for step in jobs["parity-checks"]["steps"]}
+    parity_steps = jobs["parity-checks"]["steps"]
+    for step in parity_steps:
+        for words in commands(step.get("run", "")):
+            # Global Cargo options and a toolchain may precede the subcommand.
+            cargo = words[1:] if words[0] == "cargo" else []
+            cargo = cargo[:cargo.index("--")] if "--" in cargo else cargo
+            assert "build" not in cargo, step.get("name")
+    parity = {step.get("name"): step for step in parity_steps}
+    check_w1c_rows(parity["CLI W1-C differential harness"]["run"])
+    sent_yaml = parity["Compare sent YAML startup with PyYAML"]
+    require_command(commands(sent_yaml["run"]), ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_sent_yaml.py",
+                     "rust/daemon/harness/test_sent_yaml_mutants.py"), PYTEST_FILTERS)
+    assert 'PSEUDOLIFE_SENT_YAML_BIN' in sent_yaml["run"]
+    assert 'rust/target/release/pseudolife-stdio' in sent_yaml["run"]
+    assert not any(words[0] == "cargo" for words in commands(sent_yaml["run"]))
     require_command(commands(parity["Run every eval harness test"]["run"]),
                     ("python", "-m", "pytest"),
                     ("evals/rust_port", "evals/rust_baseline", "-p",
@@ -115,6 +174,13 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    background = commands(parity["Daemon background pruning golden"]["run"])
+    require_command(background, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_background_harness.py",), PYTEST_FILTERS)
+    require_command(background, ("python", "rust/daemon/harness/run.py", "golden"),
+                    ("--rust-bin", "$candidate", "--only", "sweep-pruning", "--no-refusals"),
+                    ("--record", "--mutants"))
+
     static = commands(parity["Daemon static HTTP parity"]["run"])
     for mode in ("live", "golden"):
         require_command(static, ("python", "rust/daemon/harness/run.py", mode),
@@ -129,6 +195,25 @@ def check_executable_coverage(jobs):
                         ("--record", "--mutants"))
     require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in body)
+    security = commands(parity["Daemon security admission parity"]["run"])
+    require_command(security, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_security_cases.py",), PYTEST_FILTERS)
+    security_rows = ("security-open", "security-closed", "security-encodings",
+                     "security-encoding-priority", "security-terminal-byte")
+    for mode in ("live", "golden", "mutants"):
+        required = ("--rust-bin", "--only", "--out") + security_rows
+        if mode == "live":
+            required += ("security-refusals",)
+        if mode == "mutants":
+            required += ("--mutants", "security-origin-open", "security-host-open",
+                         "security-browser-last", "security-auth-first", "security-drop-latin1",
+                         "security-unavailable-401")
+        require_command(security, ("python", "rust/daemon/harness/run.py", mode),
+                        required, ("--record",) + (("--no-refusals",) if mode == "live" else ()))
+    require_command(security, ("python", "rust/daemon/harness/run.py", "live"),
+                    ("--rust-bin", "$bindFixture", "--only", "security-remote-open", "security-remote-auth", "--out"),
+                    ("--record",))
+    assert not any(words[0] == "cargo" for words in security)
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
@@ -154,12 +239,50 @@ def check_executable_coverage(jobs):
     assert "rust/target/release" in embedding["run"]
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
-    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    principal = parity["Principal store differential and golden harness"]
+    invocations = commands(principal["run"])
     for mode in ("live", "golden"):
-        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
-                        ("--candidate", "--out"), ("--record",))
+        require_command(invocations, ("python", "rust/daemon/harness/principals.py", mode),
+                        ("--rust-bin", "--out"), ("--record", "--mutants"))
+    lines = [line.strip() for line in principal["run"].splitlines()]
+    assert [line for line in lines if re.match(r"\$binaryName\s*=", line)] == [
+        "$binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }"]
+    assert [line for line in lines if re.match(r"\$candidate\s*=", line)] == [
+        "$candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path"]
+    for words in invocations:
+        if words[:2] == ["python", "rust/daemon/harness/principals.py"]:
+            assert words.count("--rust-bin") == 1
+            assert words[words.index("--rust-bin") + 1] == "$candidate"
+    download = next(step for step in parity_steps
+                    if step.get("uses") == "actions/download-artifact@v4")
+    assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
+    assert parity_steps.index(download) < parity_steps.index(principal)
+    assert not any(words[:2] == ["cargo", "build"] for words in invocations)
+    daemon_build = next(step for step in jobs["candidate"]["steps"]
+                        if step.get("name") == "Build embedding candidate")
+    invocation = next(words for words in commands(daemon_build["run"])
+                      if words[:2] == ["cargo", "build"])
+    assert {"mutants", "principal-harness"} <= set(
+        invocation[invocation.index("--features") + 1].split(","))
+    steps = jobs["parity-checks"]["steps"]
+    assert steps.index(parity["Prepare disposable PostgreSQL for CLI lease row"]) < steps.index(principal)
+    upload = next(step for step in steps if step.get("name") == "Retain principal store outcomes")
+    assert upload["if"] == "always() && matrix.suite == 'cli'"
+    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    row_parser = argparse.ArgumentParser(add_help=False)
+    row_parser.add_argument("--row", choices=["store", "read"], default="store")
+    for mode in ("live", "golden"):
+        for row in ("store", "read"):
+            matches = [words for words in graph if words[:3] ==
+                       ["python", "rust/daemon/harness/graph_store.py", mode]]
+            # Match argparse's default, equals form and last-selector-wins rule.
+            matches = [words for words in matches if
+                       row_parser.parse_known_args(words[3:])[0].row == row]
+            require_command(matches, ("python", "rust/daemon/harness/graph_store.py", mode),
+                            ("--candidate", "--out"), ("--record",))
     require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
     require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_read_compare.py"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -193,7 +316,20 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == "candidate"
+    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    rust_steps = jobs["rust"]["steps"]
+    override = commands(next(step["run"] for step in rust_steps
+                             if step.get("name") == "Daemon override build configurations"))
+    require_command(override, ("cargo", "+1.94.0", "build"),
+                    ("--locked", "-p", "pseudolife-daemon", "--features", "mutants"), ("--release",))
+    produced = next(step for step in rust_steps if step.get("name") == "Retain debug bind fixture")
+    consumed = next(step for step in jobs["parity-checks"]["steps"]
+                    if step.get("name") == "Download debug bind fixture")
+    assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
+    assert produced["with"]["if-no-files-found"] == "error"
+    assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
+    assert consumed["if"] == "matrix.suite == 'cli'"
+    assert consumed["with"]["path"] == "rust/target/debug"
     assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges"]
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
@@ -240,6 +376,8 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
     require_command(commands(build["run"]), ("cargo", "build"),
                     ("--locked", "--release", "-p", "pseudolife-daemon", "--bins", "--features"))
+    invocation = next(words for words in commands(build["run"]) if words[:2] == ["cargo", "build"])
+    assert "mutants" in invocation[invocation.index("--features") + 1].split(",")
     upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
     preserved = next(s for s in candidate["steps"] if s.get("name") == "Retain default static candidate")
@@ -252,6 +390,8 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert "'pseudolife-daemon-static.exe'" in static["run"]
     assert "'pseudolife-daemon-static'" in static["run"]
 
+    background = next(s for s in job["steps"] if s.get("name") == "Daemon background pruning golden")
+    assert "Join-Path 'rust/target/release' $binaryName" in background["run"]
 
 def test_daemon_artifact_is_built_once_and_shared_with_graph():
     jobs = workflow()["jobs"]
@@ -294,10 +434,84 @@ def test_required_parity_gate_fails_closed(result):
     assert executed.returncode == (0 if result == "success" else 1), executed.stderr
 
 
-def test_coverage_guard_rejects_a_removed_check(monkeypatch):
+@pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
+def test_coverage_guard_rejects_a_removed_check(monkeypatch, name):
     changed = copy.deepcopy(workflow())
     steps = changed["jobs"]["parity-checks"]["steps"]
-    steps[:] = [s for s in steps if s.get("name") != "CLI lease differential harness"]
+    steps[:] = [s for s in steps if s.get("name") != name]
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+def test_coverage_guard_rejects_an_ungated_w1c_step(monkeypatch):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "CLI W1-C differential harness")
+    del step["if"]
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("condition", [None, "matrix.suite == 'eval'", "matrix.suite == 'judges'"])
+def test_principal_store_requires_the_postgres_shard(monkeypatch, condition):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Principal store differential and golden harness")
+    step["if"] = condition
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("mode", ["live", "golden"])
+@pytest.mark.parametrize("row", ["store", "read"])
+def test_graph_coverage_rejects_each_removed_invocation(mode, row):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Graph store differential and recorded oracle")
+    prefix = f"python rust/daemon/harness/graph_store.py {mode} "
+    lines = step["run"].splitlines()
+    removed = [line for line in lines if line.strip().startswith(prefix)
+               and ("--row read" in line) == (row == "read")]
+    assert len(removed) == 1
+    step["run"] = "\n".join(line for line in lines if line not in removed)
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("selector", ["--row store --row read", "--row=read"])
+def test_graph_coverage_rejects_store_commands_selecting_read(selector):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Graph store differential and recorded oracle")
+    step["run"] = "\n".join(line + " " + selector if
+                            line.strip().startswith("python rust/daemon/harness/graph_store.py ")
+                            and "--row read" not in line else line
+                            for line in step["run"].splitlines())
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+def test_graph_postgres_initialization_pins_linux_locale():
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Prepare disposable PostgreSQL for CLI lease row")
+    assert step["env"]["LANG"] == "${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}"
+    assert step["env"]["LC_ALL"] == step["env"]["LANG"]
+    graph = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                 if s.get("name") == "Graph store differential and recorded oracle")
+    assert graph["env"]["PL_GRAPH_REQUIRE_RECORDED_LOCALE"] == "${{ runner.os == 'Linux' && '1' || '0' }}"
+
+
+@pytest.mark.parametrize("features", ["mutants", "principal-harness", ""])
+def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["candidate"]["steps"]
+                if s.get("name") == "Build embedding candidate")
+    invocation = commands(step["run"])[0]
+    original = invocation[invocation.index("--features") + 1]
+    step["run"] = step["run"].replace(original, features)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
@@ -317,7 +531,14 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml.py", ""),
+    ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml_mutants.py", ""),
     ("Check generated daemon schema", "--check", ""),
+    ("Daemon security admission parity", "security-refusals", ""),
+    ("Daemon security admission parity", "security-refusals --out", "security-refusals --no-refusals --out"),
+    ("Daemon security admission parity", "--mutants security-origin-open", "--mutants"),
+    ("Daemon security admission parity", "rust/daemon/harness/test_security_cases.py", ""),
+    ("Daemon security admission parity", "security-remote-open", ""),
     ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
     ("Daemon resident startup parity", "--no-build", ""),
     ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
@@ -334,9 +555,25 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
+    ("Principal store differential and golden harness", "principals.py live", "principals.py oracle"),
+    ("Principal store differential and golden harness", "principals.py golden", "principals.py live"),
+    ("Principal store differential and golden harness", "rust/target/release", "rust/target/debug"),
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
+    # Review of #678 (round 6): the W1-C rows pass through arrays.
+    ("CLI W1-C differential harness",
+     "'transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', "
+     "'tunnel'", "'move'"),
+    ("CLI W1-C differential harness", "'invite', 'pair', ", "'invite', "),
+    ("CLI W1-C differential harness", "python rust/cli_harness @golden",
+     "# python rust/cli_harness @golden"),
+    ("CLI W1-C differential harness", "@golden --golden", "@golden"),
+    ("CLI W1-C differential harness", "@live --candidate", "@live --skip-bank --candidate"),
+    ("CLI W1-C differential harness", "$golden = $replayed |", "$golden = @('move') |"),
+    ("Daemon background pruning golden", "rust/daemon/harness/test_background_harness.py", ""),
+    ("Daemon background pruning golden", "sweep-pruning", "session-reap"),
+    ("Daemon background pruning golden", "run.py golden", "run.py golden --record"),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())
@@ -344,6 +581,94 @@ def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new)
     step = next(s for s in changed["jobs"][job]["steps"] if s.get("name") == name)
     assert old in step["run"]
     step["run"] = step["run"].replace(old, new)
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+def test_dream_reuses_candidate_and_checks_cancel_control():
+    jobs = workflow()["jobs"]
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Dream cursor differential harness")
+    invocations = commands(step["run"])
+    for mode in ("golden", "mutants"):
+        require_command(invocations, ("python", "rust/daemon/harness/dream_cursors.py", mode),
+                        ("--ci-fixture", "--rust-bin"))
+    require_command(invocations, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_dream_cursors.py",
+                     "rust/daemon/harness/test_dream_cursor_cancel.py"), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in invocations)
+    assert "rust/target/release" in step["run"]
+    assert "dream-cancel-drop-task" in step["run"]
+    assert "$cancelExit -ne 1" in step["run"]
+    build = next(s for s in jobs["candidate"]["steps"] if s.get("name") == "Build embedding candidate")
+    words = commands(build["run"])[0]
+    assert "contract-harness" in words[words.index("--features") + 1].split(",")
+    upload = next(s for s in jobs["candidate"]["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert {"rust/target/release/dream-contract", "rust/target/release/dream-contract.exe"} <= set(upload["with"]["path"].splitlines())
+
+
+@pytest.mark.parametrize("control_exit, message, accepted", [
+    (1, "AssertionError: cancelled waiter outcome differs", True),
+    (0, "", False),
+    (2, "AssertionError: unrelated native error", False),
+    (1, "fixture setup failed", False),
+])
+def test_dream_control_survives_runner_exit_wrapper(tmp_path, control_exit, message, accepted):
+    import os
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Dream cursor differential harness")
+    # Match the hosted pwsh wrapper, including its final native exit status.
+    bootstrap = r'''$ErrorActionPreference = 'stop'
+function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
+function chmod {}
+function python {
+    if ($args -contains 'admitted_commit_survives_cancel_and_next_pull') {
+        Write-Output $env:PL_CONTROL_MESSAGE
+        $global:LASTEXITCODE = [int]$env:PL_CONTROL_EXIT
+    } else { $global:LASTEXITCODE = 0 }
+}
+'''
+    wrapper = "\nif ((Test-Path -LiteralPath variable:LASTEXITCODE)) { exit $LASTEXITCODE }\n"
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_CONTROL_EXIT=str(control_exit),
+               PL_CONTROL_MESSAGE=message)
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             bootstrap + step["run"] + wrapper], env=env,
+                            capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("old, new", [
+    ("--rust-bin $candidate", "--rust-bin stale-candidate"),
+    ("principals.py live --rust-bin $candidate", "principals.py live --rust-bin stale-candidate"),
+    ("principals.py golden --rust-bin $candidate", "principals.py golden --rust-bin stale-candidate"),
+    ("$candidate = (Resolve-Path", "$unused = (Resolve-Path"),
+    ("'pseudolife-daemon.exe'", "'stale-daemon.exe'"),
+    ("'pseudolife-daemon'", "'stale-daemon'"),
+])
+def test_principal_commands_use_the_downloaded_candidate(monkeypatch, old, new):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Principal store differential and golden harness")
+    assert old in step["run"]
+    step["run"] = step["run"].replace(old, new)
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("script", [
+    "cargo build --release --bin pseudolife-daemon",
+    "cargo +1.94.0 build --locked --release --bin pseudolife-daemon",
+    "cargo --color never build --release --bin pseudolife-daemon",
+    "& cargo build --release --bin pseudolife-daemon",
+    "& 'cargo' build --manifest-path rust/Cargo.toml --release --bin pseudolife-daemon",
+    "cargo.exe build --manifest-path rust/Cargo.toml --release --bin pseudolife-daemon",
+])
+def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
+    changed = copy.deepcopy(workflow())
+    changed["jobs"]["parity-checks"]["steps"].append({
+        "name": "Rebuild stale candidate", "run": script, "if": "matrix.suite == 'cli'"})
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()

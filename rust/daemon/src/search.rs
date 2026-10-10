@@ -52,9 +52,12 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
         not_superseded_digest(e)
             && p.bands.as_ref().is_none_or(|b| b.contains(&e.band))
             && p.sources.as_ref().is_none_or(|s| s.contains(&e.source))
-            && p.tags
-                .as_ref()
-                .is_none_or(|t| e.tags.iter().any(|x| t.contains(x)))
+            && p.tags.as_ref().is_none_or(|t| {
+                e.tags
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|x| t.contains(x))
+            })
     };
     // `_dense_eligible` adds hide_superseded; the slot pool does not.
     let eligible = |e: &Entry| filtered(e) && !(p.hide_superseded && e.superseded_at.is_some());
@@ -315,7 +318,12 @@ pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
     m.insert("bank".into(), json!(e.band));
     m.insert("timestamp".into(), json!(e.ts));
     m.insert("access_count".into(), json!(e.access_count));
-    m.insert("surprise_score".into(), json!(round4(e.surprise as f64)));
+    let surprise = if crate::mutants::active("search-surprise-float32") {
+        f64::from(e.surprise)
+    } else {
+        e.surprise_value
+    };
+    m.insert("surprise_score".into(), json!(round4(surprise)));
     m.insert("superseded".into(), json!(e.superseded_at.is_some()));
     m.insert("superseded_at".into(), json!(e.superseded_at));
     m.insert("superseded_by_text".into(), json!(e.superseded_by_text));
@@ -553,6 +561,38 @@ mod tests {
         assert_eq!(round4(0.00005), 0.0001);
         assert_eq!(round4(1.00005), 1.0001);
         assert_eq!(round4(0.12345), 0.1235);
+    }
+
+    #[test]
+    fn mixed_tags_keep_json_types_and_match_string_filters() {
+        let mut e = entry(1, "mixed tags", "agent", false);
+        e.tags = vec![json!("valid"), json!(7), json!(true)];
+        let bank = Bank {
+            dim: DIM,
+            entries: vec![e],
+            matrix: unit(1.0),
+        };
+        let params = Params {
+            query: String::new(),
+            k: 1,
+            sources: None,
+            tags: Some(["valid".to_string()].into()),
+            min_score: Some(0.0),
+            default_floor: 0.0,
+            bm25: None,
+            hide_superseded: false,
+            bands: None,
+        };
+        assert_eq!(rank(&bank, &unit(1.0), &params).len(), 1);
+        assert_eq!(
+            entry_json(&bank, &bank.entries[0], 1.0)["tags"],
+            json!(["valid", 7, true])
+        );
+        let params = Params {
+            tags: Some(["7".to_string(), "true".to_string()].into()),
+            ..params
+        };
+        assert!(rank(&bank, &unit(1.0), &params).is_empty());
     }
 
     #[test]

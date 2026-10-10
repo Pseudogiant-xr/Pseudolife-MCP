@@ -150,6 +150,16 @@ jobs:
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           Get-Content $daemonReleaseLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
+          exit $LASTEXITCODE
+      - name: Retain debug bind fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: |
+            rust/target/debug/pseudolife-daemon
+            rust/target/debug/pseudolife-daemon.exe
+          if-no-files-found: error
 
   candidate:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
@@ -182,7 +192,7 @@ jobs:
           $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
       - name: Build embedding candidate
-        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness -j 3
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -195,12 +205,14 @@ jobs:
             rust/target/release/pseudolife-daemon-static.exe
             rust/target/release/graph-contract
             rust/target/release/graph-contract.exe
+            rust/target/release/dream-contract
+            rust/target/release/dream-contract.exe
           if-no-files-found: error
 
   parity-checks:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: candidate
+    needs: [candidate, rust]
     strategy:
       fail-fast: false
       matrix:
@@ -209,8 +221,10 @@ jobs:
         suite: [eval, cli, judges]
     runs-on: ${{ matrix.os }}
     # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
-    # Allow twice that whole-job estimate, including artifact retention.
-    timeout-minutes: 65
+    # Allow twice that whole-job estimate, including artifact retention,
+    # plus the W1-C rows' step budget (60m; about 45m live and golden on
+    # hosted Windows in run 38007737431, 2026-10-10).
+    timeout-minutes: 125
     steps:
       - uses: actions/checkout@v4
         with:
@@ -237,9 +251,23 @@ jobs:
         with:
           name: rust-shim-${{ runner.os }}
           path: rust/target/release
+      - name: Download debug bind fixture
+        if: matrix.suite == 'cli'
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: rust/target/debug
       - name: Restore executable permission
         if: runner.os == 'Linux'
         run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon rust/target/release/pseudolife-daemon-static
+      - name: Compare sent YAML startup with PyYAML
+        if: matrix.suite == 'cli'
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
+          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q
+          exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -290,6 +318,11 @@ jobs:
         if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
+        # pg0's initdb inherits the locale on Linux; template1 then retains
+        # both the recorded graph-read ordering and the test login's vector.
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
         run: |
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
@@ -304,6 +337,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      # Windows local 2026-10-10: 89-action golden 49s + eight live controls 209s
+      # + recovery/control tests 38s; allow about twice the measured 296s gate.
+      - name: Dream cursor differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w3d
+        run: |
+          $binaryName = if ($IsWindows) { 'dream-contract.exe' } else { 'dream-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          if (-not $IsWindows) { chmod +x $candidate }
+          $env:PL_DREAM_CONTRACT_BINARY = $candidate
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py mutants --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PSEUDOLIFE_DAEMON_MUTANT = 'dream-cancel-drop-task'
+          $cancelLog = Join-Path $env:RUNNER_TEMP 'dream-cancel-mutant.log'
+          python -m pytest -q rust/daemon/harness/test_dream_cursor_cancel.py -k admitted_commit_survives_cancel_and_next_pull > $cancelLog 2>&1
+          $cancelExit = $LASTEXITCODE
+          Remove-Item Env:PSEUDOLIFE_DAEMON_MUTANT
+          Get-Content -Tail 20 $cancelLog
+          if ($cancelExit -ne 1 -or -not (Select-String -LiteralPath $cancelLog -Pattern 'AssertionError|_queue.Empty' -Quiet)) {
+            throw 'Cancelled-waiter ownership control was not rejected by the next-operation check'
+          }
+          exit 0
       - name: Daemon static HTTP parity
         if: matrix.suite == 'cli'
         timeout-minutes: 10
@@ -334,6 +396,8 @@ jobs:
         if: matrix.suite == 'cli'
         timeout-minutes: 10
         shell: pwsh
+        env:
+          PL_GRAPH_REQUIRE_RECORDED_LOCALE: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: |
           $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
@@ -344,6 +408,25 @@ jobs:
           python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/test_graph_read_compare.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-golden.json')
+          exit $LASTEXITCODE
+      - name: Daemon background pruning golden
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PL_HARNESS_SLICE = 'w3i'
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-background-harness'
+          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only sweep-pruning --no-refusals
           exit $LASTEXITCODE
 
       - name: Daemon body admission parity
@@ -368,12 +451,62 @@ jobs:
           name: daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
           if-no-files-found: warn
+      - name: Daemon security admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $bindFixture = (Resolve-Path (Join-Path 'rust/target/debug' $mutantName)).Path
+          if (-not $IsWindows) { chmod +x $bindFixture }
+          $env:PL_SECURITY_DEFAULT_BIN = $candidate
+          $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
+          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --out (Join-Path $env:RUNNER_TEMP 'daemon-security-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py mutants --rust-bin $mutants --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --mutants security-origin-open security-host-open security-browser-last security-auth-first security-drop-latin1 security-unavailable-401 --out (Join-Path $env:RUNNER_TEMP 'daemon-security-mutants.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon security parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-security-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-security-*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
+          if-no-files-found: error
+      - name: Principal store differential and golden harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/principals.py live --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/principals.py golden --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain principal store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-principals-${{ runner.os }}
+          path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
       - name: Daemon schema startup parity
         if: matrix.suite == 'cli'
@@ -397,6 +530,8 @@ jobs:
           path: |
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
+            ${{ runner.temp }}/graph-read-live.json
+            ${{ runner.temp }}/graph-read-golden.json
           if-no-files-found: error
       - name: Daemon resident startup parity
         if: matrix.suite == 'cli'
@@ -420,6 +555,73 @@ jobs:
             ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
             ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
           if-no-files-found: error
+      # The W1-C native leaves: every row runs live (this checkout's Python
+      # oracle beside the candidate, on disposable homes), then against its
+      # goldens. transfer, invite and maintainer use the disposable
+      # PostgreSQL and test login the lease step provisioned; test_login
+      # starts its own throwaway clusters from that step's pg0 bundle and,
+      # on Linux, disposable containers of the image built below. Declared
+      # exceptions (each in its row's .md):
+      # - test_login's Linux golden is recorded on this lane: recording needs
+      #   pg0's initdb and a Linux Docker engine, which the recording host's
+      #   WSL lacks. While goldens/test_login.linux.json is absent, the golden
+      #   pass leaves test_login out and the step after it records the golden
+      #   as an artifact to commit; once it is committed, it replays like
+      #   every other row. Hosted Windows' Docker runs Windows containers
+      #   only, so its container cases skip there.
+      # - Cases marked live-only (Case.golden False) are left out of goldens
+      #   and run in the live pass: transfer keeps help, the no-database
+      #   refusals and the float-tie cases (the whole row is 14 MB of bank
+      #   dumps); invite leaves out the 24 cases that show principals its
+      #   seed stamps with the wall clock and random codes, and one 2.6 MB
+      #   report.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux' && matrix.suite == 'cli'
+        timeout-minutes: 10
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI W1-C differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $rows = @('transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', 'tunnel')
+          $live = $rows | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $platform = if ($IsWindows) { 'windows' } else { 'linux' }
+          $replayed = $rows | Where-Object { $_ -ne 'test_login' -or (Test-Path "rust/cli_harness/goldens/test_login.$platform.json") }
+          $golden = $replayed | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @golden --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c-golden.json')
+          exit $LASTEXITCODE
+      - name: Record the Linux test_login golden while it is absent
+        id: test_login_linux_golden
+        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'cli' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'test-login-linux-record.json'
+          python rust/cli_harness --row test_login --record -v --out $summary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $row = (Get-Content -Raw $summary | ConvertFrom-Json).rows.test_login
+          "test_login Linux golden recorded at oracle $($row.oracle_commit) ($($row.oracle_commit_source)): $($row.recorded) cases executed, $(@($row.skipped).Count) skipped ($(@($row.skipped) -join ', '))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Retain the recorded Linux test_login golden
+        if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_login-linux-golden
+          path: |
+            rust/cli_harness/goldens/test_login.linux.json
+            ${{ runner.temp }}/test-login-linux-record.json
+          if-no-files-found: error
+      - name: Retain CLI harness summaries
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-harness-${{ runner.os }}
+          path: ${{ runner.temp }}/cli-harness*.json
+          if-no-files-found: warn
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
         timeout-minutes: 15
@@ -515,6 +717,45 @@ jobs:
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
 
+  daemon-image:
+    name: Rust daemon / disposable image
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Select changed image inputs
+        id: image-inputs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python rust/daemon/container_inputs.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Check the opt-in container contract
+        run: python rust/daemon/test_container.py
+      - name: Build the CPU image without publishing
+        if: steps.image-inputs.outputs.needed == 'true'
+        run: docker build --progress=plain -f ops/Dockerfile.daemon-rust -t w3j-daemon-rust:prep --build-arg GIT_SHA="$GITHUB_SHA" --build-arg GIT_DIRTY=false --build-arg BUILD_SOURCE=ci .
+      - name: Prove offline health and authenticated CPU query inference
+        if: steps.image-inputs.outputs.needed == 'true'
+        env:
+          W3J_RUST_TOKEN: w3j-disposable-ci-token
+        run: |
+          project="w3j-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            result=$?
+            if [ "$result" -ne 0 ]; then docker compose -p "$project" -f ops/docker-compose.rust.yml logs || true; fi
+            docker compose -p "$project" -f ops/docker-compose.rust.yml down || result=1
+            exit "$result"
+          }
+          trap cleanup EXIT
+          docker compose -p "$project" -f ops/docker-compose.rust.yml up --no-build --wait --wait-timeout 180
+          python rust/daemon/container_probe.py --timeout 180
+          docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
+          python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
     # Preserve the required check names; a skipped/cancelled dependency is a failure.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
