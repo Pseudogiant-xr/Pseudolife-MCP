@@ -31,12 +31,13 @@ from run import DB_NONDETERMINISTIC, diff_values, golden_scrub
 SECRET = "11" * 32  # Synthetic fixture secret, never an operator credential.
 MUTANTS = ("dream-pull-reverse", "dream-pull-ignore-source", "dream-token-no-signature",
            "dream-ack-all-pending", "dream-cursor-rewind", "dream-ack-skip-write",
-           "dream-init-classify-explicit")
+           "dream-init-classify-explicit", "dream-resident-before-persist")
 MUTANT_SCENARIOS = {
     "dream-pull-reverse": "membership", "dream-pull-ignore-source": "membership",
     "dream-token-no-signature": "tokens", "dream-ack-all-pending": "membership",
     "dream-cursor-rewind": "classification", "dream-ack-skip-write": "membership",
     "dream-init-classify-explicit": "classification",
+    "dream-resident-before-persist": "rollback",
 }
 
 
@@ -102,6 +103,7 @@ def scenarios() -> list[dict]:
             {"op": "initialize"}, {"op": "pull", "save": "batch"},
             {"op": "fault", "kind": "cursor-trigger"},
             {"op": "commit", "token_from": "batch"},
+            {"op": "pull"},
             {"op": "fault", "kind": "drop-cursor-trigger"},
             {"op": "commit", "token_from": "batch"},
             {"op": "restart"}, {"op": "pull"},
@@ -145,9 +147,11 @@ def scenarios() -> list[dict]:
             {"op": "pull", "save": "batch"},
             {"op": "fault", "kind": "cursor", "value": "bad"},
             {"op": "commit", "token_from": "batch"},
+            {"op": "pull"},
             {"op": "fault", "kind": "cursor", "value": 10.0},
             {"op": "fault", "kind": "cursor-prefixed-trigger"},
             {"op": "commit", "token_from": "batch"},
+            {"op": "pull"},
             {"op": "fault", "kind": "drop-cursor-trigger"},
             {"op": "commit", "token_from": "batch"},
         ]),

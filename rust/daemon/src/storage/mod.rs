@@ -14,6 +14,7 @@
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
+pub mod graph;
 pub mod schema;
 
 use std::sync::Mutex;
@@ -125,8 +126,6 @@ pub fn error_text(e: &tokio_postgres::Error) -> String {
 /// The open writer session plus what `ping` and `cached_bank_id` need.
 pub struct Storage {
     client: Client,
-    /// Serialize multi-statement writes on this one writer session.
-    writer: tokio::sync::Mutex<()>,
     conn_task: JoinHandle<()>,
     /// The DSN as parsed, without the application-name fallback: Python's
     /// `ping` and `cached_bank_id` connections pass none.
@@ -444,7 +443,11 @@ async fn seed_relations(client: &Client) -> Result<(), OpenError> {
                     ON CONFLICT (name) DO NOTHING
                     ";
         for (name, desc, transitive, inverse) in BUILTIN_RELATIONS {
-            let now = wall_clock();
+            let now = if crate::mutants::active("seed-clock-zero") {
+                0.0
+            } else {
+                wall_clock()
+            };
             client
                 .execute(stmt, &[&name, &desc, &transitive, &inverse, &now])
                 .await?;
@@ -533,7 +536,6 @@ impl Storage {
         match built.await {
             Ok(lease_epoch) => Ok(Storage {
                 client,
-                writer: tokio::sync::Mutex::new(()),
                 conn_task,
                 base,
                 lease_epoch,
@@ -648,10 +650,6 @@ impl Storage {
     /// The writer session, for later slices.
     pub fn client(&self) -> &Client {
         &self.client
-    }
-
-    pub async fn writer_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.writer.lock().await
     }
 
     /// `close()`: end the session and wait until the connection task has

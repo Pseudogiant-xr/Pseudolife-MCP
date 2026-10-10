@@ -8,16 +8,21 @@ mod bank;
 mod config;
 mod dream;
 mod embed;
+mod embedding_math;
 mod health;
 mod http;
 mod mutants;
+mod onnx_artifacts;
+mod onnx_runtime;
 mod principals;
 mod pyjson;
 mod routes;
 mod search;
 mod service;
+mod startup;
 mod static_files;
 mod storage;
+mod txn;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +54,19 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
+    if cfg!(feature = "mutants")
+        && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
+    {
+        println!("{}", mutants::supports_loopback_bind_fixture());
+        return;
+    }
+    // The embedding harness exercises the same loader and encoder without a bank.
+    if std::env::var_os("PSEUDOLIFE_DAEMON_EMBED_PROBE").is_some() {
+        match embed::probe() {
+            Ok(()) => return,
+            Err(e) => fail(1, &e.to_string()),
+        }
+    }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
         std::env::var("PSEUDOLIFE_MCP_DATA_DIR")
@@ -157,7 +175,9 @@ fn main() {
     let code = runtime.block_on(async move {
         // asyncio binds every interface for an empty host (IPv4 here: the
         // IPv6 wildcard is a declared divergence).
-        let host = if env.host.is_empty() {
+        let host = if mutants::loopback_bind_fixture() {
+            "127.0.0.1".to_string()
+        } else if env.host.is_empty() {
             "0.0.0.0".to_string()
         } else {
             env.host.clone()

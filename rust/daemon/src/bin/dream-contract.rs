@@ -1,6 +1,7 @@
 //! Feature-gated process adapter for the dream differential harness.
 #[path = "../dream/mod.rs"]
 mod dream;
+#[allow(dead_code)]
 #[path = "../mutants.rs"]
 mod mutants;
 #[allow(dead_code)]
@@ -8,6 +9,8 @@ mod mutants;
 mod pyjson;
 #[path = "../storage/mod.rs"]
 mod storage;
+#[path = "../txn.rs"]
+mod txn;
 
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -47,7 +50,16 @@ fn main() {
             if input["op"] == "exit" {
                 break;
             }
-            let output = if input["op"] == "cancel" {
+            let output = if input["op"] == "panic" {
+                panic_writer(&storage).await
+            } else if input["op"] == "writer-state" {
+                let row = storage
+                    .client()
+                    .query_one("SELECT pg_current_xact_id_if_assigned() IS NULL", &[])
+                    .await
+                    .unwrap();
+                json!({"idle":row.get::<_,bool>(0)})
+            } else if input["op"] == "cancel" {
                 cancel_waiter(&engine, &storage, &dsn, &input).await
             } else if input["op"] == "issue" || input["op"] == "verify" {
                 token_action(&input)
@@ -64,6 +76,26 @@ fn main() {
             .close()
             .await;
     });
+}
+
+/// A harness-only panic abandons a real write; the next ordinary cursor read
+/// must recover it through the shared seam before loading resident entries.
+async fn panic_writer(writer: &Arc<storage::Storage>) -> Value {
+    let writer = writer.clone();
+    let task = tokio::spawn(async move {
+        txn::run(writer.client(), |client| async move {
+            client
+                .batch_execute(
+                    "UPDATE entries SET dream_state='acknowledged' WHERE dream_state='pending'",
+                )
+                .await?;
+            panic!("injected cursor writer panic");
+            #[allow(unreachable_code)]
+            Ok::<(), tokio_postgres::Error>(())
+        })
+        .await
+    });
+    json!({"panicked": task.await.is_err_and(|error| error.is_panic())})
 }
 
 /// Test cancellation only after the real writer has entered its UPDATE and
@@ -121,7 +153,7 @@ async fn cancel_waiter(
         .unwrap();
     let cancelled = waiter.await.is_err_and(|e| e.is_cancelled());
     // This next operation must wait for the owned transaction to finish and
-    // then succeed; a stranded writer guard makes the harness time out.
+    // then succeed; dropped ownership must not undo the admitted commit.
     let next = engine.execute(json!({"op":"pull"})).await;
     observer
         .batch_execute(

@@ -27,9 +27,16 @@ server extension versions do not enter the golden; changed categories compare
 by value. Vectors use the existing harness's value digest. All table rows,
 cursor values and state transitions remain part of every action's comparison.
 
-The writer session has one transaction mutex shared by cursor engines. Once
+The writer session uses the shared `txn::run` seam for initialization and
+acknowledgement, and `txn::with_client` for resident reads. Graph and dream
+share its mutex and abandoned-transaction recovery; cursor engines have no
+separate writer guard. Once
 admitted, an operation owns its task through COMMIT or ROLLBACK even if the
 waiting request is cancelled, matching Python's offloaded service operation.
+The harness also panics after a real partial write and checks that the next
+ordinary cached pull recovers the abandoned transaction, confirms the writer
+is idle, and matches Python bank state. Every cursor operation crosses
+`with_client` first, including pulls whose resident snapshot is already loaded.
 Resident acknowledgement changes only after confirmed persistence; lost replies
 are recovered by exact-ID retry. Storage acknowledgements alone do not mutate
 the resident service snapshot.
@@ -43,3 +50,10 @@ used. Production HTTP/MCP dispatch is deferred to the cycle integration.
 Declared deferrals: file-mode/embedded PostgreSQL; unpersisted resident entries
 (owned by W2-E); noncanonical argument coercions; extractor/run journal/rollback,
 quarantine, literal gate, chronicle and session digests (later increments).
+Stored display cursors use numeric JSON or plain finite decimal strings from
+the canonical producers. Python-only stored-cursor coercions (boolean values,
+whitespace-padded strings and underscore numeric spellings) are deferred by
+name. Corrupt nonnumeric strings and nonfinite legacy cursors retain their
+tested refusal/recovery behavior. The private resident snapshot must receive
+newly stored entries during cycle integration; the storage initialize response
+is harness-only and its signing secret must never enter production dispatch.

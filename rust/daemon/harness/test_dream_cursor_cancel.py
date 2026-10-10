@@ -33,6 +33,38 @@ def stop_owned(proc):
 
 
 class CancelledWaiter(unittest.TestCase):
+    def test_panicked_writer_rolls_back_before_next_pull(self):
+        binary = Path(os.environ["PL_DREAM_CONTRACT_BINARY"]).resolve()
+        names = [pg.PREFIX + "panic_t", pg.PREFIX + "panic_py", pg.PREFIX + "panic_rs"]
+        try:
+            template = pg.create(names[0])
+            seed(template, {"meta": {"dream_ack_secret_v1": "11" * 32},
+                            "entries": [{"text": "panic recovery probe", "ts": 1.0}]})
+            py_dsn, rs_dsn = [pg.create(n, template=names[0]) for n in names[1:]]
+            from pseudolife_memory.storage.postgres import PostgresStorage
+            storage = PostgresStorage(py_dsn)
+            try:
+                expected = make_service(storage).dream_pull()
+            finally:
+                storage.close()
+            expected_state = dbstate.dump(py_dsn)
+            with tempfile.TemporaryDirectory(prefix="pl-w3d-panic-") as directory:
+                home = Path(directory)
+                result = subprocess.run(
+                    [str(binary)], input='{"op":"pull"}\n{"op":"panic"}\n{"op":"pull"}\n{"op":"writer-state"}\n{"op":"exit"}\n',
+                    capture_output=True, text=True, encoding="utf-8", timeout=30, cwd=home,
+                    env=daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": rs_dsn}))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                answers = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(answers[0], expected)
+                self.assertEqual(answers[1], {"panicked": True})
+                self.assertEqual(answers[2], expected)
+                self.assertEqual(answers[3], {"idle": True})
+                self.assertEqual(dbstate.diff(expected_state, dbstate.dump(rs_dsn)), [])
+        finally:
+            for name in reversed(names):
+                pg.drop(name)
+
     def test_admitted_commit_survives_cancel_and_next_pull(self):
         binary = Path(os.environ["PL_DREAM_CONTRACT_BINARY"]).resolve()
         names = [pg.PREFIX + "cancel_t", pg.PREFIX + "cancel_py", pg.PREFIX + "cancel_rs"]

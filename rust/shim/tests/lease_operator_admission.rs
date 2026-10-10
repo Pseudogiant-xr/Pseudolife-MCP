@@ -19,10 +19,24 @@ fn docker_fixture(home: &Home) -> PathBuf {
         "#!/bin/sh\nprintf 'called\\n' >> \"$LEASE_DOCKER_CALLS\"\nif [ \"$1\" = inspect ]; then printf 'true\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$LEASE_DOCKER_ARGUMENTS\"\nexit 3\n",
     );
     let path = home.0.join(name);
+    #[cfg(windows)]
     std::fs::write(&path, script).unwrap();
+    // Linux refuses to exec a file anyone holds open for writing (ETXTBSY),
+    // and a child another test forks while this process writes the script
+    // keeps a duplicate of the descriptor until its own exec. A shell writes
+    // it instead, so no descriptor of this process ever names the file.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        assert!(
+            std::process::Command::new("/bin/sh")
+                .args(["-c", "printf '%s' \"$2\" > \"$1\"", "sh"])
+                .arg(&path)
+                .arg(script)
+                .status()
+                .unwrap()
+                .success()
+        );
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
     path

@@ -42,12 +42,21 @@ pub struct MemoryConfig {
     pub recency_base_half_life_s: f64,
     pub preset: String,
     pub bands: Vec<String>,
+    pub band_specs: Vec<StartupBandSpec>,
+    pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupBandSpec {
+    pub name: String,
+    pub max_entries: usize,
+    pub retention_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +85,10 @@ pub struct EmbeddingConfig {
     pub backend: String,
     pub query_prefix: String,
     pub max_seq_length: i64,
+    pub onnx_file_name: String,
+    pub batch_size: i64,
+    pub cache_size: i64,
+    pub cpu_dtype: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,7 +146,7 @@ impl Config {
             &self.updates,
             &self.dream,
         );
-        serde_json::json!({
+        let mut dump = serde_json::json!({
             "memory.top_k": m.top_k,
             "memory.hide_superseded": m.hide_superseded,
             "memory.search_confidence_floor": m.search_confidence_floor,
@@ -172,7 +185,20 @@ impl Config {
             "memory.dream.fallback_base_url": d.fallback_base_url,
             "memory.dream.fallback_model": d.fallback_model,
             "memory.dream.extractor_model_override": d.extractor_model_override,
-        })
+        });
+        dump.as_object_mut().expect("configuration object").extend(
+            serde_json::json!({
+                "embedding.backend": e.backend,
+                "embedding.onnx_file_name": e.onnx_file_name,
+                "embedding.batch_size": e.batch_size,
+                "embedding.cache_size": e.cache_size,
+                "embedding.cpu_dtype": e.cpu_dtype,
+            })
+            .as_object()
+            .expect("embedding object")
+            .clone(),
+        );
+        dump
     }
 }
 
@@ -285,6 +311,12 @@ impl Default for MemoryConfig {
             recency_base_half_life_s: LIBRARY_HALF_LIFE_S,
             preset: "flat".to_string(),
             bands: vec!["flat".to_string()],
+            band_specs: vec![StartupBandSpec {
+                name: "flat".into(),
+                max_entries: 5250,
+                retention_policy: "balanced".into(),
+            }],
+            retention_boost: 1.0,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -301,6 +333,10 @@ impl Default for EmbeddingConfig {
             backend: "torch".to_string(),
             query_prefix: DEFAULT_QUERY_PREFIX.to_string(),
             max_seq_length: 512,
+            onnx_file_name: "onnx/model.onnx".to_string(),
+            batch_size: 16, // MemoryService MCP overlay, service.py:1106-1107
+            cache_size: 1024,
+            cpu_dtype: "auto".to_string(),
         }
     }
 }
@@ -1092,6 +1128,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             backend: want_str(e, "backend", p, &d.backend)?,
             query_prefix: want_str(e, "query_prefix", p, &d.query_prefix)?,
             max_seq_length: want_int(e, "max_seq_length", p, d.max_seq_length)?,
+            onnx_file_name: want_str(e, "onnx_file_name", p, &d.onnx_file_name)?,
+            batch_size: want_int(e, "batch_size", p, d.batch_size)?,
+            cache_size: want_int(e, "cache_size", p, d.cache_size)?,
+            cpu_dtype: want_str(e, "cpu_dtype", p, &d.cpu_dtype)?,
         };
     }
 
@@ -1117,6 +1157,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             let (preset, bands) = read_miras(miras)?;
             memory.preset = preset;
             memory.bands = bands;
+            memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
+        }
+        if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;
@@ -1232,6 +1276,63 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
         }
     };
     Ok((preset, bands))
+}
+
+fn read_startup_bands(
+    miras: &[(Node, Node)],
+    preset: &str,
+    names: &[String],
+) -> Result<Vec<StartupBandSpec>, ConfigError> {
+    // presets.py: the flat capacity is the 2026-08-15 ablation's retained
+    // 5,250-entry total; continuum keeps the same published tier capacities.
+    if preset == "flat" {
+        return Ok(vec![StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 5250,
+            retention_policy: "balanced".into(),
+        }]);
+    }
+    if preset != "custom" {
+        return Ok(names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| StartupBandSpec {
+                name: name.clone(),
+                max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
+                retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+            })
+            .collect());
+    }
+    let Some(Node::Seq(items)) = lookup(miras, "bands") else {
+        return Err(refuse("memory.miras.bands must be a list"));
+    };
+    items
+        .iter()
+        .zip(names)
+        .map(|(item, name)| {
+            let Node::Map(fields) = item else {
+                return Err(refuse("memory.miras.bands[] must be a mapping"));
+            };
+            let cap = want_int(fields, "max_entries", "memory.miras.bands[]", 5000)?;
+            let max_entries = usize::try_from(cap)
+                .map_err(|_| refuse("band max_entries must be non-negative"))?;
+            let retention_policy = want_str(
+                fields,
+                "retention_policy",
+                "memory.miras.bands[]",
+                "balanced",
+            )?;
+            if !["balanced", "recency_heavy", "surprise_heavy"].contains(&retention_policy.as_str())
+            {
+                return Err(refuse("unknown band retention_policy"));
+            }
+            Ok(StartupBandSpec {
+                name: name.clone(),
+                max_entries,
+                retention_policy,
+            })
+        })
+        .collect()
 }
 
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
@@ -1798,6 +1899,7 @@ mod tests {
                 backend: "onnx".into(),
                 query_prefix: String::new(),
                 max_seq_length: 256,
+                ..EmbeddingConfig::default()
             }
         );
     }
