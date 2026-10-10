@@ -7,30 +7,9 @@ pub(in crate::cli) fn from_str(text: &str) -> Result<Value, ()> {
     // before serde applies last-value-wins object semantics.
     let bytes = text.as_bytes();
     let mut position = 0;
-    let mut keys = Vec::new();
     while position < bytes.len() {
         match bytes[position] {
-            b'"' => {
-                let start = position;
-                position += 1;
-                while position < bytes.len() {
-                    match bytes[position] {
-                        b'\\' => position += 2,
-                        b'"' => {
-                            position += 1;
-                            break;
-                        }
-                        _ => position += 1,
-                    }
-                }
-                let mut next = position;
-                while bytes.get(next).is_some_and(u8::is_ascii_whitespace) {
-                    next += 1;
-                }
-                if bytes.get(next) == Some(&b':') {
-                    keys.push(start + 1);
-                }
-            }
+            b'"' => skip_string(bytes, &mut position),
             b'-' | b'0'..=b'9' => {
                 let start = position;
                 position += 1;
@@ -52,9 +31,49 @@ pub(in crate::cli) fn from_str(text: &str) -> Result<Value, ()> {
             _ => position += 1,
         }
     }
+    let encoded = protect_keys(text);
+    let mut value = serde_json::from_str(&encoded).map_err(|_| ())?;
+    restore_keys(&mut value);
+    Ok(value)
+}
+
+fn skip_string(bytes: &[u8], position: &mut usize) {
+    *position += 1;
+    while *position < bytes.len() {
+        match bytes[*position] {
+            b'\\' => *position += 2,
+            b'"' => {
+                *position += 1;
+                break;
+            }
+            _ => *position += 1,
+        }
+    }
+}
+
+pub(in crate::cli) fn protect_keys(text: &str) -> String {
     // serde's arbitrary_precision transport recognizes a private Number key.
     // Prefix every real object key injectively before decoding, so a user JSON
-    // object cannot impersonate that numeric transport. Restore keys afterwards.
+    // object cannot impersonate that numeric transport. This pass does not
+    // validate values: archive duplicate detection must retain scan-error order.
+    let bytes = text.as_bytes();
+    let mut position = 0;
+    let mut keys = Vec::new();
+    while position < bytes.len() {
+        if bytes[position] == b'"' {
+            let start = position;
+            skip_string(bytes, &mut position);
+            let mut next = position;
+            while bytes.get(next).is_some_and(u8::is_ascii_whitespace) {
+                next += 1;
+            }
+            if bytes.get(next) == Some(&b':') {
+                keys.push(start + 1);
+            }
+        } else {
+            position += 1;
+        }
+    }
     let mut encoded = String::with_capacity(text.len() + keys.len() * 6);
     let mut start = 0;
     for key in keys {
@@ -63,9 +82,7 @@ pub(in crate::cli) fn from_str(text: &str) -> Result<Value, ()> {
         start = key;
     }
     encoded.push_str(&text[start..]);
-    let mut value = serde_json::from_str(&encoded).map_err(|_| ())?;
-    restore_keys(&mut value);
-    Ok(value)
+    encoded
 }
 
 fn restore_keys(value: &mut Value) {
