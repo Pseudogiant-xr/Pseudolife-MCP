@@ -1929,6 +1929,10 @@ an explicit no-op interface. File-mode tensors and embedded bank lifecycle
 remain separately deferred. Source preparation and unit tests do not establish
 those missing process-boundary contracts.
 
+The enabled release loop under `/health` remains unproved: the health normalizer
+equates an unchecked `latest_release: null` / `checked_at: 0` snapshot with a
+retained release and check clock.
+
 The pruning scenario uses the existing daemon differential harness. It checks
 whole-bank state after the observed pruning milestone. For portable goldens,
 catalog fields must first match the arm's seeded baseline exactly, then become

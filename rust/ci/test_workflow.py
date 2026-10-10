@@ -304,10 +304,11 @@ def test_required_parity_gate_fails_closed(result):
     assert executed.returncode == (0 if result == "success" else 1), executed.stderr
 
 
-def test_coverage_guard_rejects_a_removed_check(monkeypatch):
+@pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
+def test_coverage_guard_rejects_a_removed_check(monkeypatch, name):
     changed = copy.deepcopy(workflow())
     steps = changed["jobs"]["parity-checks"]["steps"]
-    steps[:] = [s for s in steps if s.get("name") != "CLI lease differential harness"]
+    steps[:] = [s for s in steps if s.get("name") != name]
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
@@ -347,6 +348,9 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
+    ("Daemon background pruning golden", "rust/daemon/harness/test_background_harness.py", ""),
+    ("Daemon background pruning golden", "sweep-pruning", "session-reap"),
+    ("Daemon background pruning golden", "run.py golden", "run.py golden --record"),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())

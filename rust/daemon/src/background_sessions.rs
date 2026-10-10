@@ -53,8 +53,14 @@ pub struct Reaped {
 
 impl Sessions {
     pub async fn hydrate(client: &Client) -> Result<Self, String> {
+        crate::txn::with_client(client, Self::hydrate_inner)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn hydrate_inner(client: &Client) -> Result<Self, tokio_postgres::Error> {
         let mut sessions = Self::default();
-        for r in client.query("SELECT id,title,hint,started_at,ended_at,closed_by_new_start,session_key,parent_id FROM episodes ORDER BY started_at", &[]).await.map_err(|e| e.to_string())? {
+        for r in client.query("SELECT id,title,hint,started_at,ended_at,closed_by_new_start,session_key,parent_id FROM episodes ORDER BY started_at", &[]).await? {
             sessions.episodes.push(Episode { id: r.get(0), title: r.get(1), hint: r.get(2),
                 started_at: r.get(3), ended_at: r.get(4), closed_by_new_start: r.get(5),
                 session_key: r.get(6), parent_id: r.get(7) });
@@ -64,8 +70,7 @@ impl Sessions {
                 "SELECT key,value FROM meta WHERE key = ANY($1)",
                 &[&vec!["episode_tombstones", "deferred_empty_roots"]],
             )
-            .await
-            .map_err(|e| e.to_string())?
+            .await?
         {
             let key: String = r.get(0);
             let value: Value = r.get(1);
@@ -366,6 +371,16 @@ impl Sessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn background_hydration_obeys_writer_recovery() {
+        crate::txn::tests::background_recovers_before_write(|client| {
+            Box::pin(async move {
+                assert!(Sessions::hydrate(client).await.is_err());
+            })
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn background_sessions_obey_writer_recovery() {
         crate::txn::tests::background_recovers_before_write(|client| {
