@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/rust.yml"
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
 RUST_CHECKS = (
+    "Check generated daemon schema",
     "Bind the selected Python interpreter for Rust fixtures",
     "Install the Python SDK fixture dependency",
     "Bind the event-selected Python oracle",
@@ -37,6 +38,7 @@ PARITY_CHECKS = {
 
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
+    "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -80,6 +82,9 @@ def row_commands(invocations, required_rows, golden):
 
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
+    require_command(commands(rust["Check generated daemon schema"]["run"]),
+                    ("python", "rust/daemon/harness/gen_schema_sql.py"), ("--check",))
+    assert rust["Check generated daemon schema"]["working-directory"] == "."
     for name, prefix in (("Check formatting", ("cargo", "fmt")),
                          ("Check all targets", ("cargo", "check")),
                          ("Clippy", ("cargo", "clippy")),
@@ -124,8 +129,13 @@ def check_executable_coverage(jobs):
 
     schema = commands(parity["Daemon schema startup parity"]["run"])
     require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
-                    ("--out",), ("--record-goldens",))
+                    ("--out", "--test-bin-out"), ("--record-goldens",))
     assert not any(words[0] == "cargo" for words in schema)
+    startup = commands(parity["Daemon resident startup parity"]["run"])
+    require_command(startup, ("python", "rust/daemon/harness/startup_ci.py"),
+                    ("--out", "--no-build", "--rust-test-bin"), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in startup)
+    assert "daemon-storage-test-path.txt" in parity["Daemon resident startup parity"]["run"]
     embedding = parity["Offline embedding golden and mutant row"]
     invocations = commands(embedding["run"])
     require_command(invocations, ("python", "-m", "pytest"),
@@ -299,6 +309,11 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Check generated daemon schema", "--check", ""),
+    ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
+    ("Daemon resident startup parity", "--no-build", ""),
+    ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
+    ("Daemon resident startup parity", "--no-build", "--no-build --record-goldens"),
     ("Daemon schema startup parity", "--out", "--record-goldens --out"),
     ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),

@@ -18,6 +18,7 @@ mod pyjson;
 mod routes;
 mod search;
 mod service;
+mod startup;
 mod static_files;
 mod storage;
 mod txn;
