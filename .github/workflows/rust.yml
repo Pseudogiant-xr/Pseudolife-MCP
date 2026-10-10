@@ -182,10 +182,11 @@ jobs:
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
         suite: [eval, cli, judges]
     runs-on: ${{ matrix.os }}
-    # 40 minutes before the W1-C rows; their live and golden runs need up to
-    # an hour more on a hosted runner (test_login alone took 5 minutes live
-    # on the maintainer host, 2026-10-10).
-    timeout-minutes: 110
+    # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
+    # Allow twice that whole-job estimate, including artifact retention,
+    # plus the W1-C rows' step budget (60m; about 45m live and golden on
+    # hosted Windows in run 38007737431, 2026-10-10).
+    timeout-minutes: 125
     steps:
       - uses: actions/checkout@v4
         with:
@@ -329,7 +330,9 @@ jobs:
           if-no-files-found: error
       - name: Daemon resident startup parity
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
+        # about 13 minutes in total; allow twice that validation duration.
+        timeout-minutes: 26
         shell: pwsh
         run: |
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
