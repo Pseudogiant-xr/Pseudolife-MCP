@@ -378,7 +378,9 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                         proc.terminate()
                         proc.wait(timeout=10)
                 lifetime.callback(stop_fixture)
-                if mode != "golden":
+                if mode != "golden" or skipped_indices:
+                    # Warm the oracle through every operation so fallback cases
+                    # retain exact response, row, sequence and catalog checks.
                     oracle = PostgresStorage(urls[0])
                 for index, request in enumerate(operations(row)):
                     context = request
@@ -417,11 +419,13 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                         state_diffs = dbstate.diff(pstate, sstate)
                         expected_hash = digest(pstate)
                     else:
+                        state_diffs = []
+                    if golden and index not in skipped_indices:
+                        expected = golden["cases"][index]["response"]
                         expected_hash = golden["cases"][index]["state_sha256"]
-                        state_diffs = [] if digest(sstate) == expected_hash else ["golden bank-state digest differs"]
-                    if index in skipped_indices:
-                        diffs = []
-                    elif context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
+                        if digest(sstate) != expected_hash:
+                            state_diffs.append("golden bank-state digest differs")
+                    if context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
                         from graph_read_compare import compare
                         diffs = compare(context, expected, actual, response_diff) + state_diffs
                     else:
@@ -474,6 +478,7 @@ def main():
         results["summary"] = {"cases": len(control) - len(skipped), "diff_cases": failed}
         if skipped:
             results["summary"].update(executed_cases=len(control), skipped_indices=skipped,
+                                      live_fallback_cases=len(skipped),
                                       skip_reason=next(c["skip_reason"] for c in control if "skip_reason" in c))
         print(json.dumps(results["summary"]), flush=True)
         if failed:
