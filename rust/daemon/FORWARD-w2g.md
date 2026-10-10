@@ -102,12 +102,35 @@ The MCP spec and changelog now explicitly describe bearer-only mounting.
   declared limitation, not a passing parity claim.
 - `mcp-bare-host` is unreachable through the production tokenless mount;
   its mutation control remains deferred with the tokenless policy. Four
-  authenticated controls and dedicated real-PG units are being completed.
-- Publication scan of `origin/master..rust-cf/w2g-fwd` at `74ee4a39`, exit 0.
+  authenticated controls passed: `mcp-tier-flip` (36 diffs),
+  `mcp-toolset-floor` (30), `mcp-sse-no-session` (233), `mcp-no-hint` (3).
+  Each wrapper exited 0 only after the comparator exited 1 with actual diffs;
+  none was counted as caught because of a harness crash.
+- Dedicated Linux PostgreSQL unit runs at `74ee4a39`: `cargo test
+  -p pseudolife-daemon -j 3 storage::tests -- --nocapture --test-threads=1`,
+  exit 0 (11 passed); the same command with `principals::tests`, exit 0
+  (3 passed). `PL_W1A_TEST_DSN` and `PL_W1A_EMPTY_DSN` named separate
+  disposable W2-G databases on the assigned test PostgreSQL lane, so the
+  table-loading and empty-schema paths actually ran.
+- Linux foundation checks at `39d3eb6a`: pytest launch exited 1 because the
+  isolated environment has no pytest module. Direct execution of both
+  `test_mcp_mount.py` functions exited 0 (2 passed), with no environment
+  installation or skipped assertions. Windows pytest had already passed
+  both tests on the same source.
+- PR #688 was still open at the final master check; `origin/master` remained
+  `4b34c81e`. The original `rust-cf/w2g` remained `1b2da20da`.
+- All owned Linux build/harness/control processes exited, both worktrees
+  were clean, and disposable W2-G databases were dropped by their runners.
+- Publication scans of `origin/master..rust-cf/w2g-fwd` at `74ee4a39` and
+  `39d3eb6a`, exit 0.
   Catalogue and goldens were not re-recorded; no oracle drift was observed
   in authenticated MCP or the alternate configuration.
 
 ## Evidence and handoff
+
+The daemon source and Cargo inputs are unchanged from tested `74ee4a39`;
+`39d3eb6a` changes only the foundation case, its test and this checklist.
+The following checklist update changes documentation only.
 
 Private execution logs and JSON reports accompany the local handoff; they
 are not committed because they contain machine paths. The final handoff
