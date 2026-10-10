@@ -105,6 +105,16 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
 
 ## Declared divergences and uncovered paths
 
+- A terminated backend while `enrol-code` waits (`enrol-code-wait-terminated`):
+  psycopg names the server's FATAL (`AdminShutdown`) only when libpq read that
+  message before the socket closed, and raises `OperationalError` otherwise.
+  The maintainer host printed `AdminShutdown`; hosted Windows CI printed
+  `OperationalError` (2026-10-10, run 38007737431). The native client always
+  reads the FATAL and prints `AdminShutdown`. Rule
+  `maintainer-terminated-class` rewrites only the oracle arm's exact
+  `OperationalError` line, at exit 2, in this case; the native arm is not
+  rewritten (mutant `maint-ending-error-ignored` stays caught).
+
 - A lost connection with no server error (I/O failure, no FATAL received)
   prints `OperationalError`, psycopg's class there; not run by the harness.
 - A refused stdout is classed `OSError` except a POSIX broken pipe

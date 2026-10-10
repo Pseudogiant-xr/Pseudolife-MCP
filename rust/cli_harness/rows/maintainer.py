@@ -412,6 +412,25 @@ _TRAILER = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout
                       rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
 
 
+@normalize.rule("maintainer-terminated-class")
+def maintainer_terminated_class(obs: dict) -> None:
+    """Declared oracle race: when the waiting connection's backend is
+    terminated, psycopg names the server's FATAL (``AdminShutdown``) only if
+    libpq read that message before the socket closed; otherwise it raises
+    ``OperationalError``. The maintainer host printed ``AdminShutdown``,
+    hosted Windows CI ``OperationalError`` (2026-10-10, run 38007737431).
+    The native client always reads the FATAL. Only the oracle arm's exact
+    ``OperationalError`` line, at exit 2, becomes ``AdminShutdown``; the
+    native arm is not rewritten, so it must still name the FATAL."""
+    if obs.get("arm") != "python" or obs["exit"] != 2:
+        return
+    stderr = base64.b64decode(obs["stderr"])
+    lost = b"error: OperationalError; check PSEUDOLIFE_MCP_DATABASE_URL"
+    if stderr.rstrip(b"\r\n") == lost:
+        named = stderr.replace(b"OperationalError", b"AdminShutdown", 1)
+        obs["stderr"] = base64.b64encode(named).decode()
+
+
 @normalize.rule("maintainer-stdout-closed-trailer")
 def maintainer_stdout_closed_trailer(obs: dict) -> None:
     """Declared substitution: after a committed change whose report stdout
@@ -728,7 +747,8 @@ def cases() -> list[core.Case]:
         case("commit-refused-enrol-code", "fresh", ["enrol-code", "--no-wait"],
              prepare=refuse_at_commit("maintainer_bootstrap", "57P01")),
         # the bank fails while the committed code waits
-        case("enrol-code-wait-terminated", "fresh", ["enrol-code"], during=terminate_during),
+        case("enrol-code-wait-terminated", "fresh", ["enrol-code"], during=terminate_during,
+             rules=(*WRITES, "maintainer-terminated-class")),
         case("enrol-code-wait-lock-timeout", "fresh", ["enrol-code"], during=lock_during),
         # a refused stdout after a committed change
         case("confirm-stdout-closed", "pending", ["confirm", pending[:9]], stdout_closed=True,
