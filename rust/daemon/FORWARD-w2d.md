@@ -9,17 +9,21 @@ It is a local handoff for the paused author; it adds no remaining read routes.
 
 - Original branch: `rust-cf/w2d-search`, `65e3178ae85cb13f7c40da26e5b401b4ca496db9`.
 - Forward branch: `rust-cf/w2d-search-fwd`.
-- Merged master: `4b34c81ef053ae2966ac8605d2680c36a182e6cb`.
-- Merge/code head: `3f0ce1ea4fdb309a6e5c6367e32cd7e4914e7171`, with those two parents.
+- First merged master: `4b34c81ef053ae2966ac8605d2680c36a182e6cb`.
+- First merge/code head: `3f0ce1ea4fdb309a6e5c6367e32cd7e4914e7171`, with that
+  master and the original branch as parents.
 - Harness follow-up: `5e47a4fbb26ad6dbbc2580379e5586862b4fd595` adds one
   chronicle-limit case and its coverage assertion; no production code change.
+- Final merged master: `4a8a11a799679b711fc647ce1e0a383b95051c8b` (HTTP admission
+  and schema-review rules advanced during validation).
+- Final code/harness head: `7958d049e3bd6f10a5e14a2ade7406f412ebb0b3`.
 - Original branch and its worktree were not changed. No public push or PR.
   Transfer to the assigned Linux lane used a Git bundle and a separate checkout.
 - `GET /api/search` is the only route dispatched by `read::get`; the rest of
   `PHASE3-READ-PATH.md`, recall/world/lesson routes and the reference-store blocker
   remain the paused author's work. Existing limitations remain in `divergences.md`.
 
-## Conflicts (22 files)
+## Conflicts (22 distinct files)
 
 Paths below are relative to `rust/`.
 
@@ -50,6 +54,12 @@ Paths below are relative to `rust/`.
 
 `txn.rs`, startup modules, CI shard layout and producer census came from master
 without a conflict and were not redesigned.
+
+The final master merge had one repeated conflict, in the imports of `http.rs`:
+retain master's `HttpBody` import and W2-D's removal of the obsolete `search`
+import. All new HTTP admission/drain code, dependency additions, CI and harness
+changes came from master unchanged; W2-D dispatch remains at its existing seam.
+The latest ruleset also came from master, with no authored ruleset edits.
 
 ## Writer seam adoption
 
@@ -113,9 +123,10 @@ the main branch incorporated the contents without those side commits as parents.
 
 ## Validation
 
-Production results below are for the code tree at `3f0ce1ea`. The one harness
-follow-up is called out separately; later documentation-only commits change
-neither production nor harness code. Evidence logs are private and named by W2D.
+The first set of results below is for the code tree at `3f0ce1ea`. The harness
+follow-up and final master merge are called out separately. Final checklist-only
+commits change neither production nor harness code. Evidence logs are private
+and named by W2D.
 
 | Environment / command | Result |
 |---|---|
@@ -162,3 +173,27 @@ Final cleanup exited 0 (`cleanup-fixed.log`): the owned seed template was
 dropped, no owned scenario databases remain, and no active owned workload or
 daemon processes remain. Private model fixtures, source checkout, venv, logs and
 Rust cache are retained for review. No full suites, GPU launches or deploys ran.
+
+## Final master overlap validation
+
+The final merge at `7958d049` imports master's HTTP admission change and required
+dependencies. W2-D ranking, stores, writer seams and the strengthened harness are
+unchanged. Validation selects the affected HTTP/CI checks plus the updated
+default search scenario and chronicle control; the ten other search scenarios
+and ten caught controls retain the earlier evidence for their unchanged modules.
+
+| Check at `7958d049` | Result |
+|---|---|
+| Windows `cargo fmt --all --check` | Exit 0 (`W2D-fmt-final.log`). |
+| Windows `cargo clippy -j 2 --all-targets -p pseudolife-daemon` | Exit 0, no warnings (`W2D-clippy-final.log`). |
+| Windows `cargo test -j 2 -p pseudolife-daemon` | Exit 0; 124 passed, 2 ignored (`W2D-unit-final.log`); opt-in DB-fixture limitation above still applies. |
+| Windows `python -m pytest rust/ci/test_workflow.py rust/daemon/harness/test_body_cases.py -q` | Exit 0; 56 passed (`W2D-http-overlap.log`). |
+| Windows disposable PG writer-recovery case | Exit 0 on committed `7958d049`, pending marker absent (`W2D-seam-latest.log`). |
+| Linux `cargo build -j 3 -p pseudolife-daemon --features mutants` | Exit 0, no warnings (`http-build.log`). |
+| Linux updated default against a newly seeded disposable template | Exit 0; 59 cases, zero response/state diffs, `chronicle_over_limit=1` (`http-read-default.json`). |
+| Linux focused chronicle-limit control | Exit 0 for the runner; 1 differing case, no survivor (`http-chronicle-control.log`). |
+
+Latest-head cleanup exited 0 (`http-cleanup.log`): the newly seeded owned
+template was dropped, no owned scenario databases remain, and no active owned
+workload or daemon processes remain. Final publication validation is exit 0 over
+`origin/master..rust-cf/w2d-search-fwd`; the handoff contains no public push or PR.
