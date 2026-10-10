@@ -138,37 +138,38 @@ def bearer(token: str) -> tuple[str, str]:
 
 def normalize_memory(reading: dict) -> dict:
     """Free readings retain the oracle's per-source keys and scalar kinds."""
+    invalid = {"invalid_memory": reading}
     rss = {"rss_bytes", "rss_peak_bytes"}
     source = reading.get("source")
     if source == "unavailable":
-        return reading  # exactly {source}; any extra fields must still diff
+        return reading if set(reading) == {"source"} else invalid
     if source == "process":
         required, optional = {"source", "near_limit"}, rss
         if reading.get("near_limit") is not None or not (rss & set(reading)):
-            return reading
+            return invalid
     elif source == "cgroup":
         required = {"source", "current_bytes", "working_set_bytes", "limit_bytes",
                     "used_fraction", "near_limit", "events"}
         optional = rss | {"anon_bytes", "file_bytes"}
         limit, fraction, flag = (reading.get(k) for k in ("limit_bytes", "used_fraction", "near_limit"))
         if limit is not None and type(limit) is not int:
-            return reading
+            return invalid
         if limit:
             if type(fraction) is not float or type(flag) is not bool:
-                return reading
+                return invalid
         elif fraction is not None or flag is not None:
-            return reading
+            return invalid
         events = reading.get("events")
         if not isinstance(events, dict) or not set(events) <= {"max", "oom", "oom_kill"} \
                 or any(type(v) is not int for v in events.values()):
-            return reading
+            return invalid
     else:
-        return reading
+        return invalid
     if not required <= set(reading) <= required | optional:
-        return reading
+        return invalid
     counts = (rss | {"current_bytes", "working_set_bytes", "anon_bytes", "file_bytes"}) & set(reading)
     if any(type(reading[k]) is not int for k in counts):
-        return reading
+        return invalid
     out = dict(reading)
     for k in counts:
         out[k] = "<free int>"
@@ -180,7 +181,7 @@ def normalize_memory(reading: dict) -> dict:
     return out
 
 
-def normalize_health(body: dict, declared: list[str]) -> dict:
+def normalize_health(body: dict, declared: list[str], *, golden: bool = False) -> dict:
     body = json.loads(json.dumps(body))
     for k in sorted(HEALTH_DECLARED_ONLY_PYTHON & set(body)):
         declared.append(f"health.{k} (python only)")
@@ -198,7 +199,9 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
     if isinstance(lb, dict) and isinstance(lb.get("age_hours"), (int, float)) \
             and not isinstance(lb.get("age_hours"), bool):
         lb["age_hours"] = "<free number>"  # measured against the clock at answer time
-    if isinstance(body.get("memory"), dict):
+    # A recorded oracle is already normalized. The raw candidate always
+    # validates its kinds, including strings that imitate our placeholders.
+    if not golden and isinstance(body.get("memory"), dict):
         body["memory"] = normalize_memory(body["memory"])
     if isinstance(body.get("db"), str) and body["db"].startswith("error: "):
         body["db"] = "error: <free>"
@@ -239,10 +242,10 @@ def normalize_search(body: dict) -> dict:
     return body
 
 
-def normalize_response(resp: dict, path: str, declared: list[str]) -> dict:
+def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
-        resp["json"] = normalize_health(resp["json"], declared)
+        resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
         resp["json"] = normalize_search(resp["json"])
     if "json" in resp and isinstance(resp["json"], dict) and resp["status"] in (400, 500):
@@ -1286,7 +1289,7 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
-def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
+def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
@@ -1327,7 +1330,7 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
                 ("application/json; charset=utf-8", "no-store", "nosniff"):
             row["diffs"].append(f"declared case: JSON transport headers wrong: {h}")
         return row
-    a = normalize_response(py, c["path"], declared)
+    a = normalize_response(py, c["path"], declared, golden=golden)
     b = normalize_response(rs, c["path"], [])
     a.pop("raw", None)
     b.pop("raw", None)
@@ -1407,7 +1410,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
                     if type(scn).prepare_template is not Scenario.prepare_template:
                         # A seeded template's entries carry the seeding moment.
                         py_r, rs_r = seed_clock_scrub(py_r), seed_clock_scrub(rs_r)
-            rows.append(compare_case(c, py_r, rs_r))
+            rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
     finally:

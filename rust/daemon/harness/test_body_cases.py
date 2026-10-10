@@ -80,6 +80,21 @@ def test_health_memory_event_keys_and_count_kinds_are_checked():
         assert health_diff(reading, dict(reading, events=events))
 
 
+@pytest.mark.parametrize("reading", MEMORY_READINGS)
+def test_health_memory_invalid_values_cannot_impersonate_normalized_tokens(reading):
+    broken = run.normalize_health({"memory": reading}, [])["memory"]
+    assert health_diff(reading, broken)
+
+
+@pytest.mark.parametrize("reading", MEMORY_READINGS)
+def test_health_memory_golden_replay_validates_only_the_raw_candidate(reading):
+    c = run.case("health-memory-shape-mutants", "GET", "/health")
+    raw = {"status": 200, "headers": {}, "json": {"memory": reading}}
+    golden = run.normalize_response(raw, "/health", [])
+    assert not run.compare_case(c, golden, raw, golden=True)["diffs"]
+    assert run.compare_case(c, golden, golden, golden=True)["diffs"]
+
+
 def test_daemon_mutant_observer_failure(tmp_path, monkeypatch):
     report = tmp_path / "report.json"
     monkeypatch.setattr("sys.argv", ["run.py", "mutants", "--rust-bin", "not-executed",

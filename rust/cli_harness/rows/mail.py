@@ -120,10 +120,12 @@ def renewed_listener(arm, proc):
             if found:
                 path = found[0]
                 raw = path.read_bytes()
+                info = path.stat()
+                record = (raw, info.st_mtime_ns, info.st_ino)
                 if first is None:
-                    first = raw
+                    first = record
                     samples.append(listener_shape(arm, path, 20.0))
-                elif raw != first:
+                elif record != first:
                     samples.append(listener_shape(arm, path, 20.0))
                     arm.state["listener"] = "valid" if samples == ["valid", "valid"] else samples
                     p.write_ring(_paths(arm.home)["ring"], 7, "rung", "urgent")

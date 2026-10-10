@@ -55,6 +55,29 @@ def test_mail_listener_clock_resolution_and_upper_bound(tmp_path, monkeypatch):
         assert (mail.listener_shape(arm, path, 20.0) == "valid") is valid
 
 
+def test_mail_renewal_can_rewrite_identical_expiry_bytes(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    path.write_bytes(f"{token}\n128.0\n".encode())
+    arm = SimpleNamespace(started=100.0, home=tmp_path, state={})
+    ticks = iter([0.0, 1.0, 2.0, 20.0])
+    monkeypatch.setattr(mail.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(mail.time, "time", lambda: 108.0)
+    monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
+    def rewrite(_seconds):
+        modified = path.stat().st_mtime_ns + 100_000_000
+        os.utime(path, ns=(modified, modified))
+    monkeypatch.setattr(mail.time, "sleep", rewrite)
+    rings = []
+    monkeypatch.setattr(mail.p, "write_ring", lambda *args: rings.append(args))
+    mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
+    assert arm.state["listener"] == "valid"
+    assert len(rings) == 1
+
+
 def test_each_field_difference_is_reported():
     base = obs(stdout=b"a", stderr=b"e", files={"f": b"1"})
     assert compare.diff(base, obs(exit=1, stdout=b"a", stderr=b"e", files={"f": b"1"}), ())
