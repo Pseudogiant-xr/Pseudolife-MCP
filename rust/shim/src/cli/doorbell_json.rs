@@ -31,8 +31,13 @@ pub(in crate::cli) fn from_str(text: &str) -> Result<Value, ()> {
             _ => position += 1,
         }
     }
+    value_from_str(text).map_err(|_| ())
+}
+
+/// Decode ordinary object keys without changing the caller's number policy.
+pub(in crate::cli) fn value_from_str(text: &str) -> Result<Value, serde_json::Error> {
     let encoded = protect_keys(text);
-    let mut value = serde_json::from_str(&encoded).map_err(|_| ())?;
+    let mut value = serde_json::from_str(&encoded)?;
     restore_keys(&mut value);
     Ok(value)
 }

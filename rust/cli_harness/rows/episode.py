@@ -63,6 +63,15 @@ def _wire_cases() -> list[Case]:
     c: list[Case] = []
     add = c.append
     start, end = ["episode-start"], ["episode-end"]
+    # episode_cli.py:36 admits ignored objects; shim.py:probe_health uses json.loads.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        extra = {"$serde_json::private::Number": value}
+        add(Case(f"start-private-number-{suffix}", start, daemon=daemon(), rules=TITLE,
+                 stdin_json=hook(cwd="{CWD}", extra=[extra]), after=require_post,
+                 golden=False))
+        add(Case(f"health-private-number-{suffix}", start, rules=TITLE,
+                 stdin_json=hook(cwd="{CWD}"), after=require_post, golden=False,
+                 daemon=daemon(**{"/health": json_body({**HEALTH, "extra": [extra]})})))
     add(Case("start-plain-dir", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd="{CWD}"), setup=lambda arm: None))
     add(Case("start-git-subdir", start, daemon=daemon(), rules=TITLE, setup=git_repo,
