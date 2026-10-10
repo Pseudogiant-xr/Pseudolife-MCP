@@ -38,3 +38,9 @@ form_urlencoded = "=1.2.2"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "=0.16.1"
 tokenizers = { version = "=0.21.4", default-features = false, features = ["fancy-regex"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
