@@ -30,7 +30,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
         raise ValueError("writer guard requires the pgs fixture slice")
     result = {}
     for variant in ("control", "mutant"):
-        name = pg.PREFIX + str(time.time_ns())
+        name = pg.name(pg.PREFIX + str(time.time_ns()))
         dsn = pg.create(name)
         try:
             child = dict(env, PL_PGS_WRITER_GUARD_DSN=dsn)

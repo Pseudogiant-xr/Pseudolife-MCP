@@ -43,7 +43,7 @@ from ..mutants import Mutant
 from . import _bank
 
 PREFIX = "pl_cf_w1c_maint_"
-ARM_DB = PREFIX + "arm"
+ARM_DB = _bank.name(PREFIX + "arm")
 # Seed clock: a fixed whole minute, 2026-07-01T00:00:00Z, so seeded banks and
 # the goldens recorded from them are identical on every host and run. Mid
 # year: no common zone changes its UTC offset within two days of it. Windows
@@ -217,7 +217,7 @@ _CREATED: set[str] = set()
 
 
 def _name(kind: str) -> str:
-    return PREFIX + kind
+    return _bank.name(PREFIX + kind)
 
 
 def _drop(name: str) -> None:

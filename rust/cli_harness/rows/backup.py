@@ -21,6 +21,7 @@ headers, compression) are free.
 
 from __future__ import annotations
 
+import atexit
 import base64
 import gzip
 import hashlib
@@ -39,18 +40,21 @@ from ..core import WINDOWS, Case
 from ..mutants import Mutant
 from . import _bank
 
-DB = "pl_cf_w1c_backup_src"
-ABSENT_DB = "pl_cf_w1c_backup_absent"
+DB = _bank.name("pl_cf_w1c_backup_src")
+ABSENT_DB = _bank.name("pl_cf_w1c_backup_absent")
 PG0 = Path.home() / ".pg0" / "installation"
 _SEEDED = False
+_CREATED = False
 _BASELINE: dict | None = None
 FIXED = 1_790_000_000.123456  # seeded mtimes, identical in both arms
 OLD = time.time() - 30 * 86400
 
 
 def _source() -> str:
-    global _SEEDED, _BASELINE
+    global _SEEDED, _BASELINE, _CREATED
+    _bank.NAMES.require_process()
     if not _SEEDED:
+        _CREATED = True
         _bank.create(DB)
         from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415 (oracle seeder)
         with _bank.connect(DB) as conn:
@@ -59,6 +63,12 @@ def _source() -> str:
         _BASELINE = _bank.dump(DB)
         _SEEDED = True
     return _bank.url(DB)
+
+
+@atexit.register
+def _drop_source() -> None:
+    if _CREATED:
+        _bank.drop(DB)
 
 
 def _pg0_version() -> Path:

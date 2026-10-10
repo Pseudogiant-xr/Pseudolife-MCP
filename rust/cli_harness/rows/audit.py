@@ -219,7 +219,7 @@ _CREATED: set[str] = set()
 
 
 def _name(kind: str) -> str:
-    return PREFIX + kind
+    return _bank.name(PREFIX + kind)
 
 
 def _drop_all() -> None:
@@ -291,6 +291,7 @@ def ids(kind: str) -> dict:
 
 def export_bytes(kind: str) -> bytes:
     """The oracle's own ``board-audit export --out`` of a seeded bank."""
+    _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
         from pseudolife_memory.board_audit_cli import main  # noqa: PLC0415
         name = ensure(kind)
@@ -606,7 +607,7 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
                      stdout_closed=stdout_closed)
 
 
-REDACT_DB = PREFIX + "rd"
+REDACT_DB = _bank.name(PREFIX + "rd")
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),

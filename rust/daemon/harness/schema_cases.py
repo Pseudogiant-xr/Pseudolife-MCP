@@ -85,7 +85,7 @@ def historical_schema(commit):
 
 
 def refusal_cell(binary, number, version):
-    name = f"{pg.PREFIX}{number}"
+    name = pg.name(f"{pg.PREFIX}{number}")
     dsn = pg.create(name)
     try:
         from pseudolife_memory.storage.postgres import PostgresStorage
@@ -102,7 +102,7 @@ def refusal_cell(binary, number, version):
 
 
 def cell(binary, number, commit=None, dimension=1024, expected=None):
-    names = [f"{pg.PREFIX}{number + i}" for i in range(3)]
+    names = [pg.name(f"{pg.PREFIX}{number + i}") for i in range(3)]
     created = []
     try:
         template = pg.create(names[0])

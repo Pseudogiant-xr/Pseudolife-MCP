@@ -189,7 +189,7 @@ def prefix_mutant_control():
         raise AssertionError("disposable admission mutant anchor changed")
     for predicate in ("name.startswith(PREFIX[:-2])", "name.startswith(PREFIX)"):
         mutant = source.replace(original, "if not " + predicate + ":")
-        namespace = {}
+        namespace = {"__file__": pg.__file__}
         exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
         try:
             prefix_admission_controls(namespace["_check"])
@@ -390,7 +390,7 @@ class RustArm:
 
 class Paired:
     def __init__(self, binary=None, mutant=None, golden=None):
-        self.names = [f"pl_cf_prn_{os.getpid()}_{i}" for i in (1, 2)]
+        self.names = [pg.name(f"pl_cf_prn_{os.getpid()}_{i}") for i in (1, 2)]
         self.dsns = []
         self.arms = []
         self.trackers = []
