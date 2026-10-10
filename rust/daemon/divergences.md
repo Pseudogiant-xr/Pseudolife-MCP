@@ -12,13 +12,16 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `POST /api/coordination/*` after the body checks | the board hub | W2-F |
-| `/api/hook/session-start`, `memory-policy`, `coordination-start` (any caller) | briefing, policy and board check-in text | W2-D / W2-F |
+| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until these gates are accepted; authenticated bound-identity checks remain deferred as listed below |
+| Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
+| `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
-| `POST /api/pair` after a valid body on an authenticated install | redemption (principal store write) | W2-F |
+| `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), the redemption (principal store write), the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | W2-F (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 
 ## MCP surface (W2-G)
 
-`/mcp` is served (spec.md, "MCP surface (W2-G)"); `tools/list` is byte-equal
+
+Bearer-authenticated `/mcp` is served (spec.md, "MCP surface (W2-G)"); `tools/list` is byte-equal
 at every tier. A `tools/call` of a tool whose body has not landed answers the
 declared stub (delegate ruling 2026-10-09): the normal refusal envelope,
 `isError: true`, structured content equal to the JSON text,
@@ -77,7 +80,6 @@ tool's answers by value.
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
 | Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
 | A refused non-`initialize` request with no session id | registers a live, uninitialized session under the fresh id it reports | registers nothing; that id is later unknown | non-canonical (no client reuses a refusal's id) |
-| Request body size on `/mcp` | unbounded | 64 MiB | bounded memory |
 | `logging/setLevel`, `completion/complete` | -32602 for these params (capabilities do not advertise them) | -32601 `Method not found` | non-canonical |
 | `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
 | JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
@@ -95,7 +97,10 @@ tool's answers by value.
 | `PSEUDOLIFE_MCP_HOST=""` | asyncio binds every IPv4 and IPv6 interface | binds `0.0.0.0` only | dual-stack wildcard is packaging work (W3-J) |
 | `PSEUDOLIFE_MCP_PORT` with Unicode digits, or `PSEUDOLIFE_MCP_*_SECONDS` with Python-only float spellings | `int()`/`float()` accept them | refuses to start (exit 1) | non-canonical input |
 | `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | parsed at start on Linux/glibc (exit 1 when not a number) | not read | heap trimming is a W3-I duty |
-| Embedding model | `embedding.model_name` from the Hugging Face cache, torch or ONNX | the ONNX export in `PSEUDOLIFE_DAEMON_ONNX_DIR`; ORT library from `ORT_DYLIB_PATH` | model resolution and packaging are cutover work (W3-J) |
+| Embedding model | `embedding.model_name` from the Hugging Face cache, torch or ONNX with fallback | existing local/cached ONNX only; complete model-root override in `PSEUDOLIFE_DAEMON_ONNX_DIR`; missing graph refuses; canonical Qwen/MiniLM pools only | verified default Qwen artifact provisioning remains a W3-J cutover blocker; other heads are deferred |
+| CPU precision | `auto` uses bf16 torch on bf16-native CPUs; explicit bf16 is honored by torch | `auto` selects the graph's fp32 policy; effective explicit bf16 refuses with `deferred: bf16 ONNX` | parity evidence pins fp32; automatic and explicit bf16 ONNX remain deferred |
+| Hub cache override interpolation | Python expands `~` and environment variables in cache paths | HF_HOME, HF_HUB_CACHE and XDG_CACHE_HOME must already contain expanded paths | interpolation spellings are deferred; ordinary absolute/relative paths and override precedence are supported |
+| Nonpositive embedding limits / empty tokenization | backend-specific Python errors | batch_size and max_seq_length <= 0 refuse; a zero-token batch reports `empty tokenization` | unsupported input/limit shapes are explicitly refused before invalid inference |
 | Plugin dir for `hooks_digest` | `PSEUDOLIFE_PLUGIN_DIR`, else `plugin/` beside the package | `PSEUDOLIFE_PLUGIN_DIR` only | the image sets the env var; a checkout run sets it too |
 | Console static dir | the package's `web/static` | `PSEUDOLIFE_DAEMON_STATIC_DIR` | packaging (W3-J) |
 | Refusal and log wording | as written | same meaning, free wording | not read by any consumer |
@@ -114,7 +119,11 @@ tool's answers by value.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
-| Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
+| Future or malformed schema version | `storage/schema.py:1657-1662` overwrites the stored version with the build's version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state | W3 PG-HYDRATE; required by the slice brief, retained for the maintainer's cutover decision |
+| Remaining startup integration | CMS and canonical stores, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed and warmup search | complete entry seating, episodes, canonical loader inputs and identity metadata attach to cached Ready after all required loads; late HLC failure retains those stores with a pending flag and blocks returning Ready until clock-only retry succeeds; read/write stores adopt StartupState and seed their clock before ticking | W2-D/E (store adoption, clock ticking and warmup search), W3-H (dream tracking), W3-J (legacy/file import) |
+| Episode start-time ties | startup loads episodes with `ORDER BY started_at`, without a tie key | uses the same query ordering; ties among equal start times follow the server's row order in both arms | W3 PG-HYDRATE; Python ordering retained |
+| Session-pointer or tombstone timestamp parse failures | fail before the embedder and resident-store abandon path; each initialization call retries parsing | fail inside required initialization and arm its retry backoff | W3 PG-HYDRATE; non-canonical metadata, declared divergence |
+| Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
 | Session reaper | closes idle session episodes every `PSEUDOLIFE_SESSION_REAP_SECONDS`, after `_ensure_init` | only the `_ensure_init` retry runs on that cadence | W2-E (episodes) |
@@ -125,6 +134,16 @@ tool's answers by value.
 
 | Item | Python | Rust |
 |---|---|---|
+| Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
+| A directory's index linked outside the static root | no containment check after the index append | `directory-index-containment`: Rust rechecks the appended child and returns 403 with exact refusal headers/body |
+| Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
-| Static types for `.md`, `.csv` and other extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` |
+| Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## Graph and review
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
+| Traversal, communities, graph service/MCP wiring, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | graph store only; these services are not wired | W3-H, subsequent increments |

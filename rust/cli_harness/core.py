@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
@@ -56,8 +57,12 @@ class Case:
     argv: list[str]
     env: dict[str, str | None] = dataclasses.field(default_factory=dict)
     stdin: bytes = b""
+    # JSON stdin with {HOME}/{CWD} expanded in its strings, then serialized
+    # the way a host hook sends it (json.dumps defaults).
+    stdin_json: Any = None
     setup: Callable[[Arm], None] | None = None
     during: Callable[[Arm, subprocess.Popen], None] | None = None
+    before_capture: Callable[[Arm, subprocess.Popen], bytes] | None = None
     after: Callable[[Arm, dict], None] | None = None
     timeout: float = 30.0
     rules: tuple[str, ...] = ()
@@ -65,6 +70,13 @@ class Case:
     stdout_closed: bool = False
     daemon: Callable[[], Any] | None = None
     skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
+    # Needs real oracle daemons on disposable banks: live local acceptance
+    # only, never golden replay (the candidate still needs the oracle daemon).
+    bank: bool = False
+    # The case exists to show both arms succeed (a trickle, an https daemon):
+    # an arm with empty stdout makes the case differ instead of matching
+    # vacuously when both arms fail the same quiet way.
+    expect_output: bool = False
     note: str = ""
 
     def runs_here(self) -> bool:
@@ -93,7 +105,23 @@ def rust_target(binary: Path) -> Target:
 
 
 def _expand(value: str, arm: Arm) -> str:
-    return value.replace("{HOME}", str(arm.home)).replace("{CWD}", str(arm.cwd))
+    home = str(arm.home)
+    # A host reporting the same home with a lowercase drive letter.
+    value = value.replace("{HOME_LOWER_DRIVE}", home[:1].lower() + home[1:])
+    value = value.replace("{HOME}", home).replace("{CWD}", str(arm.cwd))
+    if arm.daemon is not None:
+        value = value.replace("{DAEMON_PORT}", arm.daemon.url.rsplit(":", 1)[1])
+    return value
+
+
+def _expand_json(value, arm: Arm):
+    if isinstance(value, str):
+        return _expand(value, arm)
+    if isinstance(value, dict):
+        return {k: _expand_json(v, arm) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_json(v, arm) for v in value]
+    return value
 
 
 def _environment(case: Case, arm: Arm, target: Target) -> dict[str, str]:
@@ -152,19 +180,54 @@ def snapshot(root: Path) -> dict[str, str]:
     return files
 
 
+# Windows: a file a scanner or indexer opened a moment ago refuses deletion
+# with a sharing violation (WinError 32) or access denied (5) until it lets
+# go; observed on hosted runners. Every arm's process and helper thread has
+# exited before a reset, so these are retried for a bounded time, not ignored.
+_SHARING = (32, 5)
+_RETRY_SECONDS = 10.0
+
+
+def _transient(error: OSError) -> bool:
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in _SHARING
+
+
+def _remove(home: Path) -> None:
+    def retry(func, path, exc_info):
+        error = exc_info[1]
+        if isinstance(error, FileNotFoundError):
+            return
+        if func not in (os.unlink, os.remove, os.rmdir):
+            # A failed directory scan or open cannot be resumed by calling it
+            # again: unlock the directory and remove that subtree afresh.
+            os.chmod(path, 0o700)
+            shutil.rmtree(path, onerror=retry)
+            return
+        deadline = time.monotonic() + _RETRY_SECONDS
+        while True:
+            try:
+                os.chmod(path, 0o700)
+                func(path)
+                return
+            except FileNotFoundError:
+                return
+            except OSError as again:
+                if not _transient(again) or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.1)
+    # chmod-000 stat cases leave a directory a plain rmtree cannot enter.
+    for dirpath, dirnames, _ in os.walk(home):
+        for name in dirnames:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(home, onerror=retry)
+
+
 def _reset(home: Path) -> None:
     if home.exists():
-        def unlock(func, path, _exc):
-            os.chmod(path, 0o700)
-            func(path)
-        # chmod-000 stat cases leave a directory a plain rmtree cannot enter.
-        for dirpath, dirnames, _ in os.walk(home):
-            for name in dirnames:
-                try:
-                    os.chmod(os.path.join(dirpath, name), 0o700)
-                except OSError:
-                    pass
-        shutil.rmtree(home, onerror=unlock)
+        _remove(home)
     home.mkdir(parents=True)
 
 
@@ -172,13 +235,19 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
     _reset(home)
     arm = Arm(target.name, home, home / "cwd")
     arm.cwd.mkdir()
-    daemon = case.daemon() if case.daemon else None
+    daemon = None
+    if case.daemon:
+        daemon = (case.daemon(target.name) if getattr(case.daemon, "per_arm", False)
+                  else case.daemon())
     arm.daemon = daemon
     try:
         if case.setup:
             case.setup(arm)
         env = _environment(case, arm, target)
         argv = [_expand(a, arm) for a in case.argv]
+        stdin = case.stdin
+        if case.stdin_json is not None:
+            stdin = json.dumps(_expand_json(case.stdin_json, arm)).encode()
         creation = getattr(subprocess, "CREATE_NO_WINDOW", 0) if WINDOWS else 0
         stdout_target = subprocess.PIPE
         closed_reader = None
@@ -189,23 +258,55 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         arm.started = time.time()
         proc = subprocess.Popen(target.command + argv, cwd=arm.cwd, env=env,
                                 stdin=subprocess.PIPE, stdout=stdout_target,
-                                stderr=subprocess.PIPE, creationflags=creation)
+                                stderr=subprocess.PIPE, creationflags=creation,
+                                bufsize=0 if case.before_capture else -1)
         if case.stdout_closed:
             os.close(stdout_target)
+        deadline = time.monotonic() + case.timeout
+        stderr_prefix = b""
+        if case.before_capture:
+            ready = threading.Event()
+            handshake = {}
+            def before_capture():
+                try:
+                    handshake["prefix"] = case.before_capture(arm, proc)
+                except Exception as error:
+                    handshake["error"] = error
+                finally:
+                    ready.set()
+            thread = threading.Thread(target=before_capture, daemon=True)
+            thread.start()
+            if not ready.wait(max(0, deadline - time.monotonic())):
+                if proc.poll() is None:
+                    proc.kill()
+                thread.join(5)
+                proc.communicate()
+                raise RuntimeError(f"{case.id}/{target.name}: no capture handshake within {case.timeout}s")
+            if "error" in handshake:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.communicate()
+                raise handshake["error"]
+            stderr_prefix = handshake["prefix"]
         worker = None
         if case.during:
             worker = threading.Thread(target=case.during, args=(arm, proc), daemon=True)
             worker.start()
         try:
-            out, err = proc.communicate(case.stdin, timeout=case.timeout)
+            out, err = proc.communicate(stdin, timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             proc.kill()
             out, err = proc.communicate()
             raise RuntimeError(f"{case.id}/{target.name}: no exit within {case.timeout}s; "
                                f"stderr={err[-400:]!r}") from None
         ended = time.time()
+        err = stderr_prefix + err
         if worker:
             worker.join(10)
+            if worker.is_alive():
+                # A helper still touching the home would race the snapshot
+                # and the next arm's reset; fail the case instead.
+                raise RuntimeError(f"{case.id}/{target.name}: helper thread still running")
         observation = {
             "home": str(home),
             # Local clock offset, so a golden's clocks validate where recorded.
@@ -218,6 +319,8 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         if daemon is not None:
             observation["daemon_url"] = daemon.url
             observation["requests"] = daemon.requests()
+        if case.expect_output and not out:
+            observation["vacuous"] = "no stdout where the case requires output"
         if case.after:
             case.after(arm, observation)
         if "listener" in arm.state:
@@ -242,11 +345,19 @@ def _home_root() -> Path:
 def run_case(case: Case, oracle: Target, candidate: Target) -> tuple[dict, dict]:
     root = _home_root()
     home = root / "h"
+    finished = False
     try:
         python = run_arm(case, oracle, home)
         rust = run_arm(case, candidate, home)
+        finished = True
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        if root.exists():
+            try:
+                _remove(root)
+            except OSError:
+                # Never let teardown replace the case's own failure.
+                if finished:
+                    raise
     return python, rust
 
 

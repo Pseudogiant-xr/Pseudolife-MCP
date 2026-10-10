@@ -8,6 +8,8 @@
 //! from its own module; `registry()` adds one line per slice. A tool nobody
 //! registered answers the declared stub (`divergences.md`).
 
+#![allow(dead_code)] // Body slices consume this shared interface as they land.
+
 use axum::http::HeaderMap;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -44,6 +46,8 @@ pub struct ToolCall<'a> {
 /// A refused or failed call, mapped to the error payload by
 /// `envelope::error_payload` exactly as `mcp_server._error_payload` maps the
 /// Python exception.
+// Preserve the agreed body-slice interface while forwarding the branch.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum ToolError {
     /// A ValueError carrying a code: a `code` attribute, or a `code` /

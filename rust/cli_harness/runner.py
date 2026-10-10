@@ -28,8 +28,8 @@ def _golden_path(row: str) -> Path:
     return GOLDENS / f"{row}.{core.PLATFORM}.json"
 
 
-def _select(row: str, wanted: list[str]) -> list[core.Case]:
-    selected = [c for c in rows.load(row) if c.runs_here()]
+def _select(row: str, wanted: list[str], bank: bool = True) -> list[core.Case]:
+    selected = [c for c in rows.load(row) if c.runs_here() and (bank or not c.bank)]
     if wanted:
         selected = [c for c in selected if c.id in wanted]
         missing = set(wanted) - {c.id for c in selected}
@@ -99,22 +99,27 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--golden", action="store_true", help="compare against goldens")
     mode.add_argument("--mutants", action="store_true", help="run the mutant control")
     parser.add_argument("--mutant", action="append", default=[], help="only these mutants")
+    parser.add_argument("--skip-bank", action="store_true",
+                        help="skip cases that need real daemons on disposable banks")
     parser.add_argument("--out", type=Path, help="write a JSON summary")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
     producers.use_oracle(args.oracle_source.resolve())
+    from .rows import _daemon  # noqa: PLC0415
+    _daemon.ORACLE.update(python=args.oracle_python, source=args.oracle_source.resolve())
     oracle = core.python_target(args.oracle_python, args.oracle_source.resolve())
     candidate_path = args.candidate or _default_candidate()
 
     if args.mutants:
         from . import mutants  # noqa: PLC0415
+        mutants.SKIP_BANK = args.skip_bank
         return mutants.main(args.row, args.mutant, oracle, args.verbose)
 
     summary: dict = {"platform": core.PLATFORM, "rows": {}}
     failed = 0
     for row in args.row:
-        cases = _select(row, args.case)
+        cases = _select(row, args.case, bank=not (args.skip_bank or args.golden or args.record))
         print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
             print(f"  wrote {record(row, cases, oracle, args.oracle_source.resolve(), args.oracle_commit)}")

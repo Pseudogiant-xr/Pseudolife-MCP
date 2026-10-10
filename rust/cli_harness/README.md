@@ -35,6 +35,21 @@ Defaults: the oracle is this checkout with the running interpreter
 - Bank-backed rows use disposable databases on the bench PostgreSQL through
   the test login only, never the live bank.
 
+## Daemons
+
+- `fixture_daemon.py`: a loopback HTTP fixture with scripted routes, fresh per
+  arm, that records every request (method, raw target, header fields in
+  order, body). Requests compare on the wire by case-insensitive field name,
+  with every field's presence and value exact and repeated names failing.
+  `Trickle` writes a reply a few bytes at a time; `tls=True` serves the
+  disposable `shim/tests/fixtures/pg_tls` certificate at `https://localhost`.
+- `rows/_daemon.py`: real oracle daemons (`pseudolife-mcp serve`), one per
+  arm on its own disposable bank (`rows/_bank.py`, test login only), shared
+  across a row's cases and settled under the CLIs' health-probe budget before
+  each one. Cases marked `bank=True` dump the rows their keys own after each
+  run; they need the oracle daemon, so they run live only (`--skip-bank`
+  skips them; `--golden` and `--record` never include them).
+
 ## Seeding
 
 State is written through the oracle's own writers (`producers.py`): the

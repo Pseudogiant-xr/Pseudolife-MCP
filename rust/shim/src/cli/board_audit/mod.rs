@@ -1,51 +1,113 @@
-//! Archive register verification; bank reads and other event families defer.
+//! `pseudolife-mcp board-audit` (board_audit_cli.py) for its canonical argv:
+//! verify an export file or the bank, export the bank, redact one body.
+//! The bank is reached through an explicit `PSEUDOLIFE_MCP_DATABASE_URL`;
+//! `stats`, help, the lite tier's embedded instance, the daemon-container
+//! transport and every other shape defer before any effect.
 mod archive;
+mod args;
+mod bank;
+mod chain;
 mod codec;
+mod redact;
 use crate::sent_json::{self, Json};
 use std::{
-    ffi::{OsStr, OsString},
-    fs::File,
-    io::{self, BufRead, BufReader, Write},
+    ffi::OsString,
+    io::{self, Write},
 };
 
-const EMPTY_REPORT: &str = concat!(
-    "{\"ok\": true, \"events\": 0, \"first_seq\": null, \"head_seq\": null, ",
-    "\"head_hash\": null, \"head_created_at\": null, \"start_cut\": null}\n"
-);
-
-/// Verify an archive without resolving or attaching a bank.
+/// Run the action after `board-audit`, returning the process exit code.
 pub fn run(arguments: Vec<OsString>) -> u8 {
-    if arguments
-        .first()
-        .is_some_and(|action| action == "export" || action == "stats" || action == "redact")
-        || arguments == [OsString::from("verify")]
-        || arguments.iter().any(|arg| arg == "--expect-head")
-        || arguments.iter().any(|arg| arg == "--help" || arg == "-h")
-    {
-        return deferred();
-    }
-    let [action, option, path] = arguments.as_slice() else {
+    let Some(action) = args::parse(&arguments) else {
         return deferred();
     };
-    if action != "verify" || option != "--input" || path.is_empty() || !input_value(path) {
-        return deferred();
+    match action {
+        args::Action::VerifyInput { input, expect } => verify_input(&input, expect),
+        args::Action::VerifyBank { expect } => {
+            with_bank(|dsn| async move { bank::verify(&dsn, expect).await })
+        }
+        args::Action::Export(export) => {
+            if let Some(out) = &export.out {
+                // Checked before any bank is resolved, as `_export` does.
+                match std::fs::metadata(out) {
+                    Ok(_) => {
+                        crate::stderrln!("board-audit: {out} exists; export never replaces a file");
+                        return 2;
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                        ) => {}
+                    Err(_) => return deferred(),
+                }
+            }
+            with_bank(|dsn| async move { bank::export(&dsn, &export).await })
+        }
+        args::Action::Redact { message_id, reason } => {
+            with_bank(|dsn| async move { redact::run(&dsn, &message_id, &reason).await })
+        }
     }
-    let file = match File::open(path) {
-        Ok(file) => file,
+}
+
+fn with_bank<F, Fut>(work: F) -> u8
+where
+    F: FnOnce(crate::pg::Dsn) -> Fut,
+    Fut: std::future::Future<Output = bank::Ending>,
+{
+    let Some(dsn) = bank::dsn() else {
+        return deferred();
+    };
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return deferred();
+    };
+    match runtime.block_on(work(dsn)) {
+        bank::Ending::Exit(code) => code,
+        bank::Ending::Deferred => deferred(),
+    }
+}
+
+/// Python's text-mode universal newlines: `\r\n`, `\r` and `\n` end a line.
+fn python_lines(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let end = rest.find(['\r', '\n']).unwrap_or(rest.len());
+        let line = &rest[..end];
+        let skip = if rest[end..].starts_with("\r\n") {
+            2
+        } else {
+            usize::from(end < rest.len())
+        };
+        rest = &rest[end + skip..];
+        Some(line)
+    })
+}
+
+fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
+    let bytes = match std::fs::read(input) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            crate::stderrln!("board-audit: cannot read {input}");
+            return 2;
+        }
         Err(_) => return deferred(),
     };
-    let mut first_seq = None;
-    let mut previous: Option<(i64, String, f64)> = None;
-    let mut count = 0_u64;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line = match line {
-            Ok(line) => line,
-            Err(_) => return deferred(),
-        };
-        if archive::blank(&line) {
+    // Python decodes in chunks and can refuse a file before reading lines
+    // that precede the bad bytes, so any invalid UTF-8 defers outright.
+    let Ok(text) = String::from_utf8(bytes) else {
+        return deferred();
+    };
+    let mut walker = chain::Walker::new(expect);
+    for (index, line) in python_lines(&text).enumerate() {
+        if archive::blank(line) {
             continue;
         }
-        let (row, seq, created_at) = match archive::row(&line) {
+        let (value, seq, created_at) = match archive::row(line) {
             Ok(row) => row,
             Err(archive::Error::Deferred) => return deferred(),
             Err(error) => {
@@ -55,108 +117,66 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
                     }
                     _ => "is not an exported audit event",
                 };
-                crate::stderrln!(
-                    "board-audit: {} line {} {}",
-                    std::path::Path::new(path).display(),
-                    index + 1,
-                    diagnostic
-                );
+                crate::stderrln!("board-audit: {input} line {} {diagnostic}", index + 1);
                 return 2;
             }
         };
-        if let Some((old_seq, old_hash, _)) = &previous {
-            if old_seq.checked_add(1) != Some(seq) {
-                return broken(seq, "sequence_gap");
-            }
-            if row["prev_hash"] != *old_hash {
-                return broken(seq, "broken_link");
-            }
-        } else {
-            first_seq = Some(seq);
-            if seq == 1 && row["prev_hash"] != "0".repeat(64) {
-                return broken(seq, "broken_link");
-            }
+        match walker.push(chain::Row {
+            value,
+            seq,
+            created_at,
+        }) {
+            Ok(None) => {}
+            Ok(Some(broken)) => return report(broken, 1),
+            Err(chain::Deferred) => return deferred(),
         }
-        // Register is the first implemented event family, not an archive rule.
-        if row["event"] != "register" {
-            return deferred();
-        }
-        let hash = match codec::hash(&row, created_at) {
-            Ok(hash) => hash,
-            Err(_) => return deferred(),
-        };
-        if row["hash"] != hash {
-            return broken(seq, "hash_mismatch");
-        }
-        if !row["body"].is_null() || !row["body_salt"].is_null() {
-            return broken(seq, "body_mismatch");
-        }
-        previous = Some((seq, hash, created_at));
-        count += 1;
     }
-    if let Some(first) = first_seq.filter(|seq| *seq != 1) {
-        return broken(first, "unanchored_start");
+    match walker.finish() {
+        Ok((report_value, intact)) => report(report_value, if intact { 0 } else { 1 }),
+        Err(chain::Deferred) => deferred(),
     }
-    let Some((head, hash, created_at)) = previous else {
-        return write_text(EMPTY_REPORT, 0);
-    };
-    report(
-        Json::Object(vec![
-            ("ok".into(), Json::Bool(true)),
-            ("events".into(), integer(count)),
-            (
-                "first_seq".into(),
-                integer(first_seq.expect("nonempty archive")),
-            ),
-            ("head_seq".into(), integer(head)),
-            ("head_hash".into(), Json::String(hash)),
-            ("head_created_at".into(), Json::Float(created_at)),
-            ("start_cut".into(), Json::Null),
-        ]),
-        0,
-    )
 }
 
-fn integer(value: impl ToString) -> Json {
-    Json::Integer(value.to_string())
-}
-fn broken(seq: i64, reason: &str) -> u8 {
-    report(
-        Json::Object(vec![
-            ("ok".into(), Json::Bool(false)),
-            ("seq".into(), integer(seq)),
-            ("reason".into(), Json::String(reason.into())),
-        ]),
-        1,
-    )
-}
+/// `print(json.dumps(value))` before any effect: one line on stdout and the
+/// given exit code. A stdout that refuses the line defers: CPython's answer
+/// there (a buffered print, then a failed flush at interpreter shutdown,
+/// exit 120 and an ignored-exception trailer) is not reproduced.
 fn report(value: Json, code: u8) -> u8 {
-    let Ok(bytes) = sent_json::encode(&value) else {
-        return deferred();
-    };
+    match print_line(&value) {
+        Ok(()) => code,
+        Err(()) => deferred(),
+    }
+}
+
+/// One `print(json.dumps(value))` line; `Err` when stdout refused it (or the
+/// value holds something the encoder refuses, which nothing here builds).
+fn print_line(value: &Json) -> Result<(), ()> {
+    let bytes = sent_json::encode(value).map_err(|_| ())?;
     let mut text = String::from_utf8(bytes).expect("report is UTF-8");
     text.push('\n');
-    write_text(&text, code)
-}
-fn write_text(text: &str, code: u8) -> u8 {
-    if io::stdout()
-        .lock()
-        .write_all(&super::text_bytes(text))
-        .is_ok()
-    {
-        code
-    } else {
-        1
-    }
-}
-
-fn input_value(path: &OsStr) -> bool {
-    path == "-" || !path.to_string_lossy().starts_with('-')
+    let mut stdout = io::stdout().lock();
+    stdout
+        .write_all(&super::text_bytes(&text))
+        .and_then(|()| stdout.flush())
+        .map_err(|_| ())
 }
 
 fn deferred() -> u8 {
     crate::stderrln!(
-        "board-audit: this path is deferred; verify --input supports empty and register archives"
+        "board-audit: this path is deferred; native board-audit covers canonical verify, export and redact"
     );
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::python_lines;
+
+    #[test]
+    fn universal_newlines_number_lines_as_python_does() {
+        let lines: Vec<_> = python_lines("a\r\nb\rc\n\rd").collect();
+        assert_eq!(lines, ["a", "b", "c", "", "d"]);
+        assert_eq!(python_lines("a\n").count(), 1);
+        assert_eq!(python_lines("").count(), 0);
+    }
 }

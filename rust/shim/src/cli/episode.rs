@@ -251,7 +251,9 @@ fn title(cwd: &[u32]) -> String {
         let is_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .and_then(|home| absolute(Path::new(&home)))
             .zip(os_text(cwd).and_then(|cwd| absolute(Path::new(&cwd))))
-            .is_some_and(|(home, cwd)| home == cwd);
+            // Python compares the abspath strings exactly; Path equality
+            // would treat `c:` and `C:` as one drive.
+            .is_some_and(|(home, cwd)| home.as_os_str() == cwd.as_os_str());
         if !is_home {
             let base = basename(&norm_points(cwd));
             let lower: String = base
@@ -279,26 +281,12 @@ fn title(cwd: &[u32]) -> String {
 }
 
 async fn health(url: &str) -> Option<()> {
-    let client = reqwest::Client::builder()
-        // urllib follows health redirects without generating a Referer.
-        .referer(false)
-        .connect_timeout(Duration::from_millis(250))
-        .read_timeout(Duration::from_millis(250))
-        .build()
-        .ok()?;
-    let bytes = client
-        .get(format!("{url}/health"))
-        .header("User-Agent", "Python-urllib/3.11")
-        .header("Accept-Encoding", "identity")
-        .header("Connection", "close")
-        .send()
-        .await
-        .ok()?
-        .bytes()
-        .await
-        .ok()?;
+    // probe_health: urllib's per-receive 0.25 s timeout and redirect limits.
+    let reply =
+        super::hook_http::get(url, "/health", None, Duration::from_millis(250), true).await?;
     // The production health path decodes UTF-8 text, unlike json.loads(bytes).
-    let value: serde_json::Value = serde_json::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
+    let value: serde_json::Value =
+        serde_json::from_str(std::str::from_utf8(&reply.body).ok()?).ok()?;
     (!value.is_null()).then_some(())
 }
 
@@ -335,45 +323,36 @@ pub(super) async fn run(mode: &str) -> ExitCode {
     } else {
         ("end", format!("{{\"session_key\": {key}}}"))
     };
-    if let Ok(client) = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(5))
-        .read_timeout(Duration::from_secs(5))
-        .build()
+    let mut authorization = None;
+    if let Ok(token) = std::env::var("PSEUDOLIFE_MCP_TOKEN")
+        && !token.is_empty()
     {
-        let mut request = client
-            .post(format!("{url}/api/episode/{path}"))
-            .header("Content-Type", "application/json")
-            .header("User-Agent", "Python-urllib/3.11")
-            .header("Accept-Encoding", "identity")
-            .header("Connection", "close")
-            .body(body);
-        if let Ok(token) = std::env::var("PSEUDOLIFE_MCP_TOKEN")
-            && !token.is_empty()
-        {
-            // http-forbidden-input-refused: HTAB and non-control values retain
-            // their existing behavior; only forbidden header grammar is changed.
-            if forbidden_header_input(&token) {
-                crate::stderrln!("{HTTP_FORBIDDEN_INPUT_REFUSED}");
-                return ExitCode::FAILURE;
-            }
-            // urllib's HTTP/1 header writer encodes values as Latin-1.
-            let bytes: Result<Vec<u8>, _> = format!("Bearer {token}")
-                .chars()
-                .map(|c| u8::try_from(u32::from(c)))
-                .collect();
-            let Ok(bytes) = bytes else {
-                return ExitCode::SUCCESS;
-            };
-            let Ok(value) = http::HeaderValue::from_bytes(&bytes) else {
-                return ExitCode::SUCCESS;
-            };
-            request = request.header("Authorization", value);
+        // http-forbidden-input-refused: HTAB and non-control values retain
+        // their existing behavior; only forbidden header grammar is changed.
+        if forbidden_header_input(&token) {
+            crate::stderrln!("{HTTP_FORBIDDEN_INPUT_REFUSED}");
+            return ExitCode::FAILURE;
         }
-        if let Ok(response) = request.send().await {
-            let _ = response.bytes().await;
-        }
+        // urllib's HTTP/1 header writer encodes values as Latin-1.
+        let bytes: Result<Vec<u8>, _> = format!("Bearer {token}")
+            .chars()
+            .map(|c| u8::try_from(u32::from(c)))
+            .collect();
+        let Ok(bytes) = bytes else {
+            return ExitCode::SUCCESS;
+        };
+        authorization = Some(bytes);
     }
+    // _post: one POST through a no-redirect opener, 5 s per receive, reply
+    // read and ignored; every failure stays silent.
+    let _ = super::hook_http::post_json(
+        &url,
+        &format!("/api/episode/{path}"),
+        authorization.as_deref(),
+        body.as_bytes(),
+        Duration::from_secs(5),
+    )
+    .await;
     ExitCode::SUCCESS
 }
 

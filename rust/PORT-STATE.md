@@ -1,5 +1,15 @@
 # Rust port state
 
+## Backup explicit-DSN and file mode
+
+CLI-BACKUP-DSN is ported: explicit-DSN dumps and file-mode state archives,
+with rotation, match the Python oracle in the `backup` harness row on
+Windows (16 cases) and Linux (17, under WSL); CI runs the Rust contract
+tests on both. The lite tier
+(CLI-BACKUP-LITE) defers by name until embedded_pg is native. Scope,
+contract, free items and deferrals: PARITY.md "Backup explicit-DSN and file
+mode".
+
 ## Stream D historical doorbell evidence (2026-10-08)
 
 The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)

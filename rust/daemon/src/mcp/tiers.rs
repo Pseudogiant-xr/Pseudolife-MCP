@@ -165,7 +165,9 @@ mod tests {
 
     #[test]
     fn map_parsing_matches_python() {
-        let m = parse_tier_map(Some(" Alice : Minimal ,bob:core,bad,:core,x:huge,bob:full,c:d:e"));
+        let m = parse_tier_map(Some(
+            " Alice : Minimal ,bob:core,bad,:core,x:huge,bob:full,c:d:e",
+        ));
         assert_eq!(m.get("alice"), Some(&Tier::Minimal));
         assert_eq!(m.get("bob"), Some(&Tier::Full));
         assert_eq!(m.len(), 2);

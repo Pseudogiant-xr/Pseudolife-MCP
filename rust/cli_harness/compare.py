@@ -29,6 +29,9 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
     a = normalize.apply(python, rules, python.get("home"))
     b = normalize.apply(rust, rules, rust.get("home"))
     out: list[str] = []
+    for side, observation in (("python", a), ("rust", b)):
+        if observation.get("vacuous"):
+            out.append(f"{side}: {observation['vacuous']}")
     if a["exit"] != b["exit"]:
         out.append(f"exit: python {a['exit']} rust {b['exit']}")
     for field in ("stdout", "stderr"):

@@ -45,7 +45,10 @@ pub fn call_identity(principal: &str, headers: &HeaderMap) -> CallIdentity {
 /// `_legacy_transport_session_enabled`: explicit truthy values only.
 fn legacy_transport_session() -> bool {
     std::env::var("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION").is_ok_and(|v| {
-        matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+        matches!(
+            v.trim().to_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
     })
 }
 
@@ -75,16 +78,25 @@ mod tests {
 
     #[test]
     fn named_principal_outranks_the_writer_header() {
-        let id = call_identity("alice", &h(&[("x-pl-writer", "mallory"), ("x-pl-session", "s1")]));
+        let id = call_identity(
+            "alice",
+            &h(&[("x-pl-writer", "mallory"), ("x-pl-session", "s1")]),
+        );
         assert_eq!(id.writer, "alice");
         assert_eq!(id.header_session.as_deref(), Some("s1"));
-        assert_eq!(tier_key("alice", &h(&[("x-pl-writer", "mallory")])).as_deref(), Some("alice"));
+        assert_eq!(
+            tier_key("alice", &h(&[("x-pl-writer", "mallory")])).as_deref(),
+            Some("alice")
+        );
     }
 
     #[test]
     fn default_principal_keeps_the_writer_header() {
         let id = call_identity(DEFAULT_PRINCIPAL, &h(&[("x-pl-writer", "Writer-M")]));
         assert_eq!(id.writer, "Writer-M");
-        assert_eq!(tier_key(DEFAULT_PRINCIPAL, &h(&[("x-pl-writer", "Writer-M")])).as_deref(), Some("Writer-M"));
+        assert_eq!(
+            tier_key(DEFAULT_PRINCIPAL, &h(&[("x-pl-writer", "Writer-M")])).as_deref(),
+            Some("Writer-M")
+        );
     }
 }

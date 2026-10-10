@@ -95,14 +95,19 @@ def test_mail_clock_uses_the_recording_hosts_offset():
         assert compare.diff(wrong, candidate, ("mail-clock",))
 
 
-def test_requests_compare_on_projected_fields_and_flag_repeats():
+def test_requests_compare_every_field_by_case_insensitive_name_and_flag_repeats():
     def req(headers, target="/a?x=1"):
         return {"method": "GET", "target": target, "headers": headers, "body": ""}
     base = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
                               ["Accept-Encoding", "identity"]])])
     same = obs(requests=[req([["user-agent", "Python-urllib/3.11"], ["host", "h"],
-                              ["Accept", "*/*"]])])
+                              ["accept-encoding", "identity"]])])
     assert compare.diff(base, same, ()) == []
+    added = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
+                               ["Accept-Encoding", "identity"], ["Accept", "*/*"]])])
+    assert compare.diff(base, added, ())
+    assert compare.diff(base, obs(requests=[req([["Host", "h"],
+                                                 ["User-Agent", "Python-urllib/3.11"]])]), ())
     assert compare.diff(base, obs(requests=[req([["Host", "h"]], "/a?x=2")]), ())
     repeated = obs(requests=[req([["Host", "h"], ["User-Agent", "Python-urllib/3.11"],
                                   ["Authorization", "a"], ["authorization", "a"]])])
@@ -128,3 +133,77 @@ def test_rules_apply_to_copies_not_the_raw_observation():
     raw = obs(exit=120, stderr=b"x")
     normalize.apply(raw, ("python-shutdown-flush",), raw["home"])
     assert raw["exit"] == 120
+
+
+def test_home_removal_waits_out_a_briefly_held_file(tmp_path):
+    import threading
+    from cli_harness import core
+    home = tmp_path / "h"
+    (home / "d").mkdir(parents=True)
+    held = (home / "d" / "digest.txt").open("w")
+    held.write("7\n")
+    held.flush()
+    threading.Timer(0.5, held.close).start()
+    core._remove(home)
+    assert not home.exists()
+
+
+def test_home_removal_retries_injected_sharing_violations(tmp_path, monkeypatch):
+    import os
+    from cli_harness import core
+    home = tmp_path / "h"
+    (home / "d").mkdir(parents=True)
+    (home / "d" / "digest.txt").write_text("7")
+    real, calls = os.unlink, []
+
+    def flaky(path, *args, **kwargs):
+        calls.append(path)
+        if len(calls) <= 2:
+            raise PermissionError(13, "being used by another process")
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(os, "unlink", flaky)
+    core._remove(home)
+    assert not home.exists() and len(calls) >= 3
+
+
+def test_home_removal_gives_up_after_its_deadline(tmp_path, monkeypatch):
+    import os
+    import pytest
+    from cli_harness import core
+    home = tmp_path / "h"
+    home.mkdir()
+    (home / "digest.txt").write_text("7")
+
+    def stuck(path, *args, **kwargs):
+        raise PermissionError(13, "being used by another process")
+    monkeypatch.setattr(os, "unlink", stuck)
+    monkeypatch.setattr(core, "_RETRY_SECONDS", 0.3)
+    with pytest.raises(PermissionError):
+        core._remove(home)
+
+
+def test_episode_title_minute_rewrites_only_an_in_window_minute():
+    now = time.time()
+    offset = time.localtime(now).tm_gmtoff
+
+    def body(stamp):
+        return {"method": "POST", "target": "/api/episode/start", "headers": [],
+                "body": '{"session_key": "k", "title": "proj - %s"}' % stamp}
+    inside = time.strftime("%Y-%m-%d %H:%M", time.gmtime(now + offset))
+    later = time.strftime("%Y-%m-%d %H:%M", time.gmtime(now + offset + 7200))
+    a = dict(obs(requests=[body(inside)]), utc_offset=offset)
+    b = dict(obs(requests=[body(inside)]), utc_offset=offset)
+    out = normalize.apply(a, ("episode-title-minute",), None)
+    assert '"proj - <minute>"' in out["requests"][0]["body"]
+    assert compare.diff(a, b, ("episode-title-minute",)) == []
+    assert compare.diff(a, dict(obs(requests=[body(later)]), utc_offset=offset),
+                        ("episode-title-minute",))
+    renamed = {**body(inside), "body": body(inside)["body"].replace("proj", "other")}
+    assert compare.diff(a, dict(obs(requests=[renamed]), utc_offset=offset),
+                        ("episode-title-minute",))
+
+
+def test_a_vacuous_arm_is_a_difference_even_when_both_match():
+    quiet = dict(obs(), vacuous="no stdout where the case requires output")
+    assert compare.diff(quiet, dict(quiet), ())
+    assert compare.diff(obs(stdout=b"x"), dict(obs(stdout=b"x"), vacuous="v"), ())

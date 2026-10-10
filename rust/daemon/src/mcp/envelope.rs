@@ -159,31 +159,55 @@ mod tests {
 
     #[test]
     fn refusal_codes_and_prose() {
-        let p = error_payload("memory_store", &ToolError::Invalid("bad_thing: nope".into()));
-        assert_eq!(p, json!({"error": "bad_thing", "message": "bad_thing: nope"}));
-        let p = error_payload("memory_store", &ToolError::Invalid("Bad thing happened".into()));
+        let p = error_payload(
+            "memory_store",
+            &ToolError::Invalid("bad_thing: nope".into()),
+        );
+        assert_eq!(
+            p,
+            json!({"error": "bad_thing", "message": "bad_thing: nope"})
+        );
+        let p = error_payload(
+            "memory_store",
+            &ToolError::Invalid("Bad thing happened".into()),
+        );
         assert_eq!(
             p,
             json!({"error": "invalid_argument", "message": "Bad thing happened"})
         );
         let p = error_payload("memory_store", &ToolError::Invalid("  ".into()));
         assert_eq!(p["message"], "The arguments were refused.");
-        let p = error_payload("memory_search", &ToolError::refused("coordination_unavailable", None));
+        let p = error_payload(
+            "memory_search",
+            &ToolError::refused("coordination_unavailable", None),
+        );
         assert!(p.get("mutation").is_none());
-        let p = error_payload("memory_agents", &ToolError::refused("coordination_unavailable", None));
+        let p = error_payload(
+            "memory_agents",
+            &ToolError::refused("coordination_unavailable", None),
+        );
         assert_eq!(p["mutation"], "unknown");
-        assert_eq!(p["message"], "coordination_unavailable: the call was refused.");
+        assert_eq!(
+            p["message"],
+            "coordination_unavailable: the call was refused."
+        );
     }
 
     #[test]
     fn prose_codes_keep_python_extras() {
         // Review finding: coordination.py raises ValueError("coordination_unavailable").
-        let p = error_payload("memory_agents", &ToolError::Invalid("coordination_unavailable".into()));
+        let p = error_payload(
+            "memory_agents",
+            &ToolError::Invalid("coordination_unavailable".into()),
+        );
         assert_eq!(
             serde_json::to_string(&p).unwrap(),
             r#"{"error":"coordination_unavailable","message":"coordination_unavailable: the call was refused.","mutation":"unknown"}"#
         );
-        let p = error_payload("memory_search", &ToolError::Invalid("coordination_unavailable".into()));
+        let p = error_payload(
+            "memory_search",
+            &ToolError::Invalid("coordination_unavailable".into()),
+        );
         assert!(p.get("mutation").is_none());
         let p = error_payload("memory_store", &ToolError::refused("bad_code", Some("")));
         assert_eq!(p["message"], "bad_code: the call was refused.");
@@ -191,9 +215,18 @@ mod tests {
 
     #[test]
     fn internal_errors_hide_their_cause() {
-        let p = error_payload("memory_search", &ToolError::Internal(anyhow::anyhow!("boom")));
-        assert_eq!(p, json!({"error": "internal_error", "message": INTERNAL_MESSAGE}));
-        let p = error_payload("memory_store", &ToolError::Internal(anyhow::anyhow!("boom")));
+        let p = error_payload(
+            "memory_search",
+            &ToolError::Internal(anyhow::anyhow!("boom")),
+        );
+        assert_eq!(
+            p,
+            json!({"error": "internal_error", "message": INTERNAL_MESSAGE})
+        );
+        let p = error_payload(
+            "memory_store",
+            &ToolError::Internal(anyhow::anyhow!("boom")),
+        );
         assert_eq!(p["mutation"], "unknown");
     }
 

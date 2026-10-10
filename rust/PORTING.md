@@ -266,17 +266,19 @@ and historical failures remain evidence rather than candidate expectations.
   Opening a new mark before printing can leave an empty mark. First control:
   `public_help_closed_output_has_native_failure_contract`.
 
-The hook HTTP client uses the oracle-pinned **`Python-urllib/3.11` User-Agent**.
-Python's urllib default `Accept-Encoding: identity` and `Connection: close`
-are explicitly dropped by the native transport; no full raw-header equality is
-claimed. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
+The hook HTTP client (`cli/hook_http.rs`, since 2026-10-09) sends urllib's
+request fields: Host as written, the oracle-pinned **`Python-urllib/3.11`
+User-Agent**, `Accept-Encoding: identity`, `Connection: close` and an optional
+Authorization, with no Accept; the CLI harness compares every request field
+exactly by case-insensitive name. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
 DEL and folded values before sending an authenticated payload request. Ordinary
 Latin-1 bearer values retain their encoded bytes; other non-Latin-1 values keep
 the existing refusal. Raw historical Python bearer diagnostics remain retained.
 
-**`hook-absent-accept-wildcard`** permits only absent-oracle Accept versus native
-exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md. No other
-Accept difference or unrecorded ID receives this disposition. **`http-field-name-case-insensitive`** associates HTTP field names
+**`hook-absent-accept-wildcard`** permitted only absent-oracle Accept versus
+native exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md; the
+2026-10-09 transport sends no Accept, so the disposition is retired for
+current hook captures and stays a historical ledger. **`http-field-name-case-insensitive`** associates HTTP field names
 by lowercase ASCII spelling; distinct-name ordering is free, while same-name value
 order, multiplicity and bytes stay exact. The port-owned comparison helper
 retains raw observations and provides no other header, body or framing waiver.

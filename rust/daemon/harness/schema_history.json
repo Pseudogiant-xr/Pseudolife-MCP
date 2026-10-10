@@ -1,0 +1,245 @@
+{
+  "first_postgres_version": 8,
+  "versions": [
+    {
+      "version": 8,
+      "commit": "3cb3d198a4121a741613188fa35e3fef27b5d3ec",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 9,
+      "commit": "9e848ecc8f890652efec6ae589ce81d3ef1dbb43",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 10,
+      "commit": "48caa2a34fdafc45c36951a04ae6e416f1dd139b",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 11,
+      "commit": "c66d23f2fc7a77ca944050e9eadda42ff006f27a",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 12,
+      "commit": "1cfeb5751c3eb813f1ad94725ed4b7c44dad0e76",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 13,
+      "commit": "e9b1bb24c457d5f8e3e2cd8b9eb9a63ea9a682fc",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 14,
+      "commit": "a2f63bc0f1268a7b88c7be83aec7b5048af468ae",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 15,
+      "commit": "a9e43615f98cf503cdce756938bbaecd21b819e0",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 16,
+      "commit": "60d84fbef20eb46fefb5107b6043764e3a495aa4",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 17,
+      "commit": "0b212131774ef5d675b01edec5bb4d427370ea14",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 18,
+      "commit": "472ff6d5f2454a70dea4e8d663aa50dd065df686",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 19,
+      "commit": "707256ba93daaef73e21ad3f979af7fadb98c446",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 20,
+      "commit": "8baa12aa29f64c62a94b96202b8f060b0bd5d5e6",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 21,
+      "commit": "5cdc74a5d8990a09ca1344270ebb4e4943a68594",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 22,
+      "commit": "111fef6f65e36b243dfcf111339013e383d36c52",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 23,
+      "commit": "0835ba64c6e9fb4ddb4352b0d97905e56f7951a8",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 24,
+      "commit": "23df7e1c40f6df8b1671ee334e8c056dd9e1f20b",
+      "embedding_dimension": 384
+    },
+    {
+      "version": 25,
+      "commit": "95d954971160ed867e62a55a19039562aa0a4243",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 26,
+      "commit": "9321ee9f1e9009317a08d53538b5689ebbde67c9",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 27,
+      "commit": "a6c2c3c72e329c21a82a877e861dcbcbeca81772",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 28,
+      "commit": "b22a8e09064e539931d97f9029d5a4c95077aa4b",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 29,
+      "commit": "4a855c2cb555a203cf441ffadea3d775fdce3467",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 30,
+      "commit": "b9b9ad569478a250321009d749fb1266d88c2a9b",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 31,
+      "commit": "468470071edfe9bfd7e526678864ac8fab92403b",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 32,
+      "commit": "9e52443b8cbefd341fc0f6003c78bb7866d04f5b",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 33,
+      "commit": "533491e00ee704bfe99ec63138ba629ef5288b60",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 34,
+      "commit": "d5333d4b35d21d7e9be98a3ca0157c79a93def06",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 35,
+      "commit": "ddc24b74b362c623cd68afe271993e7f262d3f48",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 36,
+      "commit": "f723306e63123a1c0d1267ac9f9c9340b7c71603",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 37,
+      "commit": "78fd2696e67d07d2ebb73b367a1d0485f504c680",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 38,
+      "commit": "474c6b44f332baafc9c98e6fb536b01213abef93",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 39,
+      "commit": "58517ab986e7e7f1d8f31c072bc2b9674eabdfcd",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 40,
+      "commit": "af8e9c11d0543519fd568437baf04909a10174d6",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 41,
+      "commit": "978f9ec86ae271155462fd6ffd9d693a965fc6ba",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 42,
+      "commit": "700a674ca3839009324f1b0b58811e83dd8c4712",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 43,
+      "commit": "f32c71d395149a6d7d738083eba15fd03561750b",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 44,
+      "commit": "a8562bdb6ff28cdee57dc04071392669cbcfdf0c",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 45,
+      "commit": "c2837cd6ccae1d2d6b5a0e6fcd55a008f9f6af39",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 46,
+      "commit": "d483f72de7235f9daa1769f9b3e5c771284c3883",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 47,
+      "commit": "643e6b587ee6d411870b2dcb1a8d775489c443a8",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 48,
+      "commit": "b37e7d6e6a66c138b72e862f2e1fd8fe6bd19a34",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 49,
+      "commit": "47d7daa1c4834ef17094451c87e42d5fb0aa749f",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 50,
+      "commit": "b81942cf0245757f240d6b48ab7409cba030f012",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 51,
+      "commit": "f981be7912610eb38e1cca51b5b709750c6d3f4a",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 52,
+      "commit": "962369d76242e0e42b8586ad65c0a490adc24951",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 53,
+      "commit": "75af7fd7fe9a3b1da7464be851d89ee1da0b5a7f",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 54,
+      "commit": "029e6a6ba81a6882dc87506bea410aab14a3f00f",
+      "embedding_dimension": 1024
+    },
+    {
+      "version": 55,
+      "commit": "2caa40b4bf203f3419799f42763079590030cc83",
+      "embedding_dimension": 1024
+    }
+  ]
+}

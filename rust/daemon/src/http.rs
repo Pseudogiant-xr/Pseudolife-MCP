@@ -81,7 +81,12 @@ impl App {
 }
 
 pub fn json_response(status: u16, body: &Value) -> Response {
-    let bytes = serde_json::to_vec(body).expect("serializable");
+    // `json.dumps(payload, default=str)`, byte for byte (pyjson.rs).
+    let bytes = if crate::mutants::active("serde-json-writer") {
+        serde_json::to_vec(body).expect("serializable")
+    } else {
+        crate::pyjson::dumps(body).into_bytes()
+    };
     (
         StatusCode::from_u16(status).expect("valid status"),
         [
@@ -395,10 +400,62 @@ async fn hook(app: &App, path: &str, method: &str, h: &HeaderMap, body: Body) ->
             }
             not_implemented(path)
         }
-        // session-start, memory-policy, coordination-start: their bodies
-        // (briefing, policy and board text) belong to later slices.
+        "/api/hook/coordination-start" => {
+            // `coordination.unavailable_reason`: config, the bearer and the
+            // stored-principal view only, never the board's storage.
+            let reason = board_unavailable_reason(app, h);
+            let text = if reason.is_some() {
+                String::new()
+            } else {
+                format!("{CHECKIN_TEXT}\n")
+            };
+            let state = match &reason {
+                Some(r) => format!("off; reason={r}"),
+                None => "on".to_string(),
+            };
+            let mut r = hook_text(&text);
+            r.headers_mut().insert(
+                "x-pl-board",
+                HeaderValue::from_str(&state).expect("ascii reason codes"),
+            );
+            r
+        }
+        // session-start, memory-policy: their bodies (briefing and policy
+        // text) belong to a later slice (W2-D).
         _ => not_implemented(path),
     }
+}
+
+/// `coordination.CHECKIN_TEXT`, recorded from Python (`harness/record_routes.py`).
+const CHECKIN_TEXT: &str = include_str!("../harness/goldens/checkin.txt");
+
+/// `coordination.unavailable_reason` (coordination.py:360-377).
+fn board_unavailable_reason(app: &App, h: &HeaderMap) -> Option<&'static str> {
+    if !app.service.config.coordination.enabled {
+        return Some("disabled");
+    }
+    // `authenticated_principal`: an open install never authenticates.
+    if !app.auth_configured() {
+        return Some("authentication_required");
+    }
+    let principal = match resolve(app, h) {
+        Resolved::Unavailable => return Some("principals_unavailable"),
+        Resolved::None => return Some("unauthorized"),
+        Resolved::Principal(p) => p,
+    };
+    // `principal_admitted` (principals.py:199-210).
+    let admitted = !matches!(principal.as_str(), "daemon" | "maintainer")
+        && (app
+            .service
+            .config
+            .coordination
+            .allowed_principals
+            .contains(&principal)
+            || app.store.admitted(&principal));
+    if !admitted {
+        return Some("principal_not_allowed");
+    }
+    None // a DSN is always configured in this port
 }
 
 fn body_limit(path: &str) -> usize {
@@ -486,6 +543,11 @@ async fn api(
         }
     }
     if coordination_path {
+        // `authenticated_principal` runs before the hub: an open install is
+        // refused (api.py:775-778); the hub itself is a later slice (W2-F).
+        if !app.auth_configured() && !crate::mutants::active("tokenless-maintainer-open") {
+            return json_response(401, &json!({"error": "authentication_required"}));
+        }
         return not_implemented(path);
     }
     if (coordination_errors || maintainer_path)
@@ -534,10 +596,17 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     }
     if path == "/" {
         let mut r = Response::new(Body::empty());
-        *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+        *r.status_mut() = if crate::mutants::active("static-redirect") {
+            StatusCode::FOUND
+        } else {
+            StatusCode::TEMPORARY_REDIRECT
+        };
         r.headers_mut()
             .insert(header::LOCATION, HeaderValue::from_static("/ui/"));
         for (k, v) in static_files::SECURITY_HEADERS {
+            if k == "content-security-policy" && crate::mutants::active("static-no-csp") {
+                continue;
+            }
             r.headers_mut().insert(k, HeaderValue::from_static(v));
         }
         return r;
@@ -569,6 +638,9 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
             ),
         };
         for (k, v) in static_files::SECURITY_HEADERS {
+            if k == "content-security-policy" && crate::mutants::active("static-no-csp") {
+                continue;
+            }
             r.headers_mut().insert(k, HeaderValue::from_static(v));
         }
         return r;
@@ -597,10 +669,23 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     let principal = match resolve(&app, &h) {
         Resolved::Unavailable => return principals_unavailable(),
         Resolved::None => return unauthorized(),
-        Resolved::Principal(p, ..) => p,
+        Resolved::Principal(p) => p,
     };
     if path == "/mcp" || path.starts_with("/mcp/") {
-        return crate::mcp::handle(&app, &principal, &path, &method, h, raw_query.as_deref(), body).await;
+        // Tokenless MCP awaits the accepted Host/Origin and identity policy.
+        if !app.auth_configured() {
+            return not_implemented(&path);
+        }
+        return crate::mcp::handle(
+            &app,
+            &principal,
+            &path,
+            &method,
+            h,
+            raw_query.as_deref(),
+            body,
+        )
+        .await;
     }
     // The MCP app's own router: `/mcp` is its only route.
     text_response(
@@ -756,6 +841,48 @@ async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn tokenless_mcp_remains_unserved() {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            crate::config::Config::default(),
+            env,
+            PathBuf::from("unused"),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            false,
+        ));
+        let app = Arc::new(App::new(
+            service,
+            auth::EnvTokens {
+                single: None,
+                map: vec![],
+            },
+            Arc::new(auth::PrincipalStore::new()),
+            None,
+        ));
+        for path in ["/mcp", "/mcp/", "/mcp/x"] {
+            for method in ["GET", "POST", "DELETE"] {
+                let request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", "127.0.0.1:8765")
+                    .body(Body::empty())
+                    .unwrap();
+                let response = handle(State(app.clone()), request).await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{method} {path}"
+                );
+                let body = axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap();
+                let payload: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(payload, json!({"error": "not_implemented", "path": path}));
+            }
+        }
+    }
 
     #[test]
     fn host_part_matches_python() {

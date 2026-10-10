@@ -98,7 +98,12 @@ impl McpState {
     /// `_stored_tier_of`: the stored principal row's tier, for the request's
     /// own bearer only (a client-asserted X-PL-Writer naming a stored
     /// principal does not take its tier).
-    fn stored_tier_for(&self, store: &crate::auth::PrincipalStore, principal: &str, key: &str) -> Option<Tier> {
+    fn stored_tier_for(
+        &self,
+        store: &crate::auth::PrincipalStore,
+        principal: &str,
+        key: &str,
+    ) -> Option<Tier> {
         if key.is_empty() || key != principal {
             return None;
         }
@@ -106,10 +111,19 @@ impl McpState {
     }
 
     /// `_resolve_principal_tier` for a request.
-    fn resolve_tier(&self, store: &crate::auth::PrincipalStore, principal: &str, key: Option<&str>) -> Tier {
-        tiers::resolve(key, &self.overrides, &self.tier_map, self.default_tier, |k| {
-            self.stored_tier_for(store, principal, k)
-        })
+    fn resolve_tier(
+        &self,
+        store: &crate::auth::PrincipalStore,
+        principal: &str,
+        key: Option<&str>,
+    ) -> Tier {
+        tiers::resolve(
+            key,
+            &self.overrides,
+            &self.tier_map,
+            self.default_tier,
+            |k| self.stored_tier_for(store, principal, k),
+        )
     }
 
     fn lookup(&self, sid: &str) -> Lookup {
@@ -161,7 +175,10 @@ impl McpState {
     /// Server-initiated message to the session's standalone stream, if open.
     fn notify(&self, sid: &str, message: &Value) {
         let s = self.sessions.lock().expect("sessions lock");
-        if let Some(Entry { stream: Some(tx), .. }) = s.live.get(sid) {
+        if let Some(Entry {
+            stream: Some(tx), ..
+        }) = s.live.get(sid)
+        {
             let _ = tx.send(sse_event(&message.to_string()));
         }
     }
@@ -196,19 +213,28 @@ fn rpc_http_error(status: u16, code: i64, message: &str, sid: Option<&str>) -> R
 fn json_bytes(status: u16, body: Vec<u8>, sid: Option<&str>) -> Response {
     let mut r = Response::new(Body::from(body));
     *r.status_mut() = StatusCode::from_u16(status).unwrap();
-    r.headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    r.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
     if let Some(sid) = sid {
-        r.headers_mut().insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+        r.headers_mut()
+            .insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
     }
     r
 }
 
 fn sse_headers(r: &mut Response, sid: &str) {
     let h = r.headers_mut();
-    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-transform"));
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
     h.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
     if !crate::mutants::active("mcp-sse-no-session") {
         h.insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
     }
@@ -220,11 +246,24 @@ fn accepts(h: &HeaderMap) -> (bool, bool) {
     let raw = latin1(h, "accept").unwrap_or_default();
     let types: Vec<String> = raw
         .split(',')
-        .map(|t| t.trim().split(';').next().unwrap_or("").trim().to_lowercase())
+        .map(|t| {
+            t.trim()
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_lowercase()
+        })
         .collect();
     let any = types.iter().any(|t| t == "*/*");
-    let json = any || types.iter().any(|t| t == "application/json" || t == "application/*");
-    let sse = any || types.iter().any(|t| t == "text/event-stream" || t == "text/*");
+    let json = any
+        || types
+            .iter()
+            .any(|t| t == "application/json" || t == "application/*");
+    let sse = any
+        || types
+            .iter()
+            .any(|t| t == "text/event-stream" || t == "text/*");
     (json, sse)
 }
 
@@ -386,7 +425,12 @@ pub async fn handle(
         Method::GET => get(state, &sid, known, &headers),
         Method::DELETE => {
             if !known {
-                return rpc_http_error(400, INVALID_REQUEST, "Bad Request: Missing session ID", Some(&sid));
+                return rpc_http_error(
+                    400,
+                    INVALID_REQUEST,
+                    "Bad Request: Missing session ID",
+                    Some(&sid),
+                );
             }
             state.terminate(&sid);
             json_bytes(200, Vec::new(), Some(&sid))
@@ -423,7 +467,12 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
         );
     }
     if !known {
-        return rpc_http_error(400, INVALID_REQUEST, "Bad Request: Missing session ID", Some(sid));
+        return rpc_http_error(
+            400,
+            INVALID_REQUEST,
+            "Bad Request: Missing session ID",
+            Some(sid),
+        );
     }
     let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
     {
@@ -431,7 +480,12 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
         let Some(entry) = s.live.get_mut(sid) else {
             // Terminated between the lookup and here.
             drop(s);
-            return rpc_http_error(404, INVALID_REQUEST, "Not Found: Session has been terminated", Some(sid));
+            return rpc_http_error(
+                404,
+                INVALID_REQUEST,
+                "Not Found: Session has been terminated",
+                Some(sid),
+            );
         };
         if entry.stream.as_ref().is_some_and(|t| !t.is_closed()) {
             drop(s);
@@ -445,7 +499,8 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
         entry.stream = Some(tx);
     }
     let stream = async_stream(move |yield_tx| async move {
-        let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+        let mut ping =
+            tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
         loop {
             tokio::select! {
                 msg = rx.recv() => match msg {
@@ -465,18 +520,26 @@ fn get(state: &McpState, sid: &str, known: bool, headers: &HeaderMap) -> Respons
 }
 
 /// A response body fed by a producer task.
-fn async_stream<F, Fut>(producer: F) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send
+fn async_stream<F, Fut>(
+    producer: F,
+) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     F: FnOnce(mpsc::Sender<Result<Bytes, std::io::Error>>) -> Fut,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
     let (tx, rx) = mpsc::channel(8);
     tokio::spawn(producer(tx));
-    futures::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) })
+    futures::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    })
 }
 
 enum Message {
-    Request { id: Value, method: String, params: Map<String, Value> },
+    Request {
+        id: Value,
+        method: String,
+        params: Map<String, Value>,
+    },
     /// Notifications and client responses: answered 202, then handled or
     /// dropped. Holds the method for notifications.
     Other(Option<String>),
@@ -508,9 +571,17 @@ fn classify(v: &Value) -> Option<Message> {
         if !params_ok {
             return None;
         }
-        let params = o.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+        let params = o
+            .get("params")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
         if let Some(id) = o.get("id").and_then(request_id) {
-            return Some(Message::Request { id, method: m.clone(), params });
+            return Some(Message::Request {
+                id,
+                method: m.clone(),
+                params,
+            });
         }
         return Some(Message::Other(Some(m.clone())));
     }
@@ -519,7 +590,8 @@ fn classify(v: &Value) -> Option<Message> {
         return Some(Message::Other(None));
     }
     let error_ok = o.get("error").and_then(Value::as_object).is_some_and(|e| {
-        e.get("code").is_some_and(|c| request_id(c).is_some_and(|c| c.is_number()))
+        e.get("code")
+            .is_some_and(|c| request_id(c).is_some_and(|c| c.is_number()))
             && e.get("message").is_some_and(Value::is_string)
     });
     if (id_ok || o.get("id").is_some_and(Value::is_null)) && error_ok {
@@ -576,7 +648,12 @@ async fn post(
     };
     let is_init = matches!(&message, Message::Request { method, .. } if method == "initialize");
     if !is_init && !known {
-        return rpc_http_error(400, INVALID_REQUEST, "Bad Request: Missing session ID", Some(sid));
+        return rpc_http_error(
+            400,
+            INVALID_REQUEST,
+            "Bad Request: Missing session ID",
+            Some(sid),
+        );
     }
     let (id, method, params) = match message {
         Message::Request { id, method, params } => (id, method, params),
@@ -601,7 +678,8 @@ async fn post(
     ));
     let stream = async_stream(move |tx| async move {
         tokio::pin!(work);
-        let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+        let mut ping =
+            tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
         let data = loop {
             tokio::select! {
                 data = &mut work => break data,
@@ -684,8 +762,15 @@ async fn respond(
             rpc_result(&id, &catalogue::list_result(tier))
         }
         "tools/call" => {
-            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-            let args = params.get("arguments").and_then(Value::as_object).cloned().unwrap_or_default();
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let args = params
+                .get("arguments")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
             let result = call_tool(&app, &principal, &sid, &headers, name, &args).await;
             rpc_result(&id, &result.to_string())
         }
@@ -693,13 +778,24 @@ async fn respond(
         "resources/list" => rpc_result(&id, "{\"resources\":[]}"),
         "resources/templates/list" => rpc_result(&id, "{\"resourceTemplates\":[]}"),
         "prompts/get" => {
-            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             json!({"jsonrpc": "2.0", "id": id, "error": {"code": 0, "message": format!("Unknown prompt: {name}")}})
                 .to_string()
         }
         "resources/read" => {
-            let uri = params.get("uri").and_then(Value::as_str).unwrap_or_default();
-            rpc_error(&id, INVALID_PARAMS, &format!("Unknown resource: {uri}"), json!({"uri": uri}))
+            let uri = params
+                .get("uri")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            rpc_error(
+                &id,
+                INVALID_PARAMS,
+                &format!("Unknown resource: {uri}"),
+                json!({"uri": uri}),
+            )
         }
         _ => rpc_error(&id, METHOD_NOT_FOUND, "Method not found", json!(method)),
     }
@@ -755,7 +851,10 @@ async fn call_tool(
         let key = identity::tier_key(principal, headers);
         let (out, changed) = toolset::run(state, &app.store, action, principal, key.as_deref());
         if changed {
-            state.notify(sid, &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
+            state.notify(
+                sid,
+                &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
+            );
         }
         return envelope::success_result(&out);
     }
@@ -763,7 +862,15 @@ async fn call_tool(
         return envelope::error_result(&dispatch::not_implemented(name));
     };
     let ident = identity::call_identity(principal, headers);
-    match body(app, dispatch::ToolCall { args, ident: &ident }).await {
+    match body(
+        app,
+        dispatch::ToolCall {
+            args,
+            ident: &ident,
+        },
+    )
+    .await
+    {
         Ok(v) => envelope::success_result(&v),
         Err(e) => envelope::error_result(&envelope::error_payload(name, &e)),
     }
@@ -783,7 +890,11 @@ fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
                     Some(g) => format!("; did you mean '{g}'?"),
                     None => ".".to_string(),
                 };
-                let listed = if Some(k) == unknown.last() { " Accepted: action" } else { "" };
+                let listed = if Some(k) == unknown.last() {
+                    " Accepted: action"
+                } else {
+                    ""
+                };
                 format!("unknown parameter '{k}' for memory_toolset{hint}{listed}")
             })
             .collect::<Vec<_>>()
@@ -858,7 +969,11 @@ mod goldens {
             let params = json!({"protocolVersion": version, "capabilities": {},
                                 "clientInfo": {"name": "mcp", "version": "0.1.0"}});
             let params = params.as_object().unwrap();
-            assert_eq!(initialize_result(params).unwrap(), want.as_str().unwrap(), "{version}");
+            assert_eq!(
+                initialize_result(params).unwrap(),
+                want.as_str().unwrap(),
+                "{version}"
+            );
         }
     }
 

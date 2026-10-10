@@ -33,14 +33,21 @@ fn matched(a: &[char], b: &[char], alo: usize, ahi: usize, blo: usize, bhi: usiz
 
 /// `find_longest_match` without junk: the earliest longest block in `a`,
 /// and for that, the earliest in `b`.
-fn longest(a: &[char], b: &[char], alo: usize, ahi: usize, blo: usize, bhi: usize) -> (usize, usize, usize) {
+fn longest(
+    a: &[char],
+    b: &[char],
+    alo: usize,
+    ahi: usize,
+    blo: usize,
+    bhi: usize,
+) -> (usize, usize, usize) {
     let (mut best_i, mut best_j, mut best_k) = (alo, blo, 0);
     // j2len[j] = length of the match ending at a[i-1], b[j].
     let mut j2len = vec![0usize; b.len() + 1];
-    for i in alo..ahi {
+    for (i, &a_char) in a.iter().enumerate().take(ahi).skip(alo) {
         let mut new = vec![0usize; b.len() + 1];
         for j in blo..bhi {
-            if a[i] == b[j] {
+            if a_char == b[j] {
                 let k = if j > 0 { j2len[j - 1] } else { 0 } + 1;
                 new[j] = k;
                 if k > best_k {
