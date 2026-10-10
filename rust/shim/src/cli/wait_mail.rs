@@ -1156,6 +1156,46 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof() {
+        use std::process::{Command, Stdio};
+        const CHILD: &str = "PSEUDOLIFE_TEST_FIFO_EOF";
+        const DELAYED: &str = "PSEUDOLIFE_TEST_FIFO_EOF_DELAYED";
+        const RELEASED: &str = "released delayed writer after the reader returned";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let delayed = std::env::var(DELAYED).as_deref() == Ok("1");
+            let path = PathBuf::from(path);
+            let writer_path = path.clone();
+            let bytes = vec![b'p'; 10000];
+            let sent = bytes.clone();
+            let (release, startup) = std::sync::mpsc::channel();
+            let writer = std::thread::spawn(move || {
+                if delayed {
+                    startup.recv().unwrap();
+                }
+                OpenOptions::new()
+                    .write(true)
+                    .open(writer_path)?
+                    .write_all(&sent)
+            });
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut checks = 0;
+            let result = interruptible_read_with(&path, || {
+                checks += 1;
+                (delayed && checks > 1) || Instant::now() >= deadline
+            });
+            if delayed {
+                assert_eq!(
+                    result.as_ref().unwrap_err().kind(),
+                    io::ErrorKind::Interrupted
+                );
+                release.send(()).unwrap();
+                println!("{RELEASED}");
+                io::stdout().flush().unwrap();
+            }
+            let written = writer.join().unwrap();
+            written.unwrap();
+            assert_eq!(result.unwrap(), bytes);
+            return;
+        }
         let home = std::env::temp_dir().join(format!("wait-mail-read-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&home).unwrap();
         let fifo = home.join("digest");
@@ -1165,17 +1205,46 @@ mod tests {
             rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
         )
         .unwrap();
-        let path = fifo.clone();
-        let bytes = vec![b'p'; 10000];
-        let sent = bytes.clone();
-        let writer =
-            std::thread::spawn(move || OpenOptions::new().write(true).open(path)?.write_all(&sent));
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let result = interruptible_read_with(&fifo, || Instant::now() >= deadline);
-        let written = writer.join().unwrap();
+        let mut results = Vec::new();
+        for delayed in [false, true] {
+            // Contain a writer that starts only after the reader has closed.
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::wait_mail::tests::fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof",
+                    "--nocapture",
+                ])
+                .env_clear()
+                .env(CHILD, &fifo)
+                .env(DELAYED, if delayed { "1" } else { "0" })
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut forced = false;
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    forced = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let output = child.wait_with_output().unwrap();
+            results.push((delayed, forced, output));
+        }
         fs::remove_dir_all(home).unwrap();
-        written.unwrap();
-        assert_eq!(result.unwrap(), bytes);
+        for (delayed, forced, output) in results {
+            assert_eq!(forced, delayed, "{output:?}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("running 1 test"), "{output:?}");
+            if delayed {
+                assert!(text.contains(RELEASED), "{output:?}");
+            } else {
+                assert!(output.status.success(), "{output:?}");
+            }
+        }
     }
 
     #[test]
