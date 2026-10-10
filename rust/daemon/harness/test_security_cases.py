@@ -35,7 +35,7 @@ def test_unfiltered_golden_replay_keeps_ordinary_security_and_skips_remote(tmp_p
 
 def test_admission_cases_cannot_declare_a_security_refusal():
     ordinary = [c for name in ORDINARY for c in run.SCENARIOS[name]().cases()]
-    assert len(ordinary) == 71
+    assert len(ordinary) == 75
     for name in ORDINARY + REMOTE:
         scenario = run.SCENARIOS[name]()
         cases = scenario.cases()

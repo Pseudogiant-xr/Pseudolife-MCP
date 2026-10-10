@@ -97,6 +97,13 @@ def closed_cases(case):
                    OVERSIZE, 503, "principals_unavailable"),
             expect(case, "hook method before auth", "PUT", "/api/hook/session-end", body=OVERSIZE,
                    status=405, error="method_not_allowed", priority="hook method before bearer/body")]
+    for name, body in (
+            ("api-reserved-number-key-object", b'{"$serde_json::private::Number":"1"}'),
+            ("api-reserved-number-key-text", b'{"$serde_json::private::Number":"text"}'),
+            ("api-reserved-number-key-nested", b'{"nested":{"$serde_json::private::Number":"text"}}'),
+            ("api-reserved-number-key-mixed", b'{"$serde_json::private::Number":"1","ordinary":2}')):
+        out.append(expect(case, name, "POST", "/api/nope", [auth, JS], body,
+                          priority="ordinary object keys survive JSON admission"))
     return out
 
 
