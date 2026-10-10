@@ -1,6 +1,8 @@
 //! Feature-gated process adapter for the dream differential harness.
 #[path = "../dream/mod.rs"]
 mod dream;
+#[path = "../graph_read.rs"]
+mod graph_read;
 #[allow(dead_code)]
 #[path = "../mutants.rs"]
 mod mutants;
