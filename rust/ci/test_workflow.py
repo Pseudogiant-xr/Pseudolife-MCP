@@ -52,7 +52,7 @@ def commands(script):
     result = []
     for line in script.splitlines():
         line = line.strip()
-        if not line.startswith(("python ", "cargo ", "& $oraclePython ")):
+        if not line.startswith(("python ", "cargo ", "& cargo ", "& $oraclePython ")):
             continue
         words = shlex.split(line, comments=True)
         if words[0] == "&":
@@ -103,10 +103,10 @@ def check_executable_coverage(jobs):
     parity_steps = jobs["parity-checks"]["steps"]
     for step in parity_steps:
         for words in commands(step.get("run", "")):
+            # Global Cargo options and a toolchain may precede the subcommand.
             cargo = words[1:] if words[0] == "cargo" else []
-            if cargo and cargo[0].startswith("+"):
-                cargo = cargo[1:]
-            assert not cargo or cargo[0] != "build", step.get("name")
+            cargo = cargo[:cargo.index("--")] if "--" in cargo else cargo
+            assert "build" not in cargo, step.get("name")
     parity = {step.get("name"): step for step in parity_steps}
     require_command(commands(parity["Run every eval harness test"]["run"]),
                     ("python", "-m", "pytest"),
@@ -428,6 +428,8 @@ def test_principal_commands_use_the_downloaded_candidate(monkeypatch, old, new):
 @pytest.mark.parametrize("script", [
     "cargo build --release --bin pseudolife-daemon",
     "cargo +1.94.0 build --locked --release --bin pseudolife-daemon",
+    "cargo --color never build --release --bin pseudolife-daemon",
+    "& cargo build --release --bin pseudolife-daemon",
 ])
 def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
     changed = copy.deepcopy(workflow())
