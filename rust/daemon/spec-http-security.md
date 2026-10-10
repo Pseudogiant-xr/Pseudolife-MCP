@@ -32,20 +32,20 @@ durable-storage write parity.
 | Scenario | Cases | Contract |
 | --- | ---: | --- |
 | security-open | 32 | Browser refusals, literal loopback admission, malformed headers and pairing/hook priority |
-| security-closed | 29 | REST/MCP bearer refusals, duplicate Authorization, unavailable view and hook priority |
+| security-closed | 33 | REST/MCP bearer refusals, duplicate Authorization, unavailable view and hook priority |
 | security-encodings | 8 | UTF-8/Latin-1 candidates and map principal admission |
 | security-encoding-priority | 1 | Conflicting map/singular candidates select the map principal |
 | security-terminal-byte | 1 | A UTF-8 token ending in a Latin-1 whitespace byte is preserved |
 | security-refusals | 4 | Entirely rejected maps and false trust values refuse before listening |
 | security-remote-open | 32 | Trusted remote-bind policy retains tokenless browser refusals |
-| security-remote-auth | 29 | Authenticated remote-bind policy retains credential admission |
+| security-remote-auth | 33 | Authenticated remote-bind policy retains credential admission |
 
-The ordinary 71-case corpus and four startup refusals use the default static
-release artifact. The same 71 cases exercise six source controls through the
+The ordinary 75-case corpus and four startup refusals use the default static
+release artifact. The same 75 cases exercise six source controls through the
 existing release `mutants,graph-harness` artifact. Golden replay uses recorded
 Python responses; no security refusal is declared away.
 
-Both OS CLI shards also run the 61 remote-policy cases using a debug mutants
+Both OS CLI shards also run the 65 remote-policy cases using a debug mutants
 artifact produced by the Rust job after its build-configuration checks. The
 shards depend on both artifact producers and never rebuild the daemon. The
 default static, release mutants, stdio and graph artifacts retain their roles;
@@ -63,6 +63,11 @@ skips them while retaining all five ordinary security scenarios and recordings.
 HTTP scenarios retain the existing disposable-template allocation and
 unreachable loopback DSN. Equality of the untouched template databases is
 evidence about those fixtures, not writes that a reachable bank might receive.
+
+The token-bearing corpus also verifies top-level, nested and mixed-key JSON
+objects containing ordinary keys that match serde_json transport names.
+HTTP parsing reversibly prefixes all object keys before constructing Values,
+then restores them without changing numeric values or duplicate-key semantics.
 
 ## Source controls
 

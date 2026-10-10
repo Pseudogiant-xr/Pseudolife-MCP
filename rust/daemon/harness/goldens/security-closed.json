@@ -362,6 +362,54 @@
     "error": "method_not_allowed"
    },
    "status": 405
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "error": "not_found",
+    "path": "/api/nope"
+   },
+   "status": 404
   }
  ]
 }
