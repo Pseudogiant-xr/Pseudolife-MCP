@@ -20,8 +20,10 @@ mod pyjson;
 mod routes;
 mod search;
 mod service;
+mod startup;
 mod static_files;
 mod storage;
+mod txn;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,6 +61,12 @@ fn main() {
         if runtime.block_on(principal_probe::run()).is_err() {
             fail(1, "principal harness refused");
         }
+        return;
+    }
+    if cfg!(feature = "mutants")
+        && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
+    {
+        println!("{}", mutants::supports_loopback_bind_fixture());
         return;
     }
     // The embedding harness exercises the same loader and encoder without a bank.
@@ -176,7 +184,9 @@ fn main() {
     let code = runtime.block_on(async move {
         // asyncio binds every interface for an empty host (IPv4 here: the
         // IPv6 wildcard is a declared divergence).
-        let host = if env.host.is_empty() {
+        let host = if mutants::loopback_bind_fixture() {
+            "127.0.0.1".to_string()
+        } else if env.host.is_empty() {
             "0.0.0.0".to_string()
         } else {
             env.host.clone()

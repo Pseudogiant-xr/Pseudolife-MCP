@@ -13,6 +13,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `POST /api/coordination/*` after the body checks | the board hub | W2-F |
 | `/mcp`, `/mcp/*` after the bearer gate | the MCP transport | W2-G |
+| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; MCP stays unmounted (501) until these gates are ported |
+| Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
@@ -52,7 +54,11 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
-| Hydration | CMS with capacity rebalancing, cortex, world, lessons, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed, the warmup search | entries and band-stamp write-back only | W2-D, W2-E, W3-H |
+| Future or malformed schema version | `storage/schema.py:1657-1662` overwrites the stored version with the build's version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state | W3 PG-HYDRATE; required by the slice brief, retained for the maintainer's cutover decision |
+| Remaining startup integration | CMS and canonical stores, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed and warmup search | complete entry seating, episodes, canonical loader inputs and identity metadata attach to cached Ready after all required loads; late HLC failure retains those stores with a pending flag and blocks returning Ready until clock-only retry succeeds; read/write stores adopt StartupState and seed their clock before ticking | W2-D/E (store adoption, clock ticking and warmup search), W3-H (dream tracking), W3-J (legacy/file import) |
+| Episode start-time ties | startup loads episodes with `ORDER BY started_at`, without a tie key | uses the same query ordering; ties among equal start times follow the server's row order in both arms | W3 PG-HYDRATE; Python ordering retained |
+| Session-pointer or tombstone timestamp parse failures | fail before the embedder and resident-store abandon path; each initialization call retries parsing | fail inside required initialization and arm its retry backoff | W3 PG-HYDRATE; non-canonical metadata, declared divergence |
+| Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
 | Session reaper | closes idle session episodes every `PSEUDOLIFE_SESSION_REAP_SECONDS`, after `_ensure_init` | only the `_ensure_init` retry runs on that cadence | W2-E (episodes) |
@@ -63,6 +69,16 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Item | Python | Rust |
 |---|---|---|
+| Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
+| A directory's index linked outside the static root | no containment check after the index append | `directory-index-containment`: Rust rechecks the appended child and returns 403 with exact refusal headers/body |
+| Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
 | JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels) | 400 `invalid_json` |
-| Static types for `.md`, `.csv` and other extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` |
+| Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
 | Unicode decimal digits in `top_k` / `min_score` (`top_k=٣`) | `int()` / `float()` accept them (3) | not a number: the route default (delegate ruling 2026-10-09: non-canonical input) |
+
+## Graph and review
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
+| Traversal, communities, graph service/MCP wiring, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | graph store only; these services are not wired | W3-H, subsequent increments |

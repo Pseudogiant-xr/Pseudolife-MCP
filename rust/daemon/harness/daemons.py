@@ -122,7 +122,18 @@ def make_home(root: Path, name: str, config_yaml: str | None) -> Path:
 def python_daemon(home: Path, port: int, env: dict[str, str]) -> Daemon:
     env = dict(env)
     env.setdefault("PSEUDOLIFE_MCP_PORT", str(port))  # a refusal case may set its own
-    return Daemon("python", [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
+    argv = [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
+    if env.get("PL_HARNESS_STATIC_DIR") or env.get("PL_HARNESS_LOOPBACK_BIND"):
+        setup = "import os,sys; from pathlib import Path; "
+        if env.get("PL_HARNESS_STATIC_DIR"):
+            setup += ("import pseudolife_memory.web.api as api; "
+                      "api.STATIC_DIR = Path(os.environ['PL_HARNESS_STATIC_DIR']); ")
+        if env.get("PL_HARNESS_LOOPBACK_BIND"):
+            setup += ("import uvicorn; original = uvicorn.run; "
+                      "uvicorn.run = lambda *args, **kwargs: original(*args, **dict(kwargs, host='127.0.0.1')); ")
+        argv = [sys.executable, "-c", setup +
+                "from pseudolife_memory.cli import main; sys.argv = ['pseudolife-mcp', 'serve']; main()"]
+    return Daemon("python", argv,
                   dict(env, PYTHONPATH=str(REPO)), home, port, home / "daemon.log")
 
 

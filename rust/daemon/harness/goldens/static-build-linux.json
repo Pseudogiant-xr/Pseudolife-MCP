@@ -1,0 +1,350 @@
+{
+ "db_state": {
+  "unchanged_from_before": true
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "table",
+    "retrieval_events",
+    null,
+    "the warmup search logs a retrieval event (W2-D telemetry)"
+   ],
+   [
+    "sequence",
+    "retrieval_events_id_seq",
+    null,
+    "advanced by that retrieval event (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "bytes": "",
+   "headers": {
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "location": "/ui/",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 307
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "location": "/ui/",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 307
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "location": "/ui/",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 307
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "forbidden",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "9",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 403
+  },
+  {
+   "bytes": "forbidden",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "9",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 403
+  },
+  {
+   "bytes": "static error",
+   "headers": {
+    "cache-control": "no-cache",
+    "content-length": "12",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 500
+  },
+  {
+   "bytes": "<4368 bytes sha256:f9a0fd2c709474348c0c659b>",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "4368",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/plain; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<69652 bytes sha256:a472b16eb828af1b39018e63>",
+   "headers": {
+    "cache-control": "max-age=86400",
+    "content-length": "69652",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "font/woff2",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<71368 bytes sha256:f35865e4426620f778cc353f>",
+   "headers": {
+    "cache-control": "max-age=86400",
+    "content-length": "71368",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "font/woff2",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<113746 bytes sha256:6afbf1fac617203b6d7f9187>",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "113746",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/css; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<426574 bytes sha256:00d978cc74a51b26ff55e915>",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "426574",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "application/javascript; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<177594 bytes sha256:541aee28daed26ee53042a3b>",
+   "headers": {
+    "cache-control": "max-age=86400",
+    "content-length": "177594",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "image/webp",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<37916 bytes sha256:2d5d40936784dc44cfa83bdc>",
+   "headers": {
+    "cache-control": "max-age=86400",
+    "content-length": "37916",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "image/png",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"color-scheme\" content=\"dark light\" />\n    <meta name=\"robots\" content=\"noindex\" />\n    <title>Cortex Console</title>\n    <!-- Classic, blocking: applies the stored theme before first paint. -->\n    <script src=\"/ui/theme.js\"></script>\n    <script type=\"module\" crossorigin src=\"/ui/assets/index-DNrrQi0Q.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/ui/assets/index-BFOM-F8H.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n  </body>\n</html>\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "637",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/html; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "// Apply the stored theme before first paint; same key as the classic console.\n// A file, not an inline script: the Console's Content-Security-Policy allows\n// script from 'self' only.\ntry {\n  var t = localStorage.getItem(\"pl_theme\");\n  if (t === \"light\" || t === \"dark\") document.documentElement.setAttribute(\"data-theme\", t);\n} catch (e) {}\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "343",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "application/javascript; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "# Vendored third-party assets\n\nThese files are vendored (committed in-tree) so the Cortex Console stays fully\n**offline** \u00e2\u0080\u0094 no CDN at runtime, matching the daemon's baked `HF_HUB_OFFLINE`\nimage. They live in `frontend/public/vendor/`, which Vite copies into the\nbuild unchanged, so the daemon serves them verbatim at `/ui/vendor/`; the\nconsole lazy-loads them on demand.\n\n## `galaxy.bundle.js`\n\n- **What:** [`3d-force-graph`](https://github.com/vasturiano/3d-force-graph)\n  (WebGL 3D force-directed graph) bundled together with its own\n  [three.js](https://github.com/mrdoob/three.js) so the console can build\n  custom scene objects (label sprites, community nebulae) against the **same\n  three instance** the graph uses \u00e2\u0080\u0094 two three copies in one scene is the\n  classic `instanceof`/render-state landmine this bundle exists to avoid.\n- **Exports:** `default` \u00e2\u0086\u0092 the `ForceGraph3D` constructor; `THREE` \u00e2\u0086\u0092 the full\n  three namespace. Powers the Graph view's galaxy via\n  `frontend/src/lib/galaxy.ts`.\n- **Versions (pinned):** `3d-force-graph@1.73.6`, `three@0.185.1` (resolved,\n  single deduped copy \u00e2\u0080\u0094 verified with `npm ls three`).\n- **Size:** \u00e2\u0089\u00881.5 MB minified ESM, target es2020.\n\n### Build recipe (reproducible)\n\n```bash\nmkdir galaxy-bundle && cd galaxy-bundle && npm init -y\nnpm install --save-exact 3d-force-graph@1.73.6\nnpm install --save-dev --save-exact esbuild@0.24.2 license-checker-rseidelsohn@4.4.2\n\n# license gate \u00e2\u0080\u0094 allowlist: MIT/ISC/BSD-2/BSD-3/Apache-2.0/0BSD/CC0/Unlicense\nnpx license-checker-rseidelsohn --production --summary\nnpm ls three          # must resolve to exactly ONE copy\n\ncat > entry.mjs <<'EOF'\nimport ForceGraph3D from \"3d-force-graph\";\nimport * as THREE from \"three\";\nexport default ForceGraph3D;\nexport { THREE };\nEOF\nnpx esbuild entry.mjs --bundle --format=esm --target=es2020 --minify \\\n  --legal-comments=eof --outfile=galaxy.bundle.js\n\n# self-containment checks\ngrep -c  WebGLRenderer galaxy.bundle.js          # > 0\ngrep -cE 'from ?\"(https?:|/)' galaxy.bundle.js   # must be 0\n```\n\nTo update: bump the pinned version, rerun the recipe (the license gate and the\none-three check are mandatory, not advisory), re-run the galaxy QA.\n\n### License inventory (audit of 2026-07-15, all permissive)\n\n`license-checker-rseidelsohn --production` summary: **MIT \u00c3\u009718, ISC \u00c3\u009714,\nBSD-3-Clause \u00c3\u00974** \u00e2\u0080\u0094 nothing copyleft, nothing unknown. Upstream `@license`\nbanners are embedded at the end of the bundle (`--legal-comments=eof`).\n\n- **MIT:** 3d-force-graph, three, three-forcegraph, three-render-objects,\n  d3-force-3d, d3-binarytree, d3-octree, @tweenjs/tween.js, @babel/runtime,\n  accessor-fn, data-bind-mapper, float-tooltip, kapsule, lodash-es,\n  ngraph.merge, polished, preact, tinycolor2\n- **ISC:** d3-array, d3-color, d3-dispatch, d3-format, d3-interpolate,\n  d3-quadtree, d3-scale, d3-scale-chromatic, d3-selection, d3-time,\n  d3-time-format, d3-timer, internmap\n- **BSD-3-Clause:** ngraph.events, ngraph.forcelayout, ngraph.graph,\n  ngraph.random\n\nAttribution: `3d-force-graph` \u00c2\u00a9 Vasco Asturiano (MIT); `three.js` \u00c2\u00a9 three.js\nauthors (MIT); d3 modules \u00c2\u00a9 Mike Bostock (ISC); ngraph \u00c2\u00a9 Andrei Kashcha\n(BSD-3-Clause).\n\n(The previous `3d-force-graph.bundle.js` \u00e2\u0080\u0094 an esm.sh bundle exporting only the\ndefault constructor \u00e2\u0080\u0094 was superseded by `galaxy.bundle.js` and removed in\nAtlas stage 2.)\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "3336",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "text/markdown; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "<1540006 bytes sha256:d965007f9d946bc55f46e4c1>",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "1540006",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "application/javascript; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "// Apply the stored theme before first paint; same key as the classic console.\n// A file, not an inline script: the Console's Content-Security-Policy allows\n// script from 'self' only.\ntry {\n  var t = localStorage.getItem(\"pl_theme\");\n  if (t === \"light\" || t === \"dark\") document.documentElement.setAttribute(\"data-theme\", t);\n} catch (e) {}\n",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "343",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "application/javascript; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  },
+  {
+   "bytes": "",
+   "headers": {
+    "cache-control": "no-store",
+    "content-length": "343",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "content-type": "application/javascript; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+   },
+   "status": 200
+  }
+ ]
+}

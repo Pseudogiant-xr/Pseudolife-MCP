@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/rust.yml"
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
 RUST_CHECKS = (
+    "Check generated daemon schema",
     "Bind the selected Python interpreter for Rust fixtures",
     "Install the Python SDK fixture dependency",
     "Bind the event-selected Python oracle",
@@ -22,6 +24,7 @@ RUST_CHECKS = (
     "Check formatting", "Check all targets", "Clippy", "Nextest",
     "Check all targets without default features", "Clippy without default features",
     "Nextest without default features",
+    "Daemon override build configurations",
 )
 PARITY_CHECKS = {
     "Install checkout and test dependencies": None,
@@ -33,6 +36,11 @@ PARITY_CHECKS = {
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
     "Principal store differential and golden harness": "cli",
+    "Daemon static HTTP parity": "cli",
+
+    "Daemon schema startup parity": "cli",
+    "Graph store differential and recorded oracle": "cli",
+    "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -76,6 +84,9 @@ def row_commands(invocations, required_rows, golden):
 
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
+    require_command(commands(rust["Check generated daemon schema"]["run"]),
+                    ("python", "rust/daemon/harness/gen_schema_sql.py"), ("--check",))
+    assert rust["Check generated daemon schema"]["working-directory"] == "."
     for name, prefix in (("Check formatting", ("cargo", "fmt")),
                          ("Check all targets", ("cargo", "check")),
                          ("Clippy", ("cargo", "clippy")),
@@ -89,7 +100,14 @@ def check_executable_coverage(jobs):
             forbidden = ("--features", "--all-features") if no_defaults else ("--no-default-features",)
             require_command(commands(rust[label]["run"]), prefix, required, forbidden)
 
-    parity = {step.get("name"): step for step in jobs["parity-checks"]["steps"]}
+    parity_steps = jobs["parity-checks"]["steps"]
+    for step in parity_steps:
+        for words in commands(step.get("run", "")):
+            cargo = words[1:] if words[0] == "cargo" else []
+            if cargo and cargo[0].startswith("+"):
+                cargo = cargo[1:]
+            assert not cargo or cargo[0] != "build", step.get("name")
+    parity = {step.get("name"): step for step in parity_steps}
     require_command(commands(parity["Run every eval harness test"]["run"]),
                     ("python", "-m", "pytest"),
                     ("evals/rust_port", "evals/rust_baseline", "-p",
@@ -105,6 +123,28 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    static = commands(parity["Daemon static HTTP parity"]["run"])
+    for mode in ("live", "golden"):
+        require_command(static, ("python", "rust/daemon/harness/run.py", mode),
+                        ("--rust-bin", "--only", "static-build", "static-paths", "static-missing", "static-root-link", "--out"),
+                        ("--record", "--mutants"))
+    require_command(static, ("python", "-m", "pytest"), ("rust/daemon/harness/test_static.py",), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in static)
+    override = commands(rust["Daemon override build configurations"]["run"])
+    for release in (False, True):
+        required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
+        required += ("--release", "--features", "mutants") if release else ()
+        require_command(override, ("cargo", "+1.94.0", "test"), required, () if release else ("--release", "--features"))
+
+    schema = commands(parity["Daemon schema startup parity"]["run"])
+    require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
+                    ("--out", "--test-bin-out"), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in schema)
+    startup = commands(parity["Daemon resident startup parity"]["run"])
+    require_command(startup, ("python", "rust/daemon/harness/startup_ci.py"),
+                    ("--out", "--no-build", "--rust-test-bin"), ("--record-goldens",))
+    assert not any(words[0] == "cargo" for words in startup)
+    assert "daemon-storage-test-path.txt" in parity["Daemon resident startup parity"]["run"]
     embedding = parity["Offline embedding golden and mutant row"]
     invocations = commands(embedding["run"])
     require_command(invocations, ("python", "-m", "pytest"),
@@ -120,7 +160,19 @@ def check_executable_coverage(jobs):
     for mode in ("live", "golden"):
         require_command(invocations, ("python", "rust/daemon/harness/principals.py", mode),
                         ("--rust-bin", "--out"), ("--record", "--mutants"))
-    assert "rust/target/release" in principal["run"]
+    lines = [line.strip() for line in principal["run"].splitlines()]
+    assert [line for line in lines if re.match(r"\$binaryName\s*=", line)] == [
+        "$binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }"]
+    assert [line for line in lines if re.match(r"\$candidate\s*=", line)] == [
+        "$candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path"]
+    for words in invocations:
+        if words[:2] == ["python", "rust/daemon/harness/principals.py"]:
+            assert words.count("--rust-bin") == 1
+            assert words[words.index("--rust-bin") + 1] == "$candidate"
+    download = next(step for step in parity_steps
+                    if step.get("uses") == "actions/download-artifact@v4")
+    assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
+    assert parity_steps.index(download) < parity_steps.index(principal)
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
     daemon_build = next(step for step in jobs["candidate"]["steps"]
                         if step.get("name") == "Build embedding candidate")
@@ -132,6 +184,12 @@ def check_executable_coverage(jobs):
     assert steps.index(parity["Prepare disposable PostgreSQL for CLI lease row"]) < steps.index(principal)
     upload = next(step for step in steps if step.get("name") == "Retain principal store outcomes")
     assert upload["if"] == "always() && matrix.suite == 'cli'"
+    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    for mode in ("live", "golden"):
+        require_command(graph, ("python", "rust/daemon/harness/graph_store.py", mode),
+                        ("--candidate", "--out"), ("--record",))
+    require_command(graph, ("python", "rust/daemon/harness/gen_graph_unicode.py", "--check"))
+    require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
 
     script = parity["Run unchanged candidates and differential judges"]["run"]
     invocations = commands(script)
@@ -171,7 +229,9 @@ def test_shards_cover_both_systems_and_build_once():
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
     assert len(builds) == 1
-    assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio -j 4"
+    assert builds[0]["run"].strip() == "cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3"
+    assert not any("schema_ci.py" in step.get("run", "")
+                   for step in jobs["candidate"]["steps"])
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -204,15 +264,50 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     permission = next(s for s in job["steps"] if s.get("name") == "Restore executable permission")
     assert permission["if"] == "runner.os == 'Linux'"
     assert shlex.split(permission["run"]) == ["chmod", "+x",
-        "rust/target/release/pseudolife-stdio", "rust/target/release/pseudolife-daemon"]
+        "rust/target/release/pseudolife-stdio", "rust/target/release/pseudolife-daemon",
+        "rust/target/release/pseudolife-daemon-static"]
     candidate = workflow()["jobs"]["candidate"]
     build = next(s for s in candidate["steps"] if s.get("name") == "Build embedding candidate")
     require_command(commands(build["run"]), ("cargo", "build"),
-                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bin", "--features"))
+                    ("--locked", "--release", "-p", "pseudolife-daemon", "--bins", "--features"))
     invocation = next(words for words in commands(build["run"]) if words[:2] == ["cargo", "build"])
     assert "mutants" in invocation[invocation.index("--features") + 1].split(",")
     upload = next(s for s in candidate["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert {"rust/target/release/pseudolife-daemon", "rust/target/release/pseudolife-daemon.exe"} <= set(upload["with"]["path"].splitlines())
+    preserved = next(s for s in candidate["steps"] if s.get("name") == "Retain default static candidate")
+    assert preserved.get("working-directory") == "${{ github.workspace }}"
+    names = [s.get("name") for s in candidate["steps"]]
+    assert names.index("Build candidate") < names.index("Retain default static candidate") < names.index("Build embedding candidate")
+    assert {"rust/target/release/pseudolife-daemon-static", "rust/target/release/pseudolife-daemon-static.exe"} <= set(upload["with"]["path"].splitlines())
+    assert "Copy-Item -LiteralPath" in preserved["run"]
+    static = next(s for s in job["steps"] if s.get("name") == "Daemon static HTTP parity")
+    assert "'pseudolife-daemon-static.exe'" in static["run"]
+    assert "'pseudolife-daemon-static'" in static["run"]
+
+
+def test_daemon_artifact_is_built_once_and_shared_with_graph():
+    jobs = workflow()["jobs"]
+    builds = [step for job in jobs.values() for step in job.get("steps", [])
+              if "cargo build" in step.get("run", "") and
+              "-p pseudolife-daemon" in step["run"]]
+    assert len(builds) == 1
+    assert builds[0] in jobs["candidate"]["steps"]
+    words = commands(builds[0]["run"])[0]
+    assert {"--locked", "--release", "--bins"} <= set(words)
+    assert {"graph-harness", "mutants"} <= set(words[words.index("--features") + 1].split(","))
+    upload = next(s for s in jobs["candidate"]["steps"]
+                  if s.get("with", {}).get("name") == "rust-shim-${{ runner.os }}")
+    for binary in ("pseudolife-daemon", "graph-contract"):
+        for suffix in ("", ".exe"):
+            assert f"rust/target/release/{binary}{suffix}" in upload["with"]["path"].splitlines()
+    steps = jobs["parity-checks"]["steps"]
+    download = next(s for s in steps if s.get("uses") == "actions/download-artifact@v4"
+                    and s.get("with", {}).get("name") == upload["with"]["name"])
+    assert "if" not in download
+    assert download["with"]["path"] == "rust/target/release"
+    permission = next(s for s in steps if s.get("name") == "Restore graph store executable permission")
+    assert permission["if"] == "matrix.suite == 'cli' && runner.os == 'Linux'"
+    assert permission["run"] == "chmod +x rust/target/release/graph-contract"
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
@@ -256,7 +351,7 @@ def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
     changed = copy.deepcopy(workflow())
     step = next(s for s in changed["jobs"]["candidate"]["steps"]
                 if s.get("name") == "Build embedding candidate")
-    step["run"] = step["run"].replace("mutants,principal-harness", features)
+    step["run"] = step["run"].replace("mutants,graph-harness,principal-harness", features)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
@@ -276,7 +371,15 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Check generated daemon schema", "--check", ""),
+    ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
+    ("Daemon resident startup parity", "--no-build", ""),
+    ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
+    ("Daemon resident startup parity", "--no-build", "--no-build --record-goldens"),
+    ("Daemon schema startup parity", "--out", "--record-goldens --out"),
+    ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
+    ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
     ("CLI differential harness", "--golden", ""),
     ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),
     ("Run unchanged candidates and differential judges", "& $oraclePython -c $judgeBootstrap", "# & $oraclePython -c $judgeBootstrap"),
@@ -298,6 +401,38 @@ def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new)
     step = next(s for s in changed["jobs"][job]["steps"] if s.get("name") == name)
     assert old in step["run"]
     step["run"] = step["run"].replace(old, new)
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("old, new", [
+    ("--rust-bin $candidate", "--rust-bin stale-candidate"),
+    ("principals.py live --rust-bin $candidate", "principals.py live --rust-bin stale-candidate"),
+    ("principals.py golden --rust-bin $candidate", "principals.py golden --rust-bin stale-candidate"),
+    ("$candidate = (Resolve-Path", "$unused = (Resolve-Path"),
+    ("'pseudolife-daemon.exe'", "'stale-daemon.exe'"),
+    ("'pseudolife-daemon'", "'stale-daemon'"),
+])
+def test_principal_commands_use_the_downloaded_candidate(monkeypatch, old, new):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Principal store differential and golden harness")
+    assert old in step["run"]
+    step["run"] = step["run"].replace(old, new)
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("script", [
+    "cargo build --release --bin pseudolife-daemon",
+    "cargo +1.94.0 build --locked --release --bin pseudolife-daemon",
+])
+def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
+    changed = copy.deepcopy(workflow())
+    changed["jobs"]["parity-checks"]["steps"].append({
+        "name": "Rebuild stale candidate", "run": script, "if": "matrix.suite == 'cli'"})
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()

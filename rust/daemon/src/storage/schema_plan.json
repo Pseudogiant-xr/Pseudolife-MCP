@@ -1,0 +1,429 @@
+{
+  "format": 1,
+  "source_sha256": "66f71c0168f07c0cdfdada2033d3fb4b425f47d7a00500284a87ff9fcfa4ba2c",
+  "schema_version": 55,
+  "embedding_dimension": 1024,
+  "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
+  "embedding_refusal": "Refusing to start: entries.embedding is vector({live_dim}) but this build's schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector dimensions in place -- that would either half-migrate four tables at startup or write 1024-d vectors into a {live_dim}-d column, corrupting the bank. Run the human-gated migration first: `python ops/migrate_embeddings.py` (backs up, requires the daemon stopped, re-embeds every row through the real embedder, and moves all four embedding columns from vector({live_dim}) to vector(1024)). Never run the daemon against a bank you have not migrated.",
+  "steps": [
+    {
+      "op": "embedding_guard"
+    },
+    {
+      "op": "sql",
+      "sql": "SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '30s';",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE EXTENSION IF NOT EXISTS vector;",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "SELECT to_regclass('public.memory_trace_invalidations')",
+      "parameters": []
+    },
+    {
+      "op": "remember",
+      "name": "had_trace_invalidations",
+      "test": {
+        "last": "value"
+      }
+    },
+    {
+      "op": "base_schema"
+    },
+    {
+      "op": "if",
+      "test": {
+        "not": {
+          "variable": "had_trace_invalidations"
+        }
+      },
+      "then": [
+        {
+          "op": "sql",
+          "sql": "\n        INSERT INTO memory_trace_invalidations\n          (entity_norm, attribute_norm, source_entry_id,\n           invalidated_at, cause)\n        SELECT t.entity_norm, t.attribute_norm, t.entry_id,\n               e.superseded_at, 'source_superseded'\n        FROM memory_traces t\n        JOIN entries e ON e.id = t.entry_id\n        WHERE e.superseded_at IS NOT NULL\n        ON CONFLICT (entity_norm, attribute_norm, source_entry_id)\n        DO NOTHING\n        ",
+          "parameters": []
+        }
+      ],
+      "else": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS reinforcements INTEGER NOT NULL DEFAULT 0",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS session_key TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS parent_id TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS decided_by TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS decided_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_verdict TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_confidence REAL",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_note TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judged_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS freshness_class TEXT NOT NULL DEFAULT 'evergreen'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'scalar'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS value_norm TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "DROP INDEX IF EXISTS facts_slot_current_uq",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE TABLE IF NOT EXISTS entity_kinds (entity_norm TEXT PRIMARY KEY, kind TEXT NOT NULL, origin TEXT NOT NULL, confidence REAL, decided_at DOUBLE PRECISION NOT NULL)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS merge_decisions (\n              id BIGSERIAL PRIMARY KEY,\n              proposal_id BIGINT,\n              entity_display TEXT,\n              into_display TEXT,\n              status TEXT NOT NULL,\n              score REAL,\n              reason TEXT,\n              decided_by TEXT,\n              decided_at DOUBLE PRECISION NOT NULL\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS dream_runs (\n              id BIGSERIAL PRIMARY KEY,\n              started_at DOUBLE PRECISION NOT NULL,\n              finished_at DOUBLE PRECISION,\n              cursor_before DOUBLE PRECISION NOT NULL,\n              cursor_after DOUBLE PRECISION,\n              pulled INTEGER NOT NULL DEFAULT 0,\n              claims INTEGER NOT NULL DEFAULT 0,\n              tallies JSONB NOT NULL DEFAULT '{}',\n              status TEXT NOT NULL DEFAULT 'running',\n              extractor TEXT,\n              writer_id TEXT,\n              rolled_back_at DOUBLE PRECISION\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS dream_runs_started_idx ON dream_runs (started_at DESC)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS dream_run_slots (\n              id BIGSERIAL PRIMARY KEY,\n              run_id BIGINT NOT NULL REFERENCES dream_runs(id)\n                ON DELETE CASCADE,\n              seq INTEGER NOT NULL,\n              entity TEXT NOT NULL,\n              attribute TEXT NOT NULL,\n              entity_norm TEXT NOT NULL,\n              attribute_norm TEXT NOT NULL,\n              kind TEXT NOT NULL,\n              op TEXT,\n              prev_kind TEXT,\n              prev_value TEXT,\n              prev_status TEXT,\n              prev_confidence REAL,\n              prev_support TEXT,\n              new_value TEXT,\n              action TEXT NOT NULL,\n              src_entry_id BIGINT,\n              at DOUBLE PRECISION NOT NULL\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS dream_run_slots_run_idx ON dream_run_slots (run_id, seq)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS chronicle_events (\n              id BIGSERIAL PRIMARY KEY,\n              occurred_at TIMESTAMPTZ,\n              occurred_phrase TEXT,\n              recorded_at DOUBLE PRECISION NOT NULL,\n              actor TEXT NOT NULL,\n              actor_norm TEXT NOT NULL,\n              description TEXT NOT NULL,\n              description_norm TEXT NOT NULL,\n              episode TEXT,\n              src_entry_id BIGINT,\n              hlc_phys BIGINT,\n              hlc_logical INT,\n              writer_id TEXT,\n              invalidated_at DOUBLE PRECISION\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS chronicle_events_actor_idx ON chronicle_events (actor_norm, occurred_at)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS chronicle_events_episode_idx ON chronicle_events (episode, occurred_at)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE dream_run_slots ADD COLUMN IF NOT EXISTS chronicle_event_id BIGINT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS stance TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS authority TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS distortion_tolerance TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS authority TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE facts ADD COLUMN IF NOT EXISTS distortion_tolerance TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS retrieval_events (\n              id BIGSERIAL PRIMARY KEY,\n              query_text TEXT NOT NULL,\n              origin TEXT NOT NULL DEFAULT 'search',\n              session_id TEXT,\n              episode_id TEXT,\n              served JSONB NOT NULL DEFAULT '[]',\n              created_at DOUBLE PRECISION NOT NULL\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE retrieval_events ADD COLUMN IF NOT EXISTS params JSONB",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS retrieval_events_session_idx ON retrieval_events (session_id, created_at DESC)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS retrieval_events_created_idx ON retrieval_events (created_at)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS retrieval_uses (\n              event_id BIGINT NOT NULL REFERENCES retrieval_events(id)\n                ON DELETE CASCADE,\n              entry_id BIGINT NOT NULL,\n              used_via TEXT NOT NULL,\n              created_at DOUBLE PRECISION NOT NULL,\n              PRIMARY KEY (event_id, entry_id, used_via)\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS slot_reads (\n              entity_norm    TEXT NOT NULL,\n              attribute_norm TEXT NOT NULL,\n              read_count     BIGINT NOT NULL DEFAULT 0,\n              last_read_at   DOUBLE PRECISION,\n              PRIMARY KEY (entity_norm, attribute_norm)\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS explicit_reinforcements INTEGER NOT NULL DEFAULT 0",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ADD COLUMN IF NOT EXISTS dream_state TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entries ALTER COLUMN dream_state SET DEFAULT 'pending'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "SELECT 1 FROM pg_constraint WHERE conname = 'entries_dream_state_check' AND conrelid = 'public.entries'::regclass",
+      "parameters": []
+    },
+    {
+      "op": "if",
+      "test": {
+        "not": {
+          "last": "row"
+        }
+      },
+      "then": [
+        {
+          "op": "sql",
+          "sql": "ALTER TABLE entries ADD CONSTRAINT entries_dream_state_check CHECK (dream_state IS NULL OR dream_state IN ('pending', 'acknowledged', 'legacy-covered'))",
+          "parameters": []
+        }
+      ],
+      "else": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE retrieval_events ADD COLUMN IF NOT EXISTS served_facts JSONB",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "SELECT 1 FROM pg_constraint WHERE conname = 'entries_episode_id_fkey'",
+      "parameters": []
+    },
+    {
+      "op": "if",
+      "test": {
+        "last": "row"
+      },
+      "then": [
+        {
+          "op": "sql",
+          "sql": "ALTER TABLE entries DROP CONSTRAINT entries_episode_id_fkey",
+          "parameters": []
+        }
+      ],
+      "else": []
+    },
+    {
+      "op": "sql",
+      "sql": "DROP INDEX IF EXISTS entries_embedding_idx",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n                UPDATE facts SET status = 'superseded',\n                       superseded_at = COALESCE(superseded_at,\n                                                EXTRACT(EPOCH FROM now()))\n                WHERE id IN (\n                  SELECT id FROM (\n                    SELECT id, ROW_NUMBER() OVER (\n                      PARTITION BY entity_norm, attribute_norm\n                      ORDER BY last_confirmed DESC, id DESC) AS rn\n                    FROM facts WHERE status = $1 AND kind = 'scalar') d\n                  WHERE d.rn > 1)\n                ",
+      "parameters": [
+        "current"
+      ]
+    },
+    {
+      "op": "sql",
+      "sql": "\n                UPDATE facts SET status = 'superseded',\n                       superseded_at = COALESCE(superseded_at,\n                                                EXTRACT(EPOCH FROM now()))\n                WHERE id IN (\n                  SELECT id FROM (\n                    SELECT id, ROW_NUMBER() OVER (\n                      PARTITION BY entity_norm, attribute_norm\n                      ORDER BY last_confirmed DESC, id DESC) AS rn\n                    FROM facts WHERE status = $1) d\n                  WHERE d.rn > 1)\n                ",
+      "parameters": [
+        "contested"
+      ]
+    },
+    {
+      "op": "sql",
+      "sql": "\n                UPDATE world_facts SET status = 'superseded',\n                       superseded_at = COALESCE(superseded_at,\n                                                EXTRACT(EPOCH FROM now()))\n                WHERE id IN (\n                  SELECT id FROM (\n                    SELECT id, ROW_NUMBER() OVER (\n                      PARTITION BY entity_norm, attribute_norm\n                      ORDER BY last_confirmed DESC, id DESC) AS rn\n                    FROM world_facts WHERE status = $1) d\n                  WHERE d.rn > 1)\n                ",
+      "parameters": [
+        "current"
+      ]
+    },
+    {
+      "op": "sql",
+      "sql": "\n                UPDATE lessons SET status = 'superseded',\n                       superseded_at = COALESCE(superseded_at,\n                                                EXTRACT(EPOCH FROM now()))\n                WHERE id IN (\n                  SELECT id FROM (\n                    SELECT id, ROW_NUMBER() OVER (\n                      PARTITION BY entity_norm, attribute_norm\n                      ORDER BY last_confirmed DESC, id DESC) AS rn\n                    FROM lessons WHERE status = $1) d\n                  WHERE d.rn > 1)\n                ",
+      "parameters": [
+        "current"
+      ]
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_current_scalar_uq ON facts (entity_norm, attribute_norm) WHERE status = 'current' AND kind = 'scalar'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS facts_member_current_uq ON facts (entity_norm, attribute_norm, value_norm) WHERE status = 'current' AND kind = 'member'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_contested_uq ON facts (entity_norm, attribute_norm) WHERE status = 'contested'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_verdict TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_confidence REAL",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_note TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judged_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_relation TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS decided_by TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS decided_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_verdict TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_confidence REAL",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judged2_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS curation_judgments (\n              store      TEXT NOT NULL,\n              a_key      TEXT NOT NULL,\n              b_key      TEXT NOT NULL,\n              verdict    TEXT NOT NULL,\n              keep       TEXT,\n              fold       TEXT,\n              confidence REAL,\n              note       TEXT,\n              model      TEXT,\n              judged_at  DOUBLE PRECISION NOT NULL,\n              PRIMARY KEY (store, a_key, b_key)\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS world_facts_slot_current_uq ON world_facts (entity_norm, attribute_norm) WHERE status = 'current'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS lessons_slot_current_uq ON lessons (entity_norm, attribute_norm) WHERE status = 'current'",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            CREATE TABLE IF NOT EXISTS store_decisions (\n              id             BIGSERIAL PRIMARY KEY,\n              store          TEXT NOT NULL,\n              entity_norm    TEXT NOT NULL,\n              attribute_norm TEXT NOT NULL,\n              action         TEXT NOT NULL,\n              decided_by     TEXT,\n              reason         TEXT,\n              record         JSONB,\n              decided_at     DOUBLE PRECISION NOT NULL\n            )\n            ",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "CREATE INDEX IF NOT EXISTS store_decisions_slot_idx ON store_decisions (store, entity_norm, attribute_norm, decided_at DESC)",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "\n            INSERT INTO meta (key, value) VALUES ('schema_version', $1::jsonb)\n            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value\n            ",
+      "parameters": [
+        "55"
+      ]
+    }
+  ]
+}
