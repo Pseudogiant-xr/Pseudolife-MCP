@@ -631,6 +631,9 @@ def test_parent_process_records_the_source_not_a_stale_seeder_cache(tmp_path):
 
 def test_parent_module_check_refuses_an_unisolated_or_foreign_load(tmp_path, monkeypatch):
     from cli_harness import runner  # noqa: PLC0415
+    # Other test files may have imported the oracle package into this process.
+    for name in [n for n in sys.modules if n.split(".")[0] == "pseudolife_memory"]:
+        monkeypatch.delitem(sys.modules, name)
     monkeypatch.setattr(sys, "pycache_prefix", None)
     assert "cached bytecode" in runner.parent_module_problems(tmp_path, None)[0]
     empty = tmp_path / "empty"
