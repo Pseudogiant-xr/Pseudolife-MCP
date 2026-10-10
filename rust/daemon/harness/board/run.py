@@ -36,6 +36,8 @@ REPO = HARNESS.parents[2]
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(REPO))
 import daemons  # noqa: E402
+# The shared helper admits only the current slice's disposable database names.
+os.environ["PL_HARNESS_SLICE"] = "w2f"
 import pgdisposable as pg  # noqa: E402
 from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402

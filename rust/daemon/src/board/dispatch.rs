@@ -11,27 +11,63 @@ use std::collections::HashMap;
 
 /// `_PARAMETERS`, in sorted action order.
 pub const ACTIONS: [&str; 15] = [
-    "ack", "agents", "attach", "attempt", "context", "detach", "heartbeat", "history", "lease",
-    "leases", "receive", "register", "release", "send", "update",
+    "ack",
+    "agents",
+    "attach",
+    "attempt",
+    "context",
+    "detach",
+    "heartbeat",
+    "history",
+    "lease",
+    "leases",
+    "receive",
+    "register",
+    "release",
+    "send",
+    "update",
 ];
 
 pub fn parameters(action: &str) -> &'static [&'static str] {
     match action {
         "context" => &["agent_id", "nonce", "read_only"],
         "register" => &[
-            "label", "project", "task", "status", "episode", "capabilities", "wake_enabled",
-            "parent_thread", "name", "name_source",
+            "label",
+            "project",
+            "task",
+            "status",
+            "episode",
+            "capabilities",
+            "wake_enabled",
+            "parent_thread",
+            "name",
+            "name_source",
         ],
         "update" => &[
-            "project", "task", "status", "expect", "children", "park_reason", "park_needs",
-            "park_clear_by", "park_resume", "park_expires", "name",
+            "project",
+            "task",
+            "status",
+            "expect",
+            "children",
+            "park_reason",
+            "park_needs",
+            "park_clear_by",
+            "park_resume",
+            "park_expires",
+            "name",
         ],
         "agents" => &["project", "task", "limit"],
         "lease" => &["name", "ttl", "expect", "purpose"],
         "release" => &["name"],
         "leases" => &["name", "limit"],
         "attach" => &["attachment_id", "wake_enabled", "ring", "ring_armed_until"],
-        "heartbeat" => &["attachment_id", "generation", "active", "ring_armed_until", "name"],
+        "heartbeat" => &[
+            "attachment_id",
+            "generation",
+            "active",
+            "ring_armed_until",
+            "name",
+        ],
         "detach" => &["attachment_id", "generation"],
         "send" => &["to", "text", "request_id", "reply_to", "clears", "urgent"],
         "receive" => &["after", "limit", "attachment_id", "generation"],
@@ -166,7 +202,9 @@ pub fn bound_identity(headers: &HashMap<String, String>) -> Result<Option<(Strin
 
 fn is_lower_hex32(v: &Value) -> bool {
     v.as_str().is_some_and(|s| {
-        s.len() == 32 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        s.len() == 32
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     })
 }
 
@@ -176,7 +214,10 @@ impl Board {
         if principal == DAEMON_PRINCIPAL || principal == MAINTAINER_PRINCIPAL {
             return false;
         }
-        self.config.allowed_principals.iter().any(|p| p == principal)
+        self.config
+            .allowed_principals
+            .iter()
+            .any(|p| p == principal)
             || self.principals.admitted(principal)
     }
 
@@ -189,7 +230,10 @@ impl Board {
         headers: &HashMap<String, String>,
         principal: &str,
     ) -> Result<Value> {
-        match self.dispatch_once(action, params.clone(), headers, principal).await {
+        match self
+            .dispatch_once(action, params.clone(), headers, principal)
+            .await
+        {
             Err(BoardError::ClockChanged) if action == "send" => {
                 self.hlc.lock().expect("hlc lock").seeded = false;
                 self.dispatch_once(action, params, headers, principal).await
@@ -345,7 +389,10 @@ impl Board {
                 .await;
         }
         if let Some(binding) = binding {
-            let context = self.store.context(client, principal, None, None, false).await?;
+            let context = self
+                .store
+                .context(client, principal, None, None, false)
+                .await?;
             let found = (
                 context["bank_id"].as_str().unwrap_or("").to_string(),
                 context["principal"].as_str().unwrap_or("").to_string(),
@@ -376,7 +423,14 @@ impl Board {
         let mut for_delivery = false;
         if let Some((attachment_id, generation)) = &attachment {
             self.store
-                .check_attachment(&*client, principal, &agent_id, &credential, attachment_id, *generation)
+                .check_attachment(
+                    &*client,
+                    principal,
+                    &agent_id,
+                    &credential,
+                    attachment_id,
+                    *generation,
+                )
                 .await?;
             for_delivery = true;
         }
@@ -537,7 +591,13 @@ impl Board {
             }
             "ack" => {
                 self.store
-                    .ack(client, principal, &agent_id, &credential, &params["message_id"])
+                    .ack(
+                        client,
+                        principal,
+                        &agent_id,
+                        &credential,
+                        &params["message_id"],
+                    )
                     .await?
             }
             "attempt" => {

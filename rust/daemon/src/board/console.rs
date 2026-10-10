@@ -12,7 +12,15 @@ use super::store::{Store, check_limit, now};
 use serde_json::{Value, json};
 
 const DETAILS: [&str; 9] = [
-    "hinted", "not_needed", "rung", "withheld", "nudged", "no_path", "capped", "pull", "delivery",
+    "hinted",
+    "not_needed",
+    "rung",
+    "withheld",
+    "nudged",
+    "no_path",
+    "capped",
+    "pull",
+    "delivery",
 ];
 
 impl Store {

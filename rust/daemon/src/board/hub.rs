@@ -112,7 +112,8 @@ fn wait_value(v: Option<&Value>) -> Result<f64> {
         return Ok(0.0);
     };
     let ok = matches!(v, Value::Number(_))
-        && super::canon::as_f64(v).is_some_and(|w| w.is_finite() && (0.0..=MAX_WAIT_SECONDS).contains(&w));
+        && super::canon::as_f64(v)
+            .is_some_and(|w| w.is_finite() && (0.0..=MAX_WAIT_SECONDS).contains(&w));
     if !ok {
         return Err(BoardError::code("invalid_wait_seconds"));
     }
@@ -218,7 +219,9 @@ impl Board {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs_f64(wait);
         loop {
             event.clear();
-            let result = self.invoke(action, params.clone(), headers, principal).await?;
+            let result = self
+                .invoke(action, params.clone(), headers, principal)
+                .await?;
             let has_messages = result
                 .get("messages")
                 .and_then(Value::as_array)
@@ -229,8 +232,13 @@ impl Board {
             if tokio::time::Instant::now() >= deadline {
                 return Ok(result);
             }
-            if tokio::time::timeout_at(deadline, event.wait()).await.is_err() {
-                return self.invoke(action, params.clone(), headers, principal).await;
+            if tokio::time::timeout_at(deadline, event.wait())
+                .await
+                .is_err()
+            {
+                return self
+                    .invoke(action, params.clone(), headers, principal)
+                    .await;
             }
         }
     }

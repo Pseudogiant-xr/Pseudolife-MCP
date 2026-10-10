@@ -45,6 +45,10 @@ impl Hlc {
 
 /// The best stored stamp, as `_reseed_hlc` finds it.
 pub async fn stored_high_water(c: &tokio_postgres::Client) -> Result<(i64, i64)> {
+    crate::txn::with_client(c, |c| async move { stored_high_water_inner(c).await }).await
+}
+
+async fn stored_high_water_inner(c: &tokio_postgres::Client) -> Result<(i64, i64)> {
     let mut best = (0i64, 0i64);
     for table in ["facts", "world_facts", "lessons"] {
         let sql = format!(

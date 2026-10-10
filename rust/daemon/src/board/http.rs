@@ -96,11 +96,18 @@ fn text(body: String, board: Option<String>) -> Response {
 }
 
 /// `authenticated_principal`: configured bearer auth is required.
-pub fn authenticated_principal(app: &App, headers: &HashMap<String, String>) -> Result<String, BoardError> {
+pub fn authenticated_principal(
+    app: &App,
+    headers: &HashMap<String, String>,
+) -> Result<String, BoardError> {
     if !app.env_tokens.configured() {
         return Err(BoardError::code("authentication_required"));
     }
-    match auth::resolve(headers.get("authorization").map(String::as_str), &app.env_tokens, &app.store) {
+    match auth::resolve(
+        headers.get("authorization").map(String::as_str),
+        &app.env_tokens,
+        &app.store,
+    ) {
         Resolved::Unavailable => Err(BoardError::code("principals_unavailable")),
         Resolved::None => Err(BoardError::code("unauthorized")),
         Resolved::Principal(p) => Ok(p),
@@ -109,7 +116,12 @@ pub fn authenticated_principal(app: &App, headers: &HashMap<String, String>) -> 
 
 /// `POST /api/coordination/<action>` after W1-A's body checks; `body` is
 /// the parsed object (empty for an empty body).
-pub async fn coordination(app: &App, path: &str, h: &HeaderMap, body: Map<String, Value>) -> Response {
+pub async fn coordination(
+    app: &App,
+    path: &str,
+    h: &HeaderMap,
+    body: Map<String, Value>,
+) -> Response {
     let headers = header_dict(h);
     let principal = match authenticated_principal(app, &headers) {
         Ok(p) => p,
@@ -174,9 +186,11 @@ pub fn hook_coordination_start(app: &App, h: &HeaderMap) -> Response {
 }
 
 fn agent_param(agent: Option<&String>) -> Option<&str> {
-    agent
-        .map(String::as_str)
-        .filter(|a| a.len() == 32 && a.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    agent.map(String::as_str).filter(|a| {
+        a.len() == 32
+            && a.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// Python `float(s)`: surrounding whitespace, single underscores between
@@ -186,7 +200,10 @@ fn py_float(s: &str) -> Option<f64> {
     let chars: Vec<char> = t.chars().collect();
     for (i, c) in chars.iter().enumerate() {
         if *c == '_'
-            && !(i > 0 && i + 1 < chars.len() && chars[i - 1].is_ascii_digit() && chars[i + 1].is_ascii_digit())
+            && !(i > 0
+                && i + 1 < chars.len()
+                && chars[i - 1].is_ascii_digit()
+                && chars[i + 1].is_ascii_digit())
         {
             return None;
         }
@@ -236,7 +253,9 @@ pub async fn hook_woke(app: &App, h: &HeaderMap, query: &HashMap<String, String>
     let agent = agent.to_string();
     let result = app
         .board
-        .with_store(|store, client| Box::pin(async move { store.woke(client, &agent, &principal).await }))
+        .with_store(|store, client| {
+            Box::pin(async move { store.woke(client, &agent, &principal).await })
+        })
         .await;
     recorded(result)
 }
@@ -270,9 +289,13 @@ pub async fn hook_subagent(app: &App, h: &HeaderMap, query: &HashMap<String, Str
                     return Err(BoardError::code("invalid_children"));
                 };
                 if start {
-                    store.subagent_started(client, &agent, &principal, &child, &kind).await
+                    store
+                        .subagent_started(client, &agent, &principal, &child, &kind)
+                        .await
                 } else {
-                    store.subagent_stopped(client, &agent, &principal, &child).await
+                    store
+                        .subagent_stopped(client, &agent, &principal, &child)
+                        .await
                 }
             })
         })

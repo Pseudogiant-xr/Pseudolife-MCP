@@ -50,8 +50,7 @@ pub struct Board {
     pub(crate) daemon_identity: Mutex<Option<(String, String)>>,
 }
 
-type StoreCall<'a> =
-    Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
+type StoreCall<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
 
 impl Board {
     pub fn new(

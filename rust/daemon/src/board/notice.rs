@@ -20,13 +20,24 @@ pub const TEXT_PRINTABLE: &str = "text must be at most 4000 bytes of printable t
 
 impl Board {
     /// The route body: `Ok(result)` or `Err(message)` for a 400.
-    pub async fn daemon_notice_route(&self, principal: &str, body: &Map<String, Value>) -> Result<Value, String> {
+    pub async fn daemon_notice_route(
+        &self,
+        principal: &str,
+        body: &Map<String, Value>,
+    ) -> Result<Value, String> {
         if principal == DAEMON_PRINCIPAL
-            || !self.config.daemon_notice_principals.iter().any(|p| p == principal)
+            || !self
+                .config
+                .daemon_notice_principals
+                .iter()
+                .any(|p| p == principal)
         {
             return Err(NOT_LISTED.into());
         }
-        let Some(text) = body.get("text").and_then(Value::as_str).filter(|t| !super::text::py_strip(t).is_empty())
+        let Some(text) = body
+            .get("text")
+            .and_then(Value::as_str)
+            .filter(|t| !super::text::py_strip(t).is_empty())
         else {
             return Err(TEXT_REQUIRED.into());
         };
@@ -63,7 +74,11 @@ impl Board {
                     let mut params = Map::new();
                     params.insert("label".into(), json!("daemon"));
                     params.insert("status".into(), json!("daemon notices"));
-                    let row = self.store.register(client, DAEMON_PRINCIPAL, &params).await.ok()?;
+                    let row = self
+                        .store
+                        .register(client, DAEMON_PRINCIPAL, &params)
+                        .await
+                        .ok()?;
                     let i = (
                         row["agent_id"].as_str()?.to_string(),
                         row["credential"].as_str()?.to_string(),
@@ -103,7 +118,10 @@ impl Board {
                 Err(e) if e_code(&e) == Some("no_recipients") => return Some(0),
                 Err(e)
                     if attempt == 0
-                        && matches!(e_code(&e), Some("instance_not_found" | "invalid_credential")) =>
+                        && matches!(
+                            e_code(&e),
+                            Some("instance_not_found" | "invalid_credential")
+                        ) =>
                 {
                     *self.daemon_identity.lock().expect("identity lock") = None;
                     continue;

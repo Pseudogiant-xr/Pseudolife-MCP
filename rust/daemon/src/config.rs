@@ -42,9 +42,21 @@ pub struct MemoryConfig {
     pub recency_base_half_life_s: f64,
     pub preset: String,
     pub bands: Vec<String>,
+    pub band_specs: Vec<StartupBandSpec>,
+    pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
+    /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
+    /// whether the sweep thread starts and parses its interval.
+    pub retrieval_log_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupBandSpec {
+    pub name: String,
+    pub max_entries: usize,
+    pub retention_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +85,10 @@ pub struct EmbeddingConfig {
     pub backend: String,
     pub query_prefix: String,
     pub max_seq_length: i64,
+    pub onnx_file_name: String,
+    pub batch_size: i64,
+    pub cache_size: i64,
+    pub cpu_dtype: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,6 +134,77 @@ pub struct DreamConfig {
     pub fallback_base_url: Option<String>,
     pub fallback_model: Option<String>,
     pub extractor_model_override: Option<String>,
+    /// `float(sweep_interval_seconds)` succeeds (`mcp_server.py:3268`).
+    pub sweep_interval_ok: bool,
+}
+
+impl Config {
+    /// Every value this port reads, under its Python dotted path, for the
+    /// harness's config differential (`PSEUDOLIFE_DAEMON_DUMP_CONFIG`).
+    pub fn dump(&self) -> serde_json::Value {
+        let m = &self.memory;
+        let (s, b, e, c, u, d) = (
+            &m.search,
+            &m.bm25,
+            &self.embedding,
+            &self.coordination,
+            &self.updates,
+            &self.dream,
+        );
+        let mut dump = serde_json::json!({
+            "memory.top_k": m.top_k,
+            "memory.hide_superseded": m.hide_superseded,
+            "memory.search_confidence_floor": m.search_confidence_floor,
+            "memory.recency_boost_enabled": m.recency_boost_enabled,
+            "memory.recency_base_half_life_s": m.recency_base_half_life_s,
+            "memory.miras.preset": m.preset,
+            "memory.miras.bands": m.bands,
+            "memory.search.min_score": s.min_score,
+            "memory.search.fusion": s.fusion,
+            "memory.search.candidate_pool_multiplier": s.candidate_pool_multiplier,
+            "memory.search.contiguity_neighbors": s.contiguity_neighbors,
+            "memory.search.timeline_channel": s.timeline_channel,
+            "memory.bm25.enabled": b.enabled,
+            "memory.bm25.k1": b.k1,
+            "memory.bm25.b": b.b,
+            "memory.bm25.weight": b.weight,
+            "memory.bm25.top_n": b.top_n,
+            "memory.bm25.min_score": b.min_score,
+            "memory.reranker.enabled": m.reranker_enabled,
+            "memory.retrieval_log.enabled": m.retrieval_log_enabled,
+            "embedding.model_name": e.model_name,
+            "embedding.device": e.device,
+            "embedding.query_prefix": e.query_prefix,
+            "embedding.max_seq_length": e.max_seq_length,
+            "coordination.enabled": c.enabled,
+            "coordination.wake": c.wake.to_json(),
+            "coordination.allowed_principals": c.allowed_principals,
+            "updates.check_releases": u.check_releases,
+            "updates.unattended_clients": u.unattended_clients,
+            "updates.unattended_daemon": u.unattended_daemon,
+            "updates.check_interval_seconds": u.check_interval_seconds,
+            "memory.dream.enabled": d.enabled,
+            "memory.dream.extractor_source": d.extractor_source,
+            "memory.dream.extractor_base_url": d.extractor_base_url,
+            "memory.dream.extractor_model": d.extractor_model,
+            "memory.dream.fallback_base_url": d.fallback_base_url,
+            "memory.dream.fallback_model": d.fallback_model,
+            "memory.dream.extractor_model_override": d.extractor_model_override,
+        });
+        dump.as_object_mut().expect("configuration object").extend(
+            serde_json::json!({
+                "embedding.backend": e.backend,
+                "embedding.onnx_file_name": e.onnx_file_name,
+                "embedding.batch_size": e.batch_size,
+                "embedding.cache_size": e.cache_size,
+                "embedding.cpu_dtype": e.cpu_dtype,
+            })
+            .as_object()
+            .expect("embedding object")
+            .clone(),
+        );
+        dump
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +230,8 @@ fn refuse(message: impl Into<String>) -> ConfigError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DaemonEnv {
     pub host: String,
-    pub port: u16,
+    /// Python `int()` of the variable; the range is checked at bind.
+    pub port: i64,
     pub token: Option<String>,
     pub tokens_raw: Option<String>,
     pub trust_bind: bool,
@@ -228,9 +316,16 @@ impl Default for MemoryConfig {
             recency_base_half_life_s: LIBRARY_HALF_LIFE_S,
             preset: "flat".to_string(),
             bands: vec!["flat".to_string()],
+            band_specs: vec![StartupBandSpec {
+                name: "flat".into(),
+                max_entries: 5250,
+                retention_policy: "balanced".into(),
+            }],
+            retention_boost: 1.0,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
+            retrieval_log_enabled: true,
         }
     }
 }
@@ -243,6 +338,10 @@ impl Default for EmbeddingConfig {
             backend: "torch".to_string(),
             query_prefix: DEFAULT_QUERY_PREFIX.to_string(),
             max_seq_length: 512,
+            onnx_file_name: "onnx/model.onnx".to_string(),
+            batch_size: 16, // MemoryService MCP overlay, service.py:1106-1107
+            cache_size: 1024,
+            cpu_dtype: "auto".to_string(),
         }
     }
 }
@@ -296,6 +395,7 @@ impl Default for DreamConfig {
             fallback_base_url: None,
             fallback_model: None,
             extractor_model_override: None,
+            sweep_interval_ok: true,
         }
     }
 }
@@ -451,11 +551,8 @@ impl DaemonEnv {
         let port = match env("PSEUDOLIFE_MCP_PORT") {
             None => 8765,
             Some(raw) => match py_int(&raw) {
-                Some(value) => u16::try_from(value).map_err(|_| {
-                    refuse(format!(
-                        "PSEUDOLIFE_MCP_PORT {raw:?} is not a port (0-65535)"
-                    ))
-                })?,
+                Some(value) => i64::try_from(value)
+                    .map_err(|_| refuse(format!("PSEUDOLIFE_MCP_PORT {raw:?} is out of range")))?,
                 None => {
                     return Err(refuse(format!(
                         "PSEUDOLIFE_MCP_PORT {raw:?} is not an integer"
@@ -643,9 +740,13 @@ fn resolve_scalar(value: String, style: TScalarStyle, tag: Option<Tag>) -> Resul
     })
 }
 
-fn check_collection_tag(tag: Option<Tag>) -> Result<(), String> {
+/// SafeLoader constructs a tagged collection only as itself: `!!seq` on a
+/// sequence, `!!map` on a mapping. Any other tag is a `ConstructorError`
+/// (`!!str {}`, `!!foo []`, `!!map [1]`); `!!set`, `!!omap` and `!!pairs`
+/// construct Python types no config key accepts, and are refused too.
+fn check_collection_tag(tag: Option<Tag>, kind: &str) -> Result<(), String> {
     match tag {
-        Some(tag) if tag.handle != CORE_TAG => Err(unknown_tag(&tag)),
+        Some(tag) if tag.handle != CORE_TAG || tag.suffix != kind => Err(unknown_tag(&tag)),
         _ => Ok(()),
     }
 }
@@ -749,7 +850,7 @@ impl Loader {
                 self.complete(node, anchor);
             }
             Event::SequenceStart(anchor, tag) => {
-                check_collection_tag(tag)?;
+                check_collection_tag(tag, "seq")?;
                 self.stack.push(Frame::Seq(Vec::new(), anchor));
             }
             Event::SequenceEnd => {
@@ -758,11 +859,18 @@ impl Loader {
                 }
             }
             Event::MappingStart(anchor, tag) => {
-                check_collection_tag(tag)?;
+                check_collection_tag(tag, "map")?;
                 self.stack.push(Frame::Map(Vec::new(), None, anchor));
             }
             Event::MappingEnd => {
                 if let Some(Frame::Map(pairs, _, anchor)) = self.stack.pop() {
+                    // A collection key is unhashable for construct_mapping.
+                    if pairs
+                        .iter()
+                        .any(|(k, _)| matches!(k, Node::Map(_) | Node::Seq(_)))
+                    {
+                        return Err("found unhashable key while constructing a mapping".into());
+                    }
                     let node = finish_mapping(pairs)?;
                     self.complete(node, anchor);
                 }
@@ -1030,6 +1138,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             backend: want_str(e, "backend", p, &d.backend)?,
             query_prefix: want_str(e, "query_prefix", p, &d.query_prefix)?,
             max_seq_length: want_int(e, "max_seq_length", p, d.max_seq_length)?,
+            onnx_file_name: want_str(e, "onnx_file_name", p, &d.onnx_file_name)?,
+            batch_size: want_int(e, "batch_size", p, d.batch_size)?,
+            cache_size: want_int(e, "cache_size", p, d.cache_size)?,
+            cpu_dtype: want_str(e, "cpu_dtype", p, &d.cpu_dtype)?,
         };
     }
 
@@ -1055,6 +1167,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             let (preset, bands) = read_miras(miras)?;
             memory.preset = preset;
             memory.bands = bands;
+            memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
+        }
+        if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;
@@ -1072,6 +1188,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 top_n: want_int(b, "top_n", p, d.top_n)?,
                 min_score: want_float(b, "min_score", p, d.min_score)?,
             };
+        }
+        if let Some(r) = section(m, "retrieval_log", "memory.")? {
+            memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
@@ -1169,6 +1288,63 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigErr
     Ok((preset, bands))
 }
 
+fn read_startup_bands(
+    miras: &[(Node, Node)],
+    preset: &str,
+    names: &[String],
+) -> Result<Vec<StartupBandSpec>, ConfigError> {
+    // presets.py: the flat capacity is the 2026-08-15 ablation's retained
+    // 5,250-entry total; continuum keeps the same published tier capacities.
+    if preset == "flat" {
+        return Ok(vec![StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 5250,
+            retention_policy: "balanced".into(),
+        }]);
+    }
+    if preset != "custom" {
+        return Ok(names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| StartupBandSpec {
+                name: name.clone(),
+                max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
+                retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+            })
+            .collect());
+    }
+    let Some(Node::Seq(items)) = lookup(miras, "bands") else {
+        return Err(refuse("memory.miras.bands must be a list"));
+    };
+    items
+        .iter()
+        .zip(names)
+        .map(|(item, name)| {
+            let Node::Map(fields) = item else {
+                return Err(refuse("memory.miras.bands[] must be a mapping"));
+            };
+            let cap = want_int(fields, "max_entries", "memory.miras.bands[]", 5000)?;
+            let max_entries = usize::try_from(cap)
+                .map_err(|_| refuse("band max_entries must be non-negative"))?;
+            let retention_policy = want_str(
+                fields,
+                "retention_policy",
+                "memory.miras.bands[]",
+                "balanced",
+            )?;
+            if !["balanced", "recency_heavy", "surprise_heavy"].contains(&retention_policy.as_str())
+            {
+                return Err(refuse("unknown band retention_policy"));
+            }
+            Ok(StartupBandSpec {
+                name: name.clone(),
+                max_entries,
+                retention_policy,
+            })
+        })
+        .collect()
+}
+
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
     let p = "memory.search";
     let d = SearchConfig::default();
@@ -1217,6 +1393,15 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         fallback_base_url: want_opt_str(d, "fallback_base_url", p)?,
         fallback_model: want_opt_str(d, "fallback_model", p)?,
         extractor_model_override: want_opt_str(d, "extractor_model_override", p)?,
+        // Python `float()`: numbers, bools and numeric strings.
+        sweep_interval_ok: match lookup(d, "sweep_interval_seconds") {
+            None | Some(Node::Int(_) | Node::Float(_) | Node::Bool(_)) => true,
+            Some(Node::Str(s)) => crate::storage::py_strip(s)
+                .replace('_', "")
+                .parse::<f64>()
+                .is_ok(),
+            Some(_) => false,
+        },
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {
@@ -1460,6 +1645,23 @@ mod tests {
 
     fn refused(text: &str) -> bool {
         matches!(load_str(text), Err(ConfigError::Refused(_)))
+    }
+
+    #[test]
+    fn collection_tags_and_unhashable_keys_refuse_like_safe_load() {
+        // yaml.safe_load, probed 2026-10-09: ConstructorError for each.
+        for text in [
+            "!!foo {}\n",
+            "other: !!str {}\n",
+            "? [x]\n: 1\n",
+            "? {a: 1}\n: 1\n",
+            "!!map [1]\n",
+        ] {
+            assert!(refused(text), "{text:?}");
+        }
+        for text in ["!!map {memory: {top_k: 3}}\n", "x: !!seq [1]\n"] {
+            assert!(!refused(text), "{text:?}");
+        }
     }
 
     fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -1734,6 +1936,7 @@ mod tests {
                 backend: "onnx".into(),
                 query_prefix: String::new(),
                 max_seq_length: 256,
+                ..EmbeddingConfig::default()
             }
         );
     }
@@ -2088,13 +2291,16 @@ mod tests {
         assert_eq!(build.built_at, "unknown");
         assert_eq!(build.source, "unknown");
 
-        for port in [
-            "", "abc", "8_", "8__0", "0x10", "1.0", "-1", "70000", "65536",
-        ] {
+        for port in ["", "abc", "8_", "8__0", "0x10", "1.0"] {
             assert!(
                 DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_MCP_PORT", port)])).is_err(),
                 "{port:?}"
             );
+        }
+        // `int()` accepts these; Python fails only at bind, after the guards.
+        for (port, want) in [("-1", -1), ("70000", 70000), ("65536", 65536)] {
+            let e = DaemonEnv::from_env(&env_of(&[("PSEUDOLIFE_MCP_PORT", port)])).unwrap();
+            assert_eq!(e.port, want, "{port:?}");
         }
         let empty_sha = env_of(&[("PSEUDOLIFE_BUILD_GIT_SHA", "")]);
         assert!(DaemonEnv::from_env(&empty_sha).unwrap().build.is_none());

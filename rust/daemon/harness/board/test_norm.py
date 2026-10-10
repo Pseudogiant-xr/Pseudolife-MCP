@@ -3,6 +3,8 @@ what it is declared to, and a malformed or unmatched value stays visible."""
 from __future__ import annotations
 
 import sys
+import os
+import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,6 +15,17 @@ A = "a" * 32
 B = "b" * 32
 M1 = "1" * 32
 M2 = "2" * 32
+
+
+def test_runner_selects_board_disposable_namespace():
+    env = dict(os.environ, PL_HARNESS_SLICE="w1a")
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "from board.run import pg; pg._check('pl_cf_w2f_identity_rs')"],
+        cwd=Path(__file__).resolve().parents[1], env=env,
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def norm_with(steps):

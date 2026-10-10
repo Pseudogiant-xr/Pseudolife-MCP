@@ -132,8 +132,17 @@ def _load_artifact(rel: str):
 
 @lru_cache(maxsize=None)
 def _read_doc(rel: str) -> str:
-    """Read one doc once. CHANGELOG.md was being re-read 160 times."""
-    return (REPO / rel).read_text(encoding="utf-8")
+    """Read one doc once. CHANGELOG.md was being re-read 160 times.
+
+    CHANGELOG.md includes the pending ``changelog.d/`` fragments, so a claim
+    is found both before and after the release folds them in (2026-10-09)."""
+    text = (REPO / rel).read_text(encoding="utf-8")
+    if rel == "CHANGELOG.md":
+        text = "\n".join(
+            [text] + [f.read_text(encoding="utf-8")
+                      for f in sorted((REPO / "changelog.d").glob("*.md"))
+                      if f.name != "README.md"])
+    return text
 
 
 @dataclass(frozen=True)

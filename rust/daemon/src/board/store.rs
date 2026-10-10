@@ -293,8 +293,7 @@ pub fn uuid_hex() -> String {
 
 /// `secrets.token_urlsafe(32)`: 32 random bytes, URL-safe base64, no padding.
 pub fn token_urlsafe32() -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut buf = [0u8; 32];
     getrandom::fill(&mut buf).expect("system randomness");
     let mut out = String::with_capacity(43);
@@ -312,7 +311,9 @@ pub fn token_urlsafe32() -> String {
 }
 
 fn is_lower_hex(s: &str, len: usize) -> bool {
-    s.len() == len && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == len
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `_live_children`.
@@ -323,7 +324,8 @@ pub fn live_children(children: &[Value], now: f64) -> Vec<Value> {
             let hooked = child
                 .get("agent_id")
                 .is_some_and(|a| a.as_str().is_some_and(|s| !s.is_empty()));
-            !hooked || now - child.get("since").and_then(canon::as_f64).unwrap_or(0.0) < HOOK_CHILD_TTL
+            !hooked
+                || now - child.get("since").and_then(canon::as_f64).unwrap_or(0.0) < HOOK_CHILD_TTL
         })
         .cloned()
         .collect()
@@ -438,7 +440,9 @@ impl Store {
         if created > 0 {
             append(
                 &tx,
-                vec![Event::new("bank_identity", &json!({"bank_id": bank_id})).principal(principal)],
+                vec![
+                    Event::new("bank_identity", &json!({"bank_id": bank_id})).principal(principal),
+                ],
                 now(),
                 None,
             )
@@ -597,7 +601,12 @@ impl Store {
     }
 
     /// `_name_change`: the columns applying `name` from `source`, or none.
-    fn name_change(row: &AgentRow, name: &str, source: &str, now: f64) -> Option<(String, String, f64)> {
+    fn name_change(
+        row: &AgentRow,
+        name: &str,
+        source: &str,
+        now: f64,
+    ) -> Option<(String, String, f64)> {
         let current = row.name_source.as_str();
         if name_rank(source) < name_rank(current) {
             return None;
@@ -748,7 +757,10 @@ impl Store {
                             None,
                         ));
                     }
-                    out.push((key.clone(), float_value(canon::as_f64(value).expect("number"))));
+                    out.push((
+                        key.clone(),
+                        float_value(canon::as_f64(value).expect("number")),
+                    ));
                     continue;
                 }
                 _ => return Err(BoardError::code("invalid_update")),
@@ -794,12 +806,15 @@ impl Store {
         };
         let episode = field(&fields, "episode").as_str().unwrap_or("").to_string();
         let caps = field(&fields, "capabilities");
-        let thread = (caps.as_object().is_some_and(|m| m.contains_key("codex")) && !episode.is_empty())
-            .then(|| episode.clone());
+        let thread = (caps.as_object().is_some_and(|m| m.contains_key("codex"))
+            && !episode.is_empty())
+        .then(|| episode.clone());
         let name_source = params.get("name_source").filter(|v| !v.is_null());
         let name = params.get("name").cloned().unwrap_or(json!(""));
         if let Some(src) = name_source {
-            let valid = src.as_str().is_some_and(|s| CLIENT_NAME_SOURCES.contains(&s));
+            let valid = src
+                .as_str()
+                .is_some_and(|s| CLIENT_NAME_SOURCES.contains(&s));
             if !src.is_string() && !src.is_number() && !src.is_boolean() {
                 // An unhashable value: `not in frozenset` raises TypeError.
                 return Err(BoardError::code("invalid_request_type_error"));
@@ -819,13 +834,14 @@ impl Store {
                 json!(name_source.and_then(Value::as_str).unwrap_or("agent")),
             ));
         }
-        let parent_thread = params.get("parent_thread").filter(|v| !v.is_null()).cloned();
+        let parent_thread = params
+            .get("parent_thread")
+            .filter(|v| !v.is_null())
+            .cloned();
         if let Some(pt) = &parent_thread {
             // A non-string is `canonical = None`, never equal to it (Codex
             // review finding 3).
-            let canonical = pt
-                .as_str()
-                .and_then(|s| python_uuid_canonical(s));
+            let canonical = pt.as_str().and_then(python_uuid_canonical);
             if !pt.is_string()
                 || canonical.as_deref() != pt.as_str()
                 || thread.is_none()
@@ -855,7 +871,10 @@ impl Store {
         let s = |k: &str| field(&fields, k).as_str().unwrap_or("").to_string();
         let named = field(&fields, "name");
         let named_str = named.as_str().unwrap_or("").to_string();
-        let name_src = field(&fields, "name_source").as_str().unwrap_or("").to_string();
+        let name_src = field(&fields, "name_source")
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         let harness_name = if name_src == "harness" {
             named_str.clone()
         } else {
@@ -898,10 +917,15 @@ impl Store {
                 .scope(&s("project"), &s("task")),
         ];
         if let Some(thread) = &thread {
-            events.extend(self.link_children(&tx, principal, thread, &agent_id).await?);
+            events.extend(
+                self.link_children(&tx, principal, thread, &agent_id)
+                    .await?,
+            );
         }
         append(&tx, events, now, None).await?;
-        let mut out = self.authenticate(&tx, principal, &agent_id, &credential).await?;
+        let mut out = self
+            .authenticate(&tx, principal, &agent_id, &credential)
+            .await?;
         tx.commit().await?;
         out["credential"] = json!(credential);
         Ok(out)
@@ -948,6 +972,7 @@ impl Store {
 
     /// `update` (spec BS4). `given` are the parameters other than `expect`
     /// and `name`, in their given order.
+    #[allow(clippy::too_many_arguments)] // The board update contract's arguments.
     pub async fn update(
         &self,
         client: &mut tokio_postgres::Client,
@@ -963,7 +988,10 @@ impl Store {
             Some(n) => Some(Self::check_name(n)?),
             None => None,
         };
-        Self::check_label(principal, fields.iter().find(|(k, _)| k == "label").map(|(_, v)| v))?;
+        Self::check_label(
+            principal,
+            fields.iter().find(|(k, _)| k == "label").map(|(_, v)| v),
+        )?;
         let expect = match expect {
             None => None,
             Some(v) => match canon::py_int_i64(v) {
@@ -974,7 +1002,9 @@ impl Store {
         let has = |fields: &[(String, Value)], k: &str| fields.iter().any(|(key, _)| key == k);
         let park_update = PARK_FIELDS.iter().any(|k| has(&fields, k));
         let tx = client.transaction().await?;
-        let row = self.auth(&tx, principal, agent_id, credential, true).await?;
+        let row = self
+            .auth(&tx, principal, agent_id, credential, true)
+            .await?;
         let now = now();
         let recorded = row.park_reason.is_some();
         let parked = wake::live_park(&row, now).is_some();
@@ -998,7 +1028,10 @@ impl Store {
             }
         };
         if park_update {
-            let reason = fields.iter().find(|(k, _)| k == "park_reason").map(|(_, v)| v.clone());
+            let reason = fields
+                .iter()
+                .find(|(k, _)| k == "park_reason")
+                .map(|(_, v)| v.clone());
             if reason.as_ref().is_some_and(Value::is_null) {
                 cleared(&mut fields);
             } else if reason.is_none() && !parked {
@@ -1062,7 +1095,11 @@ impl Store {
             slot.1 = Value::Array(parent_children(&row.children_list(), &labels, now));
         }
         if let Some(expect) = expect {
-            set(&mut fields, "status_expires_at", float_value(now + expect as f64));
+            set(
+                &mut fields,
+                "status_expires_at",
+                float_value(now + expect as f64),
+            );
         } else if has(&fields, "status") && row.status_expires_at.is_some() {
             set(&mut fields, "status_expires_at", Value::Null);
         }
@@ -1114,15 +1151,19 @@ impl Store {
             .to_string();
         append(
             &tx,
-            vec![Event::new("update", &payload)
-                .principal(principal)
-                .agent(agent_id)
-                .scope(&project, &task)],
+            vec![
+                Event::new("update", &payload)
+                    .principal(principal)
+                    .agent(agent_id)
+                    .scope(&project, &task),
+            ],
             now,
             None,
         )
         .await?;
-        let out = self.authenticate(&tx, principal, agent_id, credential).await?;
+        let out = self
+            .authenticate(&tx, principal, agent_id, credential)
+            .await?;
         tx.commit().await?;
         Ok(out)
     }
@@ -1135,14 +1176,13 @@ impl Store {
         agent_id: &str,
         principal: &str,
     ) -> Result<Option<AgentRow>> {
-        Ok(c
-            .query_opt(
-                "SELECT * FROM coordination_agents WHERE agent_id=$1 AND principal=$2 \
+        Ok(c.query_opt(
+            "SELECT * FROM coordination_agents WHERE agent_id=$1 AND principal=$2 \
                  AND credential_hash IS NOT NULL FOR UPDATE",
-                &[&agent_id, &principal],
-            )
-            .await?
-            .map(|r| AgentRow::from_row(&r)))
+            &[&agent_id, &principal],
+        )
+        .await?
+        .map(|r| AgentRow::from_row(&r)))
     }
 
     async fn set_hook_children(
@@ -1161,14 +1201,16 @@ impl Store {
         .await?;
         append(
             c,
-            vec![Event::new(
-                "update",
-                &json!({"fields": {"children": list}, "before": {"children": row.children}}),
-            )
-            .actor("hook")
-            .principal(principal)
-            .agent(&row.agent_id)
-            .scope(&row.project, &row.task)],
+            vec![
+                Event::new(
+                    "update",
+                    &json!({"fields": {"children": list}, "before": {"children": row.children}}),
+                )
+                .actor("hook")
+                .principal(principal)
+                .agent(&row.agent_id)
+                .scope(&row.project, &row.task),
+            ],
             now,
             None,
         )
@@ -1241,7 +1283,8 @@ impl Store {
             children.remove(oldest.0);
         }
         children.push(json!({"label": label, "since": float_value(now), "agent_id": child}));
-        self.set_hook_children(&tx, &row, children, principal, now).await?;
+        self.set_hook_children(&tx, &row, children, principal, now)
+            .await?;
         tx.commit().await?;
         Ok(json!({"recorded": true, "changed": true}))
     }
@@ -1271,7 +1314,8 @@ impl Store {
         if children.len() == live.len() {
             return Ok(json!({"recorded": false, "reason": "not_listed"}));
         }
-        self.set_hook_children(&tx, &row, children, principal, now).await?;
+        self.set_hook_children(&tx, &row, children, principal, now)
+            .await?;
         tx.commit().await?;
         Ok(json!({"recorded": true, "changed": true}))
     }
@@ -1286,11 +1330,13 @@ impl Store {
         credential: &str,
         params: &Map<String, Value>,
     ) -> Result<Value> {
-        self.auth(&*client, principal, agent_id, credential, false).await?;
+        self.auth(&*client, principal, agent_id, credential, false)
+            .await?;
         let limit = params.get("limit").cloned().unwrap_or(json!(MAX_PAGE));
         let project = params.get("project").filter(|v| !v.is_null());
         let task = params.get("task").filter(|v| !v.is_null());
-        self.roster(client, agent_id, project, task, &limit, true).await
+        self.roster(client, agent_id, project, task, &limit, true)
+            .await
     }
 
     pub async fn roster(
@@ -1317,7 +1363,8 @@ impl Store {
             append(&tx, events, now, None).await?;
             tx.commit().await?;
         }
-        self.roster_read(&*client, agent_id, project, task, page).await
+        self.roster_read(&*client, agent_id, project, task, page)
+            .await
     }
 
     /// The read half of `_roster`: agents, idle count, status ages and the
@@ -1330,7 +1377,10 @@ impl Store {
         task: Option<&Value>,
         limit: i64,
     ) -> Result<Value> {
-        let mut clauses = vec!["agent_id<>$1".to_string(), "credential_hash IS NOT NULL".to_string()];
+        let mut clauses = vec![
+            "agent_id<>$1".to_string(),
+            "credential_hash IS NOT NULL".to_string(),
+        ];
         let mut values: Vec<String> = vec![agent_id.to_string()];
         for (key, value) in [("project", project), ("task", task)] {
             if let Some(v) = value {
@@ -1389,15 +1439,16 @@ impl Store {
         for row in rows.iter().take(limit as usize) {
             let mut agent = self.public(row);
             agent["status_expires_at"] = opt_f64(row.status_expires_at);
-            agent["status_overdue"] =
-                json!(row.status_expires_at.is_some_and(|e| now > e));
+            agent["status_overdue"] = json!(row.status_expires_at.is_some_and(|e| now > e));
             agents.push(agent);
         }
         self.stamp_status_age(client, &mut agents, now).await?;
         let leases = lease::lease_page(client, None, MAX_PAGE, now).await?;
-        Ok(json!({"agents": agents, "truncated": rows.len() as i64 > limit,
+        Ok(
+            json!({"agents": agents, "truncated": rows.len() as i64 > limit,
                   "idle_omitted": idle, "leases": leases["leases"],
-                  "leases_truncated": leases["truncated"]}))
+                  "leases_truncated": leases["truncated"]}),
+        )
     }
 
     /// `_stamp_status_age`.
@@ -1518,14 +1569,20 @@ impl Store {
             return Err(BoardError::code("invalid_capabilities"));
         }
         let tx = client.transaction().await?;
-        let row = self.auth(&tx, principal, agent_id, credential, true).await?;
+        let row = self
+            .auth(&tx, principal, agent_id, credential, true)
+            .await?;
         let now = now();
         let armed_until = Self::listener_deadline(ring_armed_until, now)?;
         let alive = row.attachment_id.is_some() && row.lease_until.unwrap_or(0.0) > now;
         if alive && row.attachment_id.as_deref() != Some(attachment_id.as_str()) {
             return Err(BoardError::code("attachment_busy"));
         }
-        let generation = if alive { row.generation } else { row.generation + 1 };
+        let generation = if alive {
+            row.generation
+        } else {
+            row.generation + 1
+        };
         let started = row.attachment_id.as_deref() != Some(attachment_id.as_str());
         let lease_until = now + ATTACHMENT_LEASE;
         tx.execute(
@@ -1556,14 +1613,16 @@ impl Store {
         let offer = wake::serve_wake(&tx, agent_id, now).await?;
         append(
             &tx,
-            vec![Event::new(
-                "attach",
-                &json!({"generation": generation, "lease_until": float_value(lease_until),
+            vec![
+                Event::new(
+                    "attach",
+                    &json!({"generation": generation, "lease_until": float_value(lease_until),
                         "wake_enabled": wake_enabled, "renewed": alive}),
-            )
-            .principal(principal)
-            .agent(agent_id)
-            .scope(&row.project, &row.task)],
+                )
+                .principal(principal)
+                .agent(agent_id)
+                .scope(&row.project, &row.task),
+            ],
             now,
             None,
         )
@@ -1579,9 +1638,10 @@ impl Store {
 
     /// `_attachment`.
     pub fn attachment(row: &AgentRow, attachment_id: &Value, generation: i64) -> Result<()> {
-        let matches = row.attachment_id.as_deref().is_some_and(|a| {
-            !a.is_empty() && attachment_id.as_str() == Some(a)
-        });
+        let matches = row
+            .attachment_id
+            .as_deref()
+            .is_some_and(|a| !a.is_empty() && attachment_id.as_str() == Some(a));
         if !matches || row.generation != generation || row.lease_until.unwrap_or(0.0) <= now() {
             return Err(BoardError::code("stale_attachment"));
         }
@@ -1625,7 +1685,9 @@ impl Store {
             None => None,
         };
         let tx = client.transaction().await?;
-        let row = self.auth(&tx, principal, agent_id, credential, true).await?;
+        let row = self
+            .auth(&tx, principal, agent_id, credential, true)
+            .await?;
         Self::attachment(&row, attachment_id, generation)?;
         let now = now();
         let armed_until = Self::listener_deadline(ring_armed_until, now)?;
@@ -1685,7 +1747,9 @@ impl Store {
         generation: i64,
     ) -> Result<Value> {
         let tx = client.transaction().await?;
-        let row = self.auth(&tx, principal, agent_id, credential, true).await?;
+        let row = self
+            .auth(&tx, principal, agent_id, credential, true)
+            .await?;
         Self::attachment(&row, attachment_id, generation)?;
         tx.execute(
             "UPDATE coordination_agents SET attachment_id=NULL,lease_until=NULL,\
@@ -1817,11 +1881,13 @@ impl Store {
             .get(0);
         append(
             &tx,
-            vec![Event::new("woke", &json!({"rings": rings}))
-                .principal(principal)
-                .agent(agent_id)
-                .recipient(agent_id)
-                .scope(&row.project, &row.task)],
+            vec![
+                Event::new("woke", &json!({"rings": rings}))
+                    .principal(principal)
+                    .agent(agent_id)
+                    .recipient(agent_id)
+                    .scope(&row.project, &row.task),
+            ],
             now,
             None,
         )
@@ -1843,7 +1909,10 @@ pub fn parent_children(current: &[Value], labels: &[String], now: f64) -> Vec<Va
         .collect();
     let mut since: Map<String, Value> = Map::new();
     for child in current.iter().filter(|c| !hooked(c)) {
-        if let (Some(label), Some(s)) = (child.get("label").and_then(Value::as_str), child.get("since")) {
+        if let (Some(label), Some(s)) = (
+            child.get("label").and_then(Value::as_str),
+            child.get("since"),
+        ) {
             since.insert(label.to_string(), s.clone());
         }
     }
@@ -1853,7 +1922,10 @@ pub fn parent_children(current: &[Value], labels: &[String], now: f64) -> Vec<Va
         .map(|l| {
             obj(vec![
                 ("label", json!(l)),
-                ("since", since.get(l).cloned().unwrap_or_else(|| float_value(now))),
+                (
+                    "since",
+                    since.get(l).cloned().unwrap_or_else(|| float_value(now)),
+                ),
             ])
         })
         .collect();
@@ -1904,17 +1976,6 @@ fn ascii_escape(s: &str) -> String {
     out
 }
 
-#[cfg(test)]
-mod proof_tests {
-    #[test]
-    fn ensure_ascii_escapes_del_and_non_ascii() {
-        // CPython 3.11: json.dumps(["a\x7f\u00e9\U0001f600"], ensure_ascii=True).
-        let input = "[\"a\u{7f}\u{e9}\u{1f600}\"]";
-        let want = r#"["a\u007f\u00e9\ud83d\ude00"]"#;
-        assert_eq!(super::ascii_escape(input), want);
-    }
-}
-
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -1940,5 +2001,16 @@ fn column_param(key: &str, value: &Value) -> Box<dyn tokio_postgres::types::ToSq
         }
         "park_reason" => Box::new(value.as_str().map(str::to_string)),
         _ => Box::new(value.as_str().unwrap_or("").to_string()),
+    }
+}
+
+#[cfg(test)]
+mod proof_tests {
+    #[test]
+    fn ensure_ascii_escapes_del_and_non_ascii() {
+        // CPython 3.11: json.dumps(["a\x7f\u00e9\U0001f600"], ensure_ascii=True).
+        let input = "[\"a\u{7f}\u{e9}\u{1f600}\"]";
+        let want = r#"["a\u007f\u00e9\ud83d\ude00"]"#;
+        assert_eq!(super::ascii_escape(input), want);
     }
 }

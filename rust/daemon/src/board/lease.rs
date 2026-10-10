@@ -32,6 +32,7 @@ fn reserved(name: &str) -> bool {
 
 /// `_lease_args`: the name (no control/format/surrogate/unassigned
 /// character, no surrounding whitespace, at most 120), ttl, expect, purpose.
+#[allow(clippy::type_complexity)] // Mirrors Python's four validated lease arguments.
 pub fn lease_args(
     name: &Value,
     ttl: Option<&Value>,
@@ -135,9 +136,12 @@ async fn drop_reserved_waiters(
     {
         let agent: String = r.get(0);
         events.push(
-            Event::new("lease_dequeue", &json!({"name": name, "reason": "reserved"}))
-                .actor("daemon")
-                .agent(&agent),
+            Event::new(
+                "lease_dequeue",
+                &json!({"name": name, "reason": "reserved"}),
+            )
+            .actor("daemon")
+            .agent(&agent),
         );
     }
     Ok(())
@@ -186,9 +190,12 @@ pub async fn settle(
         for r in c.query(&sql, &[&name, &short, &long]).await? {
             let agent: String = r.get(0);
             events.push(
-                Event::new("lease_dequeue", &json!({"name": name, "reason": "departed"}))
-                    .actor("daemon")
-                    .agent(&agent),
+                Event::new(
+                    "lease_dequeue",
+                    &json!({"name": name, "reason": "departed"}),
+                )
+                .actor("daemon")
+                .agent(&agent),
             );
         }
         if reserved(name) {
@@ -215,7 +222,17 @@ pub async fn settle(
             )
             .await?;
             let hold = ttl.min(LEASE_GRANT_WINDOW);
-            row = grant(c, name, &agent, &principal, now, f64::from(hold), expect, &purpose).await?;
+            row = grant(
+                c,
+                name,
+                &agent,
+                &principal,
+                now,
+                f64::from(hold),
+                expect,
+                &purpose,
+            )
+            .await?;
             events.push(
                 Event::new(
                     "lease_grant",
@@ -390,14 +407,19 @@ impl Store {
             return Err(BoardError::code("reserved_lease"));
         }
         let tx = client.transaction().await?;
-        let agent = self.auth(&tx, principal, agent_id, credential, false).await?;
+        let agent = self
+            .auth(&tx, principal, agent_id, credential, false)
+            .await?;
         let now = now();
         if let Some(project) = name.strip_prefix(COORDINATOR_PREFIX) {
             lock_role_leases(&tx, project).await?;
             let live = "SELECT 1 AS d FROM coordination_leases WHERE name=$1 \
                         AND holder_agent_id=$2 AND expires_at>$3";
             let delegate = tx
-                .query_opt(live, &[&format!("{DELEGATE_PREFIX}{project}"), &agent_id, &now])
+                .query_opt(
+                    live,
+                    &[&format!("{DELEGATE_PREFIX}{project}"), &agent_id, &now],
+                )
                 .await?;
             let coordinator = tx.query_opt(live, &[&name, &agent_id, &now]).await?;
             if delegate.is_some() && coordinator.is_none() {
@@ -529,7 +551,9 @@ impl Store {
     ) -> Result<Value> {
         let (name, ..) = lease_args(name, None, None, None)?;
         let tx = client.transaction().await?;
-        let agent = self.auth(&tx, principal, agent_id, credential, false).await?;
+        let agent = self
+            .auth(&tx, principal, agent_id, credential, false)
+            .await?;
         let now = now();
         let scoped = |e: Event| {
             e.principal(principal)
@@ -668,7 +692,11 @@ pub async fn lease_page(
                 ("purpose", json!(purpose)),
                 (
                     "name",
-                    json!(text::board_name(&agent, Some(&label), agent_name.as_deref())),
+                    json!(text::board_name(
+                        &agent,
+                        Some(&label),
+                        agent_name.as_deref()
+                    )),
                 ),
             ]));
         }
@@ -710,6 +738,10 @@ pub async fn leases_action(
         Some(v) => Some(lease_args(v, None, None, None)?.0),
         None => None,
     };
-    let limit = check_limit(params.get("limit").unwrap_or(&json!(super::store::MAX_PAGE)))?;
+    let limit = check_limit(
+        params
+            .get("limit")
+            .unwrap_or(&json!(super::store::MAX_PAGE)),
+    )?;
     list_leases(client, name.as_deref(), limit, true).await
 }

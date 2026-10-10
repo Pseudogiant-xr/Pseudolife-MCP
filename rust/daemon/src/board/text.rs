@@ -48,15 +48,15 @@ pub fn collapse_spaces(s: &str) -> String {
 /// `str.casefold()` (CPython 3.11).
 pub fn casefold(s: &str) -> String {
     s.chars()
-        .flat_map(
-            |c| match unicode14::FOLD_CORRECTIONS.binary_search_by_key(&c, |(source, _)| *source) {
+        .flat_map(|c| {
+            match unicode14::FOLD_CORRECTIONS.binary_search_by_key(&c, |(source, _)| *source) {
                 Ok(index) => unicode14::FOLD_CORRECTIONS[index]
                     .1
                     .chars()
                     .collect::<Vec<_>>(),
                 Err(_) => c.to_string().case_fold().collect::<Vec<_>>(),
-            },
-        )
+            }
+        })
         .collect()
 }
 
@@ -95,17 +95,62 @@ pub fn check_value<'a>(
 /// `_CONFUSABLES` (`storage/coordination.py:408-422`), applied before casefolding.
 fn confusable(c: char) -> char {
     match c {
-        'а' => 'a', 'е' => 'e', 'о' => 'o', 'р' => 'p', 'с' => 'c', 'у' => 'y', 'х' => 'x',
-        'і' => 'i', 'ј' => 'j', 'ѕ' => 's', 'ԁ' => 'd', 'һ' => 'h', 'ӏ' => 'l', 'ԛ' => 'q',
+        'а' => 'a',
+        'е' => 'e',
+        'о' => 'o',
+        'р' => 'p',
+        'с' => 'c',
+        'у' => 'y',
+        'х' => 'x',
+        'і' => 'i',
+        'ј' => 'j',
+        'ѕ' => 's',
+        'ԁ' => 'd',
+        'һ' => 'h',
+        'ӏ' => 'l',
+        'ԛ' => 'q',
         'ԝ' => 'w',
-        'А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M', 'Н' => 'H', 'О' => 'O',
-        'Р' => 'P', 'С' => 'C', 'Т' => 'T', 'Х' => 'X', 'І' => 'I', 'Ј' => 'J', 'Ѕ' => 'S',
+        'А' => 'A',
+        'В' => 'B',
+        'Е' => 'E',
+        'К' => 'K',
+        'М' => 'M',
+        'Н' => 'H',
+        'О' => 'O',
+        'Р' => 'P',
+        'С' => 'C',
+        'Т' => 'T',
+        'Х' => 'X',
+        'І' => 'I',
+        'Ј' => 'J',
+        'Ѕ' => 'S',
         'У' => 'Y',
-        'α' => 'a', 'ι' => 'i', 'κ' => 'k', 'ν' => 'v', 'ο' => 'o', 'ρ' => 'p', 'υ' => 'u',
+        'α' => 'a',
+        'ι' => 'i',
+        'κ' => 'k',
+        'ν' => 'v',
+        'ο' => 'o',
+        'ρ' => 'p',
+        'υ' => 'u',
         'χ' => 'x',
-        'Α' => 'A', 'Β' => 'B', 'Ε' => 'E', 'Ζ' => 'Z', 'Η' => 'H', 'Ι' => 'I', 'Κ' => 'K',
-        'Μ' => 'M', 'Ν' => 'N', 'Ο' => 'O', 'Ρ' => 'P', 'Τ' => 'T', 'Υ' => 'Y', 'Χ' => 'X',
-        'ı' => 'i', 'l' => 'i', '0' => 'o', '1' => 'i',
+        'Α' => 'A',
+        'Β' => 'B',
+        'Ε' => 'E',
+        'Ζ' => 'Z',
+        'Η' => 'H',
+        'Ι' => 'I',
+        'Κ' => 'K',
+        'Μ' => 'M',
+        'Ν' => 'N',
+        'Ο' => 'O',
+        'Ρ' => 'P',
+        'Τ' => 'T',
+        'Υ' => 'Y',
+        'Χ' => 'X',
+        'ı' => 'i',
+        'l' => 'i',
+        '0' => 'o',
+        '1' => 'i',
         c => c,
     }
 }
@@ -226,7 +271,14 @@ mod tests {
         ] {
             assert!(reserved_name(label), "{label}");
         }
-        for label in ["daemon watcher", "passkeys", "verifier", "claude-code", "codex", ""] {
+        for label in [
+            "daemon watcher",
+            "passkeys",
+            "verifier",
+            "claude-code",
+            "codex",
+            "",
+        ] {
             assert!(!reserved_name(label), "{label}");
         }
     }

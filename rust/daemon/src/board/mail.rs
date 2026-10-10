@@ -5,8 +5,8 @@ use super::canon::{self, float_value};
 use super::db::{AgentRow, MessageRow, obj, opt_f64, opt_str};
 use super::error::{BoardError, Result};
 use super::store::{
-    ATTACHED_IDLE_WINDOW, DAEMON_PRINCIPAL, Event, MAINTAINER_PRINCIPAL, RESERVED_SENDERS,
-    Store, append, chain_head, check_limit, now, random_hex, refuse_secret, uuid_hex,
+    ATTACHED_IDLE_WINDOW, DAEMON_PRINCIPAL, Event, MAINTAINER_PRINCIPAL, RESERVED_SENDERS, Store,
+    append, chain_head, check_limit, now, random_hex, refuse_secret, uuid_hex,
 };
 use super::text::{self, check_string, check_value};
 use super::{lease, wake};
@@ -37,7 +37,8 @@ const ID_CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST
 const BODY_SALT_BYTES: usize = 16;
 
 fn is_hex(s: &str) -> bool {
-    s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `is_full_agent_id`.
@@ -144,7 +145,11 @@ pub async fn mailbox_state(c: &impl GenericClient, agent_id: &str) -> Result<Val
                 DAEMON_PRINCIPAL.to_string()
             } else {
                 let l = label.unwrap_or_default();
-                if text::reserved_name(&l) { String::new() } else { l }
+                if text::reserved_name(&l) {
+                    String::new()
+                } else {
+                    l
+                }
             };
             let body: Option<String> = r.get(4);
             obj(vec![
@@ -218,7 +223,11 @@ fn send_result(
             m.insert("wake".into(), row.wake.clone().unwrap_or(Value::Null));
             m.insert(
                 "path".into(),
-                json!(agents.get(&row.recipient_agent_id).map_or("pull", |a| path_for(a, now))),
+                json!(
+                    agents
+                        .get(&row.recipient_agent_id)
+                        .map_or("pull", |a| path_for(a, now))
+                ),
             );
             Value::Object(m)
         })
@@ -246,7 +255,8 @@ pub fn message_ids(value: &Value) -> Result<(Vec<String>, bool)> {
     let raw = check_value(value, 8192, "message_id", false)?;
     let s = text::py_strip(raw);
     let (items, batch): (Vec<String>, bool) = if s.starts_with('[') {
-        let parsed: Value = serde_json::from_str(s).map_err(|_| BoardError::code("invalid_message_id"))?;
+        let parsed: Value =
+            serde_json::from_str(s).map_err(|_| BoardError::code("invalid_message_id"))?;
         let Some(list) = parsed.as_array().filter(|l| !l.is_empty()) else {
             return Err(BoardError::code("invalid_message_id"));
         };
@@ -254,7 +264,9 @@ pub fn message_ids(value: &Value) -> Result<(Vec<String>, bool)> {
             return Err(BoardError::code("invalid_message_id"));
         }
         (
-            list.iter().map(|v| v.as_str().expect("str").to_string()).collect(),
+            list.iter()
+                .map(|v| v.as_str().expect("str").to_string())
+                .collect(),
             true,
         )
     } else {
@@ -354,10 +366,7 @@ impl Store {
         Ok(resolved(ids, Some(missing), ambiguous)?.expect("missing raises"))
     }
 
-    fn fanout_scope(
-        target: &(&'static str, Option<String>),
-        only: bool,
-    ) -> (String, usize) {
+    fn fanout_scope(target: &(&'static str, Option<String>), only: bool) -> (String, usize) {
         let mut clauses = vec![
             "credential_hash IS NOT NULL",
             "agent_id<>$1",
@@ -396,7 +405,8 @@ impl Store {
             n + 1
         );
         let project = target.1.clone().unwrap_or_default();
-        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![&sender, &now, &floor];
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            vec![&sender, &now, &floor];
         if target.0 == "project" {
             params.push(&project);
         }
@@ -421,17 +431,17 @@ impl Store {
         let (where_, _) = Self::fanout_scope(target, false);
         let floor = now - ATTACHED_IDLE_WINDOW;
         let project = target.1.clone().unwrap_or_default();
-        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![&sender, &now, &floor];
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            vec![&sender, &now, &floor];
         if target.0 == "project" {
             params.push(&project);
         }
-        Ok(c
-            .query_one(
-                &format!("SELECT count(*) AS n FROM coordination_agents WHERE {where_}"),
-                &params,
-            )
-            .await?
-            .get(0))
+        Ok(c.query_one(
+            &format!("SELECT count(*) AS n FROM coordination_agents WHERE {where_}"),
+            &params,
+        )
+        .await?
+        .get(0))
     }
 
     /// `_replayed`.
@@ -478,9 +488,15 @@ impl Store {
         if existing.iter().any(|row| row.fingerprint != fingerprint) {
             return Err(BoardError::code("request_conflict"));
         }
-        let ids: Vec<String> = existing.iter().map(|r| r.recipient_agent_id.clone()).collect();
+        let ids: Vec<String> = existing
+            .iter()
+            .map(|r| r.recipient_agent_id.clone())
+            .collect();
         let agents = c
-            .query("SELECT * FROM coordination_agents WHERE agent_id=ANY($1)", &[&ids])
+            .query(
+                "SELECT * FROM coordination_agents WHERE agent_id=ANY($1)",
+                &[&ids],
+            )
             .await?
             .iter()
             .map(|r| {
@@ -505,7 +521,8 @@ impl Store {
         }
         let maintainer = args.maintainer_proof.is_some();
         if maintainer != (principal == MAINTAINER_PRINCIPAL)
-            || (maintainer && (args.notice || !args.maintainer_proof.as_ref().is_some_and(Value::is_object)))
+            || (maintainer
+                && (args.notice || !args.maintainer_proof.as_ref().is_some_and(Value::is_object)))
         {
             return Err(BoardError::code("invalid_request"));
         }
@@ -587,7 +604,9 @@ impl Store {
         }
         let tx = client.transaction().await?;
         let now = now();
-        let sender = self.auth(&tx, principal, agent_id, credential, false).await?;
+        let sender = self
+            .auth(&tx, principal, agent_id, credential, false)
+            .await?;
         if sender.parent_thread.is_some() {
             return Err(BoardError::detail("child_send_refused", CHILD_SEND_REFUSED));
         }
@@ -687,7 +706,9 @@ impl Store {
             &[&lock_ids],
         )
         .await?;
-        let sender = self.auth(&tx, principal, agent_id, credential, false).await?;
+        let sender = self
+            .auth(&tx, principal, agent_id, credential, false)
+            .await?;
         let existing = self.existing(&tx, agent_id, &request_id).await?;
         if !existing.is_empty() {
             return self
@@ -723,7 +744,15 @@ impl Store {
                 return Err(BoardError::ClockChanged);
             }
         }
-        let recipients: Vec<AgentRow> = if fanout.is_none() {
+        let recipients: Vec<AgentRow> = if let Some(fanout) = &fanout {
+            let rows = self
+                .fanout_rows(&tx, agent_id, fanout, now, Some(&targets))
+                .await?;
+            if rows.is_empty() {
+                return Err(BoardError::code("no_recipients"));
+            }
+            rows
+        } else {
             let Some(row) = tx
                 .query_opt(
                     "SELECT * FROM coordination_agents WHERE agent_id=$1 \
@@ -735,14 +764,6 @@ impl Store {
                 return Err(BoardError::code("recipient_not_found"));
             };
             vec![AgentRow::from_row(&row)]
-        } else {
-            let rows = self
-                .fanout_rows(&tx, agent_id, fanout.as_ref().expect("burst"), now, Some(&targets))
-                .await?;
-            if rows.is_empty() {
-                return Err(BoardError::code("no_recipients"));
-            }
-            rows
         };
         let expiry = now + MESSAGE_TTL;
         let mut parent: Option<(String, String, String, String)> = None;
@@ -764,9 +785,9 @@ impl Store {
             if RESERVED_SENDERS.contains(&recipient.principal.as_str())
                 && !(to.is_none()
                     && recipient.principal == MAINTAINER_PRINCIPAL
-                    && parent.as_ref().is_some_and(|p| {
-                        p.2 == MAINTAINER_ORIGIN && p.3 == MAINTAINER_PRINCIPAL
-                    }))
+                    && parent
+                        .as_ref()
+                        .is_some_and(|p| p.2 == MAINTAINER_ORIGIN && p.3 == MAINTAINER_PRINCIPAL))
             {
                 return Err(BoardError::code("recipient_reserved"));
             }
@@ -847,7 +868,11 @@ impl Store {
                 &[&seq, &recipient.agent_id],
             )
             .await?;
-            let origin = if maintainer { MAINTAINER_ORIGIN } else { MESSAGE_ORIGIN };
+            let origin = if maintainer {
+                MAINTAINER_ORIGIN
+            } else {
+                MESSAGE_ORIGIN
+            };
             let row = tx
                 .query_one(
                     "INSERT INTO coordination_messages (message_id,sender_agent_id,recipient_agent_id,\
@@ -926,7 +951,13 @@ impl Store {
             .into_iter()
             .map(|r| (r.agent_id.clone(), r))
             .collect();
-        Ok(send_result(to.as_deref(), fanout.is_some(), &rows, &agents, now))
+        Ok(send_result(
+            to.as_deref(),
+            fanout.is_some(),
+            &rows,
+            &agents,
+            now,
+        ))
     }
 
     async fn existing(
@@ -935,18 +966,18 @@ impl Store {
         agent_id: &str,
         request_id: &str,
     ) -> Result<Vec<MessageRow>> {
-        Ok(c
-            .query(
-                "SELECT * FROM coordination_messages WHERE sender_agent_id=$1 AND request_id=$2",
-                &[&agent_id, &request_id],
-            )
-            .await?
-            .iter()
-            .map(MessageRow::from_row)
-            .collect())
+        Ok(c.query(
+            "SELECT * FROM coordination_messages WHERE sender_agent_id=$1 AND request_id=$2",
+            &[&agent_id, &request_id],
+        )
+        .await?
+        .iter()
+        .map(MessageRow::from_row)
+        .collect())
     }
 
     /// `receive`.
+    #[allow(clippy::too_many_arguments)] // The board receive contract's arguments.
     pub async fn receive(
         &self,
         client: &mut tokio_postgres::Client,
@@ -957,7 +988,9 @@ impl Store {
         limit: Option<&Value>,
         for_delivery: bool,
     ) -> Result<Value> {
-        let row = self.auth(&*client, principal, agent_id, credential, false).await?;
+        let row = self
+            .auth(&*client, principal, agent_id, credential, false)
+            .await?;
         let limit = check_limit(limit.unwrap_or(&json!(50)))?;
         let mut seq: i64 = 0;
         if let Some(after) = after.filter(|v| !v.is_null()) {
@@ -988,7 +1021,14 @@ impl Store {
                      w.message_id=coordination_messages.message_id AND \
                      w.decision='nudged'))) AND repudiated_at IS NULL \
                      ORDER BY recipient_sequence LIMIT $6",
-                    &[&agent_id, &seq, &now, &MAX_ATTEMPTS, &DAEMON_PRINCIPAL, &limit],
+                    &[
+                        &agent_id,
+                        &seq,
+                        &now,
+                        &MAX_ATTEMPTS,
+                        &DAEMON_PRINCIPAL,
+                        &limit,
+                    ],
                 )
                 .await?
         } else {
@@ -1113,7 +1153,8 @@ impl Store {
     ) -> Result<Value> {
         let (given, batch) = message_ids(message_id)?;
         let tx = client.transaction().await?;
-        self.auth(&tx, principal, agent_id, credential, true).await?;
+        self.auth(&tx, principal, agent_id, credential, true)
+            .await?;
         let now = now();
         let prefixes: Vec<String> = given.iter().filter(|g| is_id_prefix(g)).cloned().collect();
         let mut matches: std::collections::HashMap<String, Vec<String>> =
@@ -1144,7 +1185,11 @@ impl Store {
                 None => Some(one.clone()),
                 Some(found) => resolved(
                     found.clone(),
-                    if batch { None } else { Some("message_not_found") },
+                    if batch {
+                        None
+                    } else {
+                        Some("message_not_found")
+                    },
                     "ambiguous_message_id",
                 )?,
             };
@@ -1224,6 +1269,7 @@ impl Store {
     }
 
     /// `mark_attempt`.
+    #[allow(clippy::too_many_arguments)] // The board delivery contract's arguments.
     pub async fn mark_attempt(
         &self,
         client: &mut tokio_postgres::Client,
@@ -1235,7 +1281,9 @@ impl Store {
         generation: i64,
     ) -> Result<Value> {
         let tx = client.transaction().await?;
-        let agent = self.auth(&tx, principal, agent_id, credential, true).await?;
+        let agent = self
+            .auth(&tx, principal, agent_id, credential, true)
+            .await?;
         Store::attachment(&agent, attachment_id, generation)?;
         if !agent.wake_enabled {
             return Err(BoardError::code("wake_disabled"));
@@ -1272,16 +1320,18 @@ impl Store {
             );
             append(
                 &tx,
-                vec![Event::new(
-                    "attempt",
-                    &json!({"generation": generation, "attempts": row.attempts,
+                vec![
+                    Event::new(
+                        "attempt",
+                        &json!({"generation": generation, "attempts": row.attempts,
                             "sender_agent_id": row.sender_agent_id}),
-                )
-                .principal(principal)
-                .agent(agent_id)
-                .recipient(agent_id)
-                .scope(&row.project, &row.task)
-                .message(id)],
+                    )
+                    .principal(principal)
+                    .agent(agent_id)
+                    .recipient(agent_id)
+                    .scope(&row.project, &row.task)
+                    .message(id),
+                ],
                 now,
                 None,
             )
@@ -1305,8 +1355,10 @@ impl Store {
         audit_retention_days: i64,
     ) -> Result<Value> {
         let tx = client.transaction().await?;
-        tx.batch_execute("SET LOCAL statement_timeout = '5s'").await?;
-        self.auth(&tx, principal, agent_id, credential, false).await?;
+        tx.batch_execute("SET LOCAL statement_timeout = '5s'")
+            .await?;
+        self.auth(&tx, principal, agent_id, credential, false)
+            .await?;
         let limit = check_limit(limit.unwrap_or(&json!(50)))?;
         let mut seq: i64 = 0;
         if let Some(after) = after.filter(|v| !v.is_null()) {
@@ -1342,7 +1394,9 @@ impl Store {
             None => None,
             Some(v) => {
                 let ok = v.as_str().filter(|s| {
-                    !s.is_empty() && text::py_len(s) <= 120 && s.chars().all(|c| ID_CHARS.contains(c))
+                    !s.is_empty()
+                        && text::py_len(s) <= 120
+                        && s.chars().all(|c| ID_CHARS.contains(c))
                 });
                 let Some(s) = ok else {
                     return Err(BoardError::code("invalid_recipient"));
@@ -1354,41 +1408,47 @@ impl Store {
         let cutoff = (audit_retention_days != 0).then(|| audit_cutoff(now, audit_retention_days));
         // Each direction: (columns, values), then seq and the optional cutoff.
         let mut params: Vec<Box<dyn tokio_postgres::types::ToSql + Sync + Send>> = Vec::new();
-        let mut direction = |columns: &[&str],
-                             values: &[String],
-                             extra_principal: bool|
-         -> (String, String) {
-            let prefix = format!(
-                "({})",
-                columns.iter().map(|c| format!("s.{c}")).collect::<Vec<_>>().join(",")
-            );
-            let mut slots = Vec::new();
-            for v in values {
-                params.push(Box::new(v.clone()));
-                slots.push(format!("${}", params.len()));
-            }
-            let placeholders = format!("({})", slots.join(","));
-            let mut clauses = vec![
-                "s.event='send'".to_string(),
-                format!("{prefix}>={placeholders}"),
-                format!("{prefix}<={placeholders}"),
-            ];
-            params.push(Box::new(seq));
-            clauses.push(format!("s.seq>${}", params.len()));
-            if extra_principal {
-                params.push(Box::new(principal.to_string()));
-                clauses.push(format!("s.principal=${}", params.len()));
-            }
-            if let Some(cut) = cutoff {
-                params.push(Box::new(cut));
-                clauses.push(format!("s.created_at>=${}", params.len()));
-            }
-            let order = format!(
-                "{},s.seq",
-                columns.iter().map(|c| format!("s.{c}")).collect::<Vec<_>>().join(",")
-            );
-            (clauses.join(" AND "), order)
-        };
+        let mut direction =
+            |columns: &[&str], values: &[String], extra_principal: bool| -> (String, String) {
+                let prefix = format!(
+                    "({})",
+                    columns
+                        .iter()
+                        .map(|c| format!("s.{c}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                let mut slots = Vec::new();
+                for v in values {
+                    params.push(Box::new(v.clone()));
+                    slots.push(format!("${}", params.len()));
+                }
+                let placeholders = format!("({})", slots.join(","));
+                let mut clauses = vec![
+                    "s.event='send'".to_string(),
+                    format!("{prefix}>={placeholders}"),
+                    format!("{prefix}<={placeholders}"),
+                ];
+                params.push(Box::new(seq));
+                clauses.push(format!("s.seq>${}", params.len()));
+                if extra_principal {
+                    params.push(Box::new(principal.to_string()));
+                    clauses.push(format!("s.principal=${}", params.len()));
+                }
+                if let Some(cut) = cutoff {
+                    params.push(Box::new(cut));
+                    clauses.push(format!("s.created_at>=${}", params.len()));
+                }
+                let order = format!(
+                    "{},s.seq",
+                    columns
+                        .iter()
+                        .map(|c| format!("s.{c}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                (clauses.join(" AND "), order)
+            };
         let ((outgoing, out_order), (incoming, in_order)) = match &peer {
             None => (
                 direction(
@@ -1450,7 +1510,11 @@ impl Store {
             let redacted_at: Option<f64> = sent.get("redacted_at");
             let redacted = redacted_at.is_some();
             let body: Option<String> = sent.get("body");
-            let mut text_value = if redacted { None } else { body.map(Value::String) };
+            let mut text_value = if redacted {
+                None
+            } else {
+                body.map(Value::String)
+            };
             if text_value.is_none() && !redacted {
                 text_value = payload.get("text").cloned().filter(|v| !v.is_null());
             }
@@ -1459,7 +1523,8 @@ impl Store {
                 expires_at = Some(expires_at.map_or(r, |e| e.min(r)));
             }
             let sender_principal: String = sent.get("principal");
-            let maintainer = payload.get("origin").and_then(Value::as_str) == Some(MAINTAINER_ORIGIN)
+            let maintainer = payload.get("origin").and_then(Value::as_str)
+                == Some(MAINTAINER_ORIGIN)
                 && sender_principal == MAINTAINER_PRINCIPAL;
             let acknowledged_at: Option<f64> = sent.get("acknowledged_at");
             let first_read_at: Option<f64> = sent.get("first_read_at");
@@ -1487,7 +1552,10 @@ impl Store {
                 "unavailable"
             };
             let mut m = Map::new();
-            m.insert("message_id".into(), opt_str(sent.get::<_, Option<String>>("message_id").as_deref()));
+            m.insert(
+                "message_id".into(),
+                opt_str(sent.get::<_, Option<String>>("message_id").as_deref()),
+            );
             m.insert("sender_agent_id".into(), json!(agent));
             m.insert("sender_principal".into(), json!(sender_principal));
             m.insert("recipient_agent_id".into(), opt_str(recipient.as_deref()));
@@ -1496,10 +1564,16 @@ impl Store {
             m.insert("task".into(), json!(sent.get::<_, String>("task")));
             m.insert("text".into(), text_value.unwrap_or(Value::Null));
             m.insert("body_state".into(), json!(body_state));
-            m.insert("reply_to".into(), payload.get("reply_to").cloned().unwrap_or(Value::Null));
+            m.insert(
+                "reply_to".into(),
+                payload.get("reply_to").cloned().unwrap_or(Value::Null),
+            );
             m.insert(
                 "recipient_sequence".into(),
-                payload.get("recipient_sequence").cloned().unwrap_or(Value::Null),
+                payload
+                    .get("recipient_sequence")
+                    .cloned()
+                    .unwrap_or(Value::Null),
             );
             m.insert("hlc".into(), json!(sent.get::<_, String>("hlc")));
             m.insert("created_at".into(), float_value(sent.get("created_at")));
@@ -1509,7 +1583,11 @@ impl Store {
             m.insert("state".into(), json!(state));
             m.insert(
                 "origin".into(),
-                json!(if maintainer { MAINTAINER_ORIGIN } else { MESSAGE_ORIGIN }),
+                json!(if maintainer {
+                    MAINTAINER_ORIGIN
+                } else {
+                    MESSAGE_ORIGIN
+                }),
             );
             let repudiated_at: Option<f64> = sent.get("repudiated_at");
             if maintainer && let Some(at) = repudiated_at {
@@ -1521,9 +1599,11 @@ impl Store {
             messages.push(Value::Object(m));
         }
         let last = rows.last().map_or(seq, |r| r.get::<_, i64>("seq"));
-        Ok(json!({"messages": messages, "after": format!("{agent_id}:history:{last}"),
+        Ok(
+            json!({"messages": messages, "after": format!("{agent_id}:history:{last}"),
                   "has_more": has_more, "retention_days": audit_retention_days,
-                  "retained_since": cutoff.map(|c| c as i64)}))
+                  "retained_since": cutoff.map(|c| c as i64)}),
+        )
     }
 
     /// `prune`.
@@ -1658,8 +1738,10 @@ impl Store {
         }
         append(&tx, events, now, head).await?;
         tx.commit().await?;
-        Ok(json!({"bodies_expired": expired.len(), "removed": removed.len(),
-                  "agents_removed": agents.len(), "audit_removed": audit_removed}))
+        Ok(
+            json!({"bodies_expired": expired.len(), "removed": removed.len(),
+                  "agents_removed": agents.len(), "audit_removed": audit_removed}),
+        )
     }
 }
 

@@ -322,7 +322,12 @@ mod tests {
                 bad.push(format!("{want} -> {}", py_float(x)));
             }
         }
-        assert!(bad.is_empty(), "{} mismatches, e.g. {:?}", bad.len(), &bad[..bad.len().min(5)]);
+        assert!(
+            bad.is_empty(),
+            "{} mismatches, e.g. {:?}",
+            bad.len(),
+            &bad[..bad.len().min(5)]
+        );
     }
 
     #[test]
@@ -333,7 +338,10 @@ mod tests {
             canonical(&v),
             "{\"Z\":{\"x\":\"/\",\"y\":1},\"a\":\"é\\n\\u0001\\\"\\\\\",\"b\":[1,2.0,null,true]}"
         );
-        assert_eq!(canonical(&json!({"\u{e9}": 1, "z": 2})), "{\"z\":2,\"é\":1}");
+        assert_eq!(
+            canonical(&json!({"\u{e9}": 1, "z": 2})),
+            "{\"z\":2,\"é\":1}"
+        );
     }
 
     #[test]
@@ -353,9 +361,12 @@ mod tests {
             hlc: "",
             payload: "{\"bank_id\":\"00000000-0000-4000-8000-000000000000\"}",
         };
-        let mut material = String::from("0".repeat(64));
+        let mut material = "0".repeat(64);
         material.push_str("[\"pseudolife-coordination-audit-v1\",1,\"bank_identity\",\"agent\",\"default\",\"\",null,\"\",\"\",null,1791519474.5,\"\",\"{\\\"bank_id\\\":\\\"00000000-0000-4000-8000-000000000000\\\"}\"]");
-        assert_eq!(audit_hash(GENESIS_HASH, &row), sha256_hex(material.as_bytes()));
+        assert_eq!(
+            audit_hash(GENESIS_HASH, &row),
+            sha256_hex(material.as_bytes())
+        );
     }
 
     #[test]

@@ -93,24 +93,29 @@ pub fn need_matches(clears: &str, needs: &str) -> bool {
 }
 
 fn is_hex(s: &str) -> bool {
-    s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `_lease_clearer`.
-async fn lease_clearer(c: &impl GenericClient, agent_id: &str, name: &str, now: f64) -> Result<bool> {
+async fn lease_clearer(
+    c: &impl GenericClient,
+    agent_id: &str,
+    name: &str,
+    now: f64,
+) -> Result<bool> {
     let len = name.chars().count();
     if name == "maintainer" || ((8..=32).contains(&len) && is_hex(name)) {
         return Ok(false);
     }
-    Ok(c
-        .query_opt(
-            "SELECT 1 AS hit FROM coordination_events WHERE created_at>$1 AND agent_id=$2 \
+    Ok(c.query_opt(
+        "SELECT 1 AS hit FROM coordination_events WHERE created_at>$1 AND agent_id=$2 \
              AND CASE WHEN event IN ('lease_release','lease_expire') \
              THEN payload::jsonb->>'name'=$3 ELSE false END LIMIT 1",
-            &[&(now - LEASE_CLEAR_GRACE), &agent_id, &name],
-        )
-        .await?
-        .is_some())
+        &[&(now - LEASE_CLEAR_GRACE), &agent_id, &name],
+    )
+    .await?
+    .is_some())
 }
 
 /// `_authority`.
@@ -161,7 +166,11 @@ fn no_path(recipient: &AgentRow, missing: &str) -> Map<String, Value> {
     m.insert("last_activity".into(), float_value(recipient.last_activity));
     m.insert(
         "fallback".into(),
-        json!(if codex { FALLBACK_CODEX } else { FALLBACK_CLAUDE }),
+        json!(if codex {
+            FALLBACK_CODEX
+        } else {
+            FALLBACK_CLAUDE
+        }),
     );
     m.insert(
         "fallback_paths".into(),
@@ -206,9 +215,7 @@ pub async fn wake_decision(
         m
     };
     let attention = park.is_none() && urgent && recipient.has_capability("codex");
-    if !attention
-        && park.is_none()
-        && recipient.last_activity > now - policy.active_seconds as f64
+    if !attention && park.is_none() && recipient.last_activity > now - policy.active_seconds as f64
     {
         return Ok(obj_map(json!({"decision": "hinted", "reason": "active"})));
     }
@@ -232,8 +239,10 @@ pub async fn wake_decision(
             h = Some("clearer");
         }
         let Some(h) = h else {
-            return Ok(obj_map(json!({"decision": "not_needed", "reason": "parked_done",
-                                     "reopen_by": DONE_REOPEN_BY})));
+            return Ok(obj_map(
+                json!({"decision": "not_needed", "reason": "parked_done",
+                                     "reopen_by": DONE_REOPEN_BY}),
+            ));
         };
         how = h;
     } else if let Some(park) = park.as_ref() {
@@ -261,7 +270,9 @@ pub async fn wake_decision(
     } else if urgent {
         how = auth.unwrap_or("urgent");
     } else {
-        return Ok(obj_map(json!({"decision": "not_needed", "reason": "no_park"})));
+        return Ok(obj_map(
+            json!({"decision": "not_needed", "reason": "no_park"}),
+        ));
     }
     let counts_urgent = how == "urgent" || (done && how == "clearer");
     if counts_urgent && !crate::mutants::active("board-urgent-cap-off") {
@@ -280,7 +291,10 @@ pub async fn wake_decision(
             ));
         }
     } else if AUTHORITY_REASONS.contains(&how) {
-        let reasons: Vec<String> = AUTHORITY_ROW_REASONS.iter().map(|s| s.to_string()).collect();
+        let reasons: Vec<String> = AUTHORITY_ROW_REASONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let sent = count(
             &c.query_one(
                 "SELECT count(*) AS n FROM coordination_wakes WHERE \
@@ -305,7 +319,13 @@ pub async fn wake_decision(
              count(*) FILTER (WHERE created_at>$3) AS night,\
              max(ring_at) FILTER (WHERE sender_agent_id=$4 AND ring_at>$5) AS burst \
              FROM coordination_wakes",
-            &[&recipient.agent_id, &hour, &day, &sender.agent_id, &stagger_floor],
+            &[
+                &recipient.agent_id,
+                &hour,
+                &day,
+                &sender.agent_id,
+                &stagger_floor,
+            ],
         )
         .await?;
     let recipient_count: i64 = counts.get(0);
@@ -382,12 +402,18 @@ async fn maintainer_wake(
         &c.query_one(
             "SELECT count(*) AS n FROM coordination_wakes WHERE \
              recipient_agent_id=$1 AND reason=$2 AND created_at>$3",
-            &[&recipient.agent_id, &MAINTAINER_WAKE_REASON, &(now - 3600.0)],
+            &[
+                &recipient.agent_id,
+                &MAINTAINER_WAKE_REASON,
+                &(now - 3600.0),
+            ],
         )
         .await?,
     );
     if sent >= policy.maintainer_per_recipient_per_hour {
-        return Ok(obj_map(json!({"decision": "capped", "reason": "maintainer_hour"})));
+        return Ok(obj_map(
+            json!({"decision": "capped", "reason": "maintainer_hour"}),
+        ));
     }
     c.execute(
         "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,\
@@ -437,7 +463,10 @@ struct Offerable {
 /// `_serve_wake`: the newest pending ring for this address, or null.
 pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Result<Value> {
     let row = c
-        .query_one("SELECT * FROM coordination_agents WHERE agent_id=$1", &[&agent_id])
+        .query_one(
+            "SELECT * FROM coordination_agents WHERE agent_id=$1",
+            &[&agent_id],
+        )
         .await?;
     let row = AgentRow::from_row(&row);
     let codex = row.has_capability("codex");
