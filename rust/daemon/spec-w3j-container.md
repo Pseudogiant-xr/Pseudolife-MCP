@@ -19,6 +19,15 @@ path slice, not this preparation proof. The frozen public ONNX graph is a
 packaging input; its different graph hash from the historical prerequisite
 does not inherit that receipt's numerical evidence.
 
+The graph, external tensors and tokenizer are the onnx-community export's
+files. The module list, last-token Pooling configuration, model configuration
+and tokenizer configuration come from `Qwen/Qwen3-Embedding-0.6B` at
+`97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`, with hashes equal to the recorded
+Qwen metadata. That module list requires normalization. Its tokenizer config
+omits `padding_side`, so the loader retains right padding; the image readiness
+check requires the policy actually reported by the loaded daemon. The synthetic
+last/left/normalize fixture is separate from the identified real-model receipt.
+
 Named YAML presentation deferral `sent-quoted-continuation-tab`: a quoted continuation starting with a literal
 tab at indentation column zero (for example `ignored: 'a` followed by a line
 starting with tab then `b'`, with either quote style) is accepted by PyYAML and rejected by yaml-rust2.

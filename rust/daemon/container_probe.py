@@ -5,11 +5,21 @@ import argparse
 import json
 import os
 import time
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
 
 QUERY = "disposable container readiness query"
+
+
+def verify_policy(log: str) -> dict:
+    observed = [json.loads(line.partition("embedding-readiness: ")[2])
+                for line in log.splitlines() if "embedding-readiness: " in line]
+    expected = {"pooling": "last-token", "padding": "right", "normalize": True}
+    if not observed or any(policy != expected for policy in observed):
+        raise RuntimeError("embedding readiness did not report the pinned model policy")
+    return observed[-1]
 
 
 def request(base: str, path: str, token: str | None = None) -> tuple[int, dict]:
@@ -56,7 +66,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8766")
     parser.add_argument("--timeout", type=float, default=180)
+    parser.add_argument("--startup-log", type=Path,
+                        help="verify the loaded model policy from a daemon startup log only")
     args = parser.parse_args()
+    if args.startup_log:
+        print(json.dumps(verify_policy(args.startup_log.read_text()), sort_keys=True))
+        return
     token = os.environ.get("W3J_RUST_TOKEN")
     if not token:
         parser.error("set W3J_RUST_TOKEN to the disposable daemon token")

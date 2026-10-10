@@ -103,16 +103,40 @@ class ContainerTests(unittest.TestCase):
             def downloaded(url, destination, expected):
                 self.assertTrue(destination.parent.is_dir())
                 self.assertEqual(len(expected), 64)
+                name = destination.relative_to(root).as_posix()
+                if name.startswith("onnx/"):
+                    name = name.removeprefix("onnx/")
+                base = provision.METADATA_BASE if name in provision.METADATA_FILES else provision.BASE
+                self.assertEqual(url, base + "/" + name)
                 destination.write_bytes(b"verified fixture")
 
             with patch.object(provision, "download", side_effect=downloaded), \
                  patch("sys.argv", ["provision_container_model.py", str(root)]):
                 provision.main()
             for name in ("onnx/model.onnx", "onnx/model.onnx_data", "tokenizer.json",
-                         "config.json", "tokenizer_config.json"):
+                         "config.json", "tokenizer_config.json", "modules.json", "1_Pooling/config.json"):
                 self.assertEqual((root / name).read_bytes(), b"verified fixture")
             defaults = (ROOT / "rust/daemon/src/config.rs").read_text()
             self.assertIn('onnx_file_name: "onnx/model.onnx".to_string()', defaults)
+
+    def test_metadata_pins_match_the_recorded_qwen_model(self):
+        provision = load("provision_container_model")
+        receipt = json.loads((ROOT / "rust/daemon/harness/results/embedding-20261010.json").read_text())
+        recorded = next(row["identities"] for row in receipt["runs"] if row["model"] == "Qwen")
+        for name in ("modules.json", "1_Pooling/config.json", "config.json", "tokenizer_config.json"):
+            self.assertEqual(provision.FILES[name], recorded[name])
+
+    def test_startup_policy_refuses_missing_or_different_metadata(self):
+        probe = load("container_probe")
+        expected = {"pooling": "last-token", "padding": "right", "normalize": True}
+        log = "rust-daemon-1 | embedding-readiness: " + json.dumps(expected) + "\n"
+        self.assertEqual(probe.verify_policy(log), expected)
+        with self.assertRaisesRegex(RuntimeError, "embedding readiness"):
+            probe.verify_policy("daemon: listening\n")
+        for key, value in (("pooling", "mean"), ("padding", "left"), ("normalize", False)):
+            changed = dict(expected, **{key: value})
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "embedding readiness"):
+                probe.verify_policy("embedding-readiness: " + json.dumps(changed) + "\n")
 
     def test_probe_requires_authenticated_search_and_refused_open_search(self):
         probe = load("container_probe")

@@ -560,6 +560,8 @@ jobs:
           trap cleanup EXIT
           docker compose -p "$project" -f ops/docker-compose.rust.yml up --no-build --wait --wait-timeout 180
           python rust/daemon/container_probe.py --timeout 180
+          docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
+          python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
     # Preserve the required check names; a skipped/cancelled dependency is a failure.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
