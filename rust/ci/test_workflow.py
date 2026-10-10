@@ -31,6 +31,7 @@ PARITY_CHECKS = {
     "Install checkout and test dependencies": None,
     "Bind the event-selected Python oracle": None,
     "Check CI coverage contract": "eval",
+    "Compare sent YAML startup with PyYAML": "cli",
     "Run every eval harness test": "eval",
     "Offline embedding golden and mutant row": "eval",
     "CLI differential harness": "cli",
@@ -150,6 +151,13 @@ def check_executable_coverage(jobs):
             assert "build" not in cargo, step.get("name")
     parity = {step.get("name"): step for step in parity_steps}
     check_w1c_rows(parity["CLI W1-C differential harness"]["run"])
+    sent_yaml = parity["Compare sent YAML startup with PyYAML"]
+    require_command(commands(sent_yaml["run"]), ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_sent_yaml.py",
+                     "rust/daemon/harness/test_sent_yaml_mutants.py"), PYTEST_FILTERS)
+    assert 'PSEUDOLIFE_SENT_YAML_BIN' in sent_yaml["run"]
+    assert 'rust/target/release/pseudolife-stdio' in sent_yaml["run"]
+    assert not any(words[0] == "cargo" for words in commands(sent_yaml["run"]))
     require_command(commands(parity["Run every eval harness test"]["run"]),
                     ("python", "-m", "pytest"),
                     ("evals/rust_port", "evals/rust_baseline", "-p",
@@ -490,6 +498,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
 
 
 @pytest.mark.parametrize("name, old, new", [
+    ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml.py", ""),
+    ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml_mutants.py", ""),
     ("Check generated daemon schema", "--check", ""),
     ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
     ("Daemon resident startup parity", "--no-build", ""),
