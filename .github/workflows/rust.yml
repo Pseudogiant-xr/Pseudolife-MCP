@@ -334,6 +334,7 @@ jobs:
           if ($cancelExit -ne 1 -or -not (Select-String -LiteralPath $cancelLog -Pattern 'AssertionError|_queue.Empty' -Quiet)) {
             throw 'Cancelled-waiter ownership control was not rejected by the next-operation check'
           }
+          exit 0
       - name: Daemon static HTTP parity
         if: matrix.suite == 'cli'
         timeout-minutes: 10

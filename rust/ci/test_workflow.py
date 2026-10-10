@@ -362,3 +362,33 @@ def test_dream_reuses_candidate_and_checks_cancel_control():
     assert "contract-harness" in words[words.index("--features") + 1].split(",")
     upload = next(s for s in jobs["candidate"]["steps"] if s.get("uses") == "actions/upload-artifact@v4")
     assert {"rust/target/release/dream-contract", "rust/target/release/dream-contract.exe"} <= set(upload["with"]["path"].splitlines())
+
+
+@pytest.mark.parametrize("control_exit, message, accepted", [
+    (1, "AssertionError: cancelled waiter outcome differs", True),
+    (0, "", False),
+    (2, "AssertionError: unrelated native error", False),
+    (1, "fixture setup failed", False),
+])
+def test_dream_control_survives_runner_exit_wrapper(tmp_path, control_exit, message, accepted):
+    import os
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Dream cursor differential harness")
+    # Match the hosted pwsh wrapper, including its final native exit status.
+    bootstrap = r'''$ErrorActionPreference = 'stop'
+function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
+function chmod {}
+function python {
+    if ($args -contains 'admitted_commit_survives_cancel_and_next_pull') {
+        Write-Output $env:PL_CONTROL_MESSAGE
+        $global:LASTEXITCODE = [int]$env:PL_CONTROL_EXIT
+    } else { $global:LASTEXITCODE = 0 }
+}
+'''
+    wrapper = "\nif ((Test-Path -LiteralPath variable:LASTEXITCODE)) { exit $LASTEXITCODE }\n"
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_CONTROL_EXIT=str(control_exit),
+               PL_CONTROL_MESSAGE=message)
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             bootstrap + step["run"] + wrapper], env=env,
+                            capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
