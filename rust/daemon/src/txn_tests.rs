@@ -9,6 +9,145 @@ use tokio_postgres::NoTls;
 // deliberately exercising that marker concurrently with each other.
 static TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+async fn nested_writer_adapter_case(outer_run: bool, inner_run: bool) {
+    let _test = TESTS.lock().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        if outer_run {
+            assert_eq!(query(&mut stream).await, "BEGIN");
+            completion(&mut stream, b"BEGIN\0", b'T').await;
+            assert_eq!(query(&mut stream).await, "ROLLBACK");
+            completion(&mut stream, b"ROLLBACK\0", b'I').await;
+        }
+        assert_eq!(query(&mut stream).await, "AFTER NESTED CALL");
+        completion(&mut stream, b"SELECT 0\0", b'I').await;
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(connection);
+    let client = Arc::new(client);
+    let writer = client.clone();
+    let mut task = tokio::spawn(async move {
+        let body = |c| async move {
+            if inner_run {
+                run(c, |_| async { Ok::<_, tokio_postgres::Error>(()) }).await
+            } else {
+                with_client(c, |_| async { Ok::<_, tokio_postgres::Error>(()) }).await
+            }
+        };
+        if outer_run {
+            run(&writer, body).await
+        } else {
+            with_client(&writer, body).await
+        }
+    });
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(1), &mut task).await;
+    let rejected = match completed {
+        Ok(Err(error)) if error.is_panic() => {
+            let payload = error.into_panic();
+            let message = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+            message
+                == Some("writer adapters must not be nested; use the borrowed client inside a body")
+        }
+        Err(_) => {
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+            false
+        }
+        _ => false,
+    };
+    with_client(&client, |c| async move {
+        c.batch_execute("AFTER NESTED CALL").await
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+    assert!(!OPEN.load(Ordering::SeqCst));
+    drop(client);
+    connection_task.abort();
+    assert!(
+        rejected,
+        "nested writer adapter waited on its own lock instead of panicking with the expected message"
+    );
+}
+
+#[tokio::test]
+async fn nested_run_in_run_fails_fast_and_recovers() {
+    nested_writer_adapter_case(true, true).await;
+}
+
+#[tokio::test]
+async fn nested_with_client_in_run_fails_fast_and_recovers() {
+    nested_writer_adapter_case(true, false).await;
+}
+
+#[tokio::test]
+async fn nested_run_in_with_client_fails_fast_and_recovers() {
+    nested_writer_adapter_case(false, true).await;
+}
+
+#[tokio::test]
+async fn nested_with_client_in_with_client_fails_fast_and_recovers() {
+    nested_writer_adapter_case(false, false).await;
+}
+
+#[tokio::test]
+async fn swallowed_body_error_cannot_report_commit_success() {
+    let _test = TESTS.lock().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        assert_eq!(query(&mut stream).await, "BEGIN");
+        completion(&mut stream, b"BEGIN\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "INSERT INTO fixture VALUES (1)");
+        completion(&mut stream, b"INSERT 0 1\0", b'T').await;
+        assert_eq!(query(&mut stream).await, "BROKEN BODY STATEMENT");
+        terminal_error(&mut stream, "23505").await;
+        let command = query(&mut stream).await;
+        let guarded = command == "SELECT 1";
+        if guarded {
+            terminal_error(&mut stream, "25P02").await;
+            assert_eq!(query(&mut stream).await, "ROLLBACK");
+        } else {
+            assert_eq!(command, "COMMIT");
+        }
+        // PostgreSQL silently turns COMMIT of an aborted transaction into
+        // a successful ROLLBACK command, not an ErrorResponse.
+        completion(&mut stream, b"ROLLBACK\0", b'I').await;
+        guarded
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture dbname=fixture sslmode=disable",
+        address.port()
+    );
+    let (client, connection) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(connection);
+    let result = run(&client, |c| async move {
+        c.batch_execute("INSERT INTO fixture VALUES (1)").await?;
+        let _ = c.batch_execute("BROKEN BODY STATEMENT").await;
+        Ok::<_, tokio_postgres::Error>(())
+    })
+    .await;
+    let guarded = server.await.unwrap();
+    drop(client);
+    connection_task.abort();
+    assert!(
+        guarded && matches!(&result, Err(error) if error.code().unwrap().code() == "25P02"),
+        "aborted transaction returned a successful commit"
+    );
+}
+
 #[derive(Debug)]
 enum Failure {
     Operational(tokio_postgres::Error),
@@ -69,6 +208,11 @@ async fn failed_exit_case(mode: &'static str) {
             trace.push(query(&mut stream).await);
             assert_eq!(trace.last().unwrap(), "INSERT INTO fixture VALUES (1)");
             completion(&mut stream, b"INSERT 0 1\0", b'T').await;
+        }
+        if mode.starts_with("commit") {
+            trace.push(query(&mut stream).await);
+            assert_eq!(trace.last().unwrap(), "SELECT 1");
+            completion(&mut stream, b"SELECT 1\0", b'T').await;
         }
         trace.push(query(&mut stream).await);
         assert_eq!(
