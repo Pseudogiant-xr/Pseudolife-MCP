@@ -78,5 +78,13 @@ The spike runs the ONNX export that the prerequisite receipt verified
 - Exact score floats, and tie order among equal scores.
 - Error text other than the listed bodies.
 - JSON key order and whitespace.
-- The `version` value and the contents of the `memory` object.
+- The `version` value and numeric/boolean readings in the `memory` object.
+  Memory keys and scalar kinds are checked before values are normalized:
+  `unavailable` has only `source`; `process` has `source`, null `near_limit`
+  and at least one integer RSS field; `cgroup` has integer current/working-set
+  bytes, integer-or-null limit bytes, float-or-null fraction, boolean-or-null
+  `near_limit`, and an object of integer event counters. RSS and anon/file
+  byte fields and the individual event counters are conditional; their
+  presence must agree between arms. A zero or null limit has null fraction
+  and flag.
 - `access_count` values: Python increments them on every served hit, while the spike is read-only.

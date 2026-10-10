@@ -29,6 +29,32 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+def test_mail_expired_listener_after_renewal(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    arm = SimpleNamespace(started=100.0)
+    # LF bytes match the listener producer on both platforms.
+    for observed, expiry in [(103.0, 101.0), (108.0, 106.0)]:
+        path.write_bytes(f"{token}\n{expiry}\n".encode())
+        monkeypatch.setattr(mail.time, "time", lambda: observed)
+        assert mail.listener_shape(arm, path, 20.0) != "valid"
+
+
+def test_mail_listener_clock_resolution_and_upper_bound(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    arm = SimpleNamespace(started=100.0)
+    monkeypatch.setattr(mail.time, "time", lambda: 108.0)
+    for expiry, valid in [(107.5, True), (107.0, False), (128.0, True), (130.0, False),
+                          (float("inf"), False), (float("nan"), False)]:
+        path.write_bytes(f"{token}\n{expiry}\n".encode())
+        assert (mail.listener_shape(arm, path, 20.0) == "valid") is valid
+
+
 def test_each_field_difference_is_reported():
     base = obs(stdout=b"a", stderr=b"e", files={"f": b"1"})
     assert compare.diff(base, obs(exit=1, stdout=b"a", stderr=b"e", files={"f": b"1"}), ())

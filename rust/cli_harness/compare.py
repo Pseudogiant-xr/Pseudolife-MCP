@@ -24,6 +24,17 @@ def _stream_diff(field: str, want: str, got: str) -> list[str]:
     return lines
 
 
+def _equal(a, b) -> bool:
+    """JSON scalars keep their kinds even inside objects and arrays."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(_equal(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
     """Differences after each side's own normalization; empty means equal."""
     a = normalize.apply(python, rules, python.get("home"))
@@ -32,7 +43,7 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
     for side, observation in (("python", a), ("rust", b)):
         if observation.get("vacuous"):
             out.append(f"{side}: {observation['vacuous']}")
-    if a["exit"] != b["exit"]:
+    if not _equal(a["exit"], b["exit"]):
         out.append(f"exit: python {a['exit']} rust {b['exit']}")
     for field in ("stdout", "stderr"):
         if a[field] != b[field]:
@@ -50,7 +61,7 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
         else:
             out.append(f"file {rel}: python {va[:80]!r} rust {vb[:80]!r}")
     for field in ("requests", "db", "listener", "modes"):
-        if a.get(field) != b.get(field):
+        if not _equal(a.get(field), b.get(field)):
             ja = json.dumps(a.get(field), indent=1, sort_keys=False).splitlines()
             jb = json.dumps(b.get(field), indent=1, sort_keys=False).splitlines()
             out.append(f"{field} differ:")

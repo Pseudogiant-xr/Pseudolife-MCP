@@ -136,6 +136,50 @@ def bearer(token: str) -> tuple[str, str]:
 
 # ---- normalizers (rule-based, recorded with the goldens) -------------------------------
 
+def normalize_memory(reading: dict) -> dict:
+    """Free readings retain the oracle's per-source keys and scalar kinds."""
+    rss = {"rss_bytes", "rss_peak_bytes"}
+    source = reading.get("source")
+    if source == "unavailable":
+        return reading  # exactly {source}; any extra fields must still diff
+    if source == "process":
+        required, optional = {"source", "near_limit"}, rss
+        if reading.get("near_limit") is not None or not (rss & set(reading)):
+            return reading
+    elif source == "cgroup":
+        required = {"source", "current_bytes", "working_set_bytes", "limit_bytes",
+                    "used_fraction", "near_limit", "events"}
+        optional = rss | {"anon_bytes", "file_bytes"}
+        limit, fraction, flag = (reading.get(k) for k in ("limit_bytes", "used_fraction", "near_limit"))
+        if limit is not None and type(limit) is not int:
+            return reading
+        if limit:
+            if type(fraction) is not float or type(flag) is not bool:
+                return reading
+        elif fraction is not None or flag is not None:
+            return reading
+        events = reading.get("events")
+        if not isinstance(events, dict) or not set(events) <= {"max", "oom", "oom_kill"} \
+                or any(type(v) is not int for v in events.values()):
+            return reading
+    else:
+        return reading
+    if not required <= set(reading) <= required | optional:
+        return reading
+    counts = (rss | {"current_bytes", "working_set_bytes", "anon_bytes", "file_bytes"}) & set(reading)
+    if any(type(reading[k]) is not int for k in counts):
+        return reading
+    out = dict(reading)
+    for k in counts:
+        out[k] = "<free int>"
+    if source == "cgroup":
+        out["limit_bytes"] = None if limit is None else "<free int>"
+        out["used_fraction"] = None if fraction is None else "<free float>"
+        out["near_limit"] = None if flag is None else "<free bool>"
+        out["events"] = {k: "<free int>" for k in events}
+    return out
+
+
 def normalize_health(body: dict, declared: list[str]) -> dict:
     body = json.loads(json.dumps(body))
     for k in sorted(HEALTH_DECLARED_ONLY_PYTHON & set(body)):
@@ -155,7 +199,7 @@ def normalize_health(body: dict, declared: list[str]) -> dict:
             and not isinstance(lb.get("age_hours"), bool):
         lb["age_hours"] = "<free number>"  # measured against the clock at answer time
     if isinstance(body.get("memory"), dict):
-        body["memory"] = {"source": body["memory"].get("source")}
+        body["memory"] = normalize_memory(body["memory"])
     if isinstance(body.get("db"), str) and body["db"].startswith("error: "):
         body["db"] = "error: <free>"
     for key in ("init_refusal", "not_ready"):
