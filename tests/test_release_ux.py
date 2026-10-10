@@ -547,6 +547,10 @@ _ACCOUNT_SID_PAT = re.compile(
     rb"\bs-1-(?:5-21-[0-9]+-[0-9]+-[0-9]+(?:-[0-9]+)*|12-1-(?:[0-9]+-)*[0-9]+)"
     rb"(?![0-9]|-[0-9])")
 _ALLOWED_ACCOUNT_SIDS = (b"s-1-5-21-100-200-300-1001",)
+# Fixed COMPOUNDED_AUTHENTICATION and CLAIMS_VALID markers, not domain identities:
+# https://learn.microsoft.com/openspecs/windows_protocols/ms-dtyp/81d92bba-d22b-4a8c-908a-554ab29148ab
+_WELL_KNOWN_ACCOUNT_SHAPED_SIDS = (b"s-1-5-21-" + b"0-0-0-496",
+                                  b"s-1-5-21-" + b"0-0-0-497")
 # C0 controls other than tab/LF/CR. NUL is excluded here because files
 # containing it are treated as binary and skipped before this runs.
 _CONTROL_BYTE_PAT = re.compile(rb"[\x01-\x08\x0b\x0c\x0e-\x1f]")
@@ -561,12 +565,22 @@ def test_identifier_guard_accepts_well_known_sid_classes(sid):
     assert not hits
 
 
+@pytest.mark.parametrize("suffix, rejected", [(b"0-0-0-496", False), (b"0-0-0-497", False),
+                                             (b"0-0-1-496", True), (b"0-0-0-496-999", True),
+                                             (b"0-0-0-497-999", True)])
+def test_identifier_guard_claim_markers_are_exact_exceptions(suffix, rejected):
+    hits = []
+    _scan_identifiers("fixture", b"s-1-5-21-" + suffix, hits)
+    assert bool(hits) is rejected
+
+
 def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
     """Record at most one identifier hit for ``low`` (lowercased bytes)."""
     if any(n in low for n in _IDENT_NEEDLES):
         hits.append((rel, "needle"))
         return
-    if b"s-1-" in low and any(m.group(0) not in _ALLOWED_ACCOUNT_SIDS
+    if b"s-1-" in low and any(m.group(0) not in (*_ALLOWED_ACCOUNT_SIDS,
+                                              *_WELL_KNOWN_ACCOUNT_SHAPED_SIDS)
                               for m in _ACCOUNT_SID_PAT.finditer(low)):
         hits.append((rel, "environment-specific account SID"))
         return
