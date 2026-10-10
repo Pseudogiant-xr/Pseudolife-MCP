@@ -43,6 +43,7 @@ addresses, where the fixture listens.
 from __future__ import annotations
 
 import base64
+import hashlib
 import datetime
 import json
 import os
@@ -479,6 +480,49 @@ def restart_pid(obs: dict) -> None:
         normalize._put(obs, field, pattern.sub(b"<pid>", normalize._get(obs, field)))
 
 
+def _runtime_image_binding(path: Path, seed: bytes, root: Path) -> dict:
+    """Expected input and metadata safety, without reading/writing its bytes.
+    Byte validation uses the core's captured observation after this hook."""
+    safe = False
+    try:
+        info = path.lstat()
+        safe = (not path.is_symlink() and path.is_file() and info.st_nlink == 1
+                and not (getattr(info, "st_file_attributes", 0) & 0x400)
+                and path.resolve().is_relative_to(root))
+    except OSError:
+        pass
+    return {"path": path.relative_to(root).as_posix() if path.is_relative_to(root) else "",
+            "sha256": hashlib.sha256(seed).hexdigest(), "safe": safe, "validated": False}
+
+
+_RUNTIME_MARKER = b"<validated-fixture-runtime-image>\n"
+
+
+@normalize.rule("connect-runtime-image")
+def runtime_image(obs: dict) -> None:
+    """Project only a validated input image; rejection always causes DIFF,
+    including when a command writes the same bytes as the final marker."""
+    binding = obs.get("runtime_image")
+    if not isinstance(binding, dict):
+        obs["vacuous"] = "runtime fixture image binding is missing"
+        return
+    rel = binding.get("path")
+    data = normalize._file(obs, rel) if isinstance(rel, str) else None
+    expected = binding.get("sha256", "")
+    valid = (binding.get("safe") is True and isinstance(expected, str)
+             and re.fullmatch(r"[0-9a-f]{64}", expected))
+    if valid and binding.get("validated") is True and data == _RUNTIME_MARKER:
+        return  # A recorded or already projected observation.
+    if not valid or data is None or hashlib.sha256(data).hexdigest() != expected:
+        obs["vacuous"] = "runtime fixture image failed seed/type/containment validation"
+        return
+    normalize._set_file(obs, rel, _RUNTIME_MARKER)
+    binding["validated"] = True
+
+
+normalize.RECORD_RULES.add("connect-runtime-image")
+
+
 # ── the fixture credentials ─────────────────────────────────────────────────
 
 def _redact(data: bytes) -> bytes:
@@ -694,7 +738,7 @@ def _with_temp(setup):
 def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=None, after=None,
          env=None, stdin: bytes = b"", platforms=("windows", "linux"), timeout: float = 120,
          stderr_closed: bool = False, stdout_closed: bool = False, golden: bool = True,
-         **daemon) -> Case:
+         rules: tuple[str, ...] = RULES, **daemon) -> Case:
     # With every client selected (no --client), the oracle reads the
     # unattended-update schedule: on Windows it runs this host's System32
     # schtasks /Query, which no PATH inside the home can hide.
@@ -702,7 +746,7 @@ def case(case_id: str, argv: list[str], *, url: str, port: int | None, setup=Non
     return Case(case_id, ["connect", *argv], env=_env(**(env or {})), stdin=stdin,
                 setup=_with_temp(setup), during=_arm_pid, real_programs=schedule,
                 after=_after(url, after), timeout=timeout,
-                rules=RULES + (("python-stdout-closed-trailer",) if stdout_closed else ()),
+                rules=rules + (("python-stdout-closed-trailer",) if stdout_closed else ()),
                 platforms=platforms, stderr_closed=stderr_closed, stdout_closed=stdout_closed,
                 golden=golden,
                 daemon=_fixture(port, url, **daemon) if port is not None else None)
@@ -973,6 +1017,7 @@ def cases() -> list[Case]:
             argv = ["60"]
         image.parent.mkdir(parents=True)
         shutil.copy2(source, image)
+        arm.state["runtime_image"] = (image, image.read_bytes(), arm.home.resolve())
         process = subprocess.Popen([str(image), *argv], stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -984,10 +1029,14 @@ def cases() -> list[Case]:
             obs["restart_pid"] = process.pid
             process.kill()
             process.wait(10)
+        image, seed, root = arm.state.pop("runtime_image")
+        obs["runtime_image"] = _runtime_image_binding(image, seed, root)
     # Live-only off Windows: the stand-in process is a copy of the host's `sleep`,
-    # whose bytes the snapshot keeps (a multicall coreutils binary is ~15 MB).
+    # retained as the established corpus split. The seeded image is projected
+    # only after validation; host OS executable versions are not CLI output.
     add(case("apply-restart-pids", [url, "--yes", "--client", "claude-code"], url=url, port=port,
-             setup=runtime_process, after=stop_runtime_process, golden=WINDOWS))
+             setup=runtime_process, after=stop_runtime_process, golden=WINDOWS,
+             rules=(*RULES, "connect-runtime-image")))
 
     # Verification refusals.
     port, url = _target()

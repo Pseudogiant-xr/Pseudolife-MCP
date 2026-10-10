@@ -1,7 +1,8 @@
 {
  "row": "CLI-TEST-LOGIN",
  "platform": "windows",
- "oracle_commit": "846ccd38576b0c47bcb8e112b0d8e9f80a49cdc0",
+ "oracle_commit": "5a239ae68e2f62a2d0b30f164cec289f45e1435c",
+ "oracle_commit_source": "git",
  "cases": {
   "role-name-invalid": {
    "home": null,
@@ -10,12 +11,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBuYW1lICdCYWQtTmFtZScgbXVzdCBtYXRjaCBbYS16X11bYS16MC05X117MCw2Mn0NCg==",
    "stderr": "",
    "window": [
-    1791576487.5592282,
-    1791576487.6472964
+    1791626678.9172888,
+    1791626679.117746
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -29,12 +30,12 @@
    "stdout": "eyJleGl0IjogMiwgImVycm9yIjogInJvbGUgbmFtZSAnOXgnIG11c3QgbWF0Y2ggW2Etel9dW2EtejAtOV9dezAsNjJ9IiwgImNoYW5nZXMiOiBbXX0NCg==",
    "stderr": "",
    "window": [
-    1791576487.649802,
-    1791576487.7352848
+    1791626679.1187449,
+    1791626679.315258
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -48,12 +49,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBuYW1lICcnIG11c3QgbWF0Y2ggW2Etel9dW2EtejAtOV9dezAsNjJ9DQo=",
    "stderr": "",
    "window": [
-    1791576487.737807,
-    1791576487.8355365
+    1791626679.3172636,
+    1791626679.5201914
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -67,12 +68,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBuYW1lICdyw7RsZVx1MjAwYicgbXVzdCBtYXRjaCBbYS16X11bYS16MC05X117MCw2Mn0NCg==",
    "stderr": "",
    "window": [
-    1791576487.8385713,
-    1791576487.948697
+    1791626679.5211918,
+    1791626679.7190359
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -86,12 +87,12 @@
    "stdout": "dGVzdC1sb2dpbjogcG9zdGdyZXMgaXMgbm90IGEgYmFuayBhbmQgc3RheXMgb3Blbg0K",
    "stderr": "",
    "window": [
-    1791576487.9512928,
-    1791576488.0533187
+    1791626679.720643,
+    1791626679.9170017
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -105,12 +106,12 @@
    "stdout": "eyJleGl0IjogMiwgImVycm9yIjogInRlbXBsYXRlMSBpcyBub3QgYSBiYW5rIGFuZCBzdGF5cyBvcGVuIiwgImNoYW5nZXMiOiBbXX0NCg==",
    "stderr": "",
    "window": [
-    1791576488.0563195,
-    1791576488.1574824
+    1791626679.918005,
+    1791626680.1199362
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -121,15 +122,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 4,
-   "stdout": "dGVzdC1sb2dpbjogbm8gc3VwZXJ1c2VyIGNvbm5lY3Rpb246IHJ1biB0aGlzIG9uIHRoZSBEb2NrZXIgaG9zdCwgd2hlcmUgdGhlIHBsLWNmLXcxYy10ZXN0bG9naW4tYWJzZW50LWZkZmUxZTliIGNvbnRhaW5lciBydW5zLCBvciBnaXZlIC0tYWRtaW4tdXJsIHdpdGggYSBzdXBlcnVzZXIgVVJMDQo=",
+   "stdout": "dGVzdC1sb2dpbjogbm8gc3VwZXJ1c2VyIGNvbm5lY3Rpb246IHJ1biB0aGlzIG9uIHRoZSBEb2NrZXIgaG9zdCwgd2hlcmUgdGhlIHBsLWNmLXcxYy10ZXN0bG9naW4tYWJzZW50LWFjZjUwNzFiIGNvbnRhaW5lciBydW5zLCBvciBnaXZlIC0tYWRtaW4tdXJsIHdpdGggYSBzdXBlcnVzZXIgVVJMDQo=",
    "stderr": "",
    "window": [
-    1791576488.1594908,
-    1791576488.251779
+    1791626680.1214838,
+    1791626680.3297896
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -140,15 +141,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 4,
-   "stdout": "eyJleGl0IjogNCwgImVycm9yIjogIm5vIHN1cGVydXNlciBjb25uZWN0aW9uOiBydW4gdGhpcyBvbiB0aGUgRG9ja2VyIGhvc3QsIHdoZXJlIHRoZSBwbC1jZi13MWMtdGVzdGxvZ2luLWFic2VudC1mZGZlMWU5YiBjb250YWluZXIgcnVucywgb3IgZ2l2ZSAtLWFkbWluLXVybCB3aXRoIGEgc3VwZXJ1c2VyIFVSTCIsICJjaGFuZ2VzIjogW119DQo=",
+   "stdout": "eyJleGl0IjogNCwgImVycm9yIjogIm5vIHN1cGVydXNlciBjb25uZWN0aW9uOiBydW4gdGhpcyBvbiB0aGUgRG9ja2VyIGhvc3QsIHdoZXJlIHRoZSBwbC1jZi13MWMtdGVzdGxvZ2luLWFic2VudC1hY2Y1MDcxYiBjb250YWluZXIgcnVucywgb3IgZ2l2ZSAtLWFkbWluLXVybCB3aXRoIGEgc3VwZXJ1c2VyIFVSTCIsICJjaGFuZ2VzIjogW119DQo=",
    "stderr": "",
    "window": [
-    1791576488.253781,
-    1791576488.3533275
+    1791626680.3318052,
+    1791626680.5379357
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -159,15 +160,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "dGVzdC1sb2dpbjogdGhlIGRhdGFiYXNlIHJlZnVzZWQ6IEVycm9yIHJlc3BvbnNlIGZyb20gZGFlbW9uOiBObyBzdWNoIGNvbnRhaW5lcjogcGwtY2YtdzFjLXRlc3Rsb2dpbi1hYnNlbnQtZmRmZTFlOWINCg==",
+   "stdout": "dGVzdC1sb2dpbjogdGhlIGRhdGFiYXNlIHJlZnVzZWQ6IEVycm9yIHJlc3BvbnNlIGZyb20gZGFlbW9uOiBObyBzdWNoIGNvbnRhaW5lcjogcGwtY2YtdzFjLXRlc3Rsb2dpbi1hYnNlbnQtYWNmNTA3MWINCg==",
    "stderr": "",
    "window": [
-    1791576488.410514,
-    1791576488.5807858
+    1791626680.5836456,
+    1791626680.8507092
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -178,15 +179,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "eyJleGl0IjogMSwgImVycm9yIjogInRoZSBkYXRhYmFzZSByZWZ1c2VkOiBFcnJvciByZXNwb25zZSBmcm9tIGRhZW1vbjogTm8gc3VjaCBjb250YWluZXI6IHBsLWNmLXcxYy10ZXN0bG9naW4tYWJzZW50LWZkZmUxZTliIiwgImNoYW5nZXMiOiBbXX0NCg==",
+   "stdout": "eyJleGl0IjogMSwgImVycm9yIjogInRoZSBkYXRhYmFzZSByZWZ1c2VkOiBFcnJvciByZXNwb25zZSBmcm9tIGRhZW1vbjogTm8gc3VjaCBjb250YWluZXI6IHBsLWNmLXcxYy10ZXN0bG9naW4tYWJzZW50LWFjZjUwNzFiIiwgImNoYW5nZXMiOiBbXX0NCg==",
    "stderr": "",
    "window": [
-    1791576488.5827887,
-    1791576488.7449238
+    1791626680.8522804,
+    1791626681.1241078
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "files": {
     "cwd": "dir"
@@ -200,12 +201,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnlfYmVuY2hfY3B1X3dzbDc3OiBhIGxlZnRvdmVyIHRlc3QgZGF0YWJhc2UsIGhhbmRlZCB0byBwc2V1ZG9saWZlX3Rlc3Qgc28gdGhlIHN1aXRlJ3MgcHJ1bmUgY2FuIGRyb3AgaXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnlfdGVzdF80MjQyOiBhIGxlZnRvdmVyIHRlc3QgZGF0YWJhc2UsIGhhbmRlZCB0byBwc2V1ZG9saWZlX3Rlc3Qgc28gdGhlIHN1aXRlJ3MgcHJ1bmUgY2FuIGRyb3AgaXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQogIG90aGVyIGRhdGFiYXNlcyBQVUJMSUMgbWF5IGNvbm5lY3QgdG8gKHRoZSB0ZXN0IGxvZ2luIGhvbGRzIG5vIHRhYmxlIHByaXZpbGVnZXMgdGhlcmU7IGNsb3NlIHRoZW0gd2l0aCAtLWJhbmspOiBwbF9vdGhlciwgcHNldWRvbGlmZV9tZW1vcnlfdGVzdHgNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576496.0261881,
-    1791576496.4741187
+    1791626686.619804,
+    1791626687.2084773
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -560,15 +561,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -599,12 +594,12 @@
    "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBhdCB0aGUgYWRtaW4gVVJMLCBhcyBwb3N0Z3JlcyAoc3VwZXJ1c2VyKSIsICIgIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQiLCAiICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeV9iZW5jaF9jcHVfd3NsNzc6IGEgbGVmdG92ZXIgdGVzdCBkYXRhYmFzZSwgaGFuZGVkIHRvIHBzZXVkb2xpZmVfdGVzdCBzbyB0aGUgc3VpdGUncyBwcnVuZSBjYW4gZHJvcCBpdCIsICIgIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5X3Rlc3RfNDI0MjogYSBsZWZ0b3ZlciB0ZXN0IGRhdGFiYXNlLCBoYW5kZWQgdG8gcHNldWRvbGlmZV90ZXN0IHNvIHRoZSBzdWl0ZSdzIHBydW5lIGNhbiBkcm9wIGl0IiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVCIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQiLCAiICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQiLCAiICBvdGhlciBkYXRhYmFzZXMgUFVCTElDIG1heSBjb25uZWN0IHRvICh0aGUgdGVzdCBsb2dpbiBob2xkcyBubyB0YWJsZSBwcml2aWxlZ2VzIHRoZXJlOyBjbG9zZSB0aGVtIHdpdGggLS1iYW5rKTogcGxfb3RoZXIsIHBzZXVkb2xpZmVfbWVtb3J5X3Rlc3R4IiwgImRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLiJdLCAicm9sZSI6ICJwc2V1ZG9saWZlX3Rlc3QiLCAiZmlsZSI6ICJ7SE9NRX1cXC5wc2V1ZG9saWZlLW1jcFxcdGVzdC1wZy5lbnYiLCAiYmFua3MiOiBbInBzZXVkb2xpZmVfbWVtb3J5Il0sICJ0ZW1wbGF0ZTEiOiAidmVjdG9yIDAuOC41IiwgIm90aGVycyI6IFsicGxfb3RoZXIiLCAicHNldWRvbGlmZV9tZW1vcnlfdGVzdHgiXSwgInBhc3N3b3JkX3JldXNlZCI6IGZhbHNlfQ0K",
    "stderr": "",
    "window": [
-    1791576500.876523,
-    1791576501.353885
+    1791626690.3285306,
+    1791626690.9184966
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -959,15 +954,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -998,12 +987,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgaGFzIHZlY3RvciAwLjguNQ0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576504.4044414,
-    1791576504.7855752
+    1791626693.3874836,
+    1791626693.9406219
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -1330,15 +1319,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -1369,12 +1352,12 @@
    "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBhdCB0aGUgYWRtaW4gVVJMLCBhcyBwb3N0Z3JlcyAoc3VwZXJ1c2VyKSIsICIgIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlIiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVCIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogYWxyZWFkeSBoYXMgdmVjdG9yIDAuOC41IiwgIiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEIiwgImRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLiJdLCAicm9sZSI6ICJwc2V1ZG9saWZlX3Rlc3QiLCAiZmlsZSI6ICJ7SE9NRX1cXC5wc2V1ZG9saWZlLW1jcFxcdGVzdC1wZy5lbnYiLCAiYmFua3MiOiBbInBzZXVkb2xpZmVfbWVtb3J5Il0sICJ0ZW1wbGF0ZTEiOiAidmVjdG9yIDAuOC41IiwgIm90aGVycyI6IFtdLCAicGFzc3dvcmRfcmV1c2VkIjogdHJ1ZX0NCg==",
    "stderr": "",
    "window": [
-    1791576506.6502502,
-    1791576507.0863829
+    1791626695.2757816,
+    1791626695.8397872
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -1701,15 +1684,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -1740,12 +1717,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcm90YXRlZA0KICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeTogYWxyZWFkeSBjbG9zZWQgdG8gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUDQogIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUNCiAgdGVtcGxhdGUxOiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQNCiAgdGVtcGxhdGUxOiBhbHJlYWR5IGhhcyB2ZWN0b3IgMC44LjUNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBzZXVkb2xpZmVfbWVtb3J5LiBDb3B5IHRoZSBmaWxlIHRvIGFub3RoZXIgYWNjb3VudCdzIH4vLnBzZXVkb2xpZmUtbWNwLyB0byBnaXZlIGl0cyBzZXNzaW9ucyB0aGUgc2FtZSBsb2dpbi4NCg==",
    "stderr": "",
    "window": [
-    1791576508.9493866,
-    1791576509.2721713
+    1791626697.2118263,
+    1791626697.8504655
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -2072,15 +2049,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -2111,12 +2082,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgaGFzIHZlY3RvciAwLjguNQ0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576510.9621732,
-    1791576511.4375682
+    1791626699.1616662,
+    1791626699.7095225
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -2443,15 +2414,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -2482,12 +2447,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQp0ZXN0LWxvZ2luOiBhZnRlciB0aGUgY2hhbmdlOiB0aGUgb3duZXIgb2YgcHNldWRvbGlmZV9tZW1vcnkgbG9zdCBDT05ORUNUDQo=",
    "stderr": "",
    "window": [
-    1791576512.9770417,
-    1791576513.479093
+    1791626701.0141501,
+    1791626701.667191
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -2814,15 +2779,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -2853,12 +2812,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlIG93bnMgdGhlIGJhbmsgcHNldWRvbGlmZV9tZW1vcnk6IG5vdCBhIHRlc3QgbG9naW4NCg==",
    "stderr": "",
    "window": [
-    1791576515.0863602,
-    1791576515.3910632
+    1791626702.826958,
+    1791626703.3138998
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -3175,12 +3134,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlX3Rlc3QgZXhpc3RzIGFuZCBpcyBhIHN1cGVydXNlcjogbm90IGEgdGVzdCBsb2dpbiwgYW5kIHRoaXMgd2lsbCBub3QgZGVtb3RlIGl0DQo=",
    "stderr": "",
    "window": [
-    1791576517.1591682,
-    1791576517.505323
+    1791626704.5110836,
+    1791626704.9841952
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -3523,12 +3482,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgaGFzIHZlY3RvciAwLjguNQ0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576519.3882453,
-    1791576519.7971876
+    1791626706.410614,
+    1791626706.9713929
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -3855,15 +3814,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -3894,12 +3847,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlX3Rlc3QgYWxyZWFkeSBleGlzdHMgYW5kIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IGhvbGRzIG5vIHBhc3N3b3JkIGZvciBpdCwgc28gdGhpcyB3b3VsZCBkcmF3IGEgbmV3IG9uZSwgYW5kIGV2ZXJ5IG90aGVyIGNvcHkgb2YgdGhlIGxvZ2luIGZpbGUgKGFub3RoZXIgYWNjb3VudCdzLCBhbm90aGVyIG1hY2hpbmUncykgd291bGQgc3RvcCB3b3JraW5nLiBDb3B5IHRoZSBjdXJyZW50IGZpbGUgaGVyZSwgb3IgcGFzcyAtLXJvdGF0ZSB0byBkcmF3IGEgbmV3IHBhc3N3b3JkIGFuZCBjb3B5IHRoZSBmaWxlIGFnYWluIGV2ZXJ5d2hlcmUuIE5vdGhpbmcgd2FzIGNoYW5nZWQuDQo=",
    "stderr": "",
    "window": [
-    1791576522.224304,
-    1791576522.5056562
+    1791626708.3319452,
+    1791626708.7951841
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -4221,24 +4174,12 @@
     "file_acl": {
      "owner": "<me>",
      "protected": false,
-     "aces": [
-      "(A;ID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;ID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;ID;FA;;;SY)",
-      "(A;ID;FA;;;BA)",
-      "(A;ID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -4269,12 +4210,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlX3Rlc3QgYWxyZWFkeSBleGlzdHMgYW5kIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IGhvbGRzIG5vIHBhc3N3b3JkIGZvciBpdCwgc28gdGhpcyB3b3VsZCBkcmF3IGEgbmV3IG9uZSwgYW5kIGV2ZXJ5IG90aGVyIGNvcHkgb2YgdGhlIGxvZ2luIGZpbGUgKGFub3RoZXIgYWNjb3VudCdzLCBhbm90aGVyIG1hY2hpbmUncykgd291bGQgc3RvcCB3b3JraW5nLiBDb3B5IHRoZSBjdXJyZW50IGZpbGUgaGVyZSwgb3IgcGFzcyAtLXJvdGF0ZSB0byBkcmF3IGEgbmV3IHBhc3N3b3JkIGFuZCBjb3B5IHRoZSBmaWxlIGFnYWluIGV2ZXJ5d2hlcmUuIE5vdGhpbmcgd2FzIGNoYW5nZWQuDQo=",
    "stderr": "",
    "window": [
-    1791576524.5088491,
-    1791576524.751775
+    1791626710.2370186,
+    1791626710.6927924
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -4596,24 +4537,12 @@
     "file_acl": {
      "owner": "<me>",
      "protected": false,
-     "aces": [
-      "(A;ID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;ID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;ID;FA;;;SY)",
-      "(A;ID;FA;;;BA)",
-      "(A;ID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     }
    },
    "files": {
@@ -4630,12 +4559,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgY2lfbG9naW46IGNyZWF0ZWQ6IExPR0lOIENSRUFURURCLCBub3Qgc3VwZXJ1c2VyLCBubyBDUkVBVEVST0xFLCBSRVBMSUNBVElPTiBvciBCWVBBU1NSTFM7IHBhc3N3b3JkIHNldA0KICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeV9iZW5jaF9jcHVfd3NsNzc6IGEgbGVmdG92ZXIgdGVzdCBkYXRhYmFzZSwgaGFuZGVkIHRvIGNpX2xvZ2luIHNvIHRoZSBzdWl0ZSdzIHBydW5lIGNhbiBkcm9wIGl0DQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5X3Rlc3RfNDI0MjogYSBsZWZ0b3ZlciB0ZXN0IGRhdGFiYXNlLCBoYW5kZWQgdG8gY2lfbG9naW4gc28gdGhlIHN1aXRlJ3MgcHJ1bmUgY2FuIGRyb3AgaXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQogIG90aGVyIGRhdGFiYXNlcyBQVUJMSUMgbWF5IGNvbm5lY3QgdG8gKHRoZSB0ZXN0IGxvZ2luIGhvbGRzIG5vIHRhYmxlIHByaXZpbGVnZXMgdGhlcmU7IGNsb3NlIHRoZW0gd2l0aCAtLWJhbmspOiBwbF9vdGhlciwgcHNldWRvbGlmZV9tZW1vcnlfdGVzdHgNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIGNpX2xvZ2luLCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576527.4215667,
-    1791576527.855096
+    1791626712.612672,
+    1791626713.2067757
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -4990,15 +4919,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "ci_login",
@@ -5029,12 +4952,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlX3Rlc3QgYWxyZWFkeSBleGlzdHMgYW5kIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IGhvbGRzIG5vIHBhc3N3b3JkIGZvciBpdCwgc28gdGhpcyB3b3VsZCBkcmF3IGEgbmV3IG9uZSwgYW5kIGV2ZXJ5IG90aGVyIGNvcHkgb2YgdGhlIGxvZ2luIGZpbGUgKGFub3RoZXIgYWNjb3VudCdzLCBhbm90aGVyIG1hY2hpbmUncykgd291bGQgc3RvcCB3b3JraW5nLiBDb3B5IHRoZSBjdXJyZW50IGZpbGUgaGVyZSwgb3IgcGFzcyAtLXJvdGF0ZSB0byBkcmF3IGEgbmV3IHBhc3N3b3JkIGFuZCBjb3B5IHRoZSBmaWxlIGFnYWluIGV2ZXJ5d2hlcmUuIE5vdGhpbmcgd2FzIGNoYW5nZWQuDQo=",
    "stderr": "",
    "window": [
-    1791576531.3131213,
-    1791576531.6029882
+    1791626715.6519444,
+    1791626716.129136
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -5368,12 +5291,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcm90YXRlZA0KICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeTogYWxyZWFkeSBjbG9zZWQgdG8gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUDQogIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUNCiAgdGVtcGxhdGUxOiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQNCiAgdGVtcGxhdGUxOiBhbHJlYWR5IGhhcyB2ZWN0b3IgMC44LjUNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBzZXVkb2xpZmVfbWVtb3J5LiBDb3B5IHRoZSBmaWxlIHRvIGFub3RoZXIgYWNjb3VudCdzIH4vLnBzZXVkb2xpZmUtbWNwLyB0byBnaXZlIGl0cyBzZXNzaW9ucyB0aGUgc2FtZSBsb2dpbi4NCg==",
    "stderr": "",
    "window": [
-    1791576533.1933556,
-    1791576533.5285885
+    1791626717.3653042,
+    1791626717.929159
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -5700,15 +5623,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -5739,12 +5656,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBvdGhlcl9sb2dpbiBhbHJlYWR5IGV4aXN0cyBhbmQgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgaG9sZHMgbm8gcGFzc3dvcmQgZm9yIGl0LCBzbyB0aGlzIHdvdWxkIGRyYXcgYSBuZXcgb25lLCBhbmQgZXZlcnkgb3RoZXIgY29weSBvZiB0aGUgbG9naW4gZmlsZSAoYW5vdGhlciBhY2NvdW50J3MsIGFub3RoZXIgbWFjaGluZSdzKSB3b3VsZCBzdG9wIHdvcmtpbmcuIENvcHkgdGhlIGN1cnJlbnQgZmlsZSBoZXJlLCBvciBwYXNzIC0tcm90YXRlIHRvIGRyYXcgYSBuZXcgcGFzc3dvcmQgYW5kIGNvcHkgdGhlIGZpbGUgYWdhaW4gZXZlcnl3aGVyZS4gTm90aGluZyB3YXMgY2hhbmdlZC4NCg==",
    "stderr": "",
    "window": [
-    1791576535.2571466,
-    1791576535.4837554
+    1791626719.394052,
+    1791626719.8554099
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -6084,15 +6001,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -6123,12 +6034,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBtZW1iZXJzaGlwIGluIGdycF9hIHJldm9rZWQNCiAgcm9sZSBwc2V1ZG9saWZlX3Rlc3Q6IG1lbWJlcnNoaXAgaW4gZ3JwX2IgcmV2b2tlZA0KICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUDQogIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUNCiAgdGVtcGxhdGUxOiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQNCiAgdGVtcGxhdGUxOiBpbnN0YWxsZWQgdmVjdG9yIDAuOC41LCBzbyBldmVyeSBkYXRhYmFzZSB0aGUgdGVzdCBsb2dpbiBjcmVhdGVzIGhhcyBpdA0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576536.8717682,
-    1791576537.306278
+    1791626721.1437013,
+    1791626721.776004
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -6481,15 +6392,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -6520,12 +6425,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlX3Rlc3QgZXhpc3RzIGFuZCBpcyBhIHN1cGVydXNlcjogbm90IGEgdGVzdCBsb2dpbiwgYW5kIHRoaXMgd2lsbCBub3QgZGVtb3RlIGl0DQo=",
    "stderr": "",
    "window": [
-    1791576538.9570196,
-    1791576539.2582262
+    1791626723.0191875,
+    1791626723.4912484
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -6855,12 +6760,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwc2V1ZG9saWZlIG93bnMgdGhlIGJhbmsgcHNldWRvbGlmZV9tZW1vcnk6IG5vdCBhIHRlc3QgbG9naW4NCg==",
    "stderr": "",
    "window": [
-    1791576540.7809174,
-    1791576541.0846193
+    1791626724.6302605,
+    1791626725.1133718
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -7177,12 +7082,12 @@
    "stdout": "dGVzdC1sb2dpbjogcG9zdGdyZXMgaXMgdGhlIHJvbGUgdGhpcyBydW5zIGFzOyB0aGUgdGVzdCBsb2dpbiBtdXN0IGJlIGEgZGlmZmVyZW50IG9uZQ0K",
    "stderr": "",
    "window": [
-    1791576542.4206426,
-    1791576542.6544044
+    1791626726.22959,
+    1791626726.6764233
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -7499,12 +7404,12 @@
    "stdout": "dGVzdC1sb2dpbjogdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwgbG9ncyBpbiBhcyAncHNldWRvbGlmZScsIHdoaWNoIGlzIG5vdCBhIHN1cGVydXNlci4gSW5zdGFsbGluZyB2ZWN0b3IgaW50byB0ZW1wbGF0ZTEgbmVlZHMgb25lIChpdCBpcyBub3QgYSB0cnVzdGVkIGV4dGVuc2lvbik7IG9uIHRoZSBEb2NrZXIgdGllciB0aGF0IGlzIHRoZSBiYW5rIG93bmVyLCBQT1NUR1JFU19VU0VSLiBOb3RoaW5nIHdhcyBjaGFuZ2VkLg0K",
    "stderr": "",
    "window": [
-    1791576544.0884404,
-    1791576544.3308103
+    1791626727.7822783,
+    1791626728.228437
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -7821,12 +7726,12 @@
    "stdout": "eyJleGl0IjogNCwgImVycm9yIjogInRoZSBQb3N0Z3JlcyBhdCB0aGUgYWRtaW4gVVJMIGxvZ3MgaW4gYXMgJ3BzZXVkb2xpZmUnLCB3aGljaCBpcyBub3QgYSBzdXBlcnVzZXIuIEluc3RhbGxpbmcgdmVjdG9yIGludG8gdGVtcGxhdGUxIG5lZWRzIG9uZSAoaXQgaXMgbm90IGEgdHJ1c3RlZCBleHRlbnNpb24pOyBvbiB0aGUgRG9ja2VyIHRpZXIgdGhhdCBpcyB0aGUgYmFuayBvd25lciwgUE9TVEdSRVNfVVNFUi4gTm90aGluZyB3YXMgY2hhbmdlZC4iLCAiY2hhbmdlcyI6IFtdfQ0K",
    "stderr": "",
    "window": [
-    1791576545.786327,
-    1791576546.0536
+    1791626729.4254055,
+    1791626729.8693817
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -8143,12 +8048,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcGxfZXh0cmE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYXRhYmFzZSBwc2V1ZG9saWZlX21lbW9yeTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUDQogIGRhdGFiYXNlIHBsX21pc3Npbmc6IG5vdCBvbiB0aGlzIHNlcnZlcg0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBsX2V4dHJhLCBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576548.1907313,
-    1791576548.707874
+    1791626731.3951647,
+    1791626731.9890034
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -8482,15 +8387,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -8521,12 +8420,12 @@
    "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBhdCB0aGUgYWRtaW4gVVJMLCBhcyBwb3N0Z3JlcyAoc3VwZXJ1c2VyKSIsICIgIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQiLCAiICBkYXRhYmFzZSBhYWFfYmFuazogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUIiwgIiAgZGF0YWJhc2UgcGxfZXh0cmE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVCIsICIgIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QiLCAiICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlIiwgIiAgdGVtcGxhdGUxOiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQiLCAiICB0ZW1wbGF0ZTE6IGluc3RhbGxlZCB2ZWN0b3IgMC44LjUsIHNvIGV2ZXJ5IGRhdGFiYXNlIHRoZSB0ZXN0IGxvZ2luIGNyZWF0ZXMgaGFzIGl0IiwgIiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEIiwgImRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gYWFhX2JhbmssIHBsX2V4dHJhLCBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uIl0sICJyb2xlIjogInBzZXVkb2xpZmVfdGVzdCIsICJmaWxlIjogIntIT01FfVxcLnBzZXVkb2xpZmUtbWNwXFx0ZXN0LXBnLmVudiIsICJiYW5rcyI6IFsiYWFhX2JhbmsiLCAicGxfZXh0cmEiLCAicHNldWRvbGlmZV9tZW1vcnkiXSwgInRlbXBsYXRlMSI6ICJ2ZWN0b3IgMC44LjUiLCAib3RoZXJzIjogW10sICJwYXNzd29yZF9yZXVzZWQiOiBmYWxzZX0NCg==",
    "stderr": "",
    "window": [
-    1791576551.4095044,
-    1791576551.9413548
+    1791626733.989707,
+    1791626734.5736763
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -8867,15 +8766,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -8906,12 +8799,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBwc2V1ZG9saWZlIChQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwpOiBrZWVwcyBDT05ORUNUIG9uIHBzZXVkb2xpZmVfbWVtb3J5IGFzIG93bmVyLCBzdXBlcnVzZXIgb3IgYnkgZ3JhbnQNCiAgdGVtcGxhdGUxOiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQNCiAgdGVtcGxhdGUxOiBpbnN0YWxsZWQgdmVjdG9yIDAuOC41LCBzbyBldmVyeSBkYXRhYmFzZSB0aGUgdGVzdCBsb2dpbiBjcmVhdGVzIGhhcyBpdA0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576554.2135308,
-    1791576554.7695668
+    1791626736.2935588,
+    1791626736.9406383
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -9238,15 +9131,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -9277,12 +9164,12 @@
    "stdout": "dGVzdC1sb2dpbjogdGhlIGRhZW1vbidzIGRhdGFiYXNlIHVzZXIgZGFlbW9udXNlciAoUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMKSBjYW4gY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeSBvbmx5IHRocm91Z2ggUFVCTElDJ3MgQ09OTkVDVCwgd2hpY2ggdGhpcyByZXZva2VzOiB0aGUgZGFlbW9uIHdvdWxkIGJlIGxvY2tlZCBvdXQgb2YgdGhlIGJhbmsuIEdyYW50IGl0IGZpcnN0LCBhcyBhIHN1cGVydXNlcjogR1JBTlQgQ09OTkVDVCBPTiBEQVRBQkFTRSAicHNldWRvbGlmZV9tZW1vcnkiIFRPICJkYWVtb251c2VyIjsgdGhlbiBydW4gdGhpcyBhZ2Fpbi4gTm90aGluZyB3YXMgY2hhbmdlZC4NCg==",
    "stderr": "",
    "window": [
-    1791576556.5061636,
-    1791576556.7780325
+    1791626738.1587987,
+    1791626738.629043
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -9612,12 +9499,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBkYWVtb251c2VyIChQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwpOiBrZWVwcyBDT05ORUNUIG9uIHBzZXVkb2xpZmVfbWVtb3J5IGFzIG93bmVyLCBzdXBlcnVzZXIgb3IgYnkgZ3JhbnQNCiAgdGVtcGxhdGUxOiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IENSRUFURSBEQVRBQkFTRSBzdGlsbCBjb3BpZXMgaXQNCiAgdGVtcGxhdGUxOiBpbnN0YWxsZWQgdmVjdG9yIDAuOC41LCBzbyBldmVyeSBkYXRhYmFzZSB0aGUgdGVzdCBsb2dpbiBjcmVhdGVzIGhhcyBpdA0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576558.4984436,
-    1791576559.2103994
+    1791626739.729753,
+    1791626740.372496
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -9957,15 +9844,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -9996,12 +9877,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwncyB1c2VyIGdob3N0IGlzIG5vdCBhIHJvbGUgb24gdGhpcyBzZXJ2ZXI6IG5vdCBjaGVja2VkDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBzZXVkb2xpZmVfbWVtb3J5LiBDb3B5IHRoZSBmaWxlIHRvIGFub3RoZXIgYWNjb3VudCdzIH4vLnBzZXVkb2xpZmUtbWNwLyB0byBnaXZlIGl0cyBzZXNzaW9ucyB0aGUgc2FtZSBsb2dpbi4NCg==",
    "stderr": "",
    "window": [
-    1791576561.0034814,
-    1791576561.5558813
+    1791626741.7155755,
+    1791626742.3693817
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -10328,15 +10209,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -10367,12 +10242,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYXRhYmFzZSBwbF9kYWVtb25fZGI6IG5vdCBvbiB0aGlzIHNlcnZlcg0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIG5hbWVzIG5vIHVzZXI7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGluc3RhbGxlZCB2ZWN0b3IgMC44LjUsIHNvIGV2ZXJ5IGRhdGFiYXNlIHRoZSB0ZXN0IGxvZ2luIGNyZWF0ZXMgaGFzIGl0DQogIHdyb3RlIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IChvd25lci1vbmx5KTogUFNFVURPTElGRV9URVNUX1BHX1VTRVIsIFBTRVVET0xJRkVfVEVTVF9QR19QQVNTV09SRA0KZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576563.2467132,
-    1791576563.9058573
+    1791626743.5364528,
+    1791626744.2069762
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -10699,15 +10574,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -10738,12 +10607,12 @@
    "stdout": "dGVzdC1sb2dpbjogcHNldWRvbGlmZV90ZXN0IGlzIHRoZSBkYWVtb24ncyBkYXRhYmFzZSB1c2VyIChQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwpOiB0aGlzIHdvdWxkIGNsb3NlIHRoZSBiYW5rIHRvIHRoZSBkYWVtb24uIFRoZSB0ZXN0IGxvZ2luIG11c3QgYmUgYSBkaWZmZXJlbnQgcm9sZS4gTm90aGluZyB3YXMgY2hhbmdlZC4NCg==",
    "stderr": "",
    "window": [
-    1791576565.6660485,
-    1791576565.9896586
+    1791626745.3476462,
+    1791626745.829796
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -11060,12 +10929,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBzZXVkb2xpZmVfbWVtb3J5LiBDb3B5IHRoZSBmaWxlIHRvIGFub3RoZXIgYWNjb3VudCdzIH4vLnBzZXVkb2xpZmUtbWNwLyB0byBnaXZlIGl0cyBzZXNzaW9ucyB0aGUgc2FtZSBsb2dpbi4NCg==",
    "stderr": "",
    "window": [
-    1791576567.591358,
-    1791576568.2502387
+    1791626747.014684,
+    1791626747.6638944
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -11392,15 +11261,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -11431,12 +11294,12 @@
    "stdout": "dGVzdC1sb2dpbjogcm9sZSBwZWVyIGlzIGNvbm5lY3RlZCB0byBwc2V1ZG9saWZlX21lbW9yeSBub3cgYW5kIGNhbiBjb25uZWN0IHRvIGl0IG9ubHkgdGhyb3VnaCBQVUJMSUMncyBDT05ORUNULCB3aGljaCB0aGlzIHJldm9rZXM6IGl0IHdvdWxkIGJlIGxvY2tlZCBvdXQgYXQgaXRzIG5leHQgY29ubmVjdGlvbiAoYSBkYWVtb24gd2hvc2UgZGF0YWJhc2UgVVJMIGlzIG5vdCBpbiB0aGlzIHNoZWxsLCBwZXJoYXBzKS4gR3JhbnQgaXQgZmlyc3QsIGFzIGEgc3VwZXJ1c2VyOiBHUkFOVCBDT05ORUNUIE9OIERBVEFCQVNFICJwc2V1ZG9saWZlX21lbW9yeSIgVE8gInBlZXIiOyB0aGVuIHJ1biB0aGlzIGFnYWluLiBOb3RoaW5nIHdhcyBjaGFuZ2VkLg0K",
    "stderr": "",
    "window": [
-    1791576570.0901418,
-    1791576570.4280863
+    1791626748.90962,
+    1791626749.3678222
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -11766,12 +11629,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHJvbGUgcGVlciwgY29ubmVjdGVkIHRvIHBzZXVkb2xpZmVfbWVtb3J5IG5vdywga2VlcHMgQ09OTkVDVCBhcyBvd25lciwgc3VwZXJ1c2VyIG9yIGJ5IGdyYW50DQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi8ucHNldWRvbGlmZS1tY3AvdGVzdC1wZy5lbnYgKG93bmVyLW9ubHkpOiBQU0VVRE9MSUZFX1RFU1RfUEdfVVNFUiwgUFNFVURPTElGRV9URVNUX1BHX1BBU1NXT1JEDQpkb25lOiB0aGUgdGVzdCBzdWl0ZSBvbiB0aGlzIGFjY291bnQgbG9ncyBpbiBhcyBwc2V1ZG9saWZlX3Rlc3QsIHdoaWNoIGNhbm5vdCBjb25uZWN0IHRvIHBzZXVkb2xpZmVfbWVtb3J5LiBDb3B5IHRoZSBmaWxlIHRvIGFub3RoZXIgYWNjb3VudCdzIH4vLnBzZXVkb2xpZmUtbWNwLyB0byBnaXZlIGl0cyBzZXNzaW9ucyB0aGUgc2FtZSBsb2dpbi4NCg==",
    "stderr": "",
    "window": [
-    1791576572.2663972,
-    1791576573.0145957
+    1791626750.553088,
+    1791626751.206582
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -12111,15 +11974,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -12150,12 +12007,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi9hbHQvbG9naW4uZW52IChvd25lci1vbmx5KTogUFNFVURPTElGRV9URVNUX1BHX1VTRVIsIFBTRVVET0xJRkVfVEVTVF9QR19QQVNTV09SRA0KZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576575.1548467,
-    1791576575.7866628
+    1791626752.3436654,
+    1791626753.0086498
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -12482,15 +12339,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -12521,12 +12372,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgcmVsLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576577.8101559,
-    1791576578.4988763
+    1791626754.3947022,
+    1791626755.0709631
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -12853,15 +12704,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -12891,12 +12736,12 @@
    "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGF0IHRoZSBhZG1pbiBVUkwsIGFzIHBvc3RncmVzIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQNCiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVA0KICBkYWVtb24gdXNlciBub3QgY2hlY2tlZDogUFNFVURPTElGRV9NQ1BfREFUQUJBU0VfVVJMIGlzIG5vdCBzZXQgaW4gdGhpcyBzaGVsbDsgb25seSB0aGUgcm9sZXMgY29ubmVjdGVkIHRvIHRoZSBiYW5rIG5vdyB3ZXJlDQogIHRlbXBsYXRlMTogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBDUkVBVEUgREFUQUJBU0Ugc3RpbGwgY29waWVzIGl0DQogIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNSwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQNCiAgd3JvdGUgfi94L3kuZW52IChvd25lci1vbmx5KTogUFNFVURPTElGRV9URVNUX1BHX1VTRVIsIFBTRVVET0xJRkVfVEVTVF9QR19QQVNTV09SRA0KZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576580.8366146,
-    1791576581.5327563
+    1791626756.2366157,
+    1791626756.9047716
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -13223,15 +13068,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -13262,12 +13101,12 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNTE1LCBpbiBtYWluDQogICAgcmV0dXJuIF9jcmVhdGUoYXJncywgZXhlY3V0b3IsIHBhdGgsIGJhbmtzLCByZXBvcnQsIGRhZW1vbikNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNjM3LCBpbiBfY3JlYXRlDQogICAgcmVwb3J0LnNheShmInRlc3QtbG9naW46IG9uIHtleGVjdXRvci5kZXNjcmlwdGlvbn0sIGFzIHt3aG8uZ2V0KCd3aG8nKX0gKHN1cGVydXNlcikiKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDQ0LCBpbiBzYXkNCiAgICBwcmludChsaW5lLCBmaWxlPXNlbGYub3V0LCBmbHVzaD1UcnVlKQ0KT1NFcnJvcjogW0Vycm5vIDIyXSBJbnZhbGlkIGFyZ3VtZW50DQoNCkR1cmluZyBoYW5kbGluZyBvZiB0aGUgYWJvdmUgZXhjZXB0aW9uLCBhbm90aGVyIGV4Y2VwdGlvbiBvY2N1cnJlZDoNCg0KVHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjIzLCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDE4MCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KHRlc3RfbG9naW5fbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XHRlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA1MTcsIGluIG1haW4NCiAgICByZXR1cm4gcmVwb3J0LmZpbmlzaChFWElUX0ZBSUxFRCwgZiJjb3VsZCBub3Qgd3JpdGUge19zaG93bihwYXRoKX06IHtleGN9IikNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4NCiAgRmlsZSAie09SQUNMRX1ccHNldWRvbGlmZV9tZW1vcnlcdGVzdF9sb2dpbl9jbGkucHkiLCBsaW5lIDQ0OSwgaW4gZmluaXNoDQogICAgcHJpbnQoZiJ0ZXN0LWxvZ2luOiB7ZXJyb3J9IiwgZmlsZT1zZWxmLm91dCwgZmx1c2g9VHJ1ZSkNCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0KRXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791576585.2409987,
-    1791576585.5990272
+    1791626758.8789558,
+    1791626759.3412783
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -13612,12 +13451,12 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNTE1LCBpbiBtYWluDQogICAgcmV0dXJuIF9jcmVhdGUoYXJncywgZXhlY3V0b3IsIHBhdGgsIGJhbmtzLCByZXBvcnQsIGRhZW1vbikNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNjM3LCBpbiBfY3JlYXRlDQogICAgcmVwb3J0LnNheShmInRlc3QtbG9naW46IG9uIHtleGVjdXRvci5kZXNjcmlwdGlvbn0sIGFzIHt3aG8uZ2V0KCd3aG8nKX0gKHN1cGVydXNlcikiKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDQ0LCBpbiBzYXkNCiAgICBwcmludChsaW5lLCBmaWxlPXNlbGYub3V0LCBmbHVzaD1UcnVlKQ0KT1NFcnJvcjogW0Vycm5vIDIyXSBJbnZhbGlkIGFyZ3VtZW50DQoNCkR1cmluZyBoYW5kbGluZyBvZiB0aGUgYWJvdmUgZXhjZXB0aW9uLCBhbm90aGVyIGV4Y2VwdGlvbiBvY2N1cnJlZDoNCg0KVHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluDQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSA4OCwgaW4gX3J1bl9jb2RlDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMjIzLCBpbiA8bW9kdWxlPg0KICAgIG1haW4oKQ0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVxjbGkucHkiLCBsaW5lIDE4MCwgaW4gbWFpbg0KICAgIHN5cy5leGl0KHRlc3RfbG9naW5fbWFpbihzeXMuYXJndlsyOl0pKQ0KICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XHRlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA1MTcsIGluIG1haW4NCiAgICByZXR1cm4gcmVwb3J0LmZpbmlzaChFWElUX0ZBSUxFRCwgZiJjb3VsZCBub3Qgd3JpdGUge19zaG93bihwYXRoKX06IHtleGN9IikNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4NCiAgRmlsZSAie09SQUNMRX1ccHNldWRvbGlmZV9tZW1vcnlcdGVzdF9sb2dpbl9jbGkucHkiLCBsaW5lIDQ0OSwgaW4gZmluaXNoDQogICAgcHJpbnQoZiJ0ZXN0LWxvZ2luOiB7ZXJyb3J9IiwgZmlsZT1zZWxmLm91dCwgZmx1c2g9VHJ1ZSkNCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0KRXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791576590.9518561,
-    1791576591.3349063
+    1791626761.7158096,
+    1791626762.1632783
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -13944,15 +13783,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -13983,12 +13816,12 @@
    "stdout": "",
    "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNTE1LCBpbiBtYWluDQogICAgcmV0dXJuIF9jcmVhdGUoYXJncywgZXhlY3V0b3IsIHBhdGgsIGJhbmtzLCByZXBvcnQsIGRhZW1vbikNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNzA1LCBpbiBfY3JlYXRlDQogICAgcmV0dXJuIHJlcG9ydC5maW5pc2goRVhJVF9PSykNCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDUxLCBpbiBmaW5pc2gNCiAgICBwcmludChqc29uLmR1bXBzKHsiZXhpdCI6IGNvZGUsICJlcnJvciI6IGVycm9yLCAiY2hhbmdlcyI6IHNlbGYubGluZXMsICoqc2VsZi5kYXRhfSksDQpPU0Vycm9yOiBbRXJybm8gMjJdIEludmFsaWQgYXJndW1lbnQNCg0KRHVyaW5nIGhhbmRsaW5nIG9mIHRoZSBhYm92ZSBleGNlcHRpb24sIGFub3RoZXIgZXhjZXB0aW9uIG9jY3VycmVkOg0KDQpUcmFjZWJhY2sgKG1vc3QgcmVjZW50IGNhbGwgbGFzdCk6DQogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4NCiAgRmlsZSAiPGZyb3plbiBydW5weT4iLCBsaW5lIDg4LCBpbiBfcnVuX2NvZGUNCiAgRmlsZSAie09SQUNMRX1ccHNldWRvbGlmZV9tZW1vcnlcY2xpLnB5IiwgbGluZSAyMjMsIGluIDxtb2R1bGU+DQogICAgbWFpbigpDQogIEZpbGUgIntPUkFDTEV9XHBzZXVkb2xpZmVfbWVtb3J5XGNsaS5weSIsIGxpbmUgMTgwLCBpbiBtYWluDQogICAgc3lzLmV4aXQodGVzdF9sb2dpbl9tYWluKHN5cy5hcmd2WzI6XSkpDQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4NCiAgRmlsZSAie09SQUNMRX1ccHNldWRvbGlmZV9tZW1vcnlcdGVzdF9sb2dpbl9jbGkucHkiLCBsaW5lIDUxNywgaW4gbWFpbg0KICAgIHJldHVybiByZXBvcnQuZmluaXNoKEVYSVRfRkFJTEVELCBmImNvdWxkIG5vdCB3cml0ZSB7X3Nob3duKHBhdGgpfToge2V4Y30iKQ0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXg0KICBGaWxlICJ7T1JBQ0xFfVxwc2V1ZG9saWZlX21lbW9yeVx0ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDUxLCBpbiBmaW5pc2gNCiAgICBwcmludChqc29uLmR1bXBzKHsiZXhpdCI6IGNvZGUsICJlcnJvciI6IGVycm9yLCAiY2hhbmdlcyI6IHNlbGYubGluZXMsICoqc2VsZi5kYXRhfSksDQpPU0Vycm9yOiBbRXJybm8gMjJdIEludmFsaWQgYXJndW1lbnQNCkV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+DQpPU0Vycm9yOiBbRXJybm8gMjJdIEludmFsaWQgYXJndW1lbnQNCg==",
    "window": [
-    1791576594.4595306,
-    1791576594.9991317
+    1791626764.2901003,
+    1791626764.906979
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -14343,15 +14176,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -14379,15 +14206,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "dGVzdC1sb2dpbjogdGhlIGRhdGFiYXNlIHJlZnVzZWQ6IE9wZXJhdGlvbmFsRXJyb3I6IGNvbm5lY3Rpb24gZmFpbGVkOiBjb25uZWN0aW9uIHRvIHNlcnZlciBhdCAiMTI3LjAuMC4xIiwgcG9ydCA1ODg2NSBmYWlsZWQ6IEZBVEFMOiAgcGFzc3dvcmQgYXV0aGVudGljYXRpb24gZmFpbGVkIGZvciB1c2VyICJwb3N0Z3JlcyINCg==",
+   "stdout": "dGVzdC1sb2dpbjogdGhlIGRhdGFiYXNlIHJlZnVzZWQ6IE9wZXJhdGlvbmFsRXJyb3I6IGNvbm5lY3Rpb24gZmFpbGVkOiBjb25uZWN0aW9uIHRvIHNlcnZlciBhdCAiMTI3LjAuMC4xIiwgcG9ydCA0OTMzMiBmYWlsZWQ6IEZBVEFMOiAgcGFzc3dvcmQgYXV0aGVudGljYXRpb24gZmFpbGVkIGZvciB1c2VyICJwb3N0Z3JlcyINCg==",
    "stderr": "",
    "window": [
-    1791576598.4911938,
-    1791576598.729061
+    1791626767.1988149,
+    1791626767.6165674
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -14701,15 +14528,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "eyJleGl0IjogMSwgImVycm9yIjogInRoZSBkYXRhYmFzZSByZWZ1c2VkOiBPcGVyYXRpb25hbEVycm9yOiBjb25uZWN0aW9uIGZhaWxlZDogY29ubmVjdGlvbiB0byBzZXJ2ZXIgYXQgXCIxMjcuMC4wLjFcIiwgcG9ydCA1ODg2NSBmYWlsZWQ6IEZBVEFMOiAgcGFzc3dvcmQgYXV0aGVudGljYXRpb24gZmFpbGVkIGZvciB1c2VyIFwicG9zdGdyZXNcIiIsICJjaGFuZ2VzIjogW119DQo=",
+   "stdout": "eyJleGl0IjogMSwgImVycm9yIjogInRoZSBkYXRhYmFzZSByZWZ1c2VkOiBPcGVyYXRpb25hbEVycm9yOiBjb25uZWN0aW9uIGZhaWxlZDogY29ubmVjdGlvbiB0byBzZXJ2ZXIgYXQgXCIxMjcuMC4wLjFcIiwgcG9ydCA0OTMzMiBmYWlsZWQ6IEZBVEFMOiAgcGFzc3dvcmQgYXV0aGVudGljYXRpb24gZmFpbGVkIGZvciB1c2VyIFwicG9zdGdyZXNcIiIsICJjaGFuZ2VzIjogW119DQo=",
    "stderr": "",
    "window": [
-    1791576600.2225568,
-    1791576600.4503498
+    1791626768.7169964,
+    1791626769.1425662
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "arm": "python",
    "db": {
@@ -15023,15 +14850,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWZkZmUxZTliLWNvbnRhaW5lci1mcmVzaCwgYXMgcHNldWRvbGlmZSAoc3VwZXJ1c2VyKQ0KICByb2xlIHBzZXVkb2xpZmVfdGVzdDogY3JlYXRlZDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgc2V0DQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGluc3RhbGxlZCB2ZWN0b3IgMC44LjYsIHNvIGV2ZXJ5IGRhdGFiYXNlIHRoZSB0ZXN0IGxvZ2luIGNyZWF0ZXMgaGFzIGl0DQogIHdyb3RlIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IChvd25lci1vbmx5KTogUFNFVURPTElGRV9URVNUX1BHX1VTRVIsIFBTRVVET0xJRkVfVEVTVF9QR19QQVNTV09SRA0KZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
+   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWFjZjUwNzFiLWNvbnRhaW5lci1mcmVzaCwgYXMgcHNldWRvbGlmZSAoc3VwZXJ1c2VyKQ0KICByb2xlIHBzZXVkb2xpZmVfdGVzdDogY3JlYXRlZDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgc2V0DQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBDT05ORUNUIHJldm9rZWQgZnJvbSBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGluc3RhbGxlZCB2ZWN0b3IgMC44LjYsIHNvIGV2ZXJ5IGRhdGFiYXNlIHRoZSB0ZXN0IGxvZ2luIGNyZWF0ZXMgaGFzIGl0DQogIHdyb3RlIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52IChvd25lci1vbmx5KTogUFNFVURPTElGRV9URVNUX1BHX1VTRVIsIFBTRVVET0xJRkVfVEVTVF9QR19QQVNTV09SRA0KZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uDQo=",
    "stderr": "",
    "window": [
-    1791576602.7954419,
-    1791576603.632876
+    1791626771.4255633,
+    1791626772.2144465
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "db": {
     "roles": [
@@ -15344,15 +15171,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -15381,15 +15202,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBpbiBjb250YWluZXIgcGwtY2YtdzFjLXRlc3Rsb2dpbi1mZGZlMWU5Yi1jb250YWluZXItb3RoZXItZGItanNvbiwgYXMgcHNldWRvbGlmZSAoc3VwZXJ1c2VyKSIsICIgIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQiLCAiICBkYXRhYmFzZSBwbF9iYW5rMjogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUIiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IG5vdCBvbiB0aGlzIHNlcnZlciIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNiwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQiLCAiICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQiLCAiZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwbF9iYW5rMi4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uIl0sICJyb2xlIjogInBzZXVkb2xpZmVfdGVzdCIsICJmaWxlIjogIntIT01FfVxcLnBzZXVkb2xpZmUtbWNwXFx0ZXN0LXBnLmVudiIsICJiYW5rcyI6IFsicGxfYmFuazIiXSwgInRlbXBsYXRlMSI6ICJ2ZWN0b3IgMC44LjYiLCAib3RoZXJzIjogW10sICJwYXNzd29yZF9yZXVzZWQiOiBmYWxzZX0NCg==",
+   "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBpbiBjb250YWluZXIgcGwtY2YtdzFjLXRlc3Rsb2dpbi1hY2Y1MDcxYi1jb250YWluZXItb3RoZXItZGItanNvbiwgYXMgcHNldWRvbGlmZSAoc3VwZXJ1c2VyKSIsICIgIHJvbGUgcHNldWRvbGlmZV90ZXN0OiBjcmVhdGVkOiBMT0dJTiBDUkVBVEVEQiwgbm90IHN1cGVydXNlciwgbm8gQ1JFQVRFUk9MRSwgUkVQTElDQVRJT04gb3IgQllQQVNTUkxTOyBwYXNzd29yZCBzZXQiLCAiICBkYXRhYmFzZSBwbF9iYW5rMjogQ09OTkVDVCByZXZva2VkIGZyb20gUFVCTElDOyBpdHMgb3duZXIgcHNldWRvbGlmZSBrZWVwcyBDT05ORUNUIiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IG5vdCBvbiB0aGlzIHNlcnZlciIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNiwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQiLCAiICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQiLCAiZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwbF9iYW5rMi4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uIl0sICJyb2xlIjogInBzZXVkb2xpZmVfdGVzdCIsICJmaWxlIjogIntIT01FfVxcLnBzZXVkb2xpZmUtbWNwXFx0ZXN0LXBnLmVudiIsICJiYW5rcyI6IFsicGxfYmFuazIiXSwgInRlbXBsYXRlMSI6ICJ2ZWN0b3IgMC44LjYiLCAib3RoZXJzIjogW10sICJwYXNzd29yZF9yZXVzZWQiOiBmYWxzZX0NCg==",
    "stderr": "",
    "window": [
-    1791576607.5112956,
-    1791576608.2716823
+    1791626774.96611,
+    1791626775.7346826
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "db": {
     "roles": [
@@ -15702,15 +15523,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -15739,15 +15554,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWZkZmUxZTliLWNvbnRhaW5lci1yZWFwcGx5LCBhcyBwc2V1ZG9saWZlIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgaGFzIHZlY3RvciAwLjguNg0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
+   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWFjZjUwNzFiLWNvbnRhaW5lci1yZWFwcGx5LCBhcyBwc2V1ZG9saWZlIChzdXBlcnVzZXIpDQogIHJvbGUgcHNldWRvbGlmZV90ZXN0OiByZXNldDogTE9HSU4gQ1JFQVRFREIsIG5vdCBzdXBlcnVzZXIsIG5vIENSRUFURVJPTEUsIFJFUExJQ0FUSU9OIG9yIEJZUEFTU1JMUzsgcGFzc3dvcmQgcmUtYXBwbGllZCBmcm9tIHRoZSBmaWxlDQogIGRhdGFiYXNlIHBzZXVkb2xpZmVfbWVtb3J5OiBhbHJlYWR5IGNsb3NlZCB0byBQVUJMSUM7IGl0cyBvd25lciBwc2V1ZG9saWZlIGtlZXBzIENPTk5FQ1QNCiAgZGFlbW9uIHVzZXIgbm90IGNoZWNrZWQ6IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBpcyBub3Qgc2V0IGluIHRoaXMgc2hlbGw7IG9ubHkgdGhlIHJvbGVzIGNvbm5lY3RlZCB0byB0aGUgYmFuayBub3cgd2VyZQ0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgY2xvc2VkIHRvIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdA0KICB0ZW1wbGF0ZTE6IGFscmVhZHkgaGFzIHZlY3RvciAwLjguNg0KICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQNCmRvbmU6IHRoZSB0ZXN0IHN1aXRlIG9uIHRoaXMgYWNjb3VudCBsb2dzIGluIGFzIHBzZXVkb2xpZmVfdGVzdCwgd2hpY2ggY2Fubm90IGNvbm5lY3QgdG8gcHNldWRvbGlmZV9tZW1vcnkuIENvcHkgdGhlIGZpbGUgdG8gYW5vdGhlciBhY2NvdW50J3Mgfi8ucHNldWRvbGlmZS1tY3AvIHRvIGdpdmUgaXRzIHNlc3Npb25zIHRoZSBzYW1lIGxvZ2luLg0K",
    "stderr": "",
    "window": [
-    1791576611.4859247,
-    1791576612.1972306
+    1791626778.6256113,
+    1791626779.3682718
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "db": {
     "roles": [
@@ -16060,15 +15875,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -16097,15 +15906,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBpbiBjb250YWluZXIgcGwtY2YtdzFjLXRlc3Rsb2dpbi1mZGZlMWU5Yi1jb250YWluZXItcm90YXRlLW1lbWJlcnNoaXAsIGFzIHBzZXVkb2xpZmUgKHN1cGVydXNlcikiLCAiICByb2xlIHBzZXVkb2xpZmVfdGVzdDogcmVzZXQ6IExPR0lOIENSRUFURURCLCBub3Qgc3VwZXJ1c2VyLCBubyBDUkVBVEVST0xFLCBSRVBMSUNBVElPTiBvciBCWVBBU1NSTFM7IHBhc3N3b3JkIHJvdGF0ZWQiLCAiICByb2xlIHBzZXVkb2xpZmVfdGVzdDogbWVtYmVyc2hpcCBpbiBncnBfYyByZXZva2VkIiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVCIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNiwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQiLCAiICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQiLCAiZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uIl0sICJyb2xlIjogInBzZXVkb2xpZmVfdGVzdCIsICJmaWxlIjogIntIT01FfVxcLnBzZXVkb2xpZmUtbWNwXFx0ZXN0LXBnLmVudiIsICJiYW5rcyI6IFsicHNldWRvbGlmZV9tZW1vcnkiXSwgInRlbXBsYXRlMSI6ICJ2ZWN0b3IgMC44LjYiLCAib3RoZXJzIjogW10sICJwYXNzd29yZF9yZXVzZWQiOiBmYWxzZX0NCg==",
+   "stdout": "eyJleGl0IjogMCwgImVycm9yIjogbnVsbCwgImNoYW5nZXMiOiBbInRlc3QtbG9naW46IG9uIHRoZSBQb3N0Z3JlcyBpbiBjb250YWluZXIgcGwtY2YtdzFjLXRlc3Rsb2dpbi1hY2Y1MDcxYi1jb250YWluZXItcm90YXRlLW1lbWJlcnNoaXAsIGFzIHBzZXVkb2xpZmUgKHN1cGVydXNlcikiLCAiICByb2xlIHBzZXVkb2xpZmVfdGVzdDogcmVzZXQ6IExPR0lOIENSRUFURURCLCBub3Qgc3VwZXJ1c2VyLCBubyBDUkVBVEVST0xFLCBSRVBMSUNBVElPTiBvciBCWVBBU1NSTFM7IHBhc3N3b3JkIHJvdGF0ZWQiLCAiICByb2xlIHBzZXVkb2xpZmVfdGVzdDogbWVtYmVyc2hpcCBpbiBncnBfYyByZXZva2VkIiwgIiAgZGF0YWJhc2UgcHNldWRvbGlmZV9tZW1vcnk6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgaXRzIG93bmVyIHBzZXVkb2xpZmUga2VlcHMgQ09OTkVDVCIsICIgIGRhZW1vbiB1c2VyIG5vdCBjaGVja2VkOiBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgaXMgbm90IHNldCBpbiB0aGlzIHNoZWxsOyBvbmx5IHRoZSByb2xlcyBjb25uZWN0ZWQgdG8gdGhlIGJhbmsgbm93IHdlcmUiLCAiICB0ZW1wbGF0ZTE6IENPTk5FQ1QgcmV2b2tlZCBmcm9tIFBVQkxJQzsgQ1JFQVRFIERBVEFCQVNFIHN0aWxsIGNvcGllcyBpdCIsICIgIHRlbXBsYXRlMTogaW5zdGFsbGVkIHZlY3RvciAwLjguNiwgc28gZXZlcnkgZGF0YWJhc2UgdGhlIHRlc3QgbG9naW4gY3JlYXRlcyBoYXMgaXQiLCAiICB3cm90ZSB+Ly5wc2V1ZG9saWZlLW1jcC90ZXN0LXBnLmVudiAob3duZXItb25seSk6IFBTRVVET0xJRkVfVEVTVF9QR19VU0VSLCBQU0VVRE9MSUZFX1RFU1RfUEdfUEFTU1dPUkQiLCAiZG9uZTogdGhlIHRlc3Qgc3VpdGUgb24gdGhpcyBhY2NvdW50IGxvZ3MgaW4gYXMgcHNldWRvbGlmZV90ZXN0LCB3aGljaCBjYW5ub3QgY29ubmVjdCB0byBwc2V1ZG9saWZlX21lbW9yeS4gQ29weSB0aGUgZmlsZSB0byBhbm90aGVyIGFjY291bnQncyB+Ly5wc2V1ZG9saWZlLW1jcC8gdG8gZ2l2ZSBpdHMgc2Vzc2lvbnMgdGhlIHNhbWUgbG9naW4uIl0sICJyb2xlIjogInBzZXVkb2xpZmVfdGVzdCIsICJmaWxlIjogIntIT01FfVxcLnBzZXVkb2xpZmUtbWNwXFx0ZXN0LXBnLmVudiIsICJiYW5rcyI6IFsicHNldWRvbGlmZV9tZW1vcnkiXSwgInRlbXBsYXRlMSI6ICJ2ZWN0b3IgMC44LjYiLCAib3RoZXJzIjogW10sICJwYXNzd29yZF9yZXVzZWQiOiBmYWxzZX0NCg==",
    "stderr": "",
    "window": [
-    1791576616.6731956,
-    1791576617.9328065
+    1791626782.2408826,
+    1791626783.003125
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "db": {
     "roles": [
@@ -16431,15 +16240,9 @@
      ]
     },
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "login": {
      "user": "pseudolife_test",
@@ -16468,15 +16271,15 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWZkZmUxZTliLWNvbnRhaW5lci1yb2xlLXJlc2VydmVkLCBhcyBwc2V1ZG9saWZlIChzdXBlcnVzZXIpDQp0ZXN0LWxvZ2luOiB0aGUgZGF0YWJhc2UgcmVmdXNlZDogRVJST1I6ICByb2xlIG5hbWUgInBnX3Rlc3QiIGlzIHJlc2VydmVkDQpERVRBSUw6ICBSb2xlIG5hbWVzIHN0YXJ0aW5nIHdpdGggInBnXyIgYXJlIHJlc2VydmVkLg0KQ09OVEVYVDogIFNRTCBzdGF0ZW1lbnQgIkNSRUFURSBST0xFICJwZ190ZXN0IiBXSVRIIExPR0lOIENSRUFURURCIE5PU1VQRVJVU0VSIE5PQ1JFQVRFUk9MRSBOT1JFUExJQ0FUSU9OIE5PQllQQVNTUkxTIElOSEVSSVQgQ09OTkVDVElPTiBMSU1JVCAtMSBWQUxJRCBVTlRJTCAnaW5maW5pdHknIFBBU1NXT1JEICc8c2NyYW0tc2hhLTI1Ni12ZXJpZmllcj4nIg0KUEwvcGdTUUwgZnVuY3Rpb24gaW5saW5lX2NvZGVfYmxvY2sgbGluZSA1IGF0IFNRTCBzdGF0ZW1lbnQNCg==",
+   "stdout": "dGVzdC1sb2dpbjogb24gdGhlIFBvc3RncmVzIGluIGNvbnRhaW5lciBwbC1jZi13MWMtdGVzdGxvZ2luLWFjZjUwNzFiLWNvbnRhaW5lci1yb2xlLXJlc2VydmVkLCBhcyBwc2V1ZG9saWZlIChzdXBlcnVzZXIpDQp0ZXN0LWxvZ2luOiB0aGUgZGF0YWJhc2UgcmVmdXNlZDogRVJST1I6ICByb2xlIG5hbWUgInBnX3Rlc3QiIGlzIHJlc2VydmVkDQpERVRBSUw6ICBSb2xlIG5hbWVzIHN0YXJ0aW5nIHdpdGggInBnXyIgYXJlIHJlc2VydmVkLg0KQ09OVEVYVDogIFNRTCBzdGF0ZW1lbnQgIkNSRUFURSBST0xFICJwZ190ZXN0IiBXSVRIIExPR0lOIENSRUFURURCIE5PU1VQRVJVU0VSIE5PQ1JFQVRFUk9MRSBOT1JFUExJQ0FUSU9OIE5PQllQQVNTUkxTIElOSEVSSVQgQ09OTkVDVElPTiBMSU1JVCAtMSBWQUxJRCBVTlRJTCAnaW5maW5pdHknIFBBU1NXT1JEICc8c2NyYW0tc2hhLTI1Ni12ZXJpZmllcj4nIg0KUEwvcGdTUUwgZnVuY3Rpb24gaW5saW5lX2NvZGVfYmxvY2sgbGluZSA1IGF0IFNRTCBzdGF0ZW1lbnQNCg==",
    "stderr": "",
    "window": [
-    1791576622.2243855,
-    1791576622.861069
+    1791626785.7262523,
+    1791626786.3506968
    ],
    "run_tokens": {
-    "port": 58865,
-    "token": "fdfe1e9b"
+    "port": 49332,
+    "token": "acf5071b"
    },
    "db": {
     "roles": [
@@ -16766,15 +16569,9 @@
     ],
     "file_acl": null,
     "dir_acl": {
-     "owner": "<me>",
+     "owner": "<creator-owner>",
      "protected": false,
-     "aces": [
-      "(A;OICIID;0x1301bf;;;S-1-5-21-874077998-838006516-1316301657-1005)",
-      "(A;OICIID;0x1301bf;;;S-1-5-21-2839925867-832542303-3208205088-84248514)",
-      "(A;OICIID;FA;;;SY)",
-      "(A;OICIID;FA;;;BA)",
-      "(A;OICIID;FA;;;<me>)"
-     ]
+     "aces": []
     },
     "script_cr": true
    },

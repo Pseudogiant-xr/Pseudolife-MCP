@@ -19,7 +19,8 @@ memberships, every database's owner, ACL and flags, template1's extensions,
 and the written login validated against that arm's server (the file's
 password authenticates as the role and its SCRAM verifier verifies it, the
 role cannot connect to the bank) plus the file's owner-only permissions (the
-Windows owner and DACL in SDDL with the caller's SID as a token; POSIX mode
+Windows owner/protection/explicit DACL entries with symbolic identities and
+the directory's pre-command creator owner; POSIX mode
 and owner). Named rules: ``test-login-password`` (a newly drawn password,
 only once validated) and ``test-login-driver-error`` (the PostgreSQL client
 library's error text on the --admin-url path).
@@ -106,6 +107,15 @@ def _read_login(path: Path) -> dict[str, str]:
 
 
 _ME: str | None = None
+_MY_ALIASES = {"<me>"}
+_SID_SYMBOLS: dict[str, str] = {}
+_SID = re.compile(r"S-1-(?:[0-9]+-)*[0-9]+")
+_WELL_KNOWN_SIDS = {
+    "S-1-0-0": "S-1-0-0", "S-1-1-0": "WD", "S-1-3-0": "CO", "S-1-3-1": "CG",
+    "S-1-3-4": "OW", "S-1-5-11": "AU", "S-1-5-18": "SY",
+    "S-1-5-19": "LS", "S-1-5-20": "NS", "S-1-5-32-544": "BA",
+    "S-1-5-32-545": "BU", "S-1-5-32-546": "BG",
+}
 
 
 def _my_sid() -> str:
@@ -131,40 +141,92 @@ def _sddl(path: Path) -> str:
     to_text.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
                         ctypes.POINTER(wintypes.LPWSTR), ctypes.c_void_p]
     to_text.restype = wintypes.BOOL
+    sid_text = advapi.ConvertSidToStringSidW
+    sid_text.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    sid_text.restype = wintypes.BOOL
+    local_free = ctypes.windll.kernel32.LocalFree
+    local_free.argtypes = [ctypes.c_void_p]
+    local_free.restype = ctypes.c_void_p
     descriptor = ctypes.c_void_p()
+    owner = ctypes.c_void_p()
     info = 0x1 | 0x4  # OWNER | DACL
-    if get(str(path), 1, info, None, None, None, None, ctypes.byref(descriptor)):
+    if get(str(path), 1, info, ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)):
         return "unreadable"
     text = wintypes.LPWSTR()
+    owner_text = wintypes.LPWSTR()
     try:
         if not to_text(descriptor, 1, info, ctypes.byref(text), None):
             return "unconvertible"
         value = text.value
+        if not owner or not sid_text(owner, ctypes.byref(owner_text)):
+            return "unconvertible-owner"
+        # SDDL may spell the local administrator's SID as LA. Read the actual
+        # owner SID before freeing its descriptor, so that alias is never
+        # guessed from the account's RID or confused with the BA group.
+        original = re.match(r"O:([^:]+?)(?=D:|$)", value)
+        if original and owner_text.value == _my_sid() and not original[1].startswith("S-1-"):
+            _MY_ALIASES.add(original[1])
+        if original:
+            value = "O:" + owner_text.value + value[original.end(1):]
     finally:
-        ctypes.windll.kernel32.LocalFree(text)
-        ctypes.windll.kernel32.LocalFree(descriptor)
-    return value.replace(_my_sid(), "<me>")
+        local_free(owner_text)
+        local_free(text)
+        local_free(descriptor)
+    return _SID.sub(lambda m: "<me>" if m[0] == _my_sid() else m[0], value)
 
 
-def _permissions(path: Path) -> object:
+def _acl_projection(sddl: str, *, creator_owner: str | None = None) -> object:
+    """Keep owner/protection/explicit ACEs; inherited ACEs belong to the host.
+    Unknown identities share symbols across live arms, preserving distinctions
+    and repeated trustees without recording environment-specific SID values."""
+    def identity(value: str) -> str:
+        if value in _MY_ALIASES:
+            return "<me>"
+        if value in _WELL_KNOWN_SIDS:
+            return _WELL_KNOWN_SIDS[value]
+        if _SID.fullmatch(value):
+            return _SID_SYMBOLS.setdefault(value, f"<sid-{len(_SID_SYMBOLS) + 1}>")
+        return value
+
+    match = re.fullmatch(r"O:([^:]+)D:([A-Z]*)((?:\([^)]*\))*)", sddl)
+    if not match:
+        return _SID.sub(lambda m: identity(m[0]), sddl)
+    aces = []
+    for ace in re.findall(r"\([^)]*\)", match[3]):
+        fields = ace[1:-1].split(";")
+        if len(fields) >= 6 and "ID" in fields[1]:
+            continue
+        if len(fields) >= 6:
+            fields[5] = identity(fields[5])
+        aces.append(_SID.sub(lambda m: identity(m[0]), "(" + ";".join(fields) + ")"))
+    owner = "<creator-owner>" if creator_owner is not None and match[1] == creator_owner \
+        else identity(match[1])
+    return {"owner": owner, "protected": "P" in match[2].replace("AI", ""), "aces": aces}
+
+
+def _creator_owner(home: Path) -> str | None:
+    if not WINDOWS:
+        return None
+    match = re.match(r"O:([^:]+?)(?=D:|$)", _sddl(home))
+    return match[1] if match else None
+
+
+def _permissions(path: Path, *, creator_owner: str | None = None) -> object:
     if not path.exists():
         return None
     if WINDOWS:
-        # The effective ACL: owner, whether the DACL is protected from
-        # inheritance, and its ACEs. The DACL's auto-inherited control bit
+        # The command's ACL: owner, DACL protection and explicit ACEs.
+        # Inherited ACEs reflect the fixture's host parent directories.
+        # The DACL's auto-inherited control bit
         # (SDDL "AI") grants nothing and is not compared: the oracle's
         # SetFileSecurityW leaves it clear, the crate's SetSecurityInfo sets it.
-        sddl = _sddl(path)
-        match = re.fullmatch(r"O:([^:]+)D:([A-Z]*)((?:\([^)]*\))*)", sddl)
-        if not match:
-            return sddl
-        return {"owner": match[1], "protected": "P" in match[2].replace("AI", ""),
-                "aces": re.findall(r"\([^)]*\)", match[3])}
+        return _acl_projection(_sddl(path), creator_owner=creator_owner)
     info = path.stat()
     return {"mode": oct(info.st_mode & 0o7777), "mine": info.st_uid == os.geteuid()}
 
 
-def _observe(server, home: Path, login: Path, before: str | None) -> dict:
+def _observe(server, home: Path, login: Path, before: str | None,
+             creator_owner: str | None = None) -> dict:
     """The server and the login file after the run. ``before`` is the file's
     password before it (None without one): ``kept`` says whether the run left
     that same password, compared exactly, so a re-apply that silently draws a
@@ -175,7 +237,7 @@ def _observe(server, home: Path, login: Path, before: str | None) -> dict:
         "databases": server.rows(_DATABASES),
         "template1": server.rows(_EXTENSIONS, "template1"),
         "file_acl": _permissions(login),
-        "dir_acl": _permissions(login.parent),
+        "dir_acl": _permissions(login.parent, creator_owner=creator_owner),
     }
     values = _read_login(login)
     user, password = values.get(USER_KEY), values.get(PASSWORD_KEY)
@@ -412,6 +474,7 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
                 login_rel: str = LOGIN_REL, hold=None, note: str = "",
                 stdout_closed: bool = False) -> Case:
     def setup(arm):
+        arm.state["creator_owner"] = _creator_owner(arm.home)
         server = _cluster.fresh()
         arm.state["server"] = server
         if prepare:
@@ -428,7 +491,7 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
             if held is not None:
                 held.close()
             obs["db"] = _observe(server, arm.home, _login_path(arm, login_rel),
-                                 arm.state.pop("before"))
+                                 arm.state.pop("before"), arm.state.pop("creator_owner"))
         finally:
             server.stop()
 
@@ -463,6 +526,7 @@ def _container_case(id: str, argv: list[str], db: str, prepare=None, rules=()) -
     name = f"{_cluster.CONTAINER_PREFIX}{TOKEN}-{id}"
 
     def setup(arm):
+        arm.state["creator_owner"] = _creator_owner(arm.home)
         container = _cluster.Container(name, db)
         container.start()
         arm.state["server"] = container
@@ -475,7 +539,7 @@ def _container_case(id: str, argv: list[str], db: str, prepare=None, rules=()) -
         container = arm.state.pop("server")
         try:
             obs["db"] = _observe(container, arm.home, _login_path(arm),
-                                 arm.state.pop("before"))
+                                 arm.state.pop("before"), arm.state.pop("creator_owner"))
             # The server logs every statement (log_statement=all): whether the
             # CLI's psql scripts arrived with CR line ends, as Python's
             # text-mode stdin writes them on Windows.

@@ -541,6 +541,18 @@ _CREDENTIAL_PRESCREEN = (b"ghp_", b"github_pat_", b"akia", b"xox", b"sk-ant-")
 # reproduce it verbatim and must stay byte-identical. Exact strings only —
 # any other credential-shaped match still fails the guard.
 _ALLOWED_CREDENTIAL_PLACEHOLDERS = (b"xoxb-your-slack-token",)
+# Account/domain and cloud SIDs identify a recording environment. Only the
+# established synthetic credential fixture is sanctioned, as an exact match.
+_ACCOUNT_SID_PAT = re.compile(rb"\bs-1-(?:[0-9]+-)+[0-9]+(?![0-9]|-[0-9])")
+_ALLOWED_ACCOUNT_SIDS = (b"s-1-5-21-100-200-300-1001",
+                         # Existing short, synthetic task-XML fixture identities.
+                         b"s-1-5-21-" + b"123", b"s-1-5-21-" + b"999")
+# Well-known authority/alias SIDs and bare account namespace names carry no
+# environment identity. These are exact values, never a prefix exemption.
+_WELL_KNOWN_SIDS = (b"s-1-0-0", b"s-1-1-0", b"s-1-3-0", b"s-1-3-1", b"s-1-3-4",
+                    b"s-1-5-11", b"s-1-5-18", b"s-1-5-19", b"s-1-5-20",
+                    b"s-1-5-32-544", b"s-1-5-32-545", b"s-1-5-32-546",
+                    b"s-1-5-21", b"s-1-12-1")
 # C0 controls other than tab/LF/CR. NUL is excluded here because files
 # containing it are treated as binary and skipped before this runs.
 _CONTROL_BYTE_PAT = re.compile(rb"[\x01-\x08\x0b\x0c\x0e-\x1f]")
@@ -550,6 +562,10 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
     """Record at most one identifier hit for ``low`` (lowercased bytes)."""
     if any(n in low for n in _IDENT_NEEDLES):
         hits.append((rel, "needle"))
+        return
+    if b"s-1-" in low and any(m.group(0) not in (*_ALLOWED_ACCOUNT_SIDS, *_WELL_KNOWN_SIDS)
+                              for m in _ACCOUNT_SID_PAT.finditer(low)):
+        hits.append((rel, "environment-specific account SID"))
         return
     if (any(p in low for p in _USERNAME_PRESCREEN)
             and _USERNAME_PAT.search(low)):
@@ -633,6 +649,20 @@ def test_tracked_tree_carries_no_maintainer_identifiers(
     never the real ``.0.x`` subnet that leaked via eval-harness defaults."""
     hits = tracked_tree_scan[0]
     assert hits == [], f"maintainer identifiers in tracked files: {hits}"
+
+
+@pytest.mark.parametrize("value, rejected", [
+    (b"S-1-5-21-100-200-300-1001", False),
+    (b"O:S-1-5-32-544D:AI", False),
+    (b"S-1-5-21-" + b"111-222-333-444", True),
+    (b"S-1-12-1-" + b"11-22-33-44", True),
+    (b"S-1-" + b"9-11-22-33", True),
+    (b"S-1-5-21-100-200-300-1001" + b"-999", True),
+])
+def test_identifier_scan_rejects_account_sids_except_exact_synthetic_fixtures(value, rejected):
+    hits = []
+    _scan_identifiers("fixture.txt", value.lower(), hits)
+    assert bool(hits) is rejected
 
 
 def test_tracked_tree_carries_no_stray_control_bytes(

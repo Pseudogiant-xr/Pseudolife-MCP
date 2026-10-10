@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 Rule = Callable[[dict], None]
 RULES: dict[str, Rule] = {}
+RECORD_RULES: set[str] = set()  # Validated fixture inputs; output rules stay raw in goldens.
 
 
 def rule(name: str):
