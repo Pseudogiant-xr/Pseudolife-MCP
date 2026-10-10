@@ -217,7 +217,11 @@ SCENARIOS: dict[str, dict] = {
             store("Empty header falls through", [sess("")]),
             # The client hangs up mid-call; Python finishes the store on its
             # worker thread regardless.
-            {**store("Stored although the caller disconnected", [sess("sess-a")]), "abandon": True},
+            # The 2026-10-10 Linux run missed the cancellation mutant with a
+            # short input; fill the 512-token embedding cap so the socket can
+            # close while the tool body is still working.
+            {**store("Stored although the caller disconnected. " * 160,
+                     [sess("sess-a")]), "abandon": True},
             store("The next store after a disconnect", [sess("sess-a")]),
         ],
     },
