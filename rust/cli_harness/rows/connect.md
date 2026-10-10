@@ -208,6 +208,15 @@ Every deferral below happens before any request, except the last item.
 
 ## Harness notes
 
+- `apply-restart-pids` starts a copied host executable. Its OS-version-specific
+  bytes are fixture input, not connect output: after the owned process exits,
+  `connect-runtime-image` projects the captured observation to a fixed marker
+  only if its bytes still equal the seeded bytes exactly. No fixture file is
+  rewritten. The image must remain a single-link regular file inside its
+  pre-command bound home; its mode and ACL stay exact. Failed validation always
+  causes a DIFF, even if the command wrote the final marker itself; recording
+  refuses a failed projection. Only this Windows
+  golden case was re-recorded; its other recorded cases remain intact.
 - Each arm gets `TEMP`/`TMP`/`TMPDIR` = `<home>/tmp` (under the default
   temp root, same ACLs). The oracle runs its handshake child and the shim
   under it from `tempfile.gettempdir()` with that directory first on
@@ -236,9 +245,9 @@ Every deferral below happens before any request, except the last item.
   port differs per run; only that name, validated against this case's own
   fixture URL, becomes `<fixture-url-hash>.json`, so goldens replay.
 - Live-only off Windows: `apply-restart-pids` runs live on both OSes but
-  is left out of the Linux golden (`Case.golden`). Its stand-in runtime
-  process is a copy of the host's `sleep`, whose bytes the file snapshot
-  keeps; a multicall coreutils `sleep` is about 15 MB.
+  is left out of the Linux golden (`Case.golden`), retaining the established
+  corpus split. Its copied `sleep` image is validated and projected by the
+  same capture as the Windows fixture.
 - `connect-target-url`: where no fixture daemon answers the target
   (`health-unreachable`), the harness's daemon token never runs; the case's
   own target URL (a free loopback port the harness picked, recorded as

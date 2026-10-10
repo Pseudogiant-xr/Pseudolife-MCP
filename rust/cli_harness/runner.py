@@ -54,6 +54,14 @@ def _label(case: core.Case) -> str:
     return f"{case.id}  [real programs: {', '.join(case.real_programs)}]"
 
 
+def _print(text: str, *, flush: bool = False) -> None:
+    """Diagnostics survive legacy consoles; compared observations stay raw."""
+    encoding = getattr(sys.stdout, "encoding", None)
+    if encoding:
+        text = text.encode(encoding, "backslashreplace").decode(encoding)
+    print(text, flush=flush)
+
+
 def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
             candidate: core.Target, golden: dict | None, verbose: bool) -> dict:
     results = {}
@@ -74,10 +82,10 @@ def run_row(row: str, cases: list[core.Case], oracle: core.Target | None,
                             "seconds": round(time.monotonic() - started, 2)}
         if case.real_programs:
             results[case.id]["real_programs"] = list(case.real_programs)
-        print(f"  {status:5} {_label(case)}", flush=True)
+        _print(f"  {status:5} {_label(case)}", flush=True)
         if diffs and verbose:
             for line in diffs:
-                print(f"        {line}")
+                _print(f"        {line}")
     return results
 
 
@@ -354,12 +362,15 @@ def record(row: str, cases: list[core.Case], oracle: core.Target, source: Path,
     forms = _host_paths(source, oracle.command[0])
     for case in cases:
         obs = core.run_arm(case, oracle, core._home_root() / "h")
-        normal = normalize.apply(obs, (), obs["home"])
+        recording_rules = tuple(name for name in case.rules if name in normalize.RECORD_RULES)
+        normal = normalize.apply(obs, recording_rules, obs["home"])
+        if recording_rules and normal.get("vacuous"):
+            raise SystemExit(f"refusing to record {row}/{case.id}: {normal['vacuous']}")
         normal["home"] = None
         normal.pop("daemon_url", None)
         _scrub(normal, forms)
         golden["cases"][case.id] = normal
-        print(f"  recorded {_label(case)} (exit {obs['exit']})", flush=True)
+        _print(f"  recorded {_label(case)} (exit {obs['exit']})", flush=True)
     if verify is not None:
         verify()
     path = _golden_path(row)
@@ -442,12 +453,12 @@ def main(argv: list[str] | None = None) -> int:
         cases = _select(loaded, args.case,
                         bank=not (args.skip_bank or args.golden or args.record),
                         replay=args.golden or args.record)
-        print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
+        _print(f"{rows.ROWS[row]} ({len(cases)} cases, {core.PLATFORM})", flush=True)
         if args.record:
             # verify again after the row's arms: its seeders imported oracle
             # modules lazily, and the golden is written only if they are bound.
             path = record(row, cases, oracle, source, binding, verify)
-            print(f"  wrote {path}")
+            _print(f"  wrote {path}")
             chosen = {c.id for c in cases}
             summary["rows"][row] = {"parity": rows.ROWS[row], **binding,
                                     "recorded": len(cases),
@@ -464,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         failed += len(bad)
         summary["rows"][row] = {"parity": rows.ROWS[row], "cases": len(results), "diffs": bad,
                                 "results": results}
-        print(f"  {len(results) - len(bad)}/{len(results)} match", flush=True)
+        _print(f"  {len(results) - len(bad)}/{len(results)} match", flush=True)
         _write_summary(args.out, summary)
     summary["complete"] = True
     _write_summary(args.out, summary)

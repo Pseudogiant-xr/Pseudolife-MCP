@@ -34,6 +34,142 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+def test_verbose_diff_printing_survives_a_legacy_console_encoding(monkeypatch):
+    import io  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    raw = io.BytesIO()
+    output = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(core, "run_case", lambda *args: (obs(stdout=b"old"),
+                                                       obs(stdout="\u0444".encode())))
+    cases = [core.Case("first", []), core.Case("later", [])]
+    results = runner.run_row("probe", cases, object(), object(), None, True)
+    output.flush()
+    assert list(results) == ["first", "later"]
+    assert all(result["status"] == "DIFF" for result in results.values())
+    assert b"\\u0444" in raw.getvalue()
+    assert any("\u0444" in line for line in results["first"]["detail"])
+
+
+def test_windows_acl_capture_drops_inherited_aces_but_keeps_explicit_rights(tmp_path, monkeypatch):
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    path = tmp_path / "login"
+    path.write_bytes(b"fixture")
+    monkeypatch.setattr(test_login, "WINDOWS", True)
+    sid = "S-1-5-21-100-200-300-1001"
+    monkeypatch.setattr(test_login, "_sddl", lambda p:
+                        f"O:<me>D:PAI(A;;FA;;;OW)(A;OICIID;FA;;;{sid})")
+    captured = test_login._permissions(path)
+    assert captured == {"owner": "<me>", "protected": True, "aces": ["(A;;FA;;;OW)"]}
+    monkeypatch.setattr(test_login, "_sddl", lambda p: "O:BAD:P(A;;FR;;;OW)")
+    assert test_login._permissions(path) != captured
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
+def test_native_acl_capture_keeps_the_owner_dacl_separator(tmp_path):
+    import re  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    path = tmp_path / "file"
+    path.write_bytes(b"fixture")
+    valid = re.fullmatch(r"O:[^:]+D:.*", test_login._sddl(path)) is not None
+    assert valid
+
+
+def test_windows_acl_projection_binds_creator_owner_and_preserves_foreign_identities(monkeypatch):
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    monkeypatch.setattr(test_login, "_SID_SYMBOLS", {}, raising=False)
+    monkeypatch.setattr(test_login, "_MY_ALIASES", {"<me>", "LA"}, raising=False)
+    project = test_login._acl_projection
+    assert project("O:<me>D:", creator_owner="<me>") == project(
+        "O:S-1-5-32-544D:AI", creator_owner="S-1-5-32-544")
+    assert project("O:<me>D:", creator_owner="BA") != project("O:BAD:", creator_owner="BA")
+    assert project("O:LAD:P(A;;FA;;;LA)") == project("O:<me>D:P(A;;FA;;;<me>)")
+    assert project("O:BAD:P(A;;FA;;;OW)") != project("O:<me>D:P(A;;FA;;;OW)")
+    sid = "S-1-5-21-100-200-300-1001"
+    cloud = "S-1-12-1-" + "1-2-3-4"
+    first = project(f"O:<me>D:P(A;;FA;;;{sid})(D;;FR;;;{sid})")
+    other = project(f"O:<me>D:P(A;;FA;;;{cloud})(D;;FR;;;{cloud})")
+    assert first != other
+    assert first["aces"][0].split(';')[-1] == first["aces"][1].split(';')[-1]
+    assert "S-1-" not in str(first) + str(other)
+    assert project("O:<me>D:P(A;;FA;;;OW)") != project("O:<me>D:(A;;FA;;;OW)")
+
+
+def test_connect_runtime_image_projection_requires_exact_fixture_bytes(tmp_path):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    image = tmp_path / "runtime"
+    projected = []
+    for seed in (b"host image one", b"host image two"):
+        image.write_bytes(seed)
+        before = image.read_bytes(), image.stat().st_mode
+        captured = obs(files={"runtime": seed})
+        captured["runtime_image"] = connect._runtime_image_binding(image, seed, tmp_path.resolve())
+        projected.append(normalize.apply(captured, ("connect-runtime-image",), None))
+        assert (image.read_bytes(), image.stat().st_mode) == before
+    assert projected[0]["files"] == projected[1]["files"]
+    # A target writing the final marker must not masquerade as a validated image.
+    invalid = obs(files={"runtime": b"<validated-fixture-runtime-image>\n"})
+    invalid["runtime_image"] = connect._runtime_image_binding(image, b"host image two",
+                                                            tmp_path.resolve())
+    assert compare.diff(projected[1], invalid, ("connect-runtime-image",))
+
+
+def test_connect_runtime_image_projection_refuses_a_hard_link(tmp_path):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"fixture")
+    image = tmp_path / "runtime"
+    os.link(outside, image)
+    assert connect._runtime_image_binding(image, b"fixture", tmp_path.resolve())["safe"] is False
+    assert outside.read_bytes() == b"fixture"
+
+
+def test_connect_runtime_image_projection_refuses_a_path_outside_its_bound_home(tmp_path):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    home = tmp_path / "home"
+    home.mkdir()
+    image = tmp_path / "outside"
+    image.write_bytes(b"fixture")
+    assert connect._runtime_image_binding(image, b"fixture", home.resolve())["safe"] is False
+    assert image.read_bytes() == b"fixture"
+
+
+def test_recording_runtime_input_projection_refuses_the_final_marker_as_a_mutation(tmp_path,
+                                                                                 monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import connect  # noqa: PLC0415
+    image = tmp_path / "runtime"
+    image.write_bytes(b"<validated-fixture-runtime-image>\n")
+    captured = obs(files={"runtime": image.read_bytes()})
+    captured["runtime_image"] = connect._runtime_image_binding(image, b"original seed",
+                                                             tmp_path.resolve())
+    monkeypatch.setattr(core, "run_arm", lambda *args: captured)
+    output = tmp_path / "golden.json"
+    monkeypatch.setattr(runner, "_golden_path", lambda row: output)
+    oracle = core.python_target(sys.executable, tmp_path)
+    case = core.Case("fixture", [], rules=("connect-runtime-image",))
+    with pytest.raises(SystemExit, match="runtime fixture image failed"):
+        runner.record("connect", [case], oracle, tmp_path, {})
+    assert not output.exists()
+
+
+def test_runtime_image_projection_never_opens_a_fixture_for_writing(tmp_path, monkeypatch):
+    from cli_harness.rows import connect  # noqa: PLC0415
+    image = tmp_path / "runtime"
+    seed = b"fixture"
+    image.write_bytes(seed)
+    captured = obs(files={"runtime": seed})
+
+    def forbidden_open(*args, **kwargs):
+        raise AssertionError("projection must use captured bytes, not open a path")
+
+    monkeypatch.setattr(Path, "open", forbidden_open)
+    captured["runtime_image"] = connect._runtime_image_binding(image, seed, tmp_path.resolve())
+    result = normalize.apply(captured, ("connect-runtime-image",), None)
+    assert result["runtime_image"]["validated"] is True
+    assert "vacuous" not in result
+
+
 def test_transfer_default_name_normalizes_file_and_mode_keys_only_after_validation():
     from cli_harness.rows import transfer  # noqa: F401, PLC0415 - registers rules
     rule = ("transfer-default-name",)

@@ -80,6 +80,14 @@ own options (`_parser`, 456-482).
   stored verifier's check in `admin-fresh` and `container-reapply`.
 - The staged file's pid (never observable after a successful rename).
 - The DACL's auto-inherited control bit (SDDL `AI`), which grants nothing.
+- Inherited Windows ACEs (`ID`): the parent directories supply them, not the
+  command. Owner, protection and every explicit ACE remain compared. The file
+  owner is read as an actual SID before SDDL alias rendering and the current
+  principal becomes `<me>`; other account SIDs become stable symbols shared
+  across live arms. Directory ownership is bound to the disposable home's
+  creator owner captured before the command, so a group-default creator does
+  not become interchangeable with the file's current-user owner. A changed
+  owner, explicit trustee, access mask or protection flag remains a difference.
 - The SQL text itself (ported verbatim, compared through its effects).
 - A refused stdout: the oracle's traceback. Before any change the leaf
   defers, and rule `test-login-stdout-deferral` replaces the oracle arm's
