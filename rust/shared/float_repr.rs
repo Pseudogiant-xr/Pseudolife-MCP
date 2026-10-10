@@ -1,9 +1,9 @@
-//! Shared finite Python float spelling for response and audit codecs.
+//! Shared finite Python float spelling for response, audit and file writers.
 use std::{fmt::Write as _, io};
 
 pub fn finite_float(value: f64) -> io::Result<String> {
     if !value.is_finite() {
-        return Err(io::Error::other("nonfinite audit number is deferred"));
+        return Err(io::Error::other("nonfinite float is deferred"));
     }
     if value == 0.0 {
         return Ok(if value.is_sign_negative() {
@@ -14,7 +14,7 @@ pub fn finite_float(value: f64) -> io::Result<String> {
         .into());
     }
     // Locked serde_json supplies shortest digits; this reshapes notation only.
-    // Both consumers check the committed 5,358-row CPython binary64 table.
+    // Consumers check the committed 5,358-row CPython binary64 table.
     let text = serde_json::to_string(&value.abs())?;
     let (mantissa, power) = text
         .split_once(['e', 'E'])
