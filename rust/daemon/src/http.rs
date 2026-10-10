@@ -728,7 +728,17 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     };
     let mut body = RequestBody::new(body);
     let mut response = dispatch(&app, &path, &method, &h, raw_query.as_deref(), &mut body).await;
-    if response.status().as_u16() >= 400 && !body.inner.is_end_stream() {
+    // These hooks intentionally answer 200 without reading a rejected body.
+    let bodyless_hook = response.status() == StatusCode::OK
+        && matches!(
+            path.as_str(),
+            "/api/hook/memory-changes"
+                | "/api/hook/park-gate"
+                | "/api/hook/woke"
+                | "/api/hook/subagent"
+                | "/api/hook/coordination-start"
+        );
+    if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
         // Polling an Expect body would send 100 Continue after admission refused it.
         if !expect_continue {
             let outcome = finish_unread_body(

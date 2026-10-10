@@ -53,6 +53,22 @@ def cases(case, auth):
                            headers, b' ' * size), 503)
         item["headers_only"] = headers_only
         out.append(item)
+    for path, method in [("/api/hook/memory-changes", "GET"),
+                         ("/api/hook/park-gate", "GET"),
+                         ("/api/hook/woke", "POST"),
+                         ("/api/hook/subagent", "POST"),
+                         ("/api/hook/coordination-start", "GET")]:
+        for suffix, size, headers_only, expect_continue in [("65536 full", 65536, False, False),
+                                                          ("262145 full", 262145, False, False),
+                                                          ("headers only", 262145, True, False),
+                                                          ("Expect", 262145, True, True)]:
+            headers = [("Authorization", "Bearer unknown-body-fixture")]
+            if expect_continue:
+                headers.append(("Expect", "100-continue"))
+            item = expect(case(path + " unavailable unread " + suffix, method, path,
+                               headers, b' ' * size), 200)
+            item["headers_only"] = headers_only
+            out.append(item)
     end = "/api/hook/session-end"
     out += [case("end exact limit no session", "POST", end, a, object_body(16384)),
             case("end next byte", "POST", end, a, object_body(16385)),

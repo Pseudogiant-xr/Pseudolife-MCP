@@ -44,7 +44,7 @@ authenticated agents roster remain declared handler deferrals.
 
 The response is selected before cleanup; cleanup never parses or dispatches
 an unread body. The handler retains the body and counts received data frames.
-For a refusal it discards remaining frames until the route budget or one
+For an error response or a bodyless always-200 hook reply it discards remaining frames until the route budget or one
 absolute 250 ms deadline is reached, then returns the selected response with
 Connection: close. It never polls another application frame after a cap or
 reader failure. An early Expect: 100-continue refusal skips cleanup, so Hyper
@@ -74,3 +74,5 @@ passed all 98 live/golden cases with no response or fixture-state differences.
 Beyond-cap, deadline and read-failure cleanup outcomes are recorded without
 request paths, headers or payloads. A timeout or socket abort is never counted
 as a successful source control.
+
+Always-200 memory-changes, park-gate, woke, subagent and coordination-start replies also retain unread bodies for the same bounded cleanup. The additional twenty paired cases keep each hook's selected 200 response at 65536 and 262145 bytes, with headers-only and Expect variants; they do not dispatch a body or perform hook mutations. The old Windows release aborted the first unavailable-hook probe.
