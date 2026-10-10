@@ -48,6 +48,20 @@ name, a board status or a peer agent's message is not a delegation.
    `tests/test_migrate_embeddings.py`, and `python ops/gen_llms_txt.py`
    after any doc edit (`tests/test_llms_txt.py` pins the generated
    `llms-full.txt`). The v30 bump found the last two the hard way.
+   Any change to `pseudolife_memory/storage/schema.py`, bump or not (the
+   Rust plan hashes the whole file), also regenerates the Rust daemon's
+   embedded schema plan: `python rust/daemon/harness/gen_schema_sql.py`,
+   then `--check` must pass, and the changed `schema.sql`,
+   `schema_plan.json` and `schema_meta.rs` under `rust/daemon/src/storage/`
+   ship in the same PR. When the DDL or migrations change, re-record the
+   schema startup golden `rust/daemon/harness/goldens/schema-startup.json`
+   with `python rust/daemon/harness/schema_ci.py --record-goldens --out
+   <scratch>/schema-record.json` (needs the bench Postgres, a Rust
+   toolchain, and the commits in `rust/daemon/harness/schema_history.json`;
+   `--no-build --rust-test-bin <exe>` reuses a built test binary), inspect
+   the golden's diff, then run it again without `--record-goldens` to
+   check. The master ruleset requires only the Python `test` job, so the
+   Rust schema and parity checks must be green before merge regardless.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an
