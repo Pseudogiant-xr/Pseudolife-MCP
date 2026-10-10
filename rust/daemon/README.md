@@ -13,6 +13,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 | `spec-http-static.md` | Root redirect, every committed Console asset, path containment, fallbacks and response headers |
 | `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
 | `spec-w3h-graph-read.md` | GraphStore subgraph and pure alias, suggestion, degree, inference and path helpers |
+| `spec-http-body-limits.md` | Per-route wire limits, SessionEnd no-ops, agents view admission and error selection |
 | `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
 | `harness/` | The differential harness, its goldens and helpers |
 

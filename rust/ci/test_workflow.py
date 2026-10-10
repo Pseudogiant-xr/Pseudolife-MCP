@@ -39,6 +39,7 @@ PARITY_CHECKS = {
 
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
+    "Daemon body admission parity": "cli",
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -122,6 +123,13 @@ def check_executable_coverage(jobs):
                         ("--record", "--mutants"))
     require_command(static, ("python", "-m", "pytest"), ("rust/daemon/harness/test_static.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in static)
+    body = commands(parity["Daemon body admission parity"]["run"])
+    for mode in ("live", "golden"):
+        require_command(body, ("python", "rust/daemon/harness/run.py", mode),
+                        ("--rust-bin", "--only", "body-limits", "body-view-open", "body-pair-budget", "body-text-window", "--out"),
+                        ("--record", "--mutants"))
+    require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in body)
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
