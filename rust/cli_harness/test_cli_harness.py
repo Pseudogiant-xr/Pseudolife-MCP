@@ -29,6 +29,35 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+def test_episode_health_trickle_tolerates_one_slow_fixture_wakeup(monkeypatch):
+    import json
+    import types
+    import urllib.request
+    from cli_harness import fixture_daemon
+    from cli_harness.rows import episode
+
+    case = next(c for c in episode.cases() if c.id == "start-health-trickle")
+    first = True
+
+    def sleep(delay):
+        nonlocal first
+        # One 180 ms scheduler delay leaves room inside the 250 ms per-read
+        # contract. It exposed the original 100 ms fixture gap deterministically.
+        extra = 0.18 if first else 0
+        first = False
+        time.sleep(delay + extra)
+
+    monkeypatch.setattr(fixture_daemon, "time", types.SimpleNamespace(sleep=sleep))
+    daemon = case.daemon()
+    try:
+        started = time.monotonic()
+        with urllib.request.urlopen(daemon.url + "/health", timeout=0.25) as reply:
+            assert json.load(reply) == episode.HEALTH
+        assert time.monotonic() - started > 0.25
+    finally:
+        daemon.close()
+
+
 def test_each_field_difference_is_reported():
     base = obs(stdout=b"a", stderr=b"e", files={"f": b"1"})
     assert compare.diff(base, obs(exit=1, stdout=b"a", stderr=b"e", files={"f": b"1"}), ())

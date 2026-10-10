@@ -52,6 +52,9 @@ flate2.workspace = true
 tar.workspace = true
 stacker.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 rustix.workspace = true

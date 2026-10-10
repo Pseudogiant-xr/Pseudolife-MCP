@@ -108,9 +108,14 @@ def _wire_cases() -> list[Case]:
     add(Case("start-localhost", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
              daemon=daemon(), after=require_post,
              env={"PSEUDOLIFE_MCP_DAEMON_URL": "http://localhost:{DAEMON_PORT}"}))
+    # On Windows, 30 runs on 2026-10-10 took 4.14-4.67 s for both arms with
+    # 100 ms gaps; one extra 180 ms fixture wakeup reproduced the hosted abort.
+    # One-byte pieces keep the whole reply past 250 ms while 5 ms gaps leave
+    # scheduler headroom inside that per-read deadline. Still require the POST
+    # and a duration beyond the deadline, so a total-timeout client cannot pass.
     add(Case("start-health-trickle", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
-             daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)}),
-             after=require_post))
+             daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 1, 0.005)}),
+             after=require_post_read(0.25)))
     # The reply takes ~8 s in 8-byte pieces 0.7 s apart: past the 5 s timeout
     # in total, inside it per receive. Both arms must wait for the whole reply.
     add(Case("end-post-trickle", end, stdin_json=hook(event="SessionEnd"), timeout=60,
