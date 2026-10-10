@@ -390,8 +390,9 @@ def rename_prefixes(v, emap: dict[str, str]):
     return v
 
 
-def normalize_state(state: dict) -> tuple[dict, dict, dict]:
-    state = w1a.scrub_declared_rows(dbstate.normalize(state, w1a.DB_NONDETERMINISTIC))["state"]
+def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
+    state = w1a.scrub_declared_rows(state, before)["state"]
+    state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
     numeric = extract_numeric(state)
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
@@ -537,6 +538,7 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     template = prepare_template(scn, tag, root)
     dbs = {"python": f"pl_cf_w2e_{tag}_py", "rust": f"pl_cf_w2e_{tag}_rs"}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
+    before = {k: dbstate.dump(dsn) for k, dsn in dsns.items()}
     procs = {}
     steps, stats = [], {}
     try:
@@ -559,8 +561,8 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
                 py = run_op(op, procs["python"].port, mcp, dsns["python"], rust=False)
                 rs = run_op(op, procs["rust"].port, None, dsns["rust"], rust=True)
                 row["python"], row["rust"] = py, rs
-            sp, np_, ep = normalize_state(dbstate.dump(dsns["python"]))
-            sr, nr, er = normalize_state(dbstate.dump(dsns["rust"]))
+            sp, np_, ep = normalize_state(dbstate.dump(dsns["python"]), before["python"])
+            sr, nr, er = normalize_state(dbstate.dump(dsns["rust"]), before["rust"])
             if op["op"] != "init":
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
@@ -640,6 +642,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
     tag = name.replace("-", "_")
     db = f"pl_cf_w2e_{tag}_rs"
     dsn = pg.create(db)
+    before = dbstate.dump(dsn)
     home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
     d = daemons.rust_daemon(binary, home, daemons.free_port(),
                             daemons.base_env(home, w1a.rust_env(side_env(scn, dsn))))
@@ -656,7 +659,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
             rs = run_op(op, d.port, None, dsn, rust=True) if op["op"] != "init" else None
-            sr, nr, er = normalize_state(dbstate.dump(dsn))
+            sr, nr, er = normalize_state(dbstate.dump(dsn), before)
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)

@@ -2,11 +2,10 @@
 //! `ContinuumMemorySystem._store`.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde_json::{Map, Value, json};
 
-use crate::bank::{Bank, DIM, Entry};
+use crate::bank::{Bank, Entry};
 use crate::config::MemoryConfig;
 use crate::contradiction::{self, Candidate};
 use crate::episodes::{self, Caller, WriteState};
@@ -86,7 +85,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 /// (`protocols.py:84-103`, `retention.py:37-47`).
 fn retention_score(e: &Entry, now: f64, boost: f64) -> f64 {
     let age = (now - e.ts).max(1.0);
-    let balanced = e.access_count.load(Ordering::Relaxed) as f64 / age + e.surprise * 0.1;
+    let balanced = f64::from(e.access_count) / age + e.surprise_value * 0.1;
     let weight = match e.source.as_str() {
         "user_msg" | "user" => 1.5,
         "system" => 10.0,
@@ -233,7 +232,11 @@ async fn cms_store(
     // Capacity first (band.py:130-132): the victim is chosen and deleted
     // before the new entry exists.
     let band0 = cfg.bands[0].clone();
-    let cap = cfg.band_capacity.first().copied().unwrap_or(i64::MAX);
+    let cap = cfg
+        .band_specs
+        .first()
+        .map(|b| b.max_entries as i64)
+        .unwrap_or(i64::MAX);
     let victim = {
         let bank = ready.bank.read().expect("bank lock");
         let held: Vec<usize> = (0..bank.entries.len())
@@ -270,9 +273,11 @@ async fn cms_store(
         band: band0.clone(),
         stored_band: band0,
         text: new.text.to_string(),
-        surprise: overall,
+        surprise: overall as f32,
+        surprise_value: overall,
+        embedding: new.row.clone(),
         ts: episodes::now(),
-        access_count: AtomicI64::new(0),
+        access_count: 0,
         source: new.source.to_string(),
         seq: episodes::next_seq(),
         tags: new.tags,
@@ -329,13 +334,13 @@ async fn cms_store(
                     ],
                 )
                 .await?;
-            Ok(r.get(0))
+            Ok::<_, tokio_postgres::Error>(r.get(0))
         })
         .await
         .map_err(|e| ToolError::Internal(format!("entry insert failed: {e}")))?
     };
     entry.id = id;
-    debug_assert_eq!(unit.len(), DIM);
+    debug_assert_eq!(unit.len(), ready.bank.read().expect("bank lock").dim);
     ready.bank.write().expect("bank lock").push(entry, &unit);
     ws.interaction_count += 1;
     Ok((true, overall))
@@ -556,9 +561,10 @@ mod tests {
         let e = Entry {
             ts: 100.0,
             surprise: 0.5,
+            surprise_value: 0.5,
             source: "user".into(),
             reinforcements: 3,
-            access_count: AtomicI64::new(4),
+            access_count: 4,
             ..Default::default()
         };
         // ((4/50 + 0.05) + 1) * 1.5 + 1.0 * log1p(3)

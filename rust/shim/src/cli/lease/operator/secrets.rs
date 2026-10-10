@@ -139,7 +139,7 @@ fn key(text: &str, start: usize) -> Option<regex::Match<'_>> {
     }
     None
 }
-pub(super) fn refused(text: &str) -> bool {
+pub(crate) fn refused(text: &str) -> bool {
     for shape in SHAPES.iter() {
         let mut cursor = 0;
         while let Some(found) = shape.pattern.captures_at(text, cursor) {

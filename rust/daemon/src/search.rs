@@ -1,6 +1,8 @@
 //! GET /api/search ranking over the resident bank (spec S1-S6).
 
-use crate::bank::{Bank, DIM, Entry};
+#[cfg(test)]
+use crate::bank::DIM;
+use crate::bank::{Bank, Entry};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
@@ -60,7 +62,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
         p.hide_superseded || p.sources.is_some() || p.tags.is_some() || p.bands.is_some();
     let mut cand: Vec<(usize, f32)> = bank
         .matrix
-        .chunks_exact(DIM)
+        .chunks_exact(bank.dim)
         .enumerate()
         .filter(|(i, _)| !filter_active || eligible(&bank.entries[*i]))
         .map(|(i, row)| (i, row.iter().zip(q).map(|(a, b)| a * b).sum::<f32>()))
@@ -283,7 +285,7 @@ fn slot_text(v: Option<&Value>) -> String {
     match v {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Null) | None => "None".into(),
-        Some(other) => other.to_string(),
+        Some(other) => crate::pyjson::py_str(other),
     }
 }
 
@@ -312,11 +314,8 @@ pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
     m.insert("source".into(), json!(e.source));
     m.insert("bank".into(), json!(e.band));
     m.insert("timestamp".into(), json!(e.ts));
-    m.insert(
-        "access_count".into(),
-        json!(e.access_count.load(std::sync::atomic::Ordering::Relaxed)),
-    );
-    m.insert("surprise_score".into(), json!(round4(e.surprise)));
+    m.insert("access_count".into(), json!(e.access_count));
+    m.insert("surprise_score".into(), json!(round4(e.surprise as f64)));
     m.insert("superseded".into(), json!(e.superseded_at.is_some()));
     m.insert("superseded_at".into(), json!(e.superseded_at));
     m.insert("superseded_by_text".into(), json!(e.superseded_by_text));
@@ -387,11 +386,17 @@ mod tests {
     fn entry(id: i64, text: &str, source: &str, superseded: bool) -> Entry {
         Entry {
             id,
+            embedding: vec![],
             band: "flat".into(),
             stored_band: "flat".into(),
             text: text.into(),
             surprise: 0.5,
+            surprise_value: 0.5,
             ts: 0.0,
+            access_count: 0,
+            reinforcements: 0,
+            last_logical_turn: None,
+            dream_state: None,
             source: source.into(),
             superseded_at: superseded.then_some(1.0),
             superseded_by_text: None,
@@ -413,6 +418,42 @@ mod tests {
     }
 
     #[test]
+    fn dense_matrix_rows_follow_the_loaded_embedding_dimension() {
+        for dim in [384, 1024] {
+            let mut matrix = vec![0.0; 2 * dim];
+            matrix[dim] = 1.0;
+            let bank = Bank {
+                dim,
+                matrix,
+                entries: vec![
+                    entry(1, "first", "x", false),
+                    entry(2, "second", "x", false),
+                ],
+            };
+            let mut query = vec![0.0; dim];
+            query[0] = 1.0;
+            let p = Params {
+                query: String::new(),
+                k: 2,
+                sources: None,
+                tags: None,
+                min_score: None,
+                default_floor: 0.25,
+                bm25: None,
+                hide_superseded: false,
+                bands: None,
+            };
+            assert_eq!(
+                rank(&bank, &query, &p)
+                    .iter()
+                    .map(|h| bank.entries[h.idx].id)
+                    .collect::<Vec<_>>(),
+                [2]
+            );
+        }
+    }
+
+    #[test]
     fn floor_dedup_and_multipliers() {
         let rows = [
             (1, "a", "x", false, 0.9),
@@ -428,7 +469,11 @@ mod tests {
             entries.push(entry(id, t, s, sup));
             matrix.extend(unit(cos));
         }
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let p = Params {
             query: String::new(),
             k: 6,
@@ -469,6 +514,7 @@ mod tests {
             "+"
         ])];
         let bank = Bank {
+            dim: DIM,
             entries: vec![e],
             matrix: unit(0.0),
         };
@@ -529,7 +575,11 @@ mod tests {
         let mut matrix = unit(0.9);
         matrix.extend(unit(0.0));
         matrix.extend(unit(0.0));
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let p = Params {
             query: "zeta_token".into(),
             k: 8,

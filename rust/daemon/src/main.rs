@@ -8,7 +8,7 @@ mod bank;
 mod config;
 mod contradiction;
 mod embed;
-// Reached through the harness route until the MCP dispatch (W2-G) lands.
+mod embedding_math;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;
 #[cfg(feature = "harness")]
@@ -18,18 +18,19 @@ mod http;
 mod labels;
 mod meta_filter;
 mod mutants;
+mod onnx_artifacts;
+mod onnx_runtime;
 mod principals;
+mod pyjson;
 mod routes;
 mod search;
 mod service;
 mod slots;
+mod startup;
 mod static_files;
 mod storage;
-// Reached through the harness route until the MCP dispatch (W2-G) lands.
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod store;
-// Reached through the harness route until the MCP dispatch (W2-G) lands.
-#[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod txn;
 
 use std::path::PathBuf;
@@ -62,6 +63,19 @@ fn fail(code: i32, message: &str) -> ! {
 }
 
 fn main() {
+    if cfg!(feature = "mutants")
+        && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
+    {
+        println!("{}", mutants::supports_loopback_bind_fixture());
+        return;
+    }
+    // The embedding harness exercises the same loader and encoder without a bank.
+    if std::env::var_os("PSEUDOLIFE_DAEMON_EMBED_PROBE").is_some() {
+        match embed::probe() {
+            Ok(()) => return,
+            Err(e) => fail(1, &e.to_string()),
+        }
+    }
     let env_lookup = |k: &str| std::env::var(k).ok();
     if let Some(msg) = moved_refusal(
         std::env::var("PSEUDOLIFE_MCP_DATA_DIR")
@@ -88,6 +102,12 @@ fn main() {
         fail(1, &format!("data dir {}: {e}", data_dir.display()));
     }
     let config = config::load(&config_file).unwrap_or_else(|e| fail(1, &e.to_string()));
+    // Harness hook: print the parsed configuration and exit, so the config
+    // differential can compare it with Python's AppConfig (harness/run.py).
+    if std::env::var_os("PSEUDOLIFE_DAEMON_DUMP_CONFIG").is_some() {
+        println!("{}", pyjson::dumps(&config.dump()));
+        std::process::exit(0);
+    }
     let env = config::DaemonEnv::from_env(&env_lookup).unwrap_or_else(|e| fail(1, &e.to_string()));
 
     // A token that is not valid Unicode would read as unset and open the
@@ -164,7 +184,9 @@ fn main() {
     let code = runtime.block_on(async move {
         // asyncio binds every interface for an empty host (IPv4 here: the
         // IPv6 wildcard is a declared divergence).
-        let host = if env.host.is_empty() {
+        let host = if mutants::loopback_bind_fixture() {
+            "127.0.0.1".to_string()
+        } else if env.host.is_empty() {
             "0.0.0.0".to_string()
         } else {
             env.host.clone()

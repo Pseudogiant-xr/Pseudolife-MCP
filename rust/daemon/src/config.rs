@@ -42,22 +42,24 @@ pub struct MemoryConfig {
     pub recency_base_half_life_s: f64,
     pub preset: String,
     pub bands: Vec<String>,
-    /// `max_entries` per band, aligned with `bands` (write path, W1.10).
-    pub band_capacity: Vec<i64>,
-    /// The store gate (W1.8); the overlay sets 0.0 unless the leaf is set.
+    pub band_specs: Vec<StartupBandSpec>,
     pub surprise_threshold: f64,
-    /// `meta_filter.enabled` (W1.4); the overlay sets false unless set.
     pub meta_filter_enabled: bool,
-    /// `traces.retention_boost` (W1.10); the overlay sets 1.0 unless set.
-    pub retention_boost: f64,
-    /// `cortex.auto_promote` (default false); see divergences.
     pub cortex_auto_promote: bool,
+    pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupBandSpec {
+    pub name: String,
+    pub max_entries: usize,
+    pub retention_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,12 +88,18 @@ pub struct EmbeddingConfig {
     pub backend: String,
     pub query_prefix: String,
     pub max_seq_length: i64,
+    pub onnx_file_name: String,
+    pub batch_size: i64,
+    pub cache_size: i64,
+    pub cpu_dtype: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoordinationConfig {
     pub enabled: bool,
     pub wake: WakeConfig,
+    /// Stripped, lower-cased; `["default"]` when the key is absent.
+    pub allowed_principals: Vec<String>,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -126,6 +134,75 @@ pub struct DreamConfig {
     pub extractor_model_override: Option<String>,
     /// `float(sweep_interval_seconds)` succeeds (`mcp_server.py:3268`).
     pub sweep_interval_ok: bool,
+}
+
+impl Config {
+    /// Every value this port reads, under its Python dotted path, for the
+    /// harness's config differential (`PSEUDOLIFE_DAEMON_DUMP_CONFIG`).
+    pub fn dump(&self) -> serde_json::Value {
+        let m = &self.memory;
+        let (s, b, e, c, u, d) = (
+            &m.search,
+            &m.bm25,
+            &self.embedding,
+            &self.coordination,
+            &self.updates,
+            &self.dream,
+        );
+        let mut dump = serde_json::json!({
+            "memory.top_k": m.top_k,
+            "memory.hide_superseded": m.hide_superseded,
+            "memory.search_confidence_floor": m.search_confidence_floor,
+            "memory.recency_boost_enabled": m.recency_boost_enabled,
+            "memory.recency_base_half_life_s": m.recency_base_half_life_s,
+            "memory.miras.preset": m.preset,
+            "memory.miras.bands": m.bands,
+            "memory.search.min_score": s.min_score,
+            "memory.search.fusion": s.fusion,
+            "memory.search.candidate_pool_multiplier": s.candidate_pool_multiplier,
+            "memory.search.contiguity_neighbors": s.contiguity_neighbors,
+            "memory.search.timeline_channel": s.timeline_channel,
+            "memory.bm25.enabled": b.enabled,
+            "memory.bm25.k1": b.k1,
+            "memory.bm25.b": b.b,
+            "memory.bm25.weight": b.weight,
+            "memory.bm25.top_n": b.top_n,
+            "memory.bm25.min_score": b.min_score,
+            "memory.reranker.enabled": m.reranker_enabled,
+            "memory.retrieval_log.enabled": m.retrieval_log_enabled,
+            "embedding.model_name": e.model_name,
+            "embedding.device": e.device,
+            "embedding.query_prefix": e.query_prefix,
+            "embedding.max_seq_length": e.max_seq_length,
+            "coordination.enabled": c.enabled,
+            "coordination.wake": c.wake.to_json(),
+            "coordination.allowed_principals": c.allowed_principals,
+            "updates.check_releases": u.check_releases,
+            "updates.unattended_clients": u.unattended_clients,
+            "updates.unattended_daemon": u.unattended_daemon,
+            "updates.check_interval_seconds": u.check_interval_seconds,
+            "memory.dream.enabled": d.enabled,
+            "memory.dream.extractor_source": d.extractor_source,
+            "memory.dream.extractor_base_url": d.extractor_base_url,
+            "memory.dream.extractor_model": d.extractor_model,
+            "memory.dream.fallback_base_url": d.fallback_base_url,
+            "memory.dream.fallback_model": d.fallback_model,
+            "memory.dream.extractor_model_override": d.extractor_model_override,
+        });
+        dump.as_object_mut().expect("configuration object").extend(
+            serde_json::json!({
+                "embedding.backend": e.backend,
+                "embedding.onnx_file_name": e.onnx_file_name,
+                "embedding.batch_size": e.batch_size,
+                "embedding.cache_size": e.cache_size,
+                "embedding.cpu_dtype": e.cpu_dtype,
+            })
+            .as_object()
+            .expect("embedding object")
+            .clone(),
+        );
+        dump
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,10 +314,14 @@ impl Default for MemoryConfig {
             recency_base_half_life_s: LIBRARY_HALF_LIFE_S,
             preset: "flat".to_string(),
             bands: vec!["flat".to_string()],
-            band_capacity: vec![FLAT_CAPACITY],
+            band_specs: vec![StartupBandSpec {
+                name: "flat".into(),
+                max_entries: 5250,
+                retention_policy: "balanced".into(),
+            }],
+            retention_boost: 1.0,
             surprise_threshold: 0.0,
             meta_filter_enabled: false,
-            retention_boost: 1.0,
             cortex_auto_promote: false,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
@@ -258,6 +339,10 @@ impl Default for EmbeddingConfig {
             backend: "torch".to_string(),
             query_prefix: DEFAULT_QUERY_PREFIX.to_string(),
             max_seq_length: 512,
+            onnx_file_name: "onnx/model.onnx".to_string(),
+            batch_size: 16, // MemoryService MCP overlay, service.py:1106-1107
+            cache_size: 1024,
+            cpu_dtype: "auto".to_string(),
         }
     }
 }
@@ -280,6 +365,7 @@ impl Default for CoordinationConfig {
         CoordinationConfig {
             enabled: true,
             wake: WakeConfig::default(),
+            allowed_principals: vec![DEFAULT_PRINCIPAL.to_string()],
         }
     }
 }
@@ -1048,6 +1134,10 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             backend: want_str(e, "backend", p, &d.backend)?,
             query_prefix: want_str(e, "query_prefix", p, &d.query_prefix)?,
             max_seq_length: want_int(e, "max_seq_length", p, d.max_seq_length)?,
+            onnx_file_name: want_str(e, "onnx_file_name", p, &d.onnx_file_name)?,
+            batch_size: want_int(e, "batch_size", p, d.batch_size)?,
+            cache_size: want_int(e, "cache_size", p, d.cache_size)?,
+            cpu_dtype: want_str(e, "cpu_dtype", p, &d.cpu_dtype)?,
         };
     }
 
@@ -1070,25 +1160,22 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
 
         if let Some(miras) = section(m, "miras", "memory.")? {
-            let (preset, bands, capacity) = read_miras(miras)?;
+            let (preset, bands) = read_miras(miras)?;
             memory.preset = preset;
             memory.bands = bands;
-            memory.band_capacity = capacity;
+            memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
         }
-        // The write path's keys and their overlay (service.py:1104-1119).
+        if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
+        }
+        // Write-path overlay: these leaves change only when explicitly set.
         if user_set("memory.surprise_threshold") {
-            memory.surprise_threshold =
-                want_float(m, "surprise_threshold", p, memory.surprise_threshold)?;
+            memory.surprise_threshold = want_float(m, "surprise_threshold", p, 0.0)?;
         }
         if user_set("memory.meta_filter.enabled")
             && let Some(Node::Map(mf)) = lookup(m, "meta_filter")
         {
             memory.meta_filter_enabled = want_bool(mf, "enabled", "memory.meta_filter", true)?;
-        }
-        if user_set("memory.traces.retention_boost")
-            && let Some(Node::Map(t)) = lookup(m, "traces")
-        {
-            memory.retention_boost = want_float(t, "retention_boost", "memory.traces", 0.0)?;
         }
         if let Some(c) = section(m, "cortex", "memory.")? {
             memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
@@ -1155,14 +1242,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
-/// `flat_bands()` (`memory/miras/presets.py:38-56`).
-const FLAT_CAPACITY: i64 = 5250;
-/// `continuum_bands()` capacities, in `CONTINUUM_BANDS` order.
-const CONTINUUM_CAPACITY: [i64; 8] = [200, 250, 300, 400, 600, 1500, 1000, 1000];
-
-type Miras = (String, Vec<String>, Vec<i64>);
-
-fn read_miras(miras: &[(Node, Node)]) -> Result<Miras, ConfigError> {
+fn read_miras(miras: &[(Node, Node)]) -> Result<(String, Vec<String>), ConfigError> {
     let preset = match lookup(miras, "preset") {
         None => "flat".to_string(),
         Some(Node::Str(s)) => s.clone(),
@@ -1187,14 +1267,9 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<Miras, ConfigError> {
             )));
         }
     };
-    let mut capacity = Vec::new();
     let bands = match preset.as_str() {
-        "flat" => {
-            capacity.push(FLAT_CAPACITY);
-            vec!["flat".to_string()]
-        }
+        "flat" => vec!["flat".to_string()],
         "continuum" | "titans" | "moneta" | "yaad" | "memora" => {
-            capacity.extend(CONTINUUM_CAPACITY);
             CONTINUUM_BANDS.iter().map(|s| (*s).to_string()).collect()
         }
         "custom" => {
@@ -1209,8 +1284,6 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<Miras, ConfigError> {
                     return Err(wrong_type("memory.miras.bands[]", "a mapping", item));
                 };
                 names.push(want_str(spec, "name", "memory.miras.bands[]", "band")?);
-                // `MIRASBandSpec.max_entries` default (utils/config.py:82).
-                capacity.push(want_int(spec, "max_entries", "memory.miras.bands[]", 5000)?);
             }
             names
         }
@@ -1220,7 +1293,64 @@ fn read_miras(miras: &[(Node, Node)]) -> Result<Miras, ConfigError> {
             )));
         }
     };
-    Ok((preset, bands, capacity))
+    Ok((preset, bands))
+}
+
+fn read_startup_bands(
+    miras: &[(Node, Node)],
+    preset: &str,
+    names: &[String],
+) -> Result<Vec<StartupBandSpec>, ConfigError> {
+    // presets.py: the flat capacity is the 2026-08-15 ablation's retained
+    // 5,250-entry total; continuum keeps the same published tier capacities.
+    if preset == "flat" {
+        return Ok(vec![StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 5250,
+            retention_policy: "balanced".into(),
+        }]);
+    }
+    if preset != "custom" {
+        return Ok(names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| StartupBandSpec {
+                name: name.clone(),
+                max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
+                retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+            })
+            .collect());
+    }
+    let Some(Node::Seq(items)) = lookup(miras, "bands") else {
+        return Err(refuse("memory.miras.bands must be a list"));
+    };
+    items
+        .iter()
+        .zip(names)
+        .map(|(item, name)| {
+            let Node::Map(fields) = item else {
+                return Err(refuse("memory.miras.bands[] must be a mapping"));
+            };
+            let cap = want_int(fields, "max_entries", "memory.miras.bands[]", 5000)?;
+            let max_entries = usize::try_from(cap)
+                .map_err(|_| refuse("band max_entries must be non-negative"))?;
+            let retention_policy = want_str(
+                fields,
+                "retention_policy",
+                "memory.miras.bands[]",
+                "balanced",
+            )?;
+            if !["balanced", "recency_heavy", "surprise_heavy"].contains(&retention_policy.as_str())
+            {
+                return Err(refuse("unknown band retention_policy"));
+            }
+            Ok(StartupBandSpec {
+                name: name.clone(),
+                max_entries,
+                retention_policy,
+            })
+        })
+        .collect()
 }
 
 fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
@@ -1344,7 +1474,10 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             "coordination.audit_retention_days must be a whole number of days, 0 or more",
         ));
     }
-    principal_list(c, "allowed_principals")?;
+    let allowed_principals = match lookup(c, "allowed_principals") {
+        None => vec![DEFAULT_PRINCIPAL.to_string()],
+        Some(_) => principal_list(c, "allowed_principals")?,
+    };
     principal_list(c, "daemon_notice_principals")?;
     let maintainers = principal_list(c, "maintainer_principals")?;
     let mut shared: Vec<&str> = [DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL]
@@ -1358,7 +1491,11 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             shared.join(", ")
         )));
     }
-    Ok(CoordinationConfig { enabled, wake })
+    Ok(CoordinationConfig {
+        enabled,
+        wake,
+        allowed_principals,
+    })
 }
 
 /// `MaintainerConfig(**mapping)`: unknown or non-string keys are a
@@ -1780,6 +1917,7 @@ mod tests {
                 backend: "onnx".into(),
                 query_prefix: String::new(),
                 max_seq_length: 256,
+                ..EmbeddingConfig::default()
             }
         );
     }

@@ -225,7 +225,34 @@ async fn db_open_once_for_state_compare() {
         eprintln!("PL_W1A_OPEN_DSN unset: skipping");
         return;
     };
-    let s = Storage::open(&dsn).await.expect("open");
+    // This hook is harness-only: independently verify the connected server
+    // before dispatching the constructor which executes DDL.
+    let (check, task) = side_client(&dsn).await;
+    let name = simple_value(&check, "SELECT current_database()")
+        .await
+        .unwrap()
+        .flatten()
+        .unwrap();
+    assert!(
+        name.starts_with("pl_cf_"),
+        "state comparison requires a disposable harness bank"
+    );
+    assert_eq!(Some(name.as_str()), parse_dsn(&dsn).unwrap().get_dbname());
+    drop(check);
+    let _ = task.await;
+    let result = Storage::open(&dsn).await;
+    if let Ok(expected) = std::env::var("PL_SCHEMA_EXPECT_REFUSAL") {
+        match result {
+            Err(OpenError::Refused(message)) => assert!(message.contains(&expected), "{message}"),
+            Err(error) => panic!("expected schema refusal, got {error:?}"),
+            Ok(s) => {
+                s.close().await;
+                panic!("opened a refused schema");
+            }
+        }
+        return;
+    }
+    let s = result.expect("open");
     s.check_search_path().await.expect("search_path");
     s.close().await;
 }

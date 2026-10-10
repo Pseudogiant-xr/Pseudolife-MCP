@@ -1,4 +1,4 @@
-//! Lazy rows for the register archive slice; broader archive domains defer.
+//! Lazy archive rows as `_read_export` admits them; other domains defer.
 use super::super::doorbell_seen::json as scalar_json;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
@@ -10,6 +10,9 @@ pub(super) enum Error {
     InvalidRow,
     Deferred,
 }
+
+// serde_json's arbitrary_precision transport key for a number token.
+const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 // Check decoded keys before Value construction can discard duplicate evidence.
 struct Unique<'a>(&'a Cell<bool>);
@@ -50,12 +53,27 @@ impl<'de> Visitor<'de> for Unique<'_> {
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         let mut keys = HashSet::new();
+        let mut repeated = false;
         while let Some(key) = map.next_key::<String>()? {
-            if !keys.insert(key) {
-                self.0.set(true);
-                return Err(de::Error::custom("duplicate decoded key"));
+            if key == NUMBER_TOKEN {
+                // arbitrary_precision hands a number over as this one-entry
+                // map. CPython converts an integer token as it scans it and
+                // refuses one over 4,300 digits there, before any enclosing
+                // object closes: a deferral here.
+                let token: String = map.next_value()?;
+                if !token.contains(['.', 'e', 'E']) && token.trim_start_matches('-').len() > 4300 {
+                    return Err(de::Error::custom("integer over the digit limit"));
+                }
+                continue;
             }
+            repeated |= !keys.insert(key);
             map.next_value_seed(Unique(self.0))?;
+        }
+        // `object_pairs_hook` sees an object only once it closes, so a
+        // repeated key is reported here, after every later scan error in it.
+        if repeated {
+            self.0.set(true);
+            return Err(de::Error::custom("duplicate decoded key"));
         }
         Ok(())
     }
@@ -91,6 +109,10 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64), Error> {
     // Reuse the scalar reader's protection against serde's private Number key;
     // its nonfinite, surrogate and nesting refusals remain deferred domains.
     let value: Value = scalar_json::from_str(text).map_err(|_| Error::Deferred)?;
+    // Python's reader refuses (as not JSON) an integer over its digit limit.
+    if !super::codec::python_int_domain(&value) {
+        return Err(Error::Deferred);
+    }
     let Some(object) = value.as_object() else {
         return Err(Error::InvalidRow);
     };
@@ -153,5 +175,19 @@ mod tests {
         }
         assert!(matches!(row("{}"), Err(Error::InvalidRow)));
         assert!(blank("\u{1c}\u{85}\u{2000}\r\n"));
+    }
+
+    #[test]
+    fn duplicates_are_reported_when_their_object_closes() {
+        let digits = "9".repeat(4301);
+        // Python: not JSON (the object never closes / the scan fails first).
+        assert!(matches!(row(r#"{"seq":1,"seq":2"#), Err(Error::Deferred)));
+        let late = format!(r#"{{"a":1,"a":2,"n":{digits}}}"#);
+        assert!(matches!(row(&late), Err(Error::Deferred)));
+        // Python: the inner object closes before the long integer is scanned.
+        let nested = format!(r#"{{"a":{{"x":1,"x":2}},"n":{digits}}}"#);
+        assert!(matches!(row(&nested), Err(Error::Duplicate)));
+        let float = format!(r#"{{"a":1,"a":2,"n":{digits}.5}}"#);
+        assert!(matches!(row(&float), Err(Error::Duplicate)));
     }
 }

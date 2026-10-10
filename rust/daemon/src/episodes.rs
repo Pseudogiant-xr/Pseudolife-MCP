@@ -57,7 +57,7 @@ pub fn is_generic_title(title: &str) -> bool {
         })
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct Episode {
     pub id: String,
     pub title: String,
@@ -209,88 +209,35 @@ fn py_float(v: Option<&Value>) -> f64 {
     v.and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Bool(true)) => true,
-    }
-}
-
-async fn get_meta(client: &Client, key: &str) -> Result<Option<Value>, tokio_postgres::Error> {
-    let row = client
-        .query_opt("SELECT value FROM meta WHERE key = $1", &[&key])
-        .await?;
-    Ok(row.map(|r| r.get::<_, Value>(0)))
-}
-
-/// Hydration (spec W2.1): the episode log (`hydrate_cms`, `storage/sync.py:
-/// 146-155`) and the three meta rows `_ensure_init` reads (`service.py:
-/// 1308-1330`).
-pub async fn hydrate(client: &Client) -> anyhow::Result<WriteState> {
-    let rows = client
-        .query(
-            "SELECT id, title, hint, started_at, ended_at, closed_by_new_start, \
-             session_key, parent_id FROM episodes ORDER BY started_at",
-            &[],
-        )
-        .await?;
-    let mut log = EpisodeLog::default();
-    for r in rows {
-        log.episodes.push(Episode {
-            id: r.get(0),
-            title: r.get(1),
-            hint: r.get(2),
-            started_at: r.get(3),
-            ended_at: r.get(4),
-            closed_by_new_start: r.get(5),
-            session_key: r.get(6),
-            parent_id: r.get(7),
-        });
-    }
-    log.current_id = log
-        .episodes
-        .iter()
-        .rev()
-        .find(|e| e.ended_at.is_none())
-        .map(|e| e.id.clone());
+/// Build write state from the complete startup candidate before publishing Ready.
+pub fn from_startup(startup: &crate::startup::StartupState) -> anyhow::Result<WriteState> {
     let mut ws = WriteState {
-        log,
-        ..WriteState::default()
+        log: EpisodeLog {
+            episodes: startup
+                .episodes
+                .iter()
+                .cloned()
+                .map(serde_json::from_value)
+                .collect::<Result<_, _>>()?,
+            current_id: startup.current_episode.clone(),
+        },
+        ..Default::default()
     };
-    if let Some(Value::Object(raw)) = get_meta(client, "active_session_pointer").await?
-        && truthy(raw.get("session_id"))
-    {
-        ws.active_session = Some((py_str(&raw["session_id"]), py_float(raw.get("ts"))));
+    if let Some(raw) = startup.metadata["active_session"].as_array() {
+        ws.active_session = Some((py_str(&raw[0]), py_float(raw.get(1))));
     }
-    if let Some(Value::Object(raw)) = get_meta(client, "episode_tombstones").await? {
-        for (tid, m) in raw {
-            if let Value::Object(m) = m
-                && truthy(m.get("session_key"))
-            {
-                let title = if truthy(m.get("title")) {
-                    py_str(&m["title"])
-                } else {
-                    String::new()
-                };
-                ws.tombstones.push((
-                    tid,
-                    (
-                        py_str(&m["session_key"]),
-                        py_float(m.get("ended_at")),
-                        title,
-                    ),
-                ));
-            }
+    if let Some(raw) = startup.metadata["episode_tombstones"].as_object() {
+        for (id, value) in raw {
+            ws.tombstones.push((
+                id.clone(),
+                (py_str(&value[0]), py_float(value.get(1)), py_str(&value[2])),
+            ));
         }
     }
-    if let Some(Value::Object(raw)) = get_meta(client, "deferred_empty_roots").await? {
+    if let Some(raw) = startup.metadata["deferred_empty_roots"].as_object() {
         ws.deferred_empty = raw
-            .into_iter()
-            .map(|(rid, ts)| (rid, ts.as_f64().unwrap_or(0.0)))
+            .iter()
+            .map(|(id, ts)| (id.clone(), py_float(Some(ts))))
             .collect();
     }
     Ok(ws)
