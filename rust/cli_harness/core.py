@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import hashlib
 import json
 import os
 import shutil
@@ -68,15 +69,26 @@ class Case:
     rules: tuple[str, ...] = ()
     platforms: tuple[str, ...] = ("windows", "linux")
     stdout_closed: bool = False
+    stderr_closed: bool = False  # the arm's stderr is a pipe whose reader closed
     daemon: Callable[[], Any] | None = None
     skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
     # Needs real oracle daemons on disposable banks: live local acceptance
     # only, never golden replay (the candidate still needs the oracle daemon).
     bank: bool = False
+    # False: the observation shows state the row seeds afresh in every harness
+    # process (wall-clock stamps, random codes), so the case runs live only;
+    # --record and --golden leave it out. The row's .md names the reason.
+    golden: bool = True
     # The case exists to show both arms succeed (a trickle, an https daemon):
     # an arm with empty stdout makes the case differ instead of matching
     # vacuously when both arms fail the same quiet way.
     expect_output: bool = False
+    # External programs the oracle may look up on this case's paths (docker,
+    # pg_dump, tailscale, ...). Before each arm, check_programs proves none of
+    # them resolves outside the disposable home. real_programs names the ones
+    # the case deliberately runs from the host (shown in every run's listing).
+    programs: tuple[str, ...] = ()
+    real_programs: tuple[str, ...] = ()
     note: str = ""
 
     def runs_here(self) -> bool:
@@ -92,11 +104,28 @@ class Target:
     env: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
+_NO_PYCACHE: str | None = None
+
+
+def _empty_pycache_prefix() -> str:
+    """An empty directory for ``PYTHONPYCACHEPREFIX``: CPython then looks for
+    bytecode only there, never in the source tree's ``__pycache__``, so a
+    stale cache whose header matches its source cannot run in place of the
+    source. With ``PYTHONDONTWRITEBYTECODE`` nothing is written to it."""
+    global _NO_PYCACHE
+    if _NO_PYCACHE is None:
+        import atexit  # noqa: PLC0415
+        _NO_PYCACHE = tempfile.mkdtemp(prefix="cli-harness-no-pycache-")
+        atexit.register(shutil.rmtree, _NO_PYCACHE, True)
+    return _NO_PYCACHE
+
+
 def python_target(python: str, source: Path) -> Target:
     # -P keeps the arm's cwd off sys.path; PYTHONPATH selects the oracle source.
     return Target("python", [python, "-P", "-m", "pseudolife_memory.cli"],
                   {"PYTHONPATH": str(source), "PYTHONIOENCODING": "utf-8",
-                   "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+                   "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1",
+                   "PYTHONPYCACHEPREFIX": _empty_pycache_prefix()})
 
 
 def rust_target(binary: Path) -> Target:
@@ -136,12 +165,74 @@ def _environment(case: Case, arm: Arm, target: Target) -> dict[str, str]:
         "PSEUDOLIFE_RELEASE_CHECK": "0",
         "COLUMNS": "80",
     })
+    if WINDOWS:
+        # Default install locations (Program Files) resolve inside the home.
+        # A 64-bit child derives ProgramFiles from ProgramW6432 when it is
+        # set; with neither set, lookups fall back to the real C:\Program Files.
+        program_files = str(arm.home / "Program Files")
+        env.update({"ProgramW6432": program_files, "ProgramFiles": program_files})
     for key, value in case.env.items():
         if value is None:
             env.pop(key, None)
         else:
             env[key] = _expand(value, arm)
     return env
+
+
+class ProgramLeak(RuntimeError):
+    """A case's environment lets a declared program resolve outside its home."""
+
+
+# What the preflight child reports: shutil.which (current directory first on
+# Windows, PATHEXT) for each name, and the lookup inputs as the child sees
+# them (Windows derives some at process start: ProgramFiles from ProgramW6432).
+_PROBE = """\
+import json, os, shutil, sys
+names = json.loads(sys.argv[1])
+keys = ("PATH", "PATHEXT", "ProgramW6432", "ProgramFiles", "ProgramFiles(x86)",
+        "LOCALAPPDATA", "APPDATA", "SystemRoot", "HOME", "USERPROFILE")
+print(json.dumps({"which": {n: shutil.which(n) for n in names},
+                  "env": {k: os.environ.get(k) for k in keys}}))
+"""
+_PROBED: dict[str, dict] = {}
+
+
+def _inside(path: str, home: Path) -> bool:
+    try:
+        Path(path).resolve().relative_to(home.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def check_programs(case: Case, env: dict[str, str], cwd: Path, home: Path,
+                   python: str) -> dict:
+    """Refuse ``case`` unless every program it declares resolves inside
+    ``home`` or nowhere (``real_programs`` excepted) and, on Windows, the
+    Program Files variables are set inside ``home``: asked of a child of
+    ``python`` given ``env`` and ``cwd`` exactly. Runs only the interpreter;
+    one child per distinct environment, cwd and name list."""
+    names = sorted(set(case.programs) | set(case.real_programs))
+    key = hashlib.sha256(json.dumps([python, sorted(env.items()), str(cwd), names])
+                         .encode()).hexdigest()
+    if key not in _PROBED:
+        creation = getattr(subprocess, "CREATE_NO_WINDOW", 0) if WINDOWS else 0
+        done = subprocess.run([python, "-I", "-c", _PROBE, json.dumps(names)], env=env,
+                              cwd=cwd, capture_output=True, text=True, timeout=60,
+                              creationflags=creation)
+        if done.returncode != 0:
+            raise ProgramLeak(f"{case.id}: the program preflight failed: {done.stderr[-400:]}")
+        _PROBED[key] = json.loads(done.stdout)
+    seen = _PROBED[key]
+    problems = [f"{name} resolves to {found}" for name, found in seen["which"].items()
+                if found and name not in case.real_programs and not _inside(found, home)]
+    if WINDOWS:
+        problems += [f"{var} is {seen['env'][var]!r}" for var in ("ProgramW6432", "ProgramFiles")
+                     if not seen["env"][var] or not _inside(seen["env"][var], home)]
+    if problems:
+        raise ProgramLeak(f"{case.id}: an external program could resolve outside the home "
+                          f"{home}: {'; '.join(problems)}; the child sees {seen['env']}")
+    return seen
 
 
 def modes(root: Path) -> dict[str, str]:
@@ -241,9 +332,18 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
                   else case.daemon())
     arm.daemon = daemon
     try:
+        checked = None
+        if case.programs or case.real_programs:
+            # On the empty home, before setup: whatever resolves now lies
+            # outside the home, whatever setup installs later.
+            checked = _environment(case, arm, target)
+            python = target.command[0] if target.name == "python" else sys.executable
+            check_programs(case, checked, arm.cwd, home, python)
         if case.setup:
             case.setup(arm)
         env = _environment(case, arm, target)
+        if checked is not None and env != checked:
+            raise ProgramLeak(f"{case.id}: setup changed the environment the preflight checked")
         argv = [_expand(a, arm) for a in case.argv]
         stdin = case.stdin
         if case.stdin_json is not None:
@@ -255,13 +355,20 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             closed_reader, writer = os.pipe()
             os.close(closed_reader)
             stdout_target = writer
+        stderr_target = subprocess.PIPE
+        if case.stderr_closed:
+            closed_reader, writer = os.pipe()
+            os.close(closed_reader)
+            stderr_target = writer
         arm.started = time.time()
         proc = subprocess.Popen(target.command + argv, cwd=arm.cwd, env=env,
                                 stdin=subprocess.PIPE, stdout=stdout_target,
-                                stderr=subprocess.PIPE, creationflags=creation,
+                                stderr=stderr_target, creationflags=creation,
                                 bufsize=0 if case.before_capture else -1)
         if case.stdout_closed:
             os.close(stdout_target)
+        if case.stderr_closed:
+            os.close(stderr_target)
         deadline = time.monotonic() + case.timeout
         stderr_prefix = b""
         if case.before_capture:
@@ -298,9 +405,9 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             proc.kill()
             out, err = proc.communicate()
             raise RuntimeError(f"{case.id}/{target.name}: no exit within {case.timeout}s; "
-                               f"stderr={err[-400:]!r}") from None
+                               f"stderr={(err or b'')[-400:]!r}") from None
         ended = time.time()
-        err = stderr_prefix + err
+        err = stderr_prefix + (err or b"")
         if worker:
             worker.join(10)
             if worker.is_alive():

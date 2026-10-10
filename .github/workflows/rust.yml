@@ -209,8 +209,10 @@ jobs:
         suite: [eval, cli, judges]
     runs-on: ${{ matrix.os }}
     # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
-    # Allow twice that whole-job estimate, including artifact retention.
-    timeout-minutes: 65
+    # Allow twice that whole-job estimate, including artifact retention,
+    # plus the W1-C rows' step budget (60m; about 45m live and golden on
+    # hosted Windows in run 38007737431, 2026-10-10).
+    timeout-minutes: 125
     steps:
       - uses: actions/checkout@v4
         with:
@@ -420,6 +422,73 @@ jobs:
             ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
             ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
           if-no-files-found: error
+      # The W1-C native leaves: every row runs live (this checkout's Python
+      # oracle beside the candidate, on disposable homes), then against its
+      # goldens. transfer, invite and maintainer use the disposable
+      # PostgreSQL and test login the lease step provisioned; test_login
+      # starts its own throwaway clusters from that step's pg0 bundle and,
+      # on Linux, disposable containers of the image built below. Declared
+      # exceptions (each in its row's .md):
+      # - test_login's Linux golden is recorded on this lane: recording needs
+      #   pg0's initdb and a Linux Docker engine, which the recording host's
+      #   WSL lacks. While goldens/test_login.linux.json is absent, the golden
+      #   pass leaves test_login out and the step after it records the golden
+      #   as an artifact to commit; once it is committed, it replays like
+      #   every other row. Hosted Windows' Docker runs Windows containers
+      #   only, so its container cases skip there.
+      # - Cases marked live-only (Case.golden False) are left out of goldens
+      #   and run in the live pass: transfer keeps help, the no-database
+      #   refusals and the float-tie cases (the whole row is 14 MB of bank
+      #   dumps); invite leaves out the 24 cases that show principals its
+      #   seed stamps with the wall clock and random codes, and one 2.6 MB
+      #   report.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux' && matrix.suite == 'cli'
+        timeout-minutes: 10
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI W1-C differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $rows = @('transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', 'tunnel')
+          $live = $rows | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $platform = if ($IsWindows) { 'windows' } else { 'linux' }
+          $replayed = $rows | Where-Object { $_ -ne 'test_login' -or (Test-Path "rust/cli_harness/goldens/test_login.$platform.json") }
+          $golden = $replayed | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @golden --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c-golden.json')
+          exit $LASTEXITCODE
+      - name: Record the Linux test_login golden while it is absent
+        id: test_login_linux_golden
+        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'cli' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'test-login-linux-record.json'
+          python rust/cli_harness --row test_login --record -v --out $summary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $row = (Get-Content -Raw $summary | ConvertFrom-Json).rows.test_login
+          "test_login Linux golden recorded at oracle $($row.oracle_commit) ($($row.oracle_commit_source)): $($row.recorded) cases executed, $(@($row.skipped).Count) skipped ($(@($row.skipped) -join ', '))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Retain the recorded Linux test_login golden
+        if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_login-linux-golden
+          path: |
+            rust/cli_harness/goldens/test_login.linux.json
+            ${{ runner.temp }}/test-login-linux-record.json
+          if-no-files-found: error
+      - name: Retain CLI harness summaries
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-harness-${{ runner.os }}
+          path: ${{ runner.temp }}/cli-harness*.json
+          if-no-files-found: warn
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
         timeout-minutes: 15

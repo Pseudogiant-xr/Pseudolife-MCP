@@ -12,3 +12,4 @@ daemon/src/storage/schema_plan.json text eol=lf
 daemon/src/storage/schema_meta.rs text eol=lf
 # The gate embeds this Python constant byte for byte (harness/record_routes.py).
 daemon/harness/goldens/checkin.txt text eol=lf
+shim/src/cli/transfer/*.txt text eol=lf
