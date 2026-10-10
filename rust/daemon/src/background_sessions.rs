@@ -96,6 +96,19 @@ impl Sessions {
     /// Best-effort write-through, like Python's episode helpers. Each
     /// statement commits separately; callers hold the session state lock.
     pub async fn persist_reap(&self, client: &Client, result: &Reaped) {
+        if let Err(error) = crate::txn::with_client(client, |client| async move {
+            self.persist_reap_inner(client, result).await;
+            Ok::<_, tokio_postgres::Error>(())
+        })
+        .await
+        {
+            eprintln!("session write-through recovery failed: {error}");
+        }
+    }
+
+    // Already inside with_client: retain the oracle's best-effort, separate
+    // autocommit writes without nesting the writer mutex.
+    async fn persist_reap_inner(&self, client: &Client, result: &Reaped) {
         for (key, id, ended) in &result.ended_sessions {
             let ids = json!([id]);
             if let Err(e) = client.execute("UPDATE client_sessions SET ended_at=$1,end_reason='idle',episode_ids=CASE WHEN episode_ids @> $2 THEN episode_ids ELSE episode_ids || $2 END WHERE session_key=$3", &[&ended, &ids, key]).await {
@@ -353,6 +366,21 @@ impl Sessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn background_sessions_obey_writer_recovery() {
+        crate::txn::tests::background_recovers_before_write(|client| {
+            Box::pin(async move {
+                let sessions = Sessions::default();
+                let result = Reaped {
+                    deleted: vec!["fixture".into()],
+                    ..Default::default()
+                };
+                sessions.persist_reap(client, &result).await;
+            })
+        })
+        .await;
+    }
+
     #[test]
     fn malformed_resume_keeps_closes_but_skips_sweep_and_dream() {
         let mut s = Sessions {

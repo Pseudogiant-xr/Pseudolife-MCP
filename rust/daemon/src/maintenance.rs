@@ -59,60 +59,77 @@ pub fn compaction_victims(
     (0..records.len()).filter(|i| victims.contains(i)).collect()
 }
 
-/// Caller owns the shared writer's service lock and completes this future
-/// before shutdown; no request cancellation may drop an open transaction.
+/// Fence and recover the leased writer before the atomic journal prune.
 pub async fn prune_runs(client: &Client, keep: i64, now: f64) -> Result<u64, String> {
-    client
-        .batch_execute("BEGIN")
-        .await
-        .map_err(|e| e.to_string())?;
-    let result = async {
+    crate::txn::run(client, |client| async move {
         let cutoff = if crate::mutants::active("runs-no-stale-failure") { f64::MIN } else { now - 86400.0 };
         client.execute("UPDATE dream_runs SET status='failed' WHERE status='running' AND started_at < $1", &[&cutoff]).await?;
         client.execute("DELETE FROM dream_runs WHERE id NOT IN (SELECT id FROM dream_runs ORDER BY id DESC LIMIT $1)", &[&keep.max(0)]).await
-    }.await;
-    match result {
-        Ok(count) => {
-            client
-                .batch_execute("COMMIT")
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok(count)
-        }
-        Err(e) => {
-            let _ = client.batch_execute("ROLLBACK").await;
-            Err(e.to_string())
-        }
-    }
+    }).await.map_err(|e: tokio_postgres::Error| e.to_string())
 }
 
 /// Each DELETE is a separate PostgreSQL transaction, like the oracle.
 pub async fn prune_retrieval(client: &Client, cutoff: f64) -> Result<u64, String> {
-    let cutoff = if crate::mutants::active("retrieval-no-prune") {
-        f64::MIN
-    } else {
-        cutoff
-    };
-    let events = client
-        .execute(
-            "DELETE FROM retrieval_events WHERE created_at < $1",
-            &[&cutoff],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let lessons = client
-        .execute(
-            "DELETE FROM lesson_search_events WHERE created_at < $1",
-            &[&cutoff],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(events + lessons)
+    crate::txn::with_client(client, |client| async move {
+        let cutoff = if crate::mutants::active("retrieval-no-prune") {
+            f64::MIN
+        } else {
+            cutoff
+        };
+        if crate::mutants::active("retrieval-rewrite-expired") {
+            client
+                .execute(
+                    "UPDATE retrieval_events SET created_at=$1 WHERE created_at < $2",
+                    &[&(cutoff + 1.0), &cutoff],
+                )
+                .await?;
+        }
+        if crate::mutants::active("retrieval-sequence-advance") {
+            client
+                .query_one("SELECT nextval('retrieval_events_id_seq')", &[])
+                .await?;
+        }
+        let events = client
+            .execute(
+                "DELETE FROM retrieval_events WHERE created_at < $1",
+                &[&cutoff],
+            )
+            .await?;
+        let lessons = client
+            .execute(
+                "DELETE FROM lesson_search_events WHERE created_at < $1",
+                &[&cutoff],
+            )
+            .await?;
+        Ok(events + lessons)
+    })
+    .await
+    .map_err(|e: tokio_postgres::Error| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn background_runs_obey_writer_recovery() {
+        crate::txn::tests::background_recovers_before_write(|client| {
+            Box::pin(async move {
+                assert!(prune_runs(client, 2, 100.0).await.is_err());
+            })
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn background_retrieval_obeys_writer_recovery() {
+        crate::txn::tests::background_recovers_before_write(|client| {
+            Box::pin(async move {
+                assert!(prune_retrieval(client, 100.0).await.is_err());
+            })
+        })
+        .await;
+    }
+
     #[test]
     fn live_python_compaction_goldens() {
         let golden: serde_json::Value =

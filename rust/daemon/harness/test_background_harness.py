@@ -83,3 +83,49 @@ def test_signal_termination_is_not_a_controlled_clean_exit():
                            wait=lambda timeout: -signal.SIGTERM)
     daemon = SimpleNamespace(proc=proc, log=Path("fixture.log"), stop=lambda: None)
     with pytest.raises(RuntimeError): graceful_stop(daemon)
+
+
+def pruning_state():
+    return {"catalog": {"sequences": [["public", "retrieval_events_id_seq", "bigint", 1, 1, 2]]},
+            "rows": {"public.retrieval_events": {
+                "columns": ["id", "query_text", "origin", "session_id", "episode_id", "served", "created_at"],
+                "rows": [[1, "fixture", "search", None, None, [], 100.0],
+                         [2, "fixture", "search", None, None, [], 9000000000000.0]]}}}
+
+
+@pytest.mark.parametrize("change", ["rewrite", "sequence", "new-event", "warmup-extra-sequence"])
+def test_pruning_scrub_rejects_rewrites_and_unexplained_sequence_changes(change):
+    import run as harness
+    import dbstate
+    prior = pruning_state()
+    correct = copy.deepcopy(prior)
+    correct["rows"]["public.retrieval_events"]["rows"].pop(0)
+    broken = copy.deepcopy(correct)
+    if change == "rewrite":
+        rewritten = copy.deepcopy(prior["rows"]["public.retrieval_events"]["rows"][0])
+        rewritten[-1] = 200.0
+        broken["rows"]["public.retrieval_events"]["rows"].insert(0, rewritten)
+    elif change == "new-event":
+        broken["rows"]["public.retrieval_events"]["rows"].append(
+            [3, "unexpected", "search", None, None, [], 300.0])
+    elif change == "warmup-extra-sequence":
+        broken["rows"]["public.retrieval_events"]["rows"].append(
+            [3, "warmup probe", "search", None, None, [], 300.0])
+        broken["catalog"]["sequences"][0][-1] = 4
+    else:
+        broken["catalog"]["sequences"][0][-1] = 3
+    a = harness.scrub_declared_rows(correct, prior)["state"]
+    b = harness.scrub_declared_rows(broken, prior)["state"]
+    assert dbstate.diff(a, b)
+
+
+def test_only_one_proven_warmup_sequence_increment_is_waived():
+    import run as harness
+    prior = pruning_state()
+    changed = copy.deepcopy(prior)
+    changed["rows"]["public.retrieval_events"]["rows"].append(
+        [3, "warmup probe", "search", None, None, [], 300.0])
+    changed["catalog"]["sequences"][0][-1] = 3
+    raw = copy.deepcopy(changed)
+    assert harness.scrub_declared_rows(changed, prior)["state"] == prior
+    assert changed == raw

@@ -1932,7 +1932,11 @@ those missing process-boundary contracts.
 The pruning scenario uses the existing daemon differential harness. It checks
 whole-bank state after the observed pruning milestone. For portable goldens,
 catalog fields must first match the arm's seeded baseline exactly, then become
-an unchanged-baseline marker; sequence values remain exact. Seeded relation
+an unchanged-baseline marker; sequence values remain exact except for one
+identified new warmup probe and its matching single sequence allocation.
+Seeded primary-key identities survive the init scrub even when rewritten;
+unexplained sequence changes and other new retrieval rows remain differences.
+Seeded relation
 clocks must remain unchanged before their declared clock normalization. The
 session scenarios validate new close clocks against each arm's own start/end
 window and check equality of episode, client-session, deferred-map and
