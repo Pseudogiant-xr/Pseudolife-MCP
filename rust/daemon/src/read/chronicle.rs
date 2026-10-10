@@ -1,6 +1,7 @@
 //! Chronicle events served beside search hits (spec S10):
 //! `service.py:2023-2066`, `cms.py:84-121`, `storage/postgres.py:3333-3361`.
 
+// The caller holds txn::with_client for these borrowed-client helpers.
 use crate::search::has_temporal_cue;
 use serde_json::{Value, json};
 use std::sync::OnceLock;

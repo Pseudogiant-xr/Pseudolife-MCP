@@ -814,6 +814,23 @@ pub async fn cortex_search(
     knobs: &CortexKnobs,
     now: f64,
 ) -> Result<Vec<Value>> {
+    crate::txn::with_client(db, |db| async move {
+        cortex_search_locked(store, db, qvec, query, top_k, min_score, knobs, now).await
+    })
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cortex_search_locked(
+    store: &CortexStore,
+    db: &Client,
+    qvec: &[f32],
+    query: &str,
+    top_k: usize,
+    min_score: f64,
+    knobs: &CortexKnobs,
+    now: f64,
+) -> Result<Vec<Value>> {
     let mut hits = store.search(qvec, top_k, min_score);
     if let Some(b) = knobs.bm25
         && !query.is_empty()
@@ -887,6 +904,13 @@ pub async fn cortex_search(
 /// attaches only a non-empty block). Never fails the search: a write error
 /// or a row count of zero is logged and `Ok` is returned.
 pub async fn attach_served_facts(db: &Client, event_id: i64, facts: &[Value]) -> Result<()> {
+    crate::txn::with_client(db, |db| async move {
+        attach_served_facts_locked(db, event_id, facts).await
+    })
+    .await
+}
+
+async fn attach_served_facts_locked(db: &Client, event_id: i64, facts: &[Value]) -> Result<()> {
     if facts.is_empty() {
         return Ok(());
     }
@@ -933,6 +957,56 @@ pub async fn attach_served_facts(db: &Client, event_id: i64, facts: &[Value]) ->
 mod tests {
     use super::*;
     use crate::stores::cortex::tests::{axis, rec, store};
+
+    #[tokio::test]
+    async fn served_facts_recovers_abandoned_writer_transaction() {
+        let Ok(dsn) = std::env::var("PL_W2D_GUARD_DSN") else {
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2d_"))
+        );
+        let storage = std::sync::Arc::new(crate::storage::Storage::open(&dsn).await.unwrap());
+        let writer = storage.clone();
+        let (begun, received) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            crate::txn::run(writer.client(), |db| async move {
+                db.execute(
+                    "INSERT INTO meta (key, value) VALUES ('w2d_pending', 'true'::jsonb)",
+                    &[],
+                )
+                .await?;
+                begun.send(()).unwrap();
+                std::future::pending::<Result<(), tokio_postgres::Error>>().await
+            })
+            .await
+        });
+        received.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        attach_served_facts(storage.client(), 0, &[json!({})])
+            .await
+            .unwrap();
+        let pending: i64 = storage
+            .client()
+            .query_one("SELECT count(*) FROM meta WHERE key='w2d_pending'", &[])
+            .await
+            .unwrap()
+            .get(0);
+        storage.client().batch_execute("ROLLBACK").await.unwrap();
+        std::sync::Arc::try_unwrap(storage)
+            .ok()
+            .expect("fixture owns writer")
+            .close()
+            .await;
+        assert_eq!(
+            pending, 0,
+            "read telemetry inherited an abandoned transaction"
+        );
+    }
 
     #[test]
     fn relative_time_buckets_match_python() {

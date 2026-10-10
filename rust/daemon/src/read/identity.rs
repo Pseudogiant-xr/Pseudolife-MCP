@@ -2,6 +2,7 @@
 //! tiers 1 and 3 (`service.py:970-1011`) and `_caller_episode_id`
 //! (`service.py:4915-4930`, `memory/episodes.py:187-202`).
 
+// The caller holds txn::with_client for these borrowed-client helpers.
 use serde_json::Value;
 use tokio_postgres::Client;
 

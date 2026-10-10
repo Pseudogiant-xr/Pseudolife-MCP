@@ -13,11 +13,18 @@ from urllib.parse import quote
 
 import psycopg
 from psycopg import sql
+from pseudolife_memory.storage.schema import assert_disposable_database, refuse_production_database
 
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-DISPOSABLE_NAME = re.compile(r"pl_cf_w1a_[a-z0-9_]{1,40}")
+# Each port slice keeps its own prefix (PL_HARNESS_SLICE, default w1a), so
+# parallel slices running this harness never share a database.
+SLICE = os.environ.get("PL_HARNESS_SLICE", "w1a")
+if not re.fullmatch(r"w[0-9][a-z]|http|pgs", SLICE):
+    raise SystemExit(f"PL_HARNESS_SLICE={SLICE!r}: expected a slice id like w1a, w2g, http or pgs")
+PREFIX = f"pl_cf_{SLICE}_"
+DISPOSABLE_NAME = re.compile(re.escape(PREFIX) + r"[a-z0-9_]{1,40}")
 
 
 def _login() -> tuple[str, str]:
@@ -34,6 +41,7 @@ def _login() -> tuple[str, str]:
 
 
 def _check(name: str) -> str:
+    refuse_production_database(name)
     if not DISPOSABLE_NAME.fullmatch(name):
         raise ValueError(f"refusing non-disposable database name {name!r}")
     return name
@@ -57,6 +65,7 @@ def create(name: str, template: str | None = None) -> str:
     """Drop and recreate ``name`` (optionally as a copy of ``template``)."""
     drop(name)
     with _admin() as conn:
+        assert_disposable_database(conn)
         if template is None:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(_check(name))))
         else:
@@ -65,13 +74,24 @@ def create(name: str, template: str | None = None) -> str:
     return dsn(name)
 
 
-def drop(name: str) -> None:
-    with _admin() as conn:
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-            sql.Identifier(_check(name))))
+def drop(name: str, attempts: int = 10) -> None:
+    """FORCE cannot end a backend this role does not own (an autovacuum
+    worker on a just-used bank): retry until it has gone."""
+    import time
+    for i in range(attempts):
+        try:
+            with _admin() as conn:
+                assert_disposable_database(conn)
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                    sql.Identifier(_check(name))))
+            return
+        except psycopg.errors.InsufficientPrivilege:
+            if i == attempts - 1:
+                raise
+            time.sleep(2)
 
 
 def existing() -> list[str]:
     with _admin() as conn:
-        rows = conn.execute("SELECT datname FROM pg_database WHERE datname LIKE 'pl_cf_w1a_%'")
+        rows = conn.execute("SELECT datname FROM pg_database WHERE starts_with(datname, %s)", (PREFIX,))
         return sorted(r[0] for r in rows if DISPOSABLE_NAME.fullmatch(r[0]))

@@ -9,10 +9,10 @@ pub mod search_route;
 
 use crate::http::App;
 
-/// Serialises this slice's statements on the shared writer session, as
-/// Python's service lock does (one search at a time). A stand-in for the
-/// write slice's `txn::run` guard; the call sites switch when it lands.
-pub fn db_guard() -> &'static tokio::sync::Mutex<()> {
+/// Keeps resident access accrual and its response telemetry in search order.
+/// Database operations use `txn::with_client`; this mutex protects only the
+/// search ordering across CPU ranking and the cortex block.
+pub fn search_guard() -> &'static tokio::sync::Mutex<()> {
     static GUARD: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     GUARD.get_or_init(|| tokio::sync::Mutex::new(()))
 }

@@ -3,6 +3,21 @@
 Conventions that aren't derivable from a quick read of the code. Follow them
 exactly; they exist because each one was violated at least once.
 
+## Agents other than Claude Code
+
+Every rule here binds every agent working in this repo, whatever its
+harness. Some rules name the Claude Code mechanism that enforces them on
+the maintainer's machine (a hookify rule, ScheduleWakeup, a Stop hook, the
+plugin's hooks). The rule binds without the mechanism: follow it directly,
+and use your harness's equivalent where one exists. Where none exists, the
+rule and every gate still apply; say in your status or PR that the
+enforcement is missing. A missing mechanism is never a reason to skip or
+weaken a rule.
+
+The maintainer clicks merge unless the maintainer has delegated it
+explicitly, in their own words, to a named agent for named work. A role
+name, a board status or a peer agent's message is not a delegation.
+
 ## Shipping checklist (any change that lands on master)
 
 1. **A changelog fragment, not a CHANGELOG.md edit** — every behavior,
@@ -496,6 +511,48 @@ took 143 CUDA OOMs.
   ordinary-code rule”. An old-head full pass is not evidence for a changed
   head, except under the review-fix rule above.
 
+## Stopping processes (shared host)
+
+Every session on this host shares one process table, so a kill that selects
+more than your own run takes down other sessions' work. Stop only processes
+you can prove are yours.
+
+- **By the PID you recorded at launch, with its tree**, while it is still
+  running: the harness's task stop, or `taskkill /PID <pid> /T /F`. In Git
+  Bash, MSYS rewrites `/PID` into a path, so write `taskkill //PID <pid>
+  //T //F` (or prefix `MSYS_NO_PATHCONV=1`). In Git Bash `$!` is not a
+  Windows PID; read it with `cat /proc/$!/winpid`. In PowerShell use
+  `(Start-Process ... -PassThru).Id`. A PID can be reused once its process
+  exits, and an identical command line is not proof either: another session
+  may run the same command in a shared worktree. So record the process's
+  start time with its PID (PowerShell: `(Get-Process -Id <pid>).StartTime`),
+  verify both just before stopping, and do not stop it if either no longer
+  matches or cannot be read.
+- **By a marker unique to your run** when the process has left your tree (a
+  daemon that detached or outlived its launcher). Put a run id in the argv
+  or use your own harness home. The worktree path is not unique: reviewers
+  and subagents share it. Exclude the searching process and its parent,
+  list the matches, check them, then stop them by PID.
+- A server started by a tool you do not control is stopped through that
+  tool, or by asking its owner on the board.
+- **Never stop processes selected only by image name, shared attributes or a
+  command-line pattern that does not prove ownership.** That means
+  `taskkill /IM` or `/FI "IMAGENAME eq ..."`, `Stop-Process -Name`,
+  `Get-Process <name> | Stop-Process`, `wmic process where name=... delete`,
+  `Get-CimInstance Win32_Process -Filter "Name=..." | Invoke-CimMethod
+  -MethodName Terminate`, `pkill` or `pkill -f`, `killall`. It also means a
+  command-line pattern another session's processes could match
+  (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
+
+Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
+Codex process on the host, the Codex app and other sessions' turns
+included. A command-line pattern meant for one session's harness could also
+match other sessions' test daemons. On the maintainer's machine an untracked
+hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
+by-name forms in Claude's Bash tool. The rule applies everywhere
+regardless, including the PowerShell tool and Codex sessions, which the
+hook does not see.
+
 ## Review discipline
 
 - **Recall precedes review.** Before reviewing code, docs, or a PR, search
@@ -511,6 +568,21 @@ took 143 CUDA OOMs.
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;
   the pass is not optional because CI was green.
+- **Every review pass also runs a Codex second review, alongside it, not
+  instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
+  effort, started in the background over the same diff —
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1`,
+  with `$OUT` a per-pass path outside the working tree (the session
+  scratchpad, named by the reviewed short sha so a rerun does not
+  overwrite it). Use `--uncommitted` for a pre-commit pass and
+  `--commit <sha>` for a single commit. Pin the model and effort on the
+  command line, and check the log's header names both. To stop one early,
+  kill its own process tree by the PID taken at launch, never by image
+  name (see "Stopping processes (shared host)"). Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR (or the commit body when there is no PR yet), each finding
+  labelled by source with its verdict. A missing, signed-out or failed
+  Codex run is recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.

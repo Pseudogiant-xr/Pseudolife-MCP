@@ -1,7 +1,9 @@
 //! GET /api/search ranking over the resident bank (spec S1-S19):
 //! `ContinuumMemorySystem.retrieve` (`memory/cms.py:740-1760`).
 
-use crate::bank::{Bank, DIM, Entry};
+#[cfg(test)]
+use crate::bank::DIM;
+use crate::bank::{Bank, Entry};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -112,7 +114,7 @@ fn recency_weight(now: f64, ts: f64, half_life: f64) -> f64 {
 }
 
 fn cosine(bank: &Bank, idx: usize, q: &[f32]) -> f32 {
-    bank.matrix[idx * DIM..(idx + 1) * DIM]
+    bank.matrix[idx * bank.dim..(idx + 1) * bank.dim]
         .iter()
         .zip(q)
         .map(|(a, b)| a * b)
@@ -689,7 +691,7 @@ fn slot_text(v: Option<&Value>) -> String {
     match v {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Null) | None => "None".into(),
-        Some(other) => other.to_string(),
+        Some(other) => crate::pyjson::py_str(other),
     }
 }
 
@@ -853,6 +855,11 @@ mod tests {
     fn entry(id: i64, text: &str, source: &str, superseded: bool) -> Entry {
         Entry {
             id,
+            embedding: vec![0.0; DIM],
+            surprise_value: 0.0,
+            reinforcements: 0,
+            last_logical_turn: None,
+            dream_state: None,
             band: "flat".into(),
             stored_band: "flat".into(),
             text: text.into(),
@@ -938,7 +945,11 @@ mod tests {
             entries.push(entry(id, t, s, sup));
             matrix.extend(unit(cos));
         }
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let r = rank(&bank, &unit(1.0), &params("", 6), None);
         // 6 (superseded digest) never surfaces; 2 duplicates 1; 5 is under the floor;
         // 3 ranks 0.765, 4 ranks 0.5225.
@@ -966,6 +977,7 @@ mod tests {
             "+"
         ])];
         let bank = Bank {
+            dim: DIM,
             entries: vec![e],
             matrix: unit(0.0),
         };
@@ -1014,7 +1026,11 @@ mod tests {
         let mut matrix = unit(0.9);
         matrix.extend(unit(0.0));
         matrix.extend(unit(0.0));
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let mut p = params("zeta_token", 8);
         p.bm25_enabled = true;
         let r = rank(&bank, &unit(1.0), &p, None);
@@ -1049,7 +1065,11 @@ mod tests {
         ];
         let mut matrix = unit(0.5);
         matrix.extend(unit(0.9));
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let mut p = params("when did the deploy happen", 8);
         p.timeline_enabled = true;
         let r = rank(&bank, &unit(1.0), &p, None);
@@ -1062,7 +1082,11 @@ mod tests {
         let entries = vec![entry(1, "a", "x", false), entry(2, "b", "assistant", false)];
         let mut matrix = unit(0.9);
         matrix.extend(unit(0.8));
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let mut p = params("", 8);
         p.fusion_rrf = true;
         let r = rank(&bank, &unit(1.0), &p, None);
@@ -1085,7 +1109,11 @@ mod tests {
         let entries = vec![entry(1, "a", "x", false), entry(2, "b", "x", false)];
         let mut matrix = unit(0.9);
         matrix.extend(unit(0.8));
-        let bank = Bank { entries, matrix };
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
         let mut p = params("q", 8);
         p.rerank_enabled = true;
         let ce = Fixed(vec![0.0, 1.0]);
@@ -1112,6 +1140,7 @@ mod tests {
         ];
         entries[3].ts = 2.5;
         let bank = Bank {
+            dim: DIM,
             entries,
             matrix: vec![0.0; 4 * DIM],
         };

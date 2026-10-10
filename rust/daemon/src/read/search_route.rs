@@ -301,35 +301,38 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         })
         .await??;
 
-    let db = ready.storage.client();
-    let mut body = Map::new();
-    body.insert("query".into(), json!(req.query));
-    body.insert("count".into(), json!(entries_out.len()));
-    let best = direct_scores
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
-    let low = direct_scores.is_empty() || (floor > 0.0 && best < floor);
-    body.insert("low_confidence".into(), json!(low));
-    match chronicle::events_for(db, &req.query).await {
-        Ok(Some(ev)) => {
-            body.insert("events".into(), Value::Array(ev.events));
-            if let Some(t) = ev.total {
-                body.insert("events_total".into(), json!(t));
+    crate::txn::with_client(ready.storage.client(), |db| async move {
+        let mut body = Map::new();
+        body.insert("query".into(), json!(req.query));
+        body.insert("count".into(), json!(entries_out.len()));
+        let best = direct_scores
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let low = direct_scores.is_empty() || (floor > 0.0 && best < floor);
+        body.insert("low_confidence".into(), json!(low));
+        match chronicle::events_for(db, &req.query).await {
+            Ok(Some(ev)) => {
+                body.insert("events".into(), Value::Array(ev.events));
+                if let Some(t) = ev.total {
+                    body.insert("events_total".into(), json!(t));
+                }
             }
+            Ok(None) => {}
+            Err(e) => return Err(e),
         }
-        Ok(None) => {}
-        Err(e) => return Err(e),
-    }
-    let mut params_json = params_json;
-    params_json["contiguity_neighbors"] = json!(n_ctg);
-    let event_id = if cfg.retrieval_log_enabled && !crate::mutants::active("search-skip-event") {
-        log_event(db, &req, &entries_out, &served_comps, &params_json).await
-    } else {
-        None
-    };
-    body.insert("entries".into(), Value::Array(entries_out));
-    Ok(Searched { body, event_id })
+        let mut params_json = params_json;
+        params_json["contiguity_neighbors"] = json!(n_ctg);
+        let event_id = if cfg.retrieval_log_enabled && !crate::mutants::active("search-skip-event")
+        {
+            log_event(db, &req, &entries_out, &served_comps, &params_json).await
+        } else {
+            None
+        };
+        body.insert("entries".into(), Value::Array(entries_out));
+        Ok(Searched { body, event_id })
+    })
+    .await
 }
 
 /// `_log_retrieval_event` (service.py:5892-5946): never fails the search.
@@ -446,7 +449,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
 /// The search and the cortex-first block, under the service lock.
 async fn finish(svc: Arc<Service>, ready: Arc<Ready>, req: Request, raw_q: String) -> Response {
     // Held across the search and the cortex block, as `service._lock` is.
-    let _guard = crate::read::db_guard().lock().await;
+    let _guard = crate::read::search_guard().lock().await;
     let mut out = match run(&svc, &ready, req).await {
         Ok(s) => s,
         Err(e) => return json_response(500, &json!({"error": e.to_string()})),
@@ -513,7 +516,7 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
         count_access: false,
         header_session: None,
     };
-    let _guard = crate::read::db_guard().lock().await;
+    let _guard = crate::read::search_guard().lock().await;
     if let Err(e) = run(svc, ready, req).await {
         eprintln!("warmup search failed: {e}");
     }

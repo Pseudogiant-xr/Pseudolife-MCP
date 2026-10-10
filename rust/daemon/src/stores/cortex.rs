@@ -337,6 +337,10 @@ fn json_strings(v: Option<Value>) -> Vec<String> {
 /// index rebuild. A row whose vector is not 1024-dim refuses, as
 /// `_refuse_on_stale_hydrated_dims` does at service init.
 pub async fn hydrate(client: &Client) -> Result<CortexStore> {
+    crate::txn::with_client(client, |client| async move { hydrate_locked(client).await }).await
+}
+
+async fn hydrate_locked(client: &Client) -> Result<CortexStore> {
     let rows = client
         .query(
             "SELECT id, entity, attribute, entity_norm, attribute_norm, value, polarity, \
