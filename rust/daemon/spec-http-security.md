@@ -45,6 +45,12 @@ release artifact. The same 71 cases exercise six source controls through the
 existing release `mutants,graph-harness` artifact. Golden replay uses recorded
 Python responses; no security refusal is declared away.
 
+Both OS CLI shards also run the 61 remote-policy cases using a debug mutants
+artifact produced by the Rust job after its build-configuration checks. The
+shards depend on both artifact producers and never rebuild the daemon. The
+default static, release mutants, stdio and graph artifacts retain their roles;
+the separately downloaded debug fixture enables only the guarded loopback test.
+
 The two remote scenarios require the debug mutants artifact on each OS. The
 harness probes its capability before database allocation or either daemon
 launch. It then gives both daemons the configured remote policy host while
