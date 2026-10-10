@@ -36,6 +36,8 @@ import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[2]
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
     import embedding
@@ -44,7 +46,6 @@ import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 
-REPO = HERE.parents[2]
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
                     "x-frame-options", "referrer-policy", "x-content-type-options", "x-pl-board")
@@ -64,7 +65,8 @@ HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_err
 NOT_IMPLEMENTED = "not_implemented"
 MUTANTS = ["del-unescaped", "auth-candidate-order", "serde-json-writer", "skip-relation-seed", "skip-lease-epoch", "drop-alter-tail", "pair-ignores-origin",
            "health-omits-db", "route-405-as-404", "body-limit-off", "tokenless-maintainer-open",
-           "no-backoff"]
+           "no-backoff", "static-redirect", "static-no-csp", "static-traversal-open", "static-wrong-type",
+           "static-json-whitespace", "static-string-prefix"]
 
 T_DEFAULT = "tok-default-w1a-0001"
 T_ALICE = "tok-alice-w1a-0002"
@@ -74,7 +76,7 @@ T_COLON = "tok:with:colons-0003"
 # ---- HTTP ---------------------------------------------------------------------------
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
-         timeout: float = 120.0) -> dict:
+         timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False) -> dict:
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
@@ -85,9 +87,10 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     c.endheaders(body)
     r = c.getresponse()
     raw = r.read()
-    hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED}
+    hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
+            or (compare_length and k.lower() == "content-length")}
     ctype = hdrs.get("content-type", "")
-    if ctype.startswith("application/json"):
+    if ctype.startswith("application/json") and not body_bytes:
         try:
             payload = {"json": json.loads(raw), "raw": raw.decode("utf-8")}
         except ValueError:
@@ -259,6 +262,8 @@ class Scenario:
     seed_entries = False
     settle = True          # wait until both report db + embedder
     hold_lease = False     # take each bank's writer lease before the daemons start
+    unreachable_database = False  # HTTP-only cases never initialize storage/models
+    loopback_bind_fixture = False
     files: dict[str, str] = {}  # extra files in each data dir
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
@@ -268,6 +273,13 @@ class Scenario:
 
     def prepare_template(self, dsn: str) -> None:
         """Seed the template bank through Python's own write paths."""
+
+    def prepare_home(self, home: Path) -> dict[str, str]:
+        """Optional per-arm files/environment, confined to the disposable home."""
+        return {}
+
+    def cleanup_home(self, home: Path) -> None:
+        """Restore fixture permissions before a later pass removes the home."""
 
     def cases(self) -> list[dict]:
         return []
@@ -544,6 +556,7 @@ class DbDown(Scenario):
     and the stored-principal view never loads."""
     name = "db-down"
     settle = False
+    unreachable_database = True
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
@@ -620,7 +633,8 @@ class Reaper(Scenario):
 def assert_disposable(conn) -> None:
     """The server's own name for this database must be a disposable one
     before the harness alters or deletes anything in it."""
-    name = conn.execute("SELECT current_database()").fetchone()[0]
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    name = assert_disposable_database(conn)
     if not pg.DISPOSABLE_NAME.fullmatch(name):
         raise RuntimeError(f"refusing to modify non-disposable database {name!r}")
 
@@ -659,8 +673,9 @@ class DimMismatch(Scenario):
 
 
 class StampedBank(Scenario):
-    """A current bank stamped schema 99 with a non-numeric lease epoch."""
+    """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
+    settle = False
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -674,7 +689,20 @@ class StampedBank(Scenario):
             conn.execute("DELETE FROM relations WHERE name = 'uses'")
 
     def cases(self):
-        return [case("health on stamped bank", "GET", "/health")]
+        c = case("health on stamped bank", "GET", "/health")
+        c["future_schema_refusal"] = True
+        return [c]
+
+    def timeline(self, procs, holders):
+        if "python" in procs:
+            wait_settled([procs["python"].port])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            answer = call(procs["rust"].port, "GET", "/health")
+            if answer.get("json", {}).get("init_refusal"):
+                return self.cases()
+            time.sleep(0.1)
+        raise RuntimeError("future-schema Rust startup did not refuse")
 
 
 class SeededBank(Scenario):
@@ -947,6 +975,7 @@ class MapOrderReversed(MapOrder):
 class TrustBind(Scenario):
     """Tokenless on 0.0.0.0, allowed by PSEUDOLIFE_MCP_TRUST_BIND."""
     name = "trust-bind"
+    loopback_bind_fixture = True
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_TRUST_BIND": "On"}
@@ -956,20 +985,159 @@ class TrustBind(Scenario):
                 case("browser gate still applies", "GET", "/api/nope", [("Host", "evil.example")])]
 
 
+class StaticBuild(Scenario):
+    """Every file in the committed Console build, with no storage/model dependency."""
+    name = "static-build"
+    settle = False
+    unreachable_database = True
+    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+
+    def cases(self):
+        root = REPO / "pseudolife_memory" / "web" / "static"
+        assert not (root / "next").exists(), "the oracle has no /ui/next build"
+        c = [case("root " + method, method, "/") for method in ("GET", "POST", "PUT")]
+        c += [case("static " + path, "GET", path) for path in
+              ("/ui", "/ui/", "/ui/assets/", "/ui/next/", "/ui/graph/view",
+               "/ui/%2e%2e/pyproject.toml", "/ui/../pyproject.toml", "/ui/a%00b")]
+        c += [case("built " + p.relative_to(root).as_posix(), "GET",
+                   "/ui/" + urllib.parse.quote(p.relative_to(root).as_posix()))
+              for p in sorted(root.rglob("*")) if p.is_file()]
+        c += [case("static " + method, method, "/ui/theme.js") for method in ("POST", "HEAD")]
+        return c
+
+
+class StaticPaths(StaticBuild):
+    name = "static-paths"
+
+    def prepare_home(self, home):
+        root = home / "static"
+        (root / "sub").mkdir(parents=True)
+        for name, body in {"index.html": b"shell", "notice.txt": b"notice",
+                           "sub/index.html": b"directory", "image.svg": b"<svg/>",
+                           "data.json": b'{"a": 1}', "unknown.pl_http_unknown": b"opaque"}.items():
+            (root / name).write_bytes(body)
+        outside = home / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_bytes(b"outside")
+        sibling = home / "static-x"
+        sibling.mkdir()
+        (sibling / "secret.txt").write_bytes(b"sibling")
+        # Junctions are available without Windows symlink privileges. File
+        # symlinks are exercised on Linux; both arms get the same fixtures.
+        if os.name == "nt":
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "escape"), str(outside)],
+                           check=True, capture_output=True)
+        else:
+            (root / "escape").symlink_to(outside, target_is_directory=True)
+            (root / "notice.js").symlink_to(root / "notice.txt")
+            (root / "loop-a").symlink_to("loop-b")
+            (root / "loop-b").symlink_to("loop-a")
+            (root / "unreadable.txt").write_bytes(b"unreadable")
+            (root / "unreadable.txt").chmod(0)
+            (root / "linked-index").mkdir()
+            (root / "linked-index" / "index.html").symlink_to(outside / "secret.txt")
+            (root / "unsearchable").mkdir()
+            (root / "unsearchable" / "child.txt").write_bytes(b"hidden")
+            (root / "unsearchable").chmod(0)
+        return {"PL_HARNESS_STATIC_DIR": str(root), "PSEUDOLIFE_DAEMON_STATIC_DIR": str(root)}
+
+    def cases(self):
+        paths = ["/ui/", "/ui/sub", "/ui/sub/", "/ui/missing", "/ui/image.svg",
+                 "/ui/data.json", "/ui/unknown.pl_http_unknown", "/ui/../outside/secret.txt",
+                 "/ui/%2e%2e/outside/secret.txt", "/ui/escape/secret.txt",
+                 "/ui/escape/missing", "/ui/escape/../static/index.html",
+                 "/ui/escape/../index.html"]
+        paths += ["/ui/../static-x/secret.txt", "/ui/%2e%2e%2fstatic-x%2fsecret.txt",
+                  "/ui/%2e%2e%5cstatic-x%5csecret.txt", "/ui/%2f__pl_http_outside%2ffile",
+                  "/ui/%5c__pl_http_outside%5cfile", "/ui/notice.txt.", "/ui/notice.txt%20",
+                  "/ui/C:index.html", "/ui/C:%5c__pl_http_outside%5cfile",
+                  "/ui/%5c%5c127.0.0.1%5cpl_http_missing_share%5cfile",
+                  "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
+        paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
+                  "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
+        odd_segments = (".. .", ".. ..", "... ", ".... ", ". .")
+        paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
+        if os.name != "nt":
+            paths += ["/ui/notice.js", "/ui/loop-a", "/ui/unreadable.txt",
+                      "/ui/linked-index", "/ui/linked-index/index.html"]
+            paths.append("/ui/unsearchable/child.txt")
+        out = [case("path " + p, "GET", p) for p in paths]
+        if os.name == "nt":
+            for c in out:
+                if c["path"] == "/ui/C:index.html":
+                    c["refusal_policy"] = "lexical-outside-root"
+                if "..%20/" in c["path"]:
+                    c["refusal_policy"] = "parent-space-refusal"
+                if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
+                    c["refusal_policy"] = "parent-space-refusal"
+        else:
+            for c in out:
+                if c["path"] == "/ui/linked-index":
+                    c["refusal_policy"] = "directory-index-containment"
+        return out
+
+    def cleanup_home(self, home):
+        if os.name != "nt":
+            blocked = home / "static" / "unsearchable"
+            if blocked.exists():
+                blocked.chmod(0o700)
+
+
+class StaticMissing(StaticPaths):
+    name = "static-missing"
+
+    def prepare_home(self, home):
+        env = super().prepare_home(home)
+        (home / "static" / "index.html").unlink()
+        return env
+
+    def cases(self):
+        return [case("no index " + p, "GET", p) for p in ("/ui", "/ui/", "/ui/missing", "/ui/sub")]
+
+
+class StaticRootLink(StaticPaths):
+    name = "static-root-link"
+
+    def prepare_home(self, home):
+        super().prepare_home(home)
+        (home / "serve").mkdir()
+        alias = home / "serve" / "console"
+        if os.name == "nt":
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(alias), str(home / "static")],
+                           check=True, capture_output=True)
+        else:
+            alias.symlink_to(home / "static", target_is_directory=True)
+        return {"PL_HARNESS_STATIC_DIR": str(alias), "PSEUDOLIFE_DAEMON_STATIC_DIR": str(alias)}
+
+    def cases(self):
+        out = [case("linked root " + p, "GET", p) for p in
+                ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
+                 "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
+        if os.name != "nt":
+            for c in out:
+                if "/../" in c["path"] or "%2e%2e" in c["path"]:
+                    c["refusal_policy"] = "lexical-outside-root"
+        return out
+
+
 SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, ExtractorConfigured,
                                   DbDown, LeaseHeld, Reaper, DimMismatch, StampedBank, SeededBank,
                                   TrustBind, NullEmbedding, UnconstrainedDims, DbLost, Encodings,
-                                  MapOrder, MapOrderReversed)}
+                                  MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
+                                  StaticRootLink)}
 
 
 # ---- running ---------------------------------------------------------------------------
 
 def rust_env(extra: dict[str, str]) -> dict[str, str]:
     out = dict(extra)
-    for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT"):
+    for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_MUTANT",
+                "PSEUDOLIFE_DAEMON_ORT_THREADS"):
         if os.environ.get(key):
             out[key] = os.environ[key]
-    out["PSEUDOLIFE_DAEMON_STATIC_DIR"] = str(REPO / "pseudolife_memory" / "web" / "static")
+    out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(REPO / "pseudolife_memory" / "web" / "static"))
     return out
 
 
@@ -1010,6 +1178,31 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c.get("refusal_policy") in {"lexical-outside-root", "directory-index-containment", "parent-space-refusal"}:
+        sys.path.insert(0, str(REPO))
+        from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
+        headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}
+        headers.update({"content-type": "text/plain", "cache-control": "no-store", "content-length": "9"})
+        want = {"status": 403, "headers": headers, "bytes": "forbidden"}
+        row["substitution"] = c["refusal_policy"]
+        row["diffs"] = diff_values(want, rs)
+        return row
+    if c.get("future_schema_refusal"):
+        from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+        row["declared"] = "future-schema refusal: Python downgrades; Rust preserves the bank"
+        body = rs.get("json", {})
+        message = body.get("init_refusal", "")
+        if rs["status"] != 503 or body.get("status") != "degraded" \
+                or "99" not in message or str(SCHEMA_META_VERSION) not in message \
+                or "newer than" not in message or "db" in body:
+            row["diffs"].append("Rust must refuse future schema 99 before opening storage")
+        if py is not None and (py["status"] != 200 or py.get("json", {}).get("db") != "ok"):
+            row["diffs"].append("Python oracle must retain its recorded downgrade behavior")
+        for header, expected in [("content-type", "application/json; charset=utf-8"),
+                                 ("cache-control", "no-store"), ("x-content-type-options", "nosniff")]:
+            if rs["headers"].get(header) != expected:
+                row["diffs"].append(f"future-schema refusal has incorrect {header}")
+        return row
     if c["declared"]:
         row["declared"] = c["declared"]
         want = {"error": NOT_IMPLEMENTED, "path": urllib.parse.unquote(c["path"].split("?")[0])}
@@ -1034,6 +1227,12 @@ def compare_case(c: dict, py: dict | None, rs: dict) -> dict:
 
 
 def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+    if scn.loopback_bind_fixture:
+        import subprocess
+        probe = subprocess.run([str(binary)], capture_output=True, timeout=10,
+                               env=daemons.base_env(root, {"PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES": "1"}))
+        if probe.returncode != 0 or probe.stdout.strip() != b"true":
+            raise RuntimeError("trust-bind requires a debug --features mutants binary: refuse before any wildcard listener")
     tag = scn.name.replace("-", "_")
     template = f"{pg.PREFIX}{tag}_t"
     dsn_t = pg.create(template)
@@ -1043,7 +1242,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     before = dbstate.dump(dsn_t)
     dbs = {"python": f"{pg.PREFIX}{tag}_py", "rust": f"{pg.PREFIX}{tag}_rs"}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
-    if scn.name == "db-down":
+    if scn.unreachable_database:
         dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/{pg.PREFIX}down" for k in dsns}
     procs = {}
     holders = take_leases(list(dsns.values())) if scn.hold_lease else []
@@ -1052,26 +1251,41 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             home = daemons.make_home(root, f"{tag}-py", scn.config_yaml)
             for name, text in scn.files.items():
                 (home / "data" / name).write_text(text, encoding="utf-8")
-            procs["python"] = daemons.python_daemon(home, daemons.free_port(),
-                                                    daemons.base_env(home, common_env(scn, dsns["python"])))
+            env = common_env(scn, dsns["python"])
+            env.update(scn.prepare_home(home))
+            if scn.loopback_bind_fixture:
+                env["PL_HARNESS_LOOPBACK_BIND"] = "1"
+            procs["python"] = daemons.python_daemon(home, daemons.free_port(), daemons.base_env(home, env))
         home = daemons.make_home(root, f"{tag}-rs", scn.config_yaml)
         for name, text in scn.files.items():
             (home / "data" / name).write_text(text, encoding="utf-8")
+        env = common_env(scn, dsns["rust"])
+        env.update(scn.prepare_home(home))
+        if scn.loopback_bind_fixture:
+            env["PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND"] = "1"
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
-                                            daemons.base_env(home, rust_env(common_env(scn, dsns["rust"]))))
+                                            daemons.base_env(home, rust_env(env)))
         for d in procs.values():
             d.start(240)
         if scn.settle:
             wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"))
         rows = []
-        golden = load_golden(scn.name) if mode == "golden" else None
+        golden_name = scn.name
+        if scn.name in {"static-build", "static-paths", "static-root-link"}:
+            golden_name += "-windows" if os.name == "nt" else "-linux"
+        golden = load_golden(golden_name) if mode == "golden" else None
         cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
             else:
-                py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"]) if "python" in procs else golden["responses"][i]
-                rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"])
+                # The empty root redirect is chunked by uvicorn, fixed-length
+                # by hyper. Static entities use fixed lengths in both arms.
+                compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
+                py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild)) if "python" in procs else golden["responses"][i]
+                rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
+                            compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild))
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
                     if type(scn).prepare_template is not Scenario.prepare_template:
@@ -1084,7 +1298,9 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         release(holders)
         for d in procs.values():
             d.stop()
+            scn.cleanup_home(d.cwd)
     states, scrubbed = {}, {}
+    unchanged_diffs = []
     if scn.name != "db-down":
         sides = dbs if mode != "golden" else {"rust": dbs["rust"]}
         for side, name in sides.items():
@@ -1092,16 +1308,28 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             out = scrub_declared_rows(raw, before)
             states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
             scrubbed[side] = out["declared"]
+            if isinstance(scn, StaticBuild):
+                # Static serving has no bank writes. Compare the complete
+                # catalog/rows to this arm's pre-start state, rather than pin
+                # the fixture server's template extensions into its golden.
+                changes = dbstate.diff(before, raw)
+                unchanged_diffs += [f"{side} changed bank: {d}" for d in changes]
+                states[side] = {"unchanged_from_before": not changes}
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
+    if scn.name == "stamped":
+        # This declared divergence has an independent postcondition: Rust
+        # must leave every row/catalog entry identical to the prepared bank.
+        db_diffs = dbstate.diff(dbstate.normalize(before, DB_NONDETERMINISTIC, before), states["rust"])
+    db_diffs += unchanged_diffs
     # A template seeded at record time holds run-specific values (pairing
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
     seeded_template = type(scn).prepare_template is not Scenario.prepare_template
     if mode == "golden" and golden.get("db_state") and not seeded_template:
-        db_diffs = dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
+        db_diffs += dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if record:
-        save_golden(scn.name, rows, states.get("python"))
+        save_golden(golden_name, rows, states.get("python"))
     for name in [template, *dbs.values()]:
         pg.drop(name)
     return result
@@ -1162,7 +1390,25 @@ def run_refusals(binary: Path, root: Path) -> list[dict]:
 
 
 def load_golden(name: str) -> dict:
-    return json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    data = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    if name.startswith("static-build-"):
+        for c, response in zip(StaticBuild().cases(), data["responses"], strict=True):
+            platform_static_type(c, response)
+    return data
+
+
+def platform_static_type(c: dict, response: dict) -> None:
+    """Replay the oracle's two platform MIME mappings, leaving bytes exact."""
+    if response["status"] != 200 or not c["path"].endswith((".webp", ".md")):
+        return
+    sys.path.insert(0, str(REPO))
+    from pseudolife_memory.web.api import mimetypes
+    kind = mimetypes.guess_type(c["path"])[0] or "application/octet-stream"
+    if kind.startswith("text/") and "charset" not in kind:
+        kind += "; charset=utf-8"
+    response["headers"]["content-type"] = kind
+    response["headers"]["cache-control"] = ("max-age=86400" if kind.startswith(("font/", "image/"))
+                                             else "no-store")
 
 
 def _machine_paths() -> list[str]:
@@ -1234,6 +1480,9 @@ def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["schema"]:
+        import schema_cases
+        return schema_cases.main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "embedding":
         import embedding
         return embedding.main(sys.argv[2:])

@@ -64,6 +64,12 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
+      - name: Check generated daemon schema
+        working-directory: .
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/gen_schema_sql.py --check
+          exit $LASTEXITCODE
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
@@ -128,6 +134,23 @@ jobs:
       - name: Nextest without default features
         run: cargo nextest run --locked --all-targets --no-default-features -j 4
 
+      - name: Daemon override build configurations
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
+          $daemonDefaultLog = Join-Path $env:RUNNER_TEMP 'daemon-default-override.log'
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonDefaultLog
+          $result = $LASTEXITCODE
+          Get-Content $daemonDefaultLog
+          if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonDefaultLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          $daemonReleaseLog = Join-Path $env:RUNNER_TEMP 'daemon-release-override.log'
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonReleaseLog
+          $result = $LASTEXITCODE
+          Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
+          Get-Content $daemonReleaseLog
+          if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+
   candidate:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Candidate / ${{ matrix.os }}
@@ -150,7 +173,14 @@ jobs:
           workspaces: rust
           shared-key: shim-release
       - name: Build candidate
-        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+        run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
+      - name: Retain default static candidate
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $daemonName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
       - name: Build embedding candidate
         run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness -j 3
       - uses: actions/upload-artifact@v4
@@ -161,6 +191,8 @@ jobs:
             rust/target/release/pseudolife-stdio.exe
             rust/target/release/pseudolife-daemon
             rust/target/release/pseudolife-daemon.exe
+            rust/target/release/pseudolife-daemon-static
+            rust/target/release/pseudolife-daemon-static.exe
             rust/target/release/graph-contract
             rust/target/release/graph-contract.exe
           if-no-files-found: error
@@ -176,7 +208,9 @@ jobs:
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
         suite: [eval, cli, judges]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
+    # Allow twice that whole-job estimate, including artifact retention.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
         with:
@@ -205,7 +239,7 @@ jobs:
           path: rust/target/release
       - name: Restore executable permission
         if: runner.os == 'Linux'
-        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon
+        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon rust/target/release/pseudolife-daemon-static
       - name: Bind the event-selected Python oracle
         shell: pwsh
         env:
@@ -270,6 +304,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      - name: Daemon static HTTP parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PL_STATIC_DEFAULT_BIN = $candidate
+          python -m pytest -q rust/daemon/harness/test_static.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon static parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-static-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-static-*.json
+          if-no-files-found: warn
       - name: Restore graph store executable permission
         if: matrix.suite == 'cli' && runner.os == 'Linux'
         run: chmod +x rust/target/release/graph-contract
@@ -301,6 +358,20 @@ jobs:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Daemon schema startup parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon schema parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-schema-parity-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-schema-parity.json
+          if-no-files-found: error
       - name: Retain graph store outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
@@ -311,6 +382,28 @@ jobs:
             ${{ runner.temp }}/graph-store-golden.json
             ${{ runner.temp }}/graph-read-live.json
             ${{ runner.temp }}/graph-read-golden.json
+          if-no-files-found: error
+      - name: Daemon resident startup parity
+        if: matrix.suite == 'cli'
+        # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
+        # about 13 minutes in total; allow twice that validation duration.
+        timeout-minutes: 26
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') -Raw).Trim()
+          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon resident startup parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-startup-parity-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-startup-parity.json
+            ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
+            ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
