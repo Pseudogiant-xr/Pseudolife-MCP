@@ -34,6 +34,62 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+def test_login_file_inherited_everyone_grant_is_a_difference():
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    project = test_login._acl_projection
+    secure = project("O:<me>D:P(A;;FA;;;OW)")
+    exposed = project("O:<me>D:P(A;;FA;;;OW)(A;ID;FR;;;WD)")
+    assert compare.diff(obs(db={"file_acl": secure}), obs(db={"file_acl": exposed}), ())
+
+
+@pytest.mark.parametrize("marker", ["unreadable", "unconvertible", "unconvertible-owner"])
+def test_login_acl_capture_failure_is_refused(tmp_path, monkeypatch, marker):
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    path = tmp_path / "login"
+    path.write_bytes(b"fixture")
+    monkeypatch.setattr(test_login, "WINDOWS", True)
+    monkeypatch.setattr(test_login, "_sddl", lambda p: marker)
+    with pytest.raises(ValueError, match="ACL capture"):
+        test_login._permissions(path)
+
+
+@pytest.mark.parametrize("marker", ["unreadable", "unconvertible", "unconvertible-owner"])
+def test_login_acl_capture_failure_cannot_be_recorded(tmp_path, marker):
+    from cli_harness import runner  # noqa: PLC0415
+    path = tmp_path / "g.json"
+    with pytest.raises(SystemExit, match="ACL capture"):
+        runner.write_golden(path, {"cases": {"probe": obs(db={"file_acl": marker})}})
+    assert not path.exists()
+
+
+def test_foreign_trustee_fresh_rebinding_cannot_be_recorded(tmp_path, monkeypatch):
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    projections = []
+    for rid in (1001, 1002):
+        monkeypatch.setattr(test_login, "_SID_SYMBOLS", {})
+        sid = "S-1-5-21-" + f"100-200-300-{rid}"
+        projections.append(test_login._acl_projection(f"O:<me>D:P(A;;FR;;;{sid})"))
+    # Fresh processes assign the same encounter symbol to different trustees.
+    assert projections[0] == projections[1]
+    path = tmp_path / "g.json"
+    with pytest.raises(SystemExit, match="unbound ACL identity"):
+        runner.write_golden(path, {"cases": {"probe": obs(db={"file_acl": projections[0]})}})
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("acl", ["unreadable", "unconvertible", "unconvertible-owner",
+                                 {"owner": "<sid-1>", "protected": True, "aces": []}])
+def test_invalid_acl_golden_cannot_be_replayed(monkeypatch, acl):
+    from cli_harness import runner  # noqa: PLC0415
+    def unexpected_run(*args):
+        raise AssertionError("invalid golden must be refused before an arm runs")
+    monkeypatch.setattr(core, "run_arm", unexpected_run)
+    with pytest.raises(SystemExit, match="refusing golden"):
+        runner.run_row("test_login", [core.Case("probe", [])], None, object(),
+                       {"cases": {"probe": obs(db={"file_acl": acl})}}, False)
+
+
 def test_verbose_diff_printing_survives_a_legacy_console_encoding(monkeypatch):
     import io  # noqa: PLC0415
     from cli_harness import runner  # noqa: PLC0415
@@ -51,7 +107,7 @@ def test_verbose_diff_printing_survives_a_legacy_console_encoding(monkeypatch):
     assert any("\u0444" in line for line in results["first"]["detail"])
 
 
-def test_windows_acl_capture_drops_inherited_aces_but_keeps_explicit_rights(tmp_path, monkeypatch):
+def test_windows_acl_capture_only_directories_drop_inherited_aces(tmp_path, monkeypatch):
     from cli_harness.rows import test_login  # noqa: PLC0415
     path = tmp_path / "login"
     path.write_bytes(b"fixture")
@@ -59,10 +115,63 @@ def test_windows_acl_capture_drops_inherited_aces_but_keeps_explicit_rights(tmp_
     sid = "S-1-5-21-100-200-300-1001"
     monkeypatch.setattr(test_login, "_sddl", lambda p:
                         f"O:<me>D:PAI(A;;FA;;;OW)(A;OICIID;FA;;;{sid})")
-    captured = test_login._permissions(path)
+    captured = test_login._permissions(path, directory=True)
     assert captured == {"owner": "<me>", "protected": True, "aces": ["(A;;FA;;;OW)"]}
+    assert len(test_login._permissions(path)["aces"]) == 2
     monkeypatch.setattr(test_login, "_sddl", lambda p: "O:BAD:P(A;;FR;;;OW)")
     assert test_login._permissions(path) != captured
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
+def test_windows_hand_edited_login_fixture_has_bound_private_acl(tmp_path, monkeypatch):
+    from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    from pseudolife_memory.credentials import _windows_owner_only  # noqa: PLC0415
+    monkeypatch.setattr(test_login, "_seed_login", lambda *args, **kwargs: None)
+    body = b"invalid byte: \xff"
+    test_login._hand_edited(body)(SimpleNamespace(home=tmp_path), None)
+    path = tmp_path / test_login.LOGIN_REL
+    assert path.read_bytes() == body
+    with path.open("rb") as handle:
+        assert _windows_owner_only(handle.fileno())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
+def test_native_login_file_inherited_everyone_grant_is_a_difference(tmp_path):
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+    from cli_harness.rows import test_login  # noqa: PLC0415
+    from pseudolife_memory.credentials import _secure_windows_file, _windows_owner_only  # noqa: PLC0415
+    path = tmp_path / "login"
+    path.write_bytes(b"fixture")
+    _secure_windows_file(path)
+    with path.open("rb") as handle:
+        assert _windows_owner_only(handle.fileno())
+    before = test_login._permissions(path)
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                       ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    convert.restype = wintypes.BOOL
+    apply = advapi.SetFileSecurityW
+    apply.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    apply.restype = wintypes.BOOL
+    free = ctypes.windll.kernel32.LocalFree
+    free.argtypes = [ctypes.c_void_p]
+    free.restype = ctypes.c_void_p
+    descriptor = ctypes.c_void_p()
+    sddl = f"O:{test_login._my_sid()}D:P(A;;FA;;;OW)(A;ID;FA;;;WD)"
+    assert convert(sddl, 1, ctypes.byref(descriptor), None)
+    try:
+        assert apply(str(path), 0x80000005, descriptor)  # owner and protected DACL
+    finally:
+        free(descriptor)
+    with path.open("rb") as handle:
+        assert not _windows_owner_only(handle.fileno())
+    after = test_login._permissions(path)
+    assert compare.diff(obs(db={"file_acl": before}), obs(db={"file_acl": after}), ())
+    assert after["protected"]
+    assert "(A;ID;FA;;;WD)" in after["aces"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")

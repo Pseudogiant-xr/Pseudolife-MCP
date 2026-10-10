@@ -543,19 +543,35 @@ _CREDENTIAL_PRESCREEN = (b"ghp_", b"github_pat_", b"akia", b"xox", b"sk-ant-")
 _ALLOWED_CREDENTIAL_PLACEHOLDERS = (b"xoxb-your-slack-token",)
 # Account/domain and cloud SIDs identify a recording environment. Only the
 # established synthetic credential fixture is sanctioned, as an exact match.
-_ACCOUNT_SID_PAT = re.compile(rb"\bs-1-(?:[0-9]+-)+[0-9]+(?![0-9]|-[0-9])")
-_ALLOWED_ACCOUNT_SIDS = (b"s-1-5-21-100-200-300-1001",
-                         # Existing short, synthetic task-XML fixture identities.
-                         b"s-1-5-21-" + b"123", b"s-1-5-21-" + b"999")
-# Well-known authority/alias SIDs and bare account namespace names carry no
-# environment identity. These are exact values, never a prefix exemption.
-_WELL_KNOWN_SIDS = (b"s-1-0-0", b"s-1-1-0", b"s-1-3-0", b"s-1-3-1", b"s-1-3-4",
-                    b"s-1-5-11", b"s-1-5-18", b"s-1-5-19", b"s-1-5-20",
-                    b"s-1-5-32-544", b"s-1-5-32-545", b"s-1-5-32-546",
-                    b"s-1-5-21", b"s-1-12-1")
+_ACCOUNT_SID_PAT = re.compile(
+    rb"\bs-1-(?:5-21-[0-9]+-[0-9]+-[0-9]+(?:-[0-9]+)*|12-1-(?:[0-9]+-)*[0-9]+)"
+    rb"(?![0-9]|-[0-9])")
+_ALLOWED_ACCOUNT_SIDS = (b"s-1-5-21-100-200-300-1001",)
+# Fixed COMPOUNDED_AUTHENTICATION and CLAIMS_VALID markers, not domain identities:
+# https://learn.microsoft.com/openspecs/windows_protocols/ms-dtyp/81d92bba-d22b-4a8c-908a-554ab29148ab
+_WELL_KNOWN_ACCOUNT_SHAPED_SIDS = (b"s-1-5-21-" + b"0-0-0-496",
+                                  b"s-1-5-21-" + b"0-0-0-497")
 # C0 controls other than tab/LF/CR. NUL is excluded here because files
 # containing it are treated as binary and skipped before this runs.
 _CONTROL_BYTE_PAT = re.compile(rb"[\x01-\x08\x0b\x0c\x0e-\x1f]")
+
+
+@pytest.mark.parametrize("sid", [b"s-1-5-2", b"s-1-5-4", b"s-1-5-6", b"s-1-5-7",
+                                 b"s-1-16-4096", b"s-1-16-8192", b"s-1-16-12288",
+                                 b"s-1-5-32-547", b"s-1-15-2-1"])
+def test_identifier_guard_accepts_well_known_sid_classes(sid):
+    hits = []
+    _scan_identifiers("fixture", sid, hits)
+    assert not hits
+
+
+@pytest.mark.parametrize("suffix, rejected", [(b"0-0-0-496", False), (b"0-0-0-497", False),
+                                             (b"0-0-1-496", True), (b"0-0-0-496-999", True),
+                                             (b"0-0-0-497-999", True)])
+def test_identifier_guard_claim_markers_are_exact_exceptions(suffix, rejected):
+    hits = []
+    _scan_identifiers("fixture", b"s-1-5-21-" + suffix, hits)
+    assert bool(hits) is rejected
 
 
 def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
@@ -563,7 +579,8 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
     if any(n in low for n in _IDENT_NEEDLES):
         hits.append((rel, "needle"))
         return
-    if b"s-1-" in low and any(m.group(0) not in (*_ALLOWED_ACCOUNT_SIDS, *_WELL_KNOWN_SIDS)
+    if b"s-1-" in low and any(m.group(0) not in (*_ALLOWED_ACCOUNT_SIDS,
+                                              *_WELL_KNOWN_ACCOUNT_SHAPED_SIDS)
                               for m in _ACCOUNT_SID_PAT.finditer(low)):
         hits.append((rel, "environment-specific account SID"))
         return
@@ -656,7 +673,7 @@ def test_tracked_tree_carries_no_maintainer_identifiers(
     (b"O:S-1-5-32-544D:AI", False),
     (b"S-1-5-21-" + b"111-222-333-444", True),
     (b"S-1-12-1-" + b"11-22-33-44", True),
-    (b"S-1-" + b"9-11-22-33", True),
+    (b"S-1-" + b"9-11-22-33", False),
     (b"S-1-5-21-100-200-300-1001" + b"-999", True),
 ])
 def test_identifier_scan_rejects_account_sids_except_exact_synthetic_fixtures(value, rejected):
