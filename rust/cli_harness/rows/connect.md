@@ -217,6 +217,11 @@ Every deferral below happens before any request, except the last item.
   causes a DIFF, even if the command wrote the final marker itself; recording
   refuses a failed projection. Only this Windows
   golden case was re-recorded; its other recorded cases remain intact.
+  The snapshot key is derived from the same resolved image used for containment,
+  against the fixed home captured before the command, so Windows short-path
+  aliases select the recorded file. Refusals retain each filesystem predicate,
+  capture/hash checks and sanitized path-relation flags; diff text includes
+  these checks and the seeded/captured hashes without host paths.
 - Each arm gets `TEMP`/`TMP`/`TMPDIR` = `<home>/tmp` (under the default
   temp root, same ACLs). The oracle runs its handshake child and the shim
   under it from `tempfile.gettempdir()` with that directory first on
