@@ -345,6 +345,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
           exit $LASTEXITCODE
+
+      - name: Daemon body admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python -m pytest -q rust/daemon/harness/test_body_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon body parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-body-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-body-*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4

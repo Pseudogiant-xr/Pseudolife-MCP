@@ -40,6 +40,7 @@ PARITY_CHECKS = {
 
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
+    "Daemon body admission parity": "cli",
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -52,12 +53,17 @@ def commands(script):
     result = []
     for line in script.splitlines():
         line = line.strip()
-        if not line.startswith(("python ", "cargo ", "& cargo ", "& $oraclePython ")):
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
+            # PowerShell here-string delimiters are not standalone commands.
             continue
-        words = shlex.split(line, comments=True)
-        if words[0] == "&":
+        if words and words[0] == "&":
             words = words[1:]
-        result.append(words)
+        if words and words[0] == "cargo.exe":
+            words[0] = "cargo"
+        if words and words[0] in ("python", "cargo", "$oraclePython"):
+            result.append(words)
     return result
 
 
@@ -130,6 +136,13 @@ def check_executable_coverage(jobs):
                         ("--record", "--mutants"))
     require_command(static, ("python", "-m", "pytest"), ("rust/daemon/harness/test_static.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in static)
+    body = commands(parity["Daemon body admission parity"]["run"])
+    for mode in ("live", "golden"):
+        require_command(body, ("python", "rust/daemon/harness/run.py", mode),
+                        ("--rust-bin", "--only", "body-limits", "body-view-open", "body-pair-budget", "body-text-window", "--out"),
+                        ("--record", "--mutants"))
+    require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in body)
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
@@ -430,6 +443,8 @@ def test_principal_commands_use_the_downloaded_candidate(monkeypatch, old, new):
     "cargo +1.94.0 build --locked --release --bin pseudolife-daemon",
     "cargo --color never build --release --bin pseudolife-daemon",
     "& cargo build --release --bin pseudolife-daemon",
+    "& 'cargo' build --manifest-path rust/Cargo.toml --release --bin pseudolife-daemon",
+    "cargo.exe build --manifest-path rust/Cargo.toml --release --bin pseudolife-daemon",
 ])
 def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
     changed = copy.deepcopy(workflow())
