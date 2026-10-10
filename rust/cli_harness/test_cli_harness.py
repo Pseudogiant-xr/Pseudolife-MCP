@@ -34,6 +34,33 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.parametrize("directory", ["bank/backups", "bank/mybk"])
+@pytest.mark.parametrize("kind,extension", [("state", "tar.gz"), ("memory", "sql.gz")])
+def test_backup_mode_paths_use_each_arms_validated_timestamp(directory, kind, extension):
+    from cli_harness.rows import backup  # noqa: PLC0415
+    start = 1_790_000_000
+    names = [time.strftime(f"{directory}/pseudolife_lite_{kind}-%Y%m%d-%H%M%S.{extension}",
+                           time.localtime(start + offset)) for offset in (0, 2)]
+    a = obs(window=[start, start + 0.1], modes={names[0]: "0o600"})
+    b = obs(window=[start + 2, start + 2.1], modes={names[1]: "0o600"})
+    assert compare.diff(a, b, backup.RULES) == []
+    # Timestamp substitution must preserve permissions and reject stale names.
+    b["modes"][names[1]] = "0o644"
+    assert compare.diff(a, b, backup.RULES)
+    b["modes"] = {names[0]: "0o600"}
+    assert compare.diff(a, b, backup.RULES)
+
+
+def test_backup_mode_path_collisions_remain_visible():
+    from cli_harness.rows import backup  # noqa: PLC0415
+    start = 1_790_000_000
+    names = [time.strftime("bank/backups/pseudolife_lite_state-%Y%m%d-%H%M%S.tar.gz",
+                           time.localtime(start + offset)) for offset in (0, 1)]
+    a = obs(window=[start, start + 1], modes={names[0]: "0o600"})
+    b = obs(window=[start, start + 1], modes=dict.fromkeys(names, "0o600"))
+    assert compare.diff(a, b, backup.RULES)
+
+
 def test_login_file_inherited_everyone_grant_is_a_difference():
     from cli_harness.rows import test_login  # noqa: PLC0415
     project = test_login._acl_projection
