@@ -234,10 +234,24 @@ async fn posix_execve_keeps_kernel_elf_shebang_and_session_setup() {
 }
 
 fn executable(path: &Path, body: &str) {
+    #[cfg(windows)]
     std::fs::write(path, body).unwrap();
+    // Linux refuses to exec a file anyone holds open for writing (ETXTBSY),
+    // and a child another test forks while this process writes the fixture
+    // keeps a duplicate of the descriptor until its own exec. A shell writes
+    // it instead, so no descriptor of this process ever names the file.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        assert!(
+            Command::new("/bin/sh")
+                .args(["-c", "printf '%s' \"$2\" > \"$1\"", "sh"])
+                .arg(path)
+                .arg(body)
+                .status()
+                .unwrap()
+                .success()
+        );
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 }
