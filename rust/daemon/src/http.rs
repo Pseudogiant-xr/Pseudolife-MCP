@@ -593,10 +593,17 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
     }
     if path == "/" {
         let mut r = Response::new(Body::empty());
-        *r.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+        *r.status_mut() = if crate::mutants::active("static-redirect") {
+            StatusCode::FOUND
+        } else {
+            StatusCode::TEMPORARY_REDIRECT
+        };
         r.headers_mut()
             .insert(header::LOCATION, HeaderValue::from_static("/ui/"));
         for (k, v) in static_files::SECURITY_HEADERS {
+            if k == "content-security-policy" && crate::mutants::active("static-no-csp") {
+                continue;
+            }
             r.headers_mut().insert(k, HeaderValue::from_static(v));
         }
         return r;
@@ -628,6 +635,9 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
             ),
         };
         for (k, v) in static_files::SECURITY_HEADERS {
+            if k == "content-security-policy" && crate::mutants::active("static-no-csp") {
+                continue;
+            }
             r.headers_mut().insert(k, HeaderValue::from_static(v));
         }
         return r;

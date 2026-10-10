@@ -11,9 +11,15 @@ description = "Contract-first Rust port of the Pseudolife memory daemon"
 name = "pseudolife-daemon"
 path = "src/main.rs"
 
+[[bin]]
+name = "graph-contract"
+path = "harness/graph_contract.rs"
+required-features = ["graph-harness"]
+
 [features]
 # Deliberate breaks for the harness mutant control; never in a release build.
 mutants = []
+graph-harness = []
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -35,3 +41,9 @@ form_urlencoded = "=1.2.2"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "=0.16.1"
 tokenizers = { version = "=0.21.4", default-features = false, features = ["fancy-regex"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
