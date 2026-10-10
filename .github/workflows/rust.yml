@@ -360,6 +360,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-golden.json')
           exit $LASTEXITCODE
+      - name: Daemon background pruning golden
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PL_HARNESS_SLICE = 'w3i'
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-background-harness'
+          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only sweep-pruning --no-refusals
+          exit $LASTEXITCODE
 
       - name: Daemon body admission parity
         if: matrix.suite == 'cli'

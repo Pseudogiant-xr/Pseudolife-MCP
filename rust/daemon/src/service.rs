@@ -23,6 +23,9 @@ pub struct Ready {
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<Bank>,
+    /// Lock order: Service.inner, then sessions, then the storage writer.
+    /// A holder of a later lock must never acquire an earlier one.
+    pub sessions: tokio::sync::Mutex<crate::background_sessions::Sessions>,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
@@ -48,6 +51,8 @@ struct Inner {
 }
 
 pub struct Service {
+    pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
+    pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
     pub env: DaemonEnv,
     pub data_dir: PathBuf,
@@ -74,6 +79,8 @@ impl Service {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
         Service {
+            session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
+            release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
             config,
             env,
             data_dir,
@@ -210,15 +217,22 @@ impl Service {
             });
         }
         let embedder = inner.embedder.clone().expect("embedder built above");
-        let candidate = crate::startup::candidate(
-            storage.client(),
-            &self.config.memory,
-            metadata,
-            embedder.embedding_dim(),
-        )
+        let candidate = async {
+            let (bank, startup) = crate::startup::candidate(
+                storage.client(),
+                &self.config.memory,
+                metadata,
+                embedder.embedding_dim(),
+            )
+            .await?;
+            let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
+                .await
+                .map_err(anyhow::Error::msg)?;
+            Ok::<_, anyhow::Error>((bank, startup, sessions))
+        }
         .await;
         match candidate {
-            Ok((bank, startup)) => {
+            Ok((bank, startup, sessions)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -230,6 +244,7 @@ impl Service {
                     storage,
                     embedder,
                     bank: Arc::new(bank),
+                    sessions: tokio::sync::Mutex::new(sessions),
                     startup: Arc::new(startup),
                 });
                 inner.ready = Some(ready.clone());
@@ -289,29 +304,19 @@ impl Service {
         )
     }
 
-    /// The session reaper's init retry (`mcp_server._session_reaper_loop`
-    /// calls `reap_idle_sessions`, which runs `_ensure_init` first): a
-    /// daemon whose warmup gave up still recovers with no client traffic.
-    /// Reaping sessions themselves belongs to the episode slice.
-    pub async fn reaper(self: Arc<Self>, every_s: f64) {
-        if !(every_s.is_finite() && every_s >= 0.0) {
-            return; // time.sleep raises in Python's thread: the reaper dies
-        }
-        loop {
-            tokio::time::sleep(Duration::from_secs_f64(every_s.max(0.001))).await;
-            if let Err(e) = self.ensure_init().await {
-                eprintln!("session reaper error: {e}");
-            }
-        }
-    }
-
     /// `MemoryService.warmup`: retry only a retryable failure whose window
     /// is still below the cap; anything else waits for the next caller.
-    pub async fn warmup(self: Arc<Self>) {
+    pub async fn warmup(&self, mut stop: tokio::sync::watch::Receiver<bool>) {
         loop {
-            match self.ensure_init().await {
+            if *stop.borrow() {
+                return;
+            }
+            match self.ensure_init_inner().await {
                 Ok(_) => return,
                 Err(e) => {
+                    if *stop.borrow() {
+                        return;
+                    }
                     eprintln!("warmup init failed: {e}");
                     let (wait, backoff) = {
                         let inner = self.inner.lock().await;
@@ -327,16 +332,158 @@ impl Service {
                     {
                         return;
                     }
-                    tokio::time::sleep(wait).await;
+                    tokio::select! {
+                        _ = stop.changed() => return,
+                        _ = tokio::time::sleep(wait) => {}
+                    }
                 }
             }
         }
     }
 }
 
+impl crate::background::Duties for Service {
+    fn sweep(&self) -> crate::background::Duty<'_> {
+        Box::pin(async {
+            if self.config.memory.compaction_enabled {
+                self.ensure_init_inner().await?;
+                // The current reader has no canonical resident stores.
+                // W2-E connects compaction_victims and its slot-rewrite API.
+            }
+            let inner = self.inner.lock().await;
+            let Some(storage) = &inner.storage else {
+                return Ok(());
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs_f64();
+            let runs =
+                crate::maintenance::prune_runs(storage.client(), self.config.dream.runs_keep, now)
+                    .await?;
+            let retrieval = crate::maintenance::prune_retrieval(
+                storage.client(),
+                now - self.config.memory.retrieval_retention_days * 86400.0,
+            )
+            .await?;
+            drop(inner);
+            if runs > 0 || retrieval > 0 {
+                eprintln!("sweep maintenance: runs_pruned={runs} retrieval_pruned={retrieval}");
+            }
+            // The W3-H automatic-dream adapter runs after all maintenance.
+            Ok(())
+        })
+    }
+    fn autosave(&self) -> crate::background::Duty<'_> {
+        Box::pin(async {
+            // The current read-only bank has no unsaved mutable state.
+            // W2-E supplies the changed-state persistence operation when
+            // its writer lands; scheduling and exit ownership live here.
+            Ok(())
+        })
+    }
+
+    fn warmup(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
+        Box::pin(async {
+            Service::warmup(self, stop).await;
+            Ok(())
+        })
+    }
+
+    fn reap(&self, idle_seconds: f64) -> crate::background::Duty<'_> {
+        Box::pin(async move {
+            let ready = self.ensure_init_inner().await?;
+            // All session mutation is serialized with service operations.
+            let _service_lock = self.inner.lock().await;
+            let mut sessions = ready.sessions.lock().await;
+            let entries: Vec<_> = ready
+                .bank
+                .entries
+                .iter()
+                .filter_map(|e| {
+                    e.episode_id
+                        .as_ref()
+                        .map(|id| (id.clone(), e.ts, e.source.clone()))
+                })
+                .collect();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs_f64();
+            let result = sessions.reap_with_settings(
+                idle_seconds,
+                now,
+                &entries,
+                || {
+                    let resume = crate::background::seconds(
+                        std::env::var("PSEUDOLIFE_SESSION_RESUME_SECONDS").ok().as_deref(),
+                        21600.0,
+                    )?;
+                    let handles = crate::background::seconds(
+                        std::env::var("PSEUDOLIFE_HANDLE_RESUME_SECONDS").ok().as_deref(),
+                        2592000.0,
+                    ).unwrap_or_else(|_| {
+                        eprintln!("PSEUDOLIFE_HANDLE_RESUME_SECONDS is not a number; using the 30-day default");
+                        2592000.0
+                    });
+                    Ok((resume, handles))
+                },
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|t| t.as_secs_f64())
+                        .unwrap_or(now)
+                },
+            );
+            sessions.persist_reap(ready.storage.client(), &result).await;
+            drop(sessions);
+            drop(_service_lock);
+            if let Some(error) = result.failure {
+                return Err(error);
+            }
+            if result.fire_dream {
+                self.session_dream.fire();
+            }
+            if !result.session_keys.is_empty() || result.swept > 0 {
+                eprintln!("session reaper: idle sessions closed or swept");
+            }
+            Ok(())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shutdown_interrupts_warmup_retry_wait_without_another_init() {
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            "postgresql://nobody@127.0.0.1:9/pl_cf_w3i_unused".into(),
+            false,
+        ));
+        {
+            let mut inner = service.inner.lock().await;
+            inner.retry_at = Some(Instant::now() + Duration::from_secs(3600));
+            inner.failures = 1;
+            inner.backoff_s = 5.0;
+        }
+        service.update(|s| s.not_ready = Some("controlled retry refusal".into()));
+        let background = crate::background::Background::default();
+        background.start_background_durability(service.clone(), 3600.0);
+        tokio::task::yield_now().await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            background.shutdown(service.as_ref()),
+        )
+        .await
+        .expect("stop must interrupt the retry wait");
+        let inner = service.inner.lock().await;
+        assert_eq!(inner.failures, 1);
+        assert!(inner.storage.is_none());
+    }
 
     #[test]
     fn backoff_ladder_matches_python() {

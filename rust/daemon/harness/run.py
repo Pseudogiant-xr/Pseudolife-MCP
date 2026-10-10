@@ -24,6 +24,7 @@ and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` (the verified fp32 Qwen3 export).
 from __future__ import annotations
 
 import argparse
+import copy
 import http.client
 import json
 import os
@@ -53,12 +54,12 @@ HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-securi
 # (table, column) values that are wall-clock or random by construction.
 DB_NONDETERMINISTIC = {("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)"}
 # State only the Python side writes during init, owned by later slices. Kind
-# "row": a meta row by key; "table": every row; "sequence": its last_value.
+# "row": a new meta row by key; "warmup": one identified probe and its
+# matching sequence increment. Pre-existing primary keys are never waived.
 DB_DECLARED = [
     ("row", "meta", "dream_ack_secret_v1", "dream tracking init writes a random secret (W3-H)"),
     ("row", "meta", "curation_listing_spelling_v2", "the listing-spelling carry-over stamps the clock (W2-E)"),
-    ("table", "retrieval_events", None, "the warmup search logs a retrieval event (W2-D telemetry)"),
-    ("sequence", "retrieval_events_id_seq", None, "advanced by that retrieval event (W2-D telemetry)"),
+    ("warmup", "retrieval_events", None, "one warmup probe and its sequence increment (W2-D telemetry)"),
 ]
 # /health keys only Python can emit, owned by later slices (each is conditional there).
 HEALTH_DECLARED_ONLY_PYTHON = {"stall", "migration_partial", "dream_tracking_error",
@@ -295,6 +296,8 @@ class Scenario:
     loopback_bind_fixture = False
     read_only_bank = False
     files: dict[str, str] = {}  # extra files in each data dir
+    golden_replay = False
+    golden_db_state = False
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
         """Scenarios whose answers depend on time (lease, backoff, reaper):
@@ -313,6 +316,12 @@ class Scenario:
 
     def cases(self) -> list[dict]:
         return []
+
+    def normalize_db(self, state: dict, before: dict, side: str) -> dict:
+        return dbstate.normalize(state, DB_NONDETERMINISTIC, before)
+
+    def configure_daemons(self, procs: dict) -> None:
+        """Optional explicit dependency seams, declared by the scenario."""
 
 
 
@@ -818,6 +827,10 @@ print(json.dumps({
  "memory.bm25.enabled": b.enabled, "memory.bm25.k1": b.k1, "memory.bm25.b": b.b, "memory.bm25.weight": b.weight,
  "memory.bm25.top_n": b.top_n, "memory.bm25.min_score": b.min_score,
  "memory.reranker.enabled": c.memory.reranker.enabled, "memory.retrieval_log.enabled": c.memory.retrieval_log.enabled,
+ "memory.retrieval_log.retention_days": float(c.memory.retrieval_log.retention_days),
+ "memory.compaction.enabled": c.memory.compaction.enabled,
+ "memory.compaction.keep_per_slot": c.memory.compaction.keep_per_slot,
+ "memory.compaction.min_age_days": float(c.memory.compaction.min_age_days),
  "embedding.model_name": e.model_name, "embedding.device": e.device, "embedding.query_prefix": e.query_prefix,
  "embedding.max_seq_length": e.max_seq_length,
  "embedding.backend": e.backend,
@@ -1196,6 +1209,11 @@ SCENARIOS = {s.name: s for s in (Tokens, Tokenless, PairBudget, CustomConfig, Ex
                                   MapOrder, MapOrderReversed, StaticBuild, StaticPaths, StaticMissing,
                                   StaticRootLink, BodyLimits, BodyViewOpen, BodyPairBudget, BodyTextWindow)}
 
+from background_sessions import register as register_background_sessions
+SCENARIOS.update(register_background_sessions(sys.modules[__name__]))
+from background_maintenance import register as register_background_maintenance
+SCENARIOS.update(register_background_maintenance(sys.modules[__name__]))
+
 
 # ---- running ---------------------------------------------------------------------------
 
@@ -1304,6 +1322,16 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         if probe.returncode != 0 or probe.stdout.strip() != b"true":
             raise RuntimeError("trust-bind requires a debug --features mutants binary: refuse before any wildcard listener")
     tag = scn.name.replace("-", "_")
+    try:
+        return _run_scenario(scn, binary, root, mode, record)
+    finally:
+        # Only this scenario's three exact names, including seed failure.
+        for suffix in ("t", "py", "rs"):
+            pg.drop(f"{pg.PREFIX}{tag}_{suffix}")
+
+
+def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+    tag = scn.name.replace("-", "_")
     template = f"{pg.PREFIX}{tag}_t"
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
@@ -1335,6 +1363,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             env["PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND"] = "1"
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(env)))
+        scn.configure_daemons(procs)
         for d in procs.values():
             d.start(240)
         if scn.settle:
@@ -1348,6 +1377,8 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for i, c in enumerate(cases):
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
+                if py_r is None and mode == "golden":
+                    py_r, rs_r = golden["responses"][i], golden_scrub(rs_r)
             else:
                 # The empty root redirect is chunked by uvicorn, fixed-length
                 # by hyper. Static entities use fixed lengths in both arms.
@@ -1378,7 +1409,7 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
         for side, name in sides.items():
             raw = dbstate.dump(pg.dsn(name))
             out = scrub_declared_rows(raw, before)
-            states[side] = dbstate.normalize(out["state"], DB_NONDETERMINISTIC, before)
+            states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
             if scn.read_only_bank:
                 # Static serving has no bank writes. Compare the complete
@@ -1397,13 +1428,11 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
     seeded_template = type(scn).prepare_template is not Scenario.prepare_template
-    if mode == "golden" and golden.get("db_state") and not seeded_template:
+    if mode == "golden" and golden.get("db_state") and (not seeded_template or scn.golden_db_state):
         db_diffs += dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if record:
         save_golden(golden_name, rows, states.get("python"))
-    for name in [template, *dbs.values()]:
-        pg.drop(name)
     return result
 
 
@@ -1412,23 +1441,41 @@ def scrub_declared_rows(state: dict, before: dict) -> dict:
     only where they are NEW against the pre-start state ``before``; a change
     to or a deletion of an existing row is never scrubbed. The record is
     reported, never diffed."""
+    state = copy.deepcopy(state)
     declared = []
     for kind, table, key, why in DB_DECLARED:
-        if kind == "sequence":
-            prior = {r[1]: r for r in before["catalog"]["sequences"]}
-            for row in state["catalog"]["sequences"]:
-                # A sequence absent before the run (a fresh bank) started unused.
-                was = prior[table][5] if table in prior else None
-                if row[1] == table and row[5] != was:
-                    row[5] = was
-                    declared.append(f"sequence {table}: {why}")
-            continue
         t = state["rows"].get(f"public.{table}")
         if not t:
             continue
-        old = {json.dumps(r, sort_keys=True) for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
-        keep = [r for r in t["rows"]
-                if json.dumps(r, sort_keys=True) in old or (kind == "row" and r[0] != key)]
+        identity = t["columns"].index("key" if table == "meta" else "id")
+        old = {json.dumps(r[identity], sort_keys=True)
+               for r in before["rows"].get(f"public.{table}", {}).get("rows", [])}
+        new = [r for r in t["rows"] if json.dumps(r[identity], sort_keys=True) not in old]
+        if kind == "warmup":
+            # The oracle warmup runs search("warmup probe") once. A row alone
+            # does not excuse sequence drift: require exactly its one nextval,
+            # the original sequence definition, and no extra allocation.
+            sequence = table + "_id_seq"
+            prior = next((r for r in before["catalog"]["sequences"]
+                          if r[:2] == ["public", sequence]), None)
+            current = next((r for r in state["catalog"]["sequences"]
+                            if r[:2] == ["public", sequence]), None)
+            cols = t["columns"]
+            probes = [r for r in new if r[cols.index("query_text")] == "warmup probe"
+                      and r[cols.index("origin")] == "search"]
+            if len(probes) != 1 or current is None:
+                continue
+            # A fresh bank has no sequence until schema init, whose shipped
+            # BIGSERIAL definition is checked here before admitting id 1.
+            expected = prior or ["public", sequence, "bigint", 1, 1, None]
+            next_id = expected[3] if expected[5] is None else expected[5] + expected[4]
+            if current[:5] != expected[:5] or current[5] != next_id or probes[0][identity] != next_id:
+                continue
+            current[5] = expected[5]
+            keep = [r for r in t["rows"] if r is not probes[0]]
+        else:
+            keep = [r for r in t["rows"]
+                    if json.dumps(r[identity], sort_keys=True) in old or r[identity] != key]
         if len(keep) != len(t["rows"]):
             declared.append(f"{table}{'.' + key if key else ''}: {why}")
             t["rows"] = keep
@@ -1580,7 +1627,7 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
-            if mode == "golden" and type(scn).timeline is not Scenario.timeline:
+            if mode == "golden" and type(scn).timeline is not Scenario.timeline and not scn.golden_replay:
                 # Timing scenarios ask both daemons the same question at the
                 # same moment: live-only (README).
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)

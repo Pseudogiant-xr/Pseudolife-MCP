@@ -36,6 +36,9 @@ yaml-rust2.workspace = true
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"
 hex = "=0.4.3"
+indexmap = "=2.14.2"
+reqwest.workspace = true
+libc.workspace = true
 form_urlencoded = "=1.2.2"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "=0.16.1"

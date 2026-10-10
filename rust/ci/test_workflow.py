@@ -36,6 +36,7 @@ PARITY_CHECKS = {
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
     "CLI W1-C differential harness": "cli",
+    "Daemon background pruning golden": "cli",
     "Daemon static HTTP parity": "cli",
 
     "Daemon schema startup parity": "cli",
@@ -147,6 +148,13 @@ def check_executable_coverage(jobs):
                      "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
+    background = commands(parity["Daemon background pruning golden"]["run"])
+    require_command(background, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_background_harness.py",), PYTEST_FILTERS)
+    require_command(background, ("python", "rust/daemon/harness/run.py", "golden"),
+                    ("--rust-bin", "$candidate", "--only", "sweep-pruning", "--no-refusals"),
+                    ("--record", "--mutants"))
+
     static = commands(parity["Daemon static HTTP parity"]["run"])
     for mode in ("live", "golden"):
         require_command(static, ("python", "rust/daemon/harness/run.py", mode),
@@ -293,6 +301,8 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert "'pseudolife-daemon-static.exe'" in static["run"]
     assert "'pseudolife-daemon-static'" in static["run"]
 
+    background = next(s for s in job["steps"] if s.get("name") == "Daemon background pruning golden")
+    assert "Join-Path 'rust/target/release' $binaryName" in background["run"]
 
 def test_daemon_artifact_is_built_once_and_shared_with_graph():
     jobs = workflow()["jobs"]
@@ -335,10 +345,11 @@ def test_required_parity_gate_fails_closed(result):
     assert executed.returncode == (0 if result == "success" else 1), executed.stderr
 
 
-def test_coverage_guard_rejects_a_removed_check(monkeypatch):
+@pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
+def test_coverage_guard_rejects_a_removed_check(monkeypatch, name):
     changed = copy.deepcopy(workflow())
     steps = changed["jobs"]["parity-checks"]["steps"]
-    steps[:] = [s for s in steps if s.get("name") != "CLI lease differential harness"]
+    steps[:] = [s for s in steps if s.get("name") != name]
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
@@ -437,6 +448,9 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("CLI W1-C differential harness", "@golden --golden", "@golden"),
     ("CLI W1-C differential harness", "@live --candidate", "@live --skip-bank --candidate"),
     ("CLI W1-C differential harness", "$golden = $replayed |", "$golden = @('move') |"),
+    ("Daemon background pruning golden", "rust/daemon/harness/test_background_harness.py", ""),
+    ("Daemon background pruning golden", "sweep-pruning", "session-reap"),
+    ("Daemon background pruning golden", "run.py golden", "run.py golden --record"),
 ])
 def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())
