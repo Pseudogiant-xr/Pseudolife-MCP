@@ -48,6 +48,13 @@ name, a board status or a peer agent's message is not a delegation.
    `tests/test_migrate_embeddings.py`, and `python ops/gen_llms_txt.py`
    after any doc edit (`tests/test_llms_txt.py` pins the generated
    `llms-full.txt`). The v30 bump found the last two the hard way.
+   Any `schema.py` change (a bump or not) also regenerates the Rust
+   daemon's embedded schema plan, `python rust/daemon/harness/gen_schema_sql.py`
+   (`--check` must then pass), and re-records the schema startup golden
+   `rust/daemon/harness/goldens/schema-startup.json` through
+   `rust/daemon/harness/schema_ci.py --record-goldens`. The master ruleset
+   requires only the Python `test` job, so a schema PR can otherwise merge
+   while the Rust jobs are red.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an
