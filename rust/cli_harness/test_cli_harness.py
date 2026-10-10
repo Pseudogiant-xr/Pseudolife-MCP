@@ -34,6 +34,44 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+def test_transfer_default_name_normalizes_file_and_mode_keys_only_after_validation():
+    from cli_harness.rows import transfer  # noqa: F401, PLC0415 - registers rules
+    rule = ("transfer-default-name",)
+    now = 1791591851
+
+    def exported(moment, *, name=None, mode="0o600", content=b"archive", offset=0):
+        name = name or time.strftime("pseudolife-export-%Y%m%d-%H%M%S.zip",
+                                     time.gmtime(moment + offset))
+        return dict(obs(stdout=f"Exported to {name}\n".encode(),
+                        files={name: content}, window=[moment, moment + 0.1],
+                        modes={name: mode}), utc_offset=offset)
+
+    a, b = exported(now), exported(now + 1)
+    assert compare.diff(a, b, rule) == []
+    assert compare.diff(a, exported(now + 1, offset=11 * 3600), rule) == []
+    assert compare.diff(a, exported(now + 1, mode="0o644"), rule)
+    assert compare.diff(a, exported(now + 1, content=b"changed"), rule)
+    valid_name = next(iter(a["files"]))
+    for name in ("pseudolife-export-20261010-0324.zip",
+                 "pseudolife-export-20261310-032411.zip",
+                 "pseudolife-export-20261010-992411.zip",
+                 "prefix-" + valid_name,
+                 valid_name + ".extra",
+                 "pseudolife-export-20000101-000000.zip"):
+        bad = exported(now, name=name)
+        normalized = normalize.apply(bad, rule, None)
+        assert normalized["stdout"] == bad["stdout"]
+        assert list(normalized["files"]) == [name]
+        assert list(normalized["modes"]) == [name]
+        assert compare.diff(a, bad, rule)
+    # Renaming two keys to one must preserve the extra observed file/mode.
+    duplicate = exported(now)
+    other = time.strftime("pseudolife-export-%Y%m%d-%H%M%S.zip", time.gmtime(now + 1))
+    duplicate["files"][other] = "file:" + b64(b"archive")
+    duplicate["modes"][other] = "0o600"
+    assert compare.diff(a, duplicate, rule)
+
+
 def test_each_field_difference_is_reported():
     base = obs(stdout=b"a", stderr=b"e", files={"f": b"1"})
     assert compare.diff(base, obs(exit=1, stdout=b"a", stderr=b"e", files={"f": b"1"}), ())

@@ -103,6 +103,44 @@ def _minute_in(stamp: str, lo: float, hi: float, offset: int) -> bool:
                for t in range(int(lo) - 1, int(hi) + 2))
 
 
+_EXPORT_NAME = re.compile(rb"pseudolife-export-([0-9]{8}-[0-9]{6})\.zip")
+_EXPORT_SPAN = re.compile(rb"(?<![A-Za-z0-9_.-])" + _EXPORT_NAME.pattern
+                          + rb"(?![A-Za-z0-9_.-])")
+
+
+@rule("transfer-default-name")
+def transfer_default_name(obs: dict) -> None:
+    """Validate the default archive's exact name and local timestamp against
+    this arm's window before replacing it in stdout, file keys and mode keys.
+    File contents and mode values stay exact; collisions remain observable."""
+    def valid(match: re.Match) -> bool:
+        stamp = match.group(1).decode()
+        offset = obs.get("utc_offset")
+        return any(time.strftime("%Y%m%d-%H%M%S", time.localtime(t) if offset is None
+                                 else time.gmtime(t + offset)) == stamp
+                   for t in range(int(obs["window"][0]) - 1, int(obs["window"][1]) + 2))
+
+    def swap(match: re.Match) -> bytes:
+        return b"pseudolife-export-<ts>.zip" if valid(match) else match.group(0)
+
+    _put(obs, "stdout", _EXPORT_SPAN.sub(swap, _get(obs, "stdout")))
+    for field in ("files", "modes"):
+        if field not in obs:
+            continue
+        renamed: dict = {}
+        for rel, value in obs[field].items():
+            # A path component must have the complete default filename shape.
+            basename = re.split(r"[/\\]", rel)[-1]
+            match = _EXPORT_NAME.fullmatch(basename.encode())
+            new_rel = rel
+            if match and valid(match):
+                new_rel = rel[:-len(basename)] + "pseudolife-export-<ts>.zip"
+            while new_rel in renamed:
+                new_rel += " <normalized-collision>"
+            renamed[new_rel] = value
+        obs[field] = renamed
+
+
 @rule("episode-title-minute")
 def episode_title_minute(obs: dict) -> None:
     """The episode title's ``YYYY-MM-DD HH:MM`` stamp (session_title.py:103-109)

@@ -407,38 +407,6 @@ def transfer_zip(obs: dict) -> None:
         obs["files"][rel] = "file:" + base64.b64encode(canonical).decode()
 
 
-_DEFAULT_NAME = re.compile(rb"pseudolife-export-([0-9]{8}-[0-9]{6})\.zip")
-
-
-def _local_stamp_in_window(stamp: str, window, offset=None) -> bool:
-    def local(t):
-        return time.localtime(t) if offset is None else time.gmtime(t + offset)
-    return any(time.strftime("%Y%m%d-%H%M%S", local(t)) == stamp
-               for t in range(int(window[0]) - 1, int(window[1]) + 2))
-
-
-@normalize.rule("transfer-default-name")
-def transfer_default_name(obs: dict) -> None:
-    """The default ``--out`` name's local timestamp, validated against the
-    arm's window, in stdout and in the file paths."""
-    def swap(data: bytes) -> bytes:
-        def one(match: re.Match) -> bytes:
-            if _local_stamp_in_window(match.group(1).decode(), obs["window"],
-                                      obs.get("utc_offset")):
-                return b"pseudolife-export-<ts>.zip"
-            return match.group(0)
-        return _DEFAULT_NAME.sub(one, data)
-
-    obs["stdout"] = base64.b64encode(swap(base64.b64decode(obs["stdout"]))).decode()
-    files: dict = {}
-    for rel, value in obs["files"].items():
-        new_rel = swap(rel.encode()).decode()
-        while new_rel in files:
-            new_rel += " <normalized-collision>"
-        files[new_rel] = value
-    obs["files"] = files
-
-
 def _expect(line: str, keep_db: bool, oracle_shape):
     """Each arm's database is compared with its own pre-run dump: a seed
     written through the oracle's writers stamps wall-clock times, so the two

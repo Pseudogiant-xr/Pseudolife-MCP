@@ -125,7 +125,9 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
   candidate its crate version): rule `transfer-zip`.
 - The default archive name's timestamp: rule `transfer-default-name`,
   validated with the arm's own recorded UTC offset, so a golden recorded in
-  one time zone replays in another.
+  one time zone replays in another. The exact `pseudolife-export-YYYYMMDD-HHMMSS.zip`
+  filename shape is required; its timestamp is replaced in stdout, file keys
+  and mode keys, while contents and mode values remain exact.
 - An import case's input archive, which stays in the home, compares as
   members too (rule `transfer-zip`): its container bytes and version string
   are the setup's. The oracle-built input archives have `created_at` pinned
