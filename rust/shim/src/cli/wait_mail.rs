@@ -218,11 +218,11 @@ fn read_digest(path: &Path) -> io::Result<(Integer, Vec<u8>)> {
     }
     Ok((watermark, body))
 }
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn interruptible_read(path: &Path) -> io::Result<Vec<u8>> {
     interruptible_read_with(path, || INTERRUPTED.load(AtomicOrdering::Relaxed))
 }
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn interruptible_read_with(
     path: &Path,
     mut interrupted: impl FnMut() -> bool,
@@ -268,6 +268,33 @@ fn interruptible_read_with(
             Ok(size) => result.extend_from_slice(&buffer[..size]),
             Err(Errno::AGAIN) => (),
             Err(Errno::INTR) if !interrupted() => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+#[cfg(all(unix, not(target_os = "linux")))]
+fn interruptible_read(path: &Path) -> io::Result<Vec<u8>> {
+    // Keep blocking FIFO rendezvous on other Unix targets: an unconnected
+    // nonblocking FIFO can report readiness and EOF there before any writer.
+    // The lost-interrupt window before open/read remains until a portable
+    // strategy can distinguish that initial state from a writer closing.
+    use rustix::{
+        fs::{Mode, OFlags, open},
+        io::{Errno, read},
+    };
+    let file = loop {
+        match open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()) {
+            Err(Errno::INTR) if !INTERRUPTED.load(AtomicOrdering::Relaxed) => continue,
+            result => break result.map_err(io::Error::from)?,
+        }
+    };
+    let mut result = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match read(&file, &mut buffer) {
+            Ok(0) => return Ok(result),
+            Ok(size) => result.extend_from_slice(&buffer[..size]),
+            Err(Errno::INTR) if !INTERRUPTED.load(AtomicOrdering::Relaxed) => (),
             Err(error) => return Err(error.into()),
         }
     }
@@ -782,7 +809,7 @@ impl InterruptGuard {
         {
             // SAFETY: initialized sigaction values, static atomic-only handler,
             // and restoration of this process's prior disposition. No SA_RESTART:
-            // readiness polling returns EINTR promptly for owned cleanup.
+            // digest I/O can return EINTR promptly for owned cleanup.
             let previous = unsafe {
                 let mut action: libc::sigaction = std::mem::zeroed();
                 let mut previous: libc::sigaction = std::mem::zeroed();
@@ -1077,7 +1104,7 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn fifo_read_observes_interrupt_before_open_or_read() {
         use std::process::{Command, Stdio};
@@ -1153,7 +1180,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof() {
         use std::process::{Command, Stdio};
@@ -1161,14 +1188,16 @@ mod tests {
         const DELAYED: &str = "PSEUDOLIFE_TEST_FIFO_EOF_DELAYED";
         const RELEASED: &str = "released delayed writer after the reader returned";
         if let Some(path) = std::env::var_os(CHILD) {
-            let delayed = std::env::var(DELAYED).as_deref() == Ok("1");
+            let mode = std::env::var(DELAYED).unwrap();
+            let after_close = mode == "1";
+            let delayed_connection = mode == "2";
             let path = PathBuf::from(path);
             let writer_path = path.clone();
             let bytes = vec![b'p'; 10000];
             let sent = bytes.clone();
             let (release, startup) = std::sync::mpsc::channel();
             let writer = std::thread::spawn(move || {
-                if delayed {
+                if after_close || delayed_connection {
                     startup.recv().unwrap();
                 }
                 OpenOptions::new()
@@ -1180,9 +1209,14 @@ mod tests {
             let mut checks = 0;
             let result = interruptible_read_with(&path, || {
                 checks += 1;
-                (delayed && checks > 1) || Instant::now() >= deadline
+                // Check three follows a readiness wait with no writer connected.
+                // Release only then, so an early EOF fails complete delivery.
+                if delayed_connection && checks == 3 {
+                    release.send(()).unwrap();
+                }
+                (after_close && checks > 1) || Instant::now() >= deadline
             });
-            if delayed {
+            if after_close {
                 assert_eq!(
                     result.as_ref().unwrap_err().kind(),
                     io::ErrorKind::Interrupted
@@ -1206,7 +1240,7 @@ mod tests {
         )
         .unwrap();
         let mut results = Vec::new();
-        for delayed in [false, true] {
+        for mode in ["0", "1", "2"] {
             // Contain a writer that starts only after the reader has closed.
             let mut child = Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -1216,7 +1250,7 @@ mod tests {
                 ])
                 .env_clear()
                 .env(CHILD, &fifo)
-                .env(DELAYED, if delayed { "1" } else { "0" })
+                .env(DELAYED, mode)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -1232,14 +1266,14 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             let output = child.wait_with_output().unwrap();
-            results.push((delayed, forced, output));
+            results.push((mode, forced, output));
         }
         fs::remove_dir_all(home).unwrap();
-        for (delayed, forced, output) in results {
-            assert_eq!(forced, delayed, "{output:?}");
+        for (mode, forced, output) in results {
+            assert_eq!(forced, mode == "1", "mode={mode}: {output:?}");
             let text = String::from_utf8_lossy(&output.stdout);
             assert!(text.contains("running 1 test"), "{output:?}");
-            if delayed {
+            if mode == "1" {
                 assert!(text.contains(RELEASED), "{output:?}");
             } else {
                 assert!(output.status.success(), "{output:?}");
