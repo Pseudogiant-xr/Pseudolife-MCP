@@ -126,12 +126,25 @@ async fn attach(
     let pending = tokio::spawn(Board::attach_options(runtime, options));
     gate.wait().await;
     tokio::time::advance(startup + Duration::from_millis(1)).await;
-    let board = pending.await.unwrap();
+    // Keep time frozen while the expired startup timer runs. A later request
+    // timeout must not substitute for the startup deadline under test.
+    let finish_by = std::time::Instant::now() + Duration::from_secs(1);
+    while !pending.is_finished() && std::time::Instant::now() < finish_by {
+        tokio::task::yield_now().await;
+    }
+    let completed = pending.is_finished();
+    if !completed {
+        pending.abort();
+    }
     tokio::time::resume();
     drop(hold);
     clock.await.unwrap();
     gate.release();
-    board
+    assert!(
+        completed,
+        "attach did not finish at the frozen startup deadline"
+    );
+    pending.await.unwrap()
 }
 
 #[tokio::test]
@@ -167,7 +180,8 @@ async fn board_retry_slow_successful_attempt_registers_once() {
     // Cross the timer wheel's millisecond tick as well as the backoff deadline.
     tokio::time::advance(backoff + Duration::from_millis(1)).await;
     gate.wait().await;
-    // The successful registration exceeds the former 300 ms test budget.
+    // Pin the fixture budget: a successful 350 ms registration must still fit
+    // the production retry budget when only the backoff is accelerated.
     tokio::time::advance(Duration::from_millis(350)).await;
     tokio::task::yield_now().await;
     gate.release();
