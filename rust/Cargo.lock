@@ -1706,6 +1706,7 @@ dependencies = [
  "chrono",
  "form_urlencoded",
  "hex",
+ "libc",
  "ndarray",
  "ort",
  "percent-encoding",
@@ -1715,6 +1716,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "windows-sys 0.61.2",
  "yaml-rust2",
 ]
 

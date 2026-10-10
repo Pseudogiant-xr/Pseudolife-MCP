@@ -10,6 +10,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 |---|---|
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
 | `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `spec-http-static.md` | Root redirect, every committed Console asset, path containment, fallbacks and response headers |
 | `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
 | `divergences.md` | Everything the Rust daemon deliberately does not match yet, with the slice that owns each row |
 | `harness/` | The differential harness, its goldens and helpers |
@@ -49,6 +50,23 @@ the same moment and are live-only. It checks bank state only where the bank
 starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
+
+`--only static-build static-paths static-missing static-root-link` exercises the static layer
+without loading models: both daemons use an unreachable loopback DSN to
+isolate asset serving from bank startup. Set `PL_HARNESS_SLICE=http`
+for the HTTP slice's isolated database prefix. Static build and path goldens
+are platform-specific because Python's MIME database and path resolution
+differ between Windows and Linux. The six `static-*` source mutants check
+redirects, CSP, containment, component boundaries, content types and exact JSON file bytes.
+Golden replay gets WebP/Markdown MIME/cache expectations from the local Python
+MIME database; headers and file bytes are still compared exactly. Rust also
+refuses a directory index linked outside the static root, a named divergence.
+
+The existing `trust-bind` scenario requires a debug `--features mutants` binary.
+Its configured non-loopback host still passes through each daemon's original
+bind guard; only the fixture listener is overridden to `127.0.0.1`. The
+harness checks the binary capability before creating banks or starting it.
+Release builds cannot enable this listener override.
 
 The schema startup boundary has a separate mode in the same harness:
 
