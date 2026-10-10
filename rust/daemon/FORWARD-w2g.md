@@ -26,7 +26,7 @@ implementation while retaining current master's infrastructure.
 | `rust/daemon/harness/gen_schema_sql.py` | Master: preserve schema generation and history metadata. |
 | `rust/daemon/harness/pgdisposable.py` | Master: preserve shared foundation disposable-bank safeguards. W2-G has its own `mcp_run.py` namespace. |
 | `rust/daemon/harness/record_routes.py` | Master: retain current route and check-in recording. |
-| `rust/daemon/harness/run.py` | Master: retain foundation, startup, embedding and static acceptance cases. |
+| `rust/daemon/harness/run.py` | Master plus the W2-G authenticated MCP case: compare the served transport instead of requiring a 501 stub; retain tokenless 501 declarations and every other foundation/startup/embedding/static case. |
 | `rust/daemon/src/bank.rs` | Master: retain complete hydration, dimensions and writer seam. |
 | `rust/daemon/src/config.rs` | Master: retain current configuration parser and dump fixtures. |
 | `rust/daemon/src/embed.rs` | Master: retain current embedding artifact/runtime integration. |
@@ -82,7 +82,36 @@ The MCP spec and changelog now explicitly describe bearer-only mounting.
   their DSNs were unset. This is not a real-PG validation claim.
 - Windows `python -m pytest tests/test_rust_mcp_catalogue.py -q`, exit 0:
   2 passed; current Python catalogue values and tiers match recorded assets.
-- Linux build, crate tests, live differential, side configuration, mutation
-  control and publication scan: pending at this commit; results follow below.
+- Windows foundation harness regression: watched RED (1 failed, 1 passed,
+  exit 1) on the stale authenticated 501 declaration; after the single-case
+  correction, `python -m pytest rust/daemon/harness/test_mcp_mount.py -q`,
+  exit 0: 2 passed. An incorrect 501 authenticated answer and a non-501
+  tokenless answer both remain load-bearing failures.
+- Linux at `74ee4a39`: build with `--features mutants -j 3`, fmt check,
+  clippy with warnings denied, and crate tests all exit 0; 120 tests passed.
+  Optional real-PG unit tests were not configured in this first crate run.
+- Linux `mcp_run.py <binary> <out>` at `74ee4a39`, exit 0: 261 responses,
+  16 cases, zero diffs, all 37 unserved tool stubs checked. The comparison
+  includes exact tier-list bytes, tiers, stored-principal mappings, writer
+  headers, transport/session behavior and `memory_toolset`.
+- Linux `mcp_run.py ... --config2`, exit 0: 10 responses, zero diffs.
+- Linux `mcp_run.py ... --tokenless`, exit 1: 30 oracle responses and
+  8 reported diffs under the deliberate 501 boundary. The inherited future
+  policy corpus includes requests requiring a live MCP session, so its Rust
+  rebinding sequence stops early when initialize receives 501. This is a
+  declared limitation, not a passing parity claim.
+- `mcp-bare-host` is unreachable through the production tokenless mount;
+  its mutation control remains deferred with the tokenless policy. Four
+  authenticated controls and dedicated real-PG units are being completed.
+- Publication scan of `origin/master..rust-cf/w2g-fwd` at `74ee4a39`, exit 0.
+  Catalogue and goldens were not re-recorded; no oracle drift was observed
+  in authenticated MCP or the alternate configuration.
+
+## Evidence and handoff
+
+Private execution logs and JSON reports accompany the local handoff; they
+are not committed because they contain machine paths. The final handoff
+names their paths and the tested code commit. Review by the paused author
+is pending; this branch is a review candidate, not a publication decision.
 
 No deployment, full suite, GPU launch, public push or PR was performed.
