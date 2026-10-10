@@ -245,4 +245,51 @@ mod tests {
             vec!["1.1", "True", "None", "it's", "['a']", "{'k': 1}"]
         );
     }
+
+    #[test]
+    fn all_json_control_escapes_match_python() {
+        // web/api.py:103 uses json.dumps(default=str, ensure_ascii=True).
+        let value = json!({"key\n": "\0\u{1f} \u{7e}\u{7f}\u{80}\r\t\u{08}\u{0c}\\\""});
+        assert_eq!(
+            dumps(&value),
+            "{\"key\\n\": \"\\u0000\\u001f ~\\u007f\\u0080\\r\\t\\b\\f\\\\\\\"\"}"
+        );
+        assert_eq!(dumps(&json!([[], {}, "", false])), "[[], {}, \"\", false]");
+    }
+
+    #[test]
+    fn python_repr_preserves_nested_values_and_key_order() {
+        // cms.py:187-205 formats slot values with Python str().
+        let value = json!({"first": [false,null,"it's"], "second": {"quoted\"": "plain"}});
+        assert_eq!(
+            py_str(&value),
+            "{'first': [False, None, \"it's\"], 'second': {'quoted\"': 'plain'}}"
+        );
+        assert_eq!(py_str(&json!(false)), "False");
+        assert_eq!(py_str(&json!("it's\n")), "it's\n");
+        assert_eq!(py_str(&json!([])), "[]");
+        assert_eq!(py_str(&json!({})), "{}");
+    }
+
+    #[test]
+    fn float_json_allows_nonfinite_values_but_audit_codec_refuses_them() {
+        // web/api.py:103 uses json.dumps' default allow_nan=True;
+        // rust/shim/src/cli/board_audit/codec.rs:15 refuses nonfinite audit numbers.
+        for (value, expected) in [
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            assert_eq!(float_repr(value), expected);
+            assert!(shared_float::finite_float(value).is_err());
+        }
+        for (input, expected) in [
+            ("1e999", "Infinity"),
+            ("-1e999", "-Infinity"),
+            ("1e-999", "0.0"),
+        ] {
+            let value: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(dumps(&value), expected);
+        }
+    }
 }

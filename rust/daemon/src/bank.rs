@@ -516,4 +516,313 @@ mod startup_tests {
             "seating inherited the abandoned transaction"
         );
     }
+
+    #[test]
+    fn normalization_matches_python_epsilon_and_preserves_direction() {
+        // memory/miras/band.py:211-215 uses F.normalize(p=2, eps=1e-12).
+        for (mut vector, expected) in [
+            (vec![3.0, -4.0, 0.0], vec![0.6, -0.8, 0.0]),
+            (vec![0.0, 0.0], vec![0.0, 0.0]),
+            (vec![3e-14, 4e-14], vec![0.03, 0.04]),
+        ] {
+            normalize(&mut vector);
+            for (actual, expected) in vector.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-7, "{vector:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn stale_dimension_refusal_counts_rows_and_sorts_unique_dimensions() {
+        // service.py:1174-1190 counts rows separately from distinct dimensions.
+        assert!(refuse_stale_dims(vec![]).is_ok());
+        let error = refuse_stale_dims(vec![1024, 384, 384]).unwrap_err();
+        let refusal = error.downcast_ref::<StaleDims>().unwrap();
+        assert_eq!(refusal.count, 3);
+        assert_eq!(refusal.dims, vec![384, 1024]);
+        assert_eq!(
+            refusal.to_string(),
+            "3 hydrated row(s) embedded at the wrong dimension"
+        );
+    }
+
+    #[test]
+    fn retention_policies_match_python_scores_with_reinforcement() {
+        // memory/miras/retention.py:37-71 and protocols.py:84-103.
+        // Expected values evaluated with those Python functions, not this port.
+        let mut row = entry(1, 0.0);
+        row.ts = 100.0;
+        row.access_count = 3;
+        row.surprise_value = 0.123456789;
+        row.source = "tool_call".into();
+        row.reinforcements = 7;
+        for (policy, recent, old) in [
+            ("balanced", 3.5657539957098767, 2.0659623290432103),
+            ("surprise_heavy", 3.621309550759877, 2.12151788409321),
+            ("recency_heavy", 5.059292372736853, 3.9345811562598767),
+        ] {
+            for (now, expected) in [(99.0, recent), (101.0, recent), (7300.0, old)] {
+                assert!(
+                    (retention_score(&row, policy, now, 0.75) - expected).abs() < 1e-12,
+                    "{policy} {now}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn retention_source_weights_and_supersession_match_python() {
+        // memory/miras/protocols.py:27-44,84-103: boost follows source weighting.
+        let mut row = entry(1, 0.5);
+        row.access_count = 2;
+        row.ts = 90.0;
+        for (source, expected) in [
+            ("user_msg", 1.875),
+            ("user", 1.875),
+            ("system", 12.5),
+            ("tool_call", 0.625),
+            ("llm_thinking", 0.25),
+            ("assistant", 1.25),
+            ("unknown", 1.25),
+        ] {
+            row.source = source.into();
+            row.superseded_at = None;
+            assert_eq!(retention_score(&row, "balanced", 100.0, 0.0), expected);
+            row.superseded_at = Some(0.0);
+            assert_eq!(
+                retention_score(&row, "balanced", 100.0, 0.0),
+                expected * 0.05
+            );
+        }
+    }
+
+    #[test]
+    fn seating_preserves_ties_and_records_each_cascading_move() {
+        // storage/sync.py:113-126 and memory/cms.py:2022-2077.
+        let mut rows: Vec<Entry> = (1..=4).map(|id| entry(id, 0.5)).collect();
+        rows[3].stored_band = "deep".into();
+        let bands = [
+            StartupBandSpec {
+                name: "hot".into(),
+                max_entries: 1,
+                retention_policy: "balanced".into(),
+            },
+            StartupBandSpec {
+                name: "deep".into(),
+                max_entries: 1,
+                retention_policy: "balanced".into(),
+            },
+            StartupBandSpec {
+                name: "last".into(),
+                max_entries: 0,
+                retention_policy: "balanced".into(),
+            },
+        ];
+        let (seats, moves) = seating_plan(&rows, &bands, 100.0, 0.0);
+        assert_eq!(seats, vec![vec![2], vec![1], vec![3, 0]]);
+        assert_eq!(moves, vec![(0, 1), (1, 1), (3, 2), (0, 2)]);
+        assert_eq!(seating_plan(&[], &[], 100.0, 0.0), (vec![], vec![]));
+        let one_band = [StartupBandSpec {
+            name: "flat".into(),
+            max_entries: 0,
+            retention_policy: "balanced".into(),
+        }];
+        assert_eq!(
+            seating_plan(&rows, &one_band, 100.0, 0.0),
+            (vec![vec![0, 1, 2, 3]], vec![])
+        );
+    }
+
+    #[test]
+    fn hydration_clock_is_current_or_the_explicit_fixture_clock() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let actual = load_clock().unwrap();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        if std::env::var("PL_PGS_CASE").is_ok_and(|case| case == "zero-timestamp-seating") {
+            assert_eq!(actual, 1000.0);
+        } else {
+            assert!((before..=after).contains(&actual), "{actual}");
+        }
+    }
+
+    #[tokio::test]
+    async fn db_hydration_preserves_rows_vectors_and_seating_stamps() {
+        // storage/sync.py:82-103,107-149; service.py:1174-1190.
+        // startup_ci supplies a disposable database; no embedding model is loaded.
+        let Ok(dsn) = std::env::var("PL_PGS_MUTATION_DSN") else {
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|name| name.starts_with("pl_cf_pgs_"))
+        );
+        let (client, connection) = parsed.connect(tokio_postgres::NoTls).await.unwrap();
+        let connection_task = tokio::spawn(connection);
+        let actual: String = client
+            .query_one("SELECT current_database()", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert!(actual.starts_with("pl_cf_pgs_"));
+        // A session-local table mirrors load_entries' row types and permits stale vectors.
+        client
+            .batch_execute(
+                "CREATE TEMP TABLE entries (
+                id BIGINT PRIMARY KEY, band TEXT, text TEXT, embedding REAL[], surprise REAL,
+                ts DOUBLE PRECISION, access_count INTEGER, source TEXT,
+                superseded_at DOUBLE PRECISION, superseded_by_text TEXT, episode_id TEXT,
+                episode_title TEXT, tags JSONB, slots JSONB, authority TEXT,
+                distortion_tolerance TEXT, reinforcements INTEGER DEFAULT 0,
+                last_logical_turn INTEGER, dream_state TEXT);
+                INSERT INTO entries (id, band, text, embedding, surprise, ts, source) VALUES
+                (4, 'hot', 'four', ARRAY[5,0], 0.1, 100, 'unknown'),
+                (3, 'deep', 'three', ARRAY[0,0], 0.75, 700, NULL),
+                (2, 'hot', 'two', ARRAY[0,2], 0.5, 500, 'system'),
+                (1, 'retired', 'one', ARRAY[3,4], 0.25, 0, 'user');
+                UPDATE entries SET access_count=4, reinforcements=2,
+                last_logical_turn=7, dream_state='pending',
+                superseded_at=12.5, superseded_by_text='two', episode_id='episode',
+                episode_title='title', tags='[\"tag\",7,true]',
+                slots='[[\"entity\",\"attribute\",\"value\",\"+\"]]',
+                authority='observed', distortion_tolerance='constraint' WHERE id=1;",
+            )
+            .await
+            .unwrap();
+        let before = load_clock().unwrap();
+        let legacy = hydrate(&client, &["hot".into(), "deep".into()], 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            legacy.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        let first = &legacy.entries[0];
+        assert!((before..=load_clock().unwrap()).contains(&first.ts));
+        assert_eq!(
+            legacy.entries.iter().map(|e| e.ts).collect::<Vec<_>>(),
+            [first.ts, 500.0, 700.0, 100.0]
+        );
+        assert_eq!(first.stored_band, "retired");
+        assert_eq!(first.band, "hot");
+        assert_eq!(
+            legacy
+                .entries
+                .iter()
+                .map(|e| e.band.as_str())
+                .collect::<Vec<_>>(),
+            ["hot", "hot", "deep", "hot"]
+        );
+        assert_eq!(legacy.matrix, vec![0.6, 0.8, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(legacy.entries[2].source, "");
+        assert_eq!(legacy.entries[2].access_count, 0);
+        let mut expected = serde_json::json!({
+            "id": 1, "band": "hot", "text": "one", "embedding": [3.0,4.0],
+            "surprise": 0.25, "ts": first.ts, "access_count": 4,
+            "source": "user", "superseded_at": 12.5, "superseded_by_text": "two",
+            "episode_id": "episode", "episode_title": "title", "tags": ["tag",7,true],
+            "slots": [["entity","attribute","value","+"]], "authority": "observed",
+            "distortion_tolerance": "constraint", "reinforcements": 2,
+            "last_logical_turn": 7, "dream_state": "pending"
+        });
+        assert_eq!(legacy.entries_dump()[0], expected);
+        let stamp: String = client
+            .query_one("SELECT band FROM entries WHERE id=1", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(stamp, "hot");
+        client
+            .batch_execute("UPDATE entries SET band='retired' WHERE id=1")
+            .await
+            .unwrap();
+        let memory = MemoryConfig {
+            bands: vec!["hot".into(), "deep".into()],
+            band_specs: vec![
+                StartupBandSpec {
+                    name: "hot".into(),
+                    max_entries: 1,
+                    retention_policy: "balanced".into(),
+                },
+                StartupBandSpec {
+                    name: "deep".into(),
+                    max_entries: 1,
+                    retention_policy: "balanced".into(),
+                },
+            ],
+            ..MemoryConfig::default()
+        };
+        // A retired band needs a cosmetic stamp even when capacity causes no move.
+        let mut roomy = memory.clone();
+        for band in &mut roomy.band_specs {
+            band.max_entries = 10;
+        }
+        let (roomy_bank, stale) = hydrate_config(&client, &roomy, 2).await.unwrap();
+        assert!(stale.is_empty());
+        assert_eq!(roomy_bank.entries[0].id, 1);
+        assert_eq!(roomy_bank.entries[0].band, "hot");
+        let stamp: String = client
+            .query_one("SELECT band FROM entries WHERE id=1", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(stamp, "hot");
+        client
+            .batch_execute("UPDATE entries SET band='retired' WHERE id=1")
+            .await
+            .unwrap();
+        let (seated, stale) = hydrate_config(&client, &memory, 2).await.unwrap();
+        assert!(stale.is_empty());
+        assert_eq!(
+            seated.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [2, 3, 1, 4]
+        );
+        assert_eq!(seated.matrix, vec![0.0, 1.0, 0.0, 0.0, 0.6, 0.8, 1.0, 0.0]);
+        assert_eq!(
+            seated
+                .entries
+                .iter()
+                .map(|e| e.band.as_str())
+                .collect::<Vec<_>>(),
+            ["hot", "deep", "deep", "deep"]
+        );
+        let stamps: Vec<String> = client
+            .query("SELECT band FROM entries ORDER BY id", &[])
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        assert_eq!(stamps, ["deep", "hot", "deep", "deep"]);
+        expected["band"] = serde_json::json!("deep");
+        expected["ts"] = serde_json::json!(seated.entries[2].ts);
+        assert_eq!(seated.entries_dump()[0], expected);
+        client.batch_execute("INSERT INTO entries (id,band,text,embedding,ts) VALUES (5,'deep','stale',ARRAY[1],100)").await.unwrap();
+        let (bank, stale) = hydrate_config(&client, &memory, 2).await.unwrap();
+        assert_eq!(stale, [1]);
+        let index = bank.entries.iter().position(|e| e.id == 5).unwrap();
+        assert_eq!(&bank.matrix[index * 2..index * 2 + 2], &[0.0, 0.0]);
+        assert!(
+            hydrate(&client, &["hot".into(), "deep".into()], 2)
+                .await
+                .err()
+                .unwrap()
+                .downcast_ref::<StaleDims>()
+                .is_some()
+        );
+        client
+            .batch_execute("UPDATE entries SET embedding=NULL WHERE id=5")
+            .await
+            .unwrap();
+        assert!(hydrate_config(&client, &memory, 2).await.is_err());
+        drop(client);
+        connection_task.await.unwrap().unwrap();
+    }
 }
