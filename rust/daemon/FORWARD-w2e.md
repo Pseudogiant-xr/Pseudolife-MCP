@@ -65,7 +65,7 @@ Commands ran from `rust/`, with `-j 2` on Windows and `-j 3` on the Linux fixtur
 | Linux build, fmt, clippy, and crate tests | `8f250ae5` | Each exit 0: 119 passed, 0 failed, 1 ignored; no clippy warnings. |
 | Current Python full-docs oracle and ignored Rust corpus test | `ebcb00be` | Both exit 0: 54,723 checked, 0 declared skips, 0 mismatches. Output is private; tracked goldens unchanged. |
 | Scratch mutation controls | `ebcb00be` | Polarity and negation-threshold mutations each exited 101 with the named golden test mismatches; after restoring each original source, that test exited 0. Final checkout clean. |
-| Publication check over `origin/master..HEAD` | Final checklist head | Pending final check. |
+| Publication check over `origin/master..HEAD` | Checklist payload, checked again after final commit | Exit 0; no public push. |
 
 The full-docs and mutation proofs carry forward to `8f250ae5`: the slice functions, their Python oracle, their frozen cases, the corpus inputs, and `http::py_strip` are unchanged by the late HTTP merge.
 
@@ -80,4 +80,18 @@ The tests cover frozen slot extraction, developer slots, normalization, contradi
 
 ## Mutual branch merge
 
-Pending final scratch merge after both checklists are complete. The implementation-only scratch merge of store `08974997` with this branch exited 1 with conflicts in `Cargo.lock`, `daemon/Cargo.toml`, `daemon/divergences.md`, `daemon/src/bank.rs`, `daemon/src/config.rs`, `daemon/src/labels.rs`, `daemon/src/main.rs`, `daemon/src/meta_filter.rs`, and `daemon/src/service.rs`. The scratch merge was aborted; neither original branch was modified. The slice's actual slot and contradiction code is identical in both forwards.
+The scratch merge of store checklist head `0e1481c7` with slots checklist head `6f05ae78` exited 1: the two forwards do not merge cleanly. Its 11 conflicted files are:
+
+- `rust/Cargo.lock`
+- `rust/daemon/Cargo.toml`
+- `rust/daemon/FORWARD-w2e.md`
+- `rust/daemon/divergences.md`
+- `rust/daemon/src/bank.rs`
+- `rust/daemon/src/config.rs`
+- `rust/daemon/src/http.rs`
+- `rust/daemon/src/labels.rs`
+- `rust/daemon/src/main.rs`
+- `rust/daemon/src/meta_filter.rs`
+- `rust/daemon/src/service.rs`
+
+The scratch merge was aborted and both forward worktrees are clean. Neither original branch was modified. Both slot/contradiction implementations remain byte-identical; the conflicting checklists describe the two independent branches. The final follow-up commits change checklist text only.
