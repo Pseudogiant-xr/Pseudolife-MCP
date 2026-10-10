@@ -205,12 +205,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges]
+        # Resident startup and its schema/test-binary handoff share one fixture.
+        suite: [eval, cli, startup, judges]
     runs-on: ${{ matrix.os }}
-    # Windows CI 2026-10-10: 18m32s before startup + about 13m startup.
-    # Allow twice that whole-job estimate, including artifact retention.
-    timeout-minutes: 65
+    # Windows startup estimate: 20m38s including setup, master run 38014601025
+    # on 2026-10-10; allow about twice that wall time for every shard.
+    timeout-minutes: 42
     steps:
       - uses: actions/checkout@v4
         with:
@@ -227,7 +227,8 @@ jobs:
         with:
           workspaces: rust
       - name: Install checkout and test dependencies
-        timeout-minutes: 10
+        # Windows: 183s in run 38014601025, 2026-10-10; about twice duration.
+        timeout-minutes: 7
         run: |
           python -m pip install --upgrade pip
           python -m pip install "setuptools>=68" wheel
@@ -249,9 +250,13 @@ jobs:
           exit $LASTEXITCODE
       - name: Check CI coverage contract
         if: matrix.suite == 'eval'
+        # Windows: 6s in run 38016847682, 2026-10-10; about twice duration.
+        timeout-minutes: 1
         run: python -m pytest -q rust/ci
       - name: Run every eval harness test
         if: matrix.suite == 'eval'
+        # Windows: 324s in run 38014601025, 2026-10-10; about twice duration.
+        timeout-minutes: 11
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -263,7 +268,8 @@ jobs:
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
         if: matrix.suite == 'eval'
-        timeout-minutes: 10
+        # Windows: 40s in run 38016847682, 2026-10-10; about twice duration.
+        timeout-minutes: 2
         shell: pwsh
         run: |
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
@@ -275,7 +281,8 @@ jobs:
           exit $LASTEXITCODE
       - name: CLI differential harness
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows: 357s in run 38012888647, 2026-10-10; about twice duration.
+        timeout-minutes: 12
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -288,14 +295,16 @@ jobs:
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows: 11s in run 38014601025, 2026-10-10; about twice duration.
+        timeout-minutes: 1
         shell: pwsh
         run: |
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
       - name: CLI lease differential harness
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows: 226s in run 38012888647, 2026-10-10; about twice duration.
+        timeout-minutes: 8
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -306,7 +315,8 @@ jobs:
           exit $LASTEXITCODE
       - name: Daemon static HTTP parity
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows: 39s in run 38016847682, 2026-10-10; about twice duration.
+        timeout-minutes: 2
         shell: pwsh
         env:
           PL_HARNESS_SLICE: http
@@ -332,7 +342,8 @@ jobs:
         run: chmod +x rust/target/release/graph-contract
       - name: Graph store differential and recorded oracle
         if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        # Windows: 63s in run 38012888647, 2026-10-10; about twice duration.
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
@@ -352,15 +363,24 @@ jobs:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Prepare disposable PostgreSQL for startup
+        if: matrix.suite == 'startup'
+        # Windows fixture: 11s in run 38014601025 on 2026-10-10 (rounded up).
+        timeout-minutes: 1
+        shell: pwsh
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
       - name: Daemon schema startup parity
-        if: matrix.suite == 'cli'
-        timeout-minutes: 10
+        if: matrix.suite == 'startup'
+        # Windows: 364s in run 38012888647, 2026-10-10; about twice duration.
+        timeout-minutes: 13
         shell: pwsh
         run: |
           python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'startup'
         uses: actions/upload-artifact@v4
         with:
           name: daemon-schema-parity-${{ runner.os }}
@@ -376,10 +396,9 @@ jobs:
             ${{ runner.temp }}/graph-store-golden.json
           if-no-files-found: error
       - name: Daemon resident startup parity
-        if: matrix.suite == 'cli'
-        # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
-        # about 13 minutes in total; allow twice that validation duration.
-        timeout-minutes: 26
+        if: matrix.suite == 'startup'
+        # Windows: 680s in run 38014601025, 2026-10-10; about twice duration.
+        timeout-minutes: 23
         shell: pwsh
         run: |
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
@@ -388,7 +407,7 @@ jobs:
           python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon resident startup parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'startup'
         uses: actions/upload-artifact@v4
         with:
           name: daemon-startup-parity-${{ runner.os }}
@@ -399,7 +418,8 @@ jobs:
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
-        timeout-minutes: 15
+        # Windows: 553s in run 38012888647, 2026-10-10; about twice duration.
+        timeout-minutes: 19
         shell: pwsh
         run: |
           $checkoutRoot = (Get-Location).Path

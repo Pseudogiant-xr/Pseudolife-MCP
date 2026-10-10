@@ -36,9 +36,10 @@ PARITY_CHECKS = {
     "CLI lease differential harness": "cli",
     "Daemon static HTTP parity": "cli",
 
-    "Daemon schema startup parity": "cli",
+    "Prepare disposable PostgreSQL for startup": "startup",
+    "Daemon schema startup parity": "startup",
     "Graph store differential and recorded oracle": "cli",
-    "Daemon resident startup parity": "cli",
+    "Daemon resident startup parity": "startup",
     "Run unchanged candidates and differential judges": "judges",
 }
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -186,7 +187,7 @@ def test_shards_cover_both_systems_and_build_once():
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
     assert jobs["parity-checks"]["needs"] == "candidate"
-    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges"]
+    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "startup", "judges"]
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
@@ -293,6 +294,33 @@ def test_coverage_guard_rejects_a_removed_check(monkeypatch):
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
+
+
+@pytest.mark.parametrize("name", [
+    "Prepare disposable PostgreSQL for startup", "Daemon schema startup parity",
+    "Daemon resident startup parity",
+])
+def test_coverage_guard_rejects_a_missing_shard_condition(monkeypatch, name):
+    changed = copy.deepcopy(workflow())
+    step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == name)
+    del step["if"]
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError):
+        test_original_checks_remain_gated_on_the_expected_shards()
+
+
+def test_startup_fixture_and_handoff_stay_in_one_shard():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    names = [s.get("name") for s in steps]
+    fixture = names.index("Prepare disposable PostgreSQL for startup")
+    schema = names.index("Daemon schema startup parity")
+    startup = names.index("Daemon resident startup parity")
+    assert fixture < schema < startup
+    for index in (fixture, schema, startup):
+        assert steps[index]["if"] == "matrix.suite == 'startup'"
+    require_command(commands(steps[fixture]["run"]),
+                    ("python", "rust/cli_harness/lease_ci.py"))
 
 
 @pytest.mark.parametrize("name, old, new", [
