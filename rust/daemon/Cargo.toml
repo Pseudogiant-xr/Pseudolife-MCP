@@ -19,7 +19,13 @@ required-features = ["graph-harness"]
 [features]
 # Deliberate breaks for the harness mutant control; never in a release build.
 mutants = []
+contract-harness = []
 graph-harness = []
+
+[[bin]]
+name = "dream-contract"
+path = "src/bin/dream-contract.rs"
+required-features = ["contract-harness"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -29,6 +35,9 @@ serde.workspace = true
 http-body-util.workspace = true
 chrono.workspace = true
 sha2.workspace = true
+hmac.workspace = true
+base64 = "=0.22.1"
+getrandom = "=0.3.4"
 percent-encoding.workspace = true
 regex.workspace = true
 yaml-rust2.workspace = true

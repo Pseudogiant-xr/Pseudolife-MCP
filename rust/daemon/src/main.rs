@@ -8,6 +8,7 @@ mod background;
 mod background_sessions;
 mod bank;
 mod config;
+mod dream;
 mod embed;
 mod embedding_math;
 mod graph_read;

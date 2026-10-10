@@ -37,6 +37,7 @@ PARITY_CHECKS = {
     "CLI lease differential harness": "cli",
     "CLI W1-C differential harness": "cli",
     "Daemon background pruning golden": "cli",
+    "Dream cursor differential harness": "cli",
     "Daemon static HTTP parity": "cli",
 
     "Daemon schema startup parity": "cli",
@@ -461,3 +462,55 @@ def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
+
+
+def test_dream_reuses_candidate_and_checks_cancel_control():
+    jobs = workflow()["jobs"]
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "Dream cursor differential harness")
+    invocations = commands(step["run"])
+    for mode in ("golden", "mutants"):
+        require_command(invocations, ("python", "rust/daemon/harness/dream_cursors.py", mode),
+                        ("--ci-fixture", "--rust-bin"))
+    require_command(invocations, ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_dream_cursors.py",
+                     "rust/daemon/harness/test_dream_cursor_cancel.py"), PYTEST_FILTERS)
+    assert not any(words[0] == "cargo" for words in invocations)
+    assert "rust/target/release" in step["run"]
+    assert "dream-cancel-drop-task" in step["run"]
+    assert "$cancelExit -ne 1" in step["run"]
+    build = next(s for s in jobs["candidate"]["steps"] if s.get("name") == "Build embedding candidate")
+    words = commands(build["run"])[0]
+    assert "contract-harness" in words[words.index("--features") + 1].split(",")
+    upload = next(s for s in jobs["candidate"]["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert {"rust/target/release/dream-contract", "rust/target/release/dream-contract.exe"} <= set(upload["with"]["path"].splitlines())
+
+
+@pytest.mark.parametrize("control_exit, message, accepted", [
+    (1, "AssertionError: cancelled waiter outcome differs", True),
+    (0, "", False),
+    (2, "AssertionError: unrelated native error", False),
+    (1, "fixture setup failed", False),
+])
+def test_dream_control_survives_runner_exit_wrapper(tmp_path, control_exit, message, accepted):
+    import os
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
+                if s.get("name") == "Dream cursor differential harness")
+    # Match the hosted pwsh wrapper, including its final native exit status.
+    bootstrap = r'''$ErrorActionPreference = 'stop'
+function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
+function chmod {}
+function python {
+    if ($args -contains 'admitted_commit_survives_cancel_and_next_pull') {
+        Write-Output $env:PL_CONTROL_MESSAGE
+        $global:LASTEXITCODE = [int]$env:PL_CONTROL_EXIT
+    } else { $global:LASTEXITCODE = 0 }
+}
+'''
+    wrapper = "\nif ((Test-Path -LiteralPath variable:LASTEXITCODE)) { exit $LASTEXITCODE }\n"
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_CONTROL_EXIT=str(control_exit),
+               PL_CONTROL_MESSAGE=message)
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             bootstrap + step["run"] + wrapper], env=env,
+                            capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr

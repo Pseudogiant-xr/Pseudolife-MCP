@@ -182,7 +182,7 @@ jobs:
           $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
       - name: Build embedding candidate
-        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness -j 3
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -195,6 +195,8 @@ jobs:
             rust/target/release/pseudolife-daemon-static.exe
             rust/target/release/graph-contract
             rust/target/release/graph-contract.exe
+            rust/target/release/dream-contract
+            rust/target/release/dream-contract.exe
           if-no-files-found: error
 
   parity-checks:
@@ -311,6 +313,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      # Windows local 2026-10-10: 89-action golden 49s + eight live controls 209s
+      # + recovery/control tests 38s; allow about twice the measured 296s gate.
+      - name: Dream cursor differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w3d
+        run: |
+          $binaryName = if ($IsWindows) { 'dream-contract.exe' } else { 'dream-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          if (-not $IsWindows) { chmod +x $candidate }
+          $env:PL_DREAM_CONTRACT_BINARY = $candidate
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py mutants --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PSEUDOLIFE_DAEMON_MUTANT = 'dream-cancel-drop-task'
+          $cancelLog = Join-Path $env:RUNNER_TEMP 'dream-cancel-mutant.log'
+          python -m pytest -q rust/daemon/harness/test_dream_cursor_cancel.py -k admitted_commit_survives_cancel_and_next_pull > $cancelLog 2>&1
+          $cancelExit = $LASTEXITCODE
+          Remove-Item Env:PSEUDOLIFE_DAEMON_MUTANT
+          Get-Content -Tail 20 $cancelLog
+          if ($cancelExit -ne 1 -or -not (Select-String -LiteralPath $cancelLog -Pattern 'AssertionError|_queue.Empty' -Quiet)) {
+            throw 'Cancelled-waiter ownership control was not rejected by the next-operation check'
+          }
+          exit 0
       - name: Daemon static HTTP parity
         if: matrix.suite == 'cli'
         timeout-minutes: 10
