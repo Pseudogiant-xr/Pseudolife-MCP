@@ -143,6 +143,8 @@ def check(workflow):
     assert set(W1A) == {action["scenario"] for action in SUITES["h5-w1a"] if action["mode"] == "live"} \
         | set(EXCEPTIONS["w1a"]), "W1-A scenario dropped"
     supported = set(W1A) - set(EXCEPTIONS['w1a'])
+    assert set(EXCEPTIONS['w1a_platform']) == {'linux', 'windows'}, 'W1-A platform exception roster changed'
+    assert all(set(names) <= supported for names in EXCEPTIONS['w1a_platform'].values()), 'unknown W1-A platform exception'
     assert set(EXCEPTIONS['w1a_golden']) <= supported, 'unknown W1-A golden exception'
     expected_w1a = [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
                     for name in W1A if name in supported for mode in ('live', 'golden')]

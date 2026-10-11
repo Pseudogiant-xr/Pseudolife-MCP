@@ -35,6 +35,12 @@ EXCEPTIONS = {
     'w1a_golden': {name: 'Existing timeline/live-only scenario has no golden replay; both arms execute live.'
                    for name in ('lease-held', 'reaper', 'stamped', 'null-embedding',
                                 'unconstrained-dims', 'db-lost')},
+    'w1a_platform': {
+        'linux': {},
+        'windows': {
+            'encodings': 'Hosted Windows run 38132737537: three HTTP responses match, but Python alone writes writer_lease_epoch and ten default relations before shutdown; the scenario does not settle initialization. Linux and the separately passing Windows auth control remain selected.',
+        },
+    },
     'cli_mutants': {
         'linux': {
             'audit-drive-relative-admitted': 'Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.',

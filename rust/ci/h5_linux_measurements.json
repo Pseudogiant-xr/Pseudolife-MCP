@@ -97,7 +97,7 @@
       "read_seconds": 258.636
     },
     "h5-background": {
-      "seconds": 92.646,
+      "seconds": 83.446,
       "action_exits": [
         0,
         0,
@@ -242,6 +242,12 @@
       "unconstrained-dims": "Existing timeline/live-only scenario has no golden replay; both arms execute live.",
       "db-lost": "Existing timeline/live-only scenario has no golden replay; both arms execute live."
     },
+    "w1a_platform": {
+      "linux": {},
+      "windows": {
+        "encodings": "Hosted Windows run 38132737537: three HTTP responses match, but Python alone writes writer_lease_epoch and ten default relations before shutdown; the scenario does not settle initialization. Linux and the separately passing Windows auth control remain selected."
+      }
+    },
     "cli_mutants": {
       "linux": {
         "audit-drive-relative-admitted": "Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.",
@@ -257,5 +263,20 @@
       }
     },
     "audit_golden": "Only the 29 stable cases in audit_golden_cases.json replay across processes; the remaining 81 cases carry fresh IDs, hashes or redaction state. All 110 run live (Linux 2026-10-11)."
+  },
+  "empty_cache_followup": {
+    "episode_0_seconds": 48.213,
+    "episode_0_caught": 4,
+    "background_seconds": 83.446,
+    "background_live_cases": 9,
+    "action_exits": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
   }
 }

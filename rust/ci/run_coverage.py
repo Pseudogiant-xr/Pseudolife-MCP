@@ -35,6 +35,8 @@ def command(action, binaries, debug, output):
                          str(binaries / ('pseudolife-stdio' + suffix)), '-v']
         if mode != 'live':
             argv += ['--' + mode]
+        if action['row'] == 'episode' and mode == 'mutants':
+            argv += ['--fixture']
         if mode in ('record', 'golden'):
             argv += ['--golden-dir', str(output.parent / 'goldens')]
         for case in action.get('cases', []):
@@ -73,6 +75,7 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     os.environ['PL_HARNESS_SCRATCH'] = str(args.out_dir.resolve() / 'scratch')
     platform = 'windows' if os.name == 'nt' else 'linux'
+    omitted_scenarios = {}
     if args.source_shard:
         row, selected = SOURCE_SHARDS[args.source_shard]
         ids = select_controls(row, selected, platform)
@@ -82,6 +85,9 @@ def main():
         environment = source_environment(row, platform, Path.home(), os.environ)
     else:
         selection, actions = args.suite, SUITES[args.suite]
+        if args.suite == 'h5-w1a':
+            omitted_scenarios = EXCEPTIONS['w1a_platform'][platform]
+            actions = [action for action in actions if action['scenario'] not in omitted_scenarios]
         environment = dict(os.environ)
     receipts = []
     for index, action in enumerate(actions):
@@ -101,7 +107,8 @@ def main():
                     for name in selected if name not in ids} if args.source_shard else {})
         (args.out_dir / f'{selection}-timings.json').write_text(
             json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS,
-                            omitted_controls=omitted, unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
+                            omitted_controls=omitted, omitted_scenarios=omitted_scenarios,
+                            unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
             encoding='utf-8')
         if code and not args.keep_going:
             return code

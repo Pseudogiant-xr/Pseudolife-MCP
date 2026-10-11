@@ -430,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip cases that need real daemons on disposable banks")
     parser.add_argument("--out", type=Path, help="write a JSON summary")
     parser.add_argument("--golden-dir", type=Path, help="record/replay goldens in this directory")
+    parser.add_argument("--fixture", action="store_true", help="use the offline CPU embedder for real daemon fixtures")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     if args.golden_dir:
@@ -462,6 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     producers.use_oracle(source)
     from .rows import _daemon  # noqa: PLC0415
     _daemon.ORACLE.update(python=args.oracle_python, source=source)
+    _daemon.CI_FIXTURE = args.fixture
     oracle = core.python_target(args.oracle_python, source)
     candidate_path = args.candidate or _default_candidate()
 

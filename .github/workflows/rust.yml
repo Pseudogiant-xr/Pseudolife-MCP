@@ -727,7 +727,7 @@ jobs:
         timeout-minutes: ${{ runner.os == 'Linux' && matrix.h5_timeout || matrix.h5_windows_timeout }}
         shell: pwsh
         run: |
-          python rust/ci/run_coverage.py --suite ${{ matrix.suite }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5')
+          python rust/ci/run_coverage.py --suite ${{ matrix.suite }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5') --keep-going
           exit $LASTEXITCODE
       - name: Retain H5 row and control outcomes
         if: always() && startsWith(matrix.suite, 'h5-')
@@ -883,6 +883,10 @@ jobs:
         run: |
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
+      - name: Install offline episode fixture dependencies
+        if: startsWith(matrix.shard, 'episode-')
+        timeout-minutes: 5
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
       - name: Bind the source-control Python oracle
         shell: pwsh
         env:

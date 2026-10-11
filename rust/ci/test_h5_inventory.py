@@ -318,3 +318,88 @@ def test_h5_artifacts_do_not_walk_deliberate_scratch_symlink_loops():
                   if s.get('name') == 'Retain H5 row and control outcomes')
     assert upload['with']['path'].splitlines() == ['${{ runner.temp }}/h5/*.json',
                                                  '${{ runner.temp }}/h5/goldens/*.json']
+
+
+@pytest.mark.parametrize('name', ['session-reap', 'session-restart', 'session-resume-refusal',
+                                 'session-sweep', 'session-tombstone-restart'])
+def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch, name):
+    import run
+    import background_sessions
+    cache = tmp_path / 'empty-cache'
+    cache.mkdir()
+    monkeypatch.setenv('HF_HOME', str(cache))
+    monkeypatch.setattr(background_sessions.daemons, 'scratch_root', lambda: tmp_path)
+    monkeypatch.setattr(background_sessions.dbstate, 'dump', lambda dsn: {})
+
+    def prepare(scenario, home):
+        path = home / 'data/config.yaml'
+        config = yaml.safe_load(path.read_text(encoding='utf-8'))
+        config['embedding'] = {'model_name': str(home / 'model'), 'backend': 'onnx', 'device': 'cpu'}
+        path.write_text(yaml.safe_dump(config), encoding='utf-8')
+        return {'TOKENIZERS_PARALLELISM': 'false'}
+
+    monkeypatch.setattr(run.Scenario, 'prepare_home', prepare)
+
+    def seed(argv, **kwargs):
+        home = Path(kwargs['env']['PSEUDOLIFE_MCP_DATA_DIR']).parent
+        config = yaml.safe_load((home / 'data/config.yaml').read_text(encoding='utf-8'))
+        assert config.get('embedding', {}).get('model_name') == str(home / 'model')
+        assert kwargs['env']['TOKENIZERS_PARALLELISM'] == 'false'
+        assert kwargs['env']['HF_HUB_OFFLINE'] == '1' and list(cache.iterdir()) == []
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(background_sessions.subprocess, 'run', seed)
+    scenario = run.SCENARIOS[name]()
+    scenario.ci_fixture = True
+    scenario.prepare_template('fixture-dsn')
+
+
+def test_episode_daemon_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch):
+    from rust.cli_harness.rows import _daemon
+    from rust.daemon.harness import embedding_fixture
+    cache = tmp_path / 'empty-cache'
+    cache.mkdir()
+    data = tmp_path / 'data'
+    data.mkdir()
+    monkeypatch.setenv('HF_HOME', str(cache))
+    monkeypatch.setattr(_daemon, 'CI_FIXTURE', True, raising=False)
+    monkeypatch.setattr(_daemon.tempfile, 'mkdtemp', lambda **kwargs: str(data))
+    monkeypatch.setattr(_daemon._bank, 'create', lambda *args, **kwargs: None)
+    monkeypatch.setattr(_daemon._bank, 'drop', lambda *args: None)
+    monkeypatch.setattr(_daemon._bank, 'url', lambda bank: 'postgresql://fixture@127.0.0.1:5434/pl_cf_fixture')
+    monkeypatch.setattr(_daemon._bank.NAMES, 'require_process', lambda: None)
+    monkeypatch.setattr(_daemon.RealDaemon, '_await_health', lambda self: None)
+    monkeypatch.setattr(_daemon.RealDaemon, '_await_warmup', lambda self: None)
+    monkeypatch.setitem(_daemon.ORACLE, 'python', sys.executable)
+    monkeypatch.setitem(_daemon.ORACLE, 'source', ROOT)
+    created = []
+    monkeypatch.setattr(embedding_fixture, 'create', lambda path, **kw: created.append((path, kw)))
+
+    def start(argv, **kwargs):
+        path = data / 'config.yaml'
+        config = yaml.safe_load(path.read_text(encoding='utf-8')) if path.exists() else {}
+        assert config.get('embedding', {}).get('model_name') == str(data / 'model')
+        assert config['embedding']['backend'] == 'onnx' and config['embedding']['device'] == 'cpu'
+        assert kwargs['env']['HF_HUB_OFFLINE'] == '1' and list(cache.iterdir()) == []
+        assert created == [(data / 'model', {'dimension': 1024})]
+        return SimpleNamespace(poll=lambda: 0)
+
+    monkeypatch.setattr(_daemon.subprocess, 'Popen', start)
+    daemon = _daemon.RealDaemon('pl_cf_fixture')
+    daemon.shutdown()
+
+
+@pytest.mark.parametrize('platform', ['linux', 'windows'])
+def test_windows_encodings_gap_keeps_linux_and_auth_control(monkeypatch, tmp_path, platform):
+    import run_coverage
+    from coverage_plan import DAEMON_CONTROLS
+    invoked = []
+    environment = run_coverage.os.environ
+    monkeypatch.setattr(run_coverage, 'os', SimpleNamespace(name='nt' if platform == 'windows' else 'posix',
+                                                          environ=environment))
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-w1a', '--out-dir', str(tmp_path)])
+    monkeypatch.setattr(run_coverage.subprocess, 'run', lambda argv, **kw: invoked.append(argv) or SimpleNamespace(returncode=0))
+    assert run_coverage.main() == 0
+    encodings = [a for a in invoked if a[a.index('--only') + 1] == 'encodings']
+    assert len(encodings) == (0 if platform == 'windows' else 2)
+    assert DAEMON_CONTROLS['auth-candidate-order'] == ['encodings']
