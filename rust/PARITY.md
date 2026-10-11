@@ -18,7 +18,7 @@ exit code; both streams byte-exact apart from the run timestamp in the two
 new file names (validated against the arm's own clock window; two files that
 normalize to one name stay distinct); every file under the home; the state
 archive read back member by member (name, type, mode, uid, gid, mtime as a
-float, size, link target, content hash; uname and gname too on Windows); the
+float, size, link target, device major/minor, content hash; uname and gname too on Windows); the
 dump decompressed, with pg_dump's per-run `\restrict` key normalized only
 when the `\restrict` and `\unrestrict` keys agree; and the source bank's rows
 and catalog unchanged. Free: tar header layout, PAX record layout, gzip
@@ -38,12 +38,27 @@ dir that resolves (symlinks and junctions followed) to the data dir or below
 one of its archived children; a top-level child `Path.resolve()` would refuse
 (a symlink loop); a `--keep-days` under one minute (rotation would race this
 run's new files against the platform clock: Python 3.11 reads the coarse
-system clock on Windows); trees holding anything but files, directories and
-POSIX symlinks (Windows reparse points, hard links on either OS, devices,
-non-UTF-8 names); unexpected stat errors under `~/.pg0`; and on Windows a
-`TZ` override, an existing target with this second's timestamp, or a
-non-ASCII name in the backups dir (Windows glob folds case with Unicode
-rules). Declared divergences: archive uname/gname on POSIX are empty (Python
+system clock on Windows); directory reparse points that escape the source
+tree or form a traversal cycle; Windows names or link targets that Python's
+UTF-8/surrogateescape archive writer cannot encode; unexpected stat errors
+under `~/.pg0`; raw matching rotation names that cannot be printed through
+UTF-8 stdout; and on Windows an existing target with this second's timestamp.
+
+Members include hard links, POSIX FIFOs and device nodes, raw POSIX filename
+and link-target bytes, Windows symlinks and internal directory junctions.
+Sockets are omitted, as Python's tarfile omits them. PAX `hdrcharset=BINARY`
+keeps raw bytes lossless, and member order follows Python's Unicode code
+points including filesystem surrogateescape characters. The member round-trip
+case extracts each arm's actual archive with Python and checks kind, mode,
+numeric ownership, content, link targets and hard-link identity. Linux device
+headers are checked against `/dev/null`; device extraction also has a Linux
+fixture that requires mknod permission in CI and reports an unverified result
+when that permission is unavailable locally. Windows timestamps use the CRT's
+TZ interpretation; rotation compares UTC epoch times and uses Python's Unicode
+case-insensitive glob matching, allowing unrelated Unicode filenames.
+Windows TZ, symlink, junction and Unicode rotation fixtures: pending CI.
+
+Declared divergences: archive uname/gname on POSIX are empty (Python
 looks them up; ownership on restore falls back to uid/gid); Python tracebacks
 after an effect (permissions, a full disk, a pg_dump that cannot start)
 become `backup failed: <error>`; output encodings other than UTF-8, as for

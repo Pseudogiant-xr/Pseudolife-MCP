@@ -163,10 +163,9 @@ fn write_stream(stdout: bool, text: &str) -> io::Result<()> {
     }
 }
 
-/// Names in the backups dir that Python's rotation glob reads the way this
-/// port does: UTF-8 everywhere, ASCII on Windows (whose glob folds case with
-/// Unicode rules).
-fn rotation_names_supported(bdir: &Path) -> Option<()> {
+/// Raw unrelated names are harmless; a rotated raw name cannot be printed
+/// through this leaf's UTF-8 stdout contract.
+fn rotation_names_supported(bdir: &Path, include_dumps: bool) -> Option<()> {
     let entries = match fs::read_dir(bdir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Some(()),
@@ -174,9 +173,13 @@ fn rotation_names_supported(bdir: &Path) -> Option<()> {
     };
     for entry in entries {
         let name = entry.ok()?.file_name();
-        let name = name.to_str()?;
-        if cfg!(windows) && !name.is_ascii() {
-            return None;
+        if name.to_str().is_none() {
+            let text = name.to_string_lossy();
+            if glob_matches(&text, STATE_PREFIX, ".tar.gz")
+                || include_dumps && glob_matches(&text, DUMP_PREFIX, ".sql.gz")
+            {
+                return None;
+            }
         }
     }
     Some(())
@@ -239,17 +242,13 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         Err(error) if error.kind() != io::ErrorKind::NotFound => return None,
         _ => {}
     }
-    // Python's C runtime honours TZ on Windows; this port reads the system zone.
-    if cfg!(windows) && std::env::var_os("TZ").is_some_and(|tz| !tz.is_empty()) {
-        return None;
-    }
     archive::admit(&data_dir, &bdir)?;
-    rotation_names_supported(&bdir)?;
+    rotation_names_supported(&bdir, dsn.is_some())?;
     let pg_dump = match &dsn {
         Some(_) => Some(dump::find(&home()?)?),
         None => None,
     };
-    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let ts = timestamp()?;
     // Python's Windows rename refuses an existing target after writing the partial.
     if cfg!(windows)
         && [
@@ -320,20 +319,66 @@ fn path_sort_key(name: &str) -> String {
 }
 
 fn glob_matches(name: &str, prefix: &str, suffix: &str) -> bool {
-    if name.len() < prefix.len() + suffix.len() {
-        return false;
-    }
-    let (Some(head), Some(tail)) = (
-        name.get(..prefix.len()),
-        name.get(name.len() - suffix.len()..),
-    ) else {
-        return false;
-    };
     if cfg!(windows) {
-        head.eq_ignore_ascii_case(prefix) && tail.eq_ignore_ascii_case(suffix)
-    } else {
-        head == prefix && tail == suffix
+        return windows_glob_matches(name, prefix, suffix);
     }
+    name.len() >= prefix.len() + suffix.len() && name.starts_with(prefix) && name.ends_with(suffix)
+}
+
+fn windows_glob_matches(name: &str, prefix: &str, suffix: &str) -> bool {
+    fn matches(character: char, ascii: char) -> bool {
+        character.eq_ignore_ascii_case(&ascii)
+            || matches!(
+                (ascii.to_ascii_lowercase(), character),
+                ('i', 'İ' | 'ı') | ('s', 'ſ') | ('k', 'K')
+            )
+    }
+    let mut characters = name.chars();
+    for expected in prefix.chars() {
+        if !characters
+            .next()
+            .is_some_and(|actual| matches(actual, expected))
+        {
+            return false;
+        }
+    }
+    for expected in suffix.chars().rev() {
+        if !characters
+            .next_back()
+            .is_some_and(|actual| matches(actual, expected))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(not(windows))]
+fn timestamp() -> Option<String> {
+    Some(chrono::Local::now().format("%Y%m%d-%H%M%S").to_string())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn timestamp() -> Option<String> {
+    let now = seconds(SystemTime::now()).floor() as libc::time_t;
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: CRT reads this child's inherited TZ; both pointers are valid for the call.
+    unsafe {
+        libc::tzset();
+        if libc::localtime_s(&mut local, &now) != 0 {
+            return None;
+        }
+    }
+    Some(format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        local.tm_year + 1900,
+        local.tm_mon + 1,
+        local.tm_mday,
+        local.tm_hour,
+        local.tm_min,
+        local.tm_sec
+    ))
 }
 
 /// CPython's float `st_mtime`: floored seconds plus non-negative nanoseconds * 1e-9.
@@ -376,4 +421,34 @@ fn rotate(bdir: &Path, keep_days: f64, include_dumps: bool) -> io::Result<Vec<Pa
         }
     }
     Ok(pruned)
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::*;
+
+    #[test]
+    fn windows_rotation_glob_uses_python_regex_unicode_case_matching() {
+        for name in [
+            "pseudolıfe_lite_state-old.tar.gz",
+            "pseudolİfe_lite_state-old.tar.gz",
+            "pſeudolife_lite_state-old.tar.gz",
+            "PSEUDOLIFE_LITE_STATE-old.TAR.GZ",
+        ] {
+            assert!(
+                windows_glob_matches(name, STATE_PREFIX, ".tar.gz"),
+                "{name}"
+            );
+        }
+        for name in [
+            "注意.txt",
+            "pseudolife_lite_state-old.tar.gż",
+            "foreign-state.tar.gz",
+        ] {
+            assert!(
+                !windows_glob_matches(name, STATE_PREFIX, ".tar.gz"),
+                "{name}"
+            );
+        }
+    }
 }

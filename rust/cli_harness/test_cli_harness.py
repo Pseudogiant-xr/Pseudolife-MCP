@@ -1532,3 +1532,49 @@ def test_fixture_replies_records_and_closes_with_bounded_polling(row, monkeypatc
         assert probe.connect_ex(("127.0.0.1", port)) != 0
     # Bound the actual idle wait without depending on thread scheduling.
     assert intervals and all(0 < timeout <= 0.05 for timeout in intervals)
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX special-file snapshot")
+def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch):
+    import socket
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o640)
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(str(tmp_path / "socket"))
+    original = Path.read_bytes
+
+    def guarded(path):
+        assert path not in (fifo, tmp_path / "socket"), "special-file snapshot attempted content read"
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    try:
+        assert core.snapshot(tmp_path) == {"fifo": "fifo", "socket": "socket"}
+    finally:
+        sock.close()
+
+
+def test_home_tokens_preserve_surrogateescape_link_targets():
+    home = "/fixture"
+    want = obs()
+    want["files"] = {"raw-link": "link:" + home + "/raw-\udcff"}
+    normalize.home_tokens(want, home)
+    assert want["files"]["raw-link"] == "link:{HOME}/raw-\udcff"
+    wrong = obs()
+    wrong["files"] = {"raw-link": "link:{HOME}/raw-\udcfe"}
+    assert compare.diff(want, wrong, ())
+
+
+def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path):
+    import json
+    from cli_harness import runner
+    clean = {"raw-link": "link:raw-\udcff"}
+    assert normalize.scram_marks(clean) == []
+    assert normalize.drawn_login_secrets(clean) == []
+    runner.write_golden(tmp_path / "raw.json", clean)
+    assert json.loads((tmp_path / "raw.json").read_text(encoding="utf-8")) == clean
+    for secret in ["SCRAM-SHA-256$marker", _drawn_login_line().decode("ascii")]:
+        unsafe = {"raw-link": "link:raw-\udcff/" + secret}
+        with pytest.raises(SystemExit, match="refusing to write"):
+            runner.write_golden(tmp_path / "unsafe.json", unsafe)
+        assert not (tmp_path / "unsafe.json").exists()
