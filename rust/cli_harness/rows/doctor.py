@@ -303,7 +303,9 @@ class FixtureDaemon:
         self.server.handle_error = lambda request, address: None
         self.port = self.server.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # Linux W1-C, 2026-10-11: idle shutdown waited about 0.5 s per listener.
+        self.thread = threading.Thread(target=self.server.serve_forever,
+                                       kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
 
     def requests(self) -> list:
