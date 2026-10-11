@@ -126,8 +126,9 @@ def renewed_listener(arm, proc):
             if found:
                 path = found[0]
                 try:
-                    raw = path.read_bytes()
-                    info = path.stat()
+                    with path.open("rb") as stream:
+                        raw = stream.read()
+                        info = os.fstat(stream.fileno())
                 except (PermissionError, FileNotFoundError):
                     pass  # Waiter replacement: retry next tick without a sample.
                 else:
