@@ -218,13 +218,30 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges]
+        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection]
+        # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
+        # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
+        # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
+        # the total. Connection also keeps the existing 20m record budget.
+        include:
+          - suite: w1c-doctor
+            w1c_rows: "'doctor'"
+            w1c_timeout: 32
+            job_timeout: 36
+          - suite: w1c-pairing
+            w1c_rows: "'transfer', 'invite', 'pair'"
+            w1c_timeout: 36
+            job_timeout: 40
+          - suite: w1c-connection
+            w1c_rows: "'test_login', 'connect', 'maintainer', 'move', 'tunnel'"
+            w1c_timeout: 42
+            job_timeout: 66
     runs-on: ${{ matrix.os }}
-    # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took 105m55s
-    # and 104m04s: about 50m outside the W1-C step (setup reached that step
-    # after 50m02s-56m57s) plus the step itself. Allow twice the 50m
-    # remainder plus the W1-C step budget (110m; see that step).
-    timeout-minutes: 210
+    # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took
+    # 105m55s/104m04s, with about 50m outside W1-C. Master run
+    # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
+    # W1-C now runs in parallel; allow twice the conservative 50m remainder.
+    timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -235,9 +252,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - uses: dtolnay/rust-toolchain@stable
+        if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
+        if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           workspaces: rust
       - name: Install checkout and test dependencies
@@ -555,11 +574,24 @@ jobs:
             ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
             ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
           if-no-files-found: error
+      - name: Prepare disposable PostgreSQL for W1-C rows
+        if: startsWith(matrix.suite, 'w1c-')
+        # Master run 38076979343, 2026-10-10: Windows setup 12s; twice, rounded up.
+        timeout-minutes: 1
+        shell: pwsh
+        # pg0's initdb inherits the locale on Linux; template1 then retains
+        # both the recorded graph-read ordering and the test login's vector.
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
       # The W1-C native leaves: every row runs live (this checkout's Python
       # oracle beside the candidate, on disposable homes), then against its
       # goldens. transfer, invite and maintainer use the disposable
-      # PostgreSQL and test login the lease step provisioned; test_login
-      # starts its own throwaway clusters from that step's pg0 bundle and,
+      # PostgreSQL and test login their shard provisioned; test_login
+      # starts its own throwaway clusters from the pg0 bundle and,
       # on Linux, disposable containers of the image built below. Declared
       # exceptions (each in its row's .md):
       # - test_login's Linux golden is recorded on this lane: recording needs
@@ -576,21 +608,21 @@ jobs:
       #   seed stamps with the wall clock and random codes, and one 2.6 MB
       #   report.
       - name: Build the test_login container image
-        if: runner.os == 'Linux' && matrix.suite == 'cli'
-        timeout-minutes: 10
+        if: runner.os == 'Linux' && matrix.suite == 'w1c-connection'
+        # Master run 38076979343, 2026-10-10: Linux image build 13s; twice, rounded up.
+        timeout-minutes: 1
         run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
       - name: CLI W1-C differential harness
-        if: matrix.suite == 'cli'
-        # Hosted Windows, live and golden: 55m26s and 53m37s for PRs #709 and
-        # #710 (2026-10-10 UTC, after batch #707 added rows); PR #712's run hit
-        # the old 60m limit while still matching cases. Twice the 55m
-        # measurement.
-        timeout-minutes: 110
+        if: startsWith(matrix.suite, 'w1c-')
+        # Twice the per-shard Windows row sums above (38076979343,
+        # 2026-10-10). #718's old combined 110m budget used PRs #709/#710:
+        # 55m26s/53m37s, after PR #712 exhausted the old 60m limit.
+        timeout-minutes: ${{ matrix.w1c_timeout }}
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          $rows = @('transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', 'tunnel')
+          $rows = @(${{ matrix.w1c_rows }})
           $live = $rows | ForEach-Object { '--row'; $_ }
           python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -601,7 +633,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Record the Linux test_login golden while it is absent
         id: test_login_linux_golden
-        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'cli' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
+        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'w1c-connection' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
         timeout-minutes: 20
         shell: pwsh
         run: |
@@ -614,16 +646,16 @@ jobs:
         if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
         uses: actions/upload-artifact@v4
         with:
-          name: test_login-linux-golden
+          name: test_login-linux-golden-${{ matrix.suite }}
           path: |
             rust/cli_harness/goldens/test_login.linux.json
             ${{ runner.temp }}/test-login-linux-record.json
           if-no-files-found: error
       - name: Retain CLI harness summaries
-        if: always() && matrix.suite == 'cli'
+        if: always() && (matrix.suite == 'cli' || startsWith(matrix.suite, 'w1c-'))
         uses: actions/upload-artifact@v4
         with:
-          name: cli-harness-${{ runner.os }}
+          name: cli-harness-${{ runner.os }}-${{ matrix.suite }}
           path: ${{ runner.temp }}/cli-harness*.json
           if-no-files-found: warn
       - name: Run unchanged candidates and differential judges
