@@ -2,6 +2,7 @@
 
 import argparse
 import copy
+from collections import Counter
 import json
 import re
 from pathlib import Path
@@ -37,7 +38,8 @@ PARITY_CHECKS = {
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
-    "CLI W1-C differential harness": "cli",
+    "CLI W1-C differential harness": "w1c",
+    "Prepare disposable PostgreSQL for W1-C rows": "w1c",
     "Daemon background pruning golden": "cli",
     "Dream cursor differential harness": "cli",
 
@@ -96,6 +98,9 @@ def row_commands(invocations, required_rows, golden):
     assert set(required_rows) <= covered, (required_rows, golden)
 
 
+W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
+
+
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
 # row_commands() sees no --row there: the row list and how both passes are
 # built from it are pinned here instead.
@@ -113,7 +118,7 @@ def check_w1c_rows(script):
     lines = [line.strip() for line in script.splitlines()]
     literals = [line for line in lines if line.startswith("$rows = @(")]
     assert len(literals) == 1, literals
-    assert literals[0] == "$rows = @(" + ", ".join(f"'{row}'" for row in W1C_ROWS) + ")"
+    assert literals[0] == "$rows = @(${{ matrix.w1c_rows }})"
     for line in W1C_LINES:
         assert line in lines, line
     invocations = commands(script)
@@ -123,6 +128,69 @@ def check_w1c_rows(script):
                     ("--candidate",), ("--record", "--mutants", "--case"))
     assert [words[:3] for words in invocations if words[:2] == ["python", "rust/cli_harness"]] \
         == [["python", "rust/cli_harness", "@live"], ["python", "rust/cli_harness", "@golden"]]
+
+
+def check_w1c_shards(jobs):
+    job = jobs["parity-checks"]
+    matrix = job["strategy"]["matrix"]
+    assert matrix["os"] == SYSTEMS
+    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
+    assert "exclude" not in matrix
+    shards = matrix["include"]
+    assert len(shards) == len(W1C_SUITES)
+    assert Counter(shard["suite"] for shard in shards) == Counter(W1C_SUITES)
+    covered = []
+    for shard in shards:
+        assert set(shard) == {"suite", "w1c_rows", "w1c_timeout", "job_timeout"}
+        assert re.fullmatch(r"'[a-z_]+'(?:, '[a-z_]+')*", shard["w1c_rows"])
+        rows = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
+        assert ("test_login" in rows) == (shard["suite"] == "w1c-connection")
+        assert shard["w1c_timeout"] > 0
+        assert shard["job_timeout"] > shard["w1c_timeout"]
+        covered.extend(rows)
+    assert Counter(covered) == Counter(W1C_ROWS), covered
+    steps = {step.get("name"): step for step in job["steps"]}
+    harness = steps["CLI W1-C differential harness"]
+    assert harness["if"] == "startsWith(matrix.suite, 'w1c-')"
+    assert harness["timeout-minutes"] == "${{ matrix.w1c_timeout }}"
+    check_w1c_rows(harness["run"])
+    setup = steps["Prepare disposable PostgreSQL for W1-C rows"]
+    assert setup["if"] == harness["if"]
+    assert setup["run"] == steps["Prepare disposable PostgreSQL for CLI lease row"]["run"]
+    assert setup["env"] == steps["Prepare disposable PostgreSQL for CLI lease row"]["env"]
+    assert job["steps"].index(setup) < job["steps"].index(harness)
+    image = steps["Build the test_login container image"]
+    assert image["if"] == "runner.os == 'Linux' && matrix.suite == 'w1c-connection'"
+    assert image["run"] == "docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops"
+    assert job["steps"].index(image) < job["steps"].index(harness)
+    record = steps["Record the Linux test_login golden while it is absent"]
+    assert record["id"] == "test_login_linux_golden"
+    assert record["if"] == ("!cancelled() && runner.os == 'Linux' && "
+                            "matrix.suite == 'w1c-connection' && "
+                            "hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''")
+    require_command(commands(record["run"]), ("python", "rust/cli_harness"),
+                    ("--row", "test_login", "--record", "-v", "--out"))
+    retained = steps["Retain the recorded Linux test_login golden"]
+    assert retained["if"] == "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
+    assert retained["with"]["name"] == "test_login-linux-golden-${{ matrix.suite }}"
+    assert retained["with"]["path"].splitlines() == [
+        "rust/cli_harness/goldens/test_login.linux.json",
+        "${{ runner.temp }}/test-login-linux-record.json"]
+    summaries = steps["Retain CLI harness summaries"]
+    assert summaries["if"] == ("always() && (matrix.suite == 'cli' || "
+                               "startsWith(matrix.suite, 'w1c-'))")
+    assert summaries["with"]["name"] == "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
+    assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
+    # A second explicit row invocation outside the shard step duplicates work.
+    for step in job["steps"]:
+        if step is record:
+            continue
+        for words in commands(step.get("run", "")):
+            if words[:2] == ["python", "rust/cli_harness"]:
+                assert not any(word in W1C_ROWS for word in words)
+    for step in job["steps"]:
+        if step.get("uses") in ("dtolnay/rust-toolchain@stable", "Swatinem/rust-cache@v2"):
+            assert step["if"] == "!startsWith(matrix.suite, 'w1c-')"
 
 
 def check_executable_coverage(jobs):
@@ -151,7 +219,7 @@ def check_executable_coverage(jobs):
             cargo = cargo[:cargo.index("--")] if "--" in cargo else cargo
             assert "build" not in cargo, step.get("name")
     parity = {step.get("name"): step for step in parity_steps}
-    check_w1c_rows(parity["CLI W1-C differential harness"]["run"])
+    check_w1c_shards(jobs)
     sent_yaml = parity["Compare sent YAML startup with PyYAML"]
     require_command(commands(sent_yaml["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_sent_yaml.py",
@@ -330,7 +398,7 @@ def test_shards_cover_both_systems_and_build_once():
     assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
     assert consumed["if"] == "matrix.suite == 'cli'"
     assert consumed["with"]["path"] == "rust/target/debug"
-    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges"]
+    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
@@ -351,7 +419,9 @@ def test_original_checks_remain_gated_on_the_expected_shards():
             actual = matches[0]
             assert actual.get("run", "").strip(), name
             assert not actual.get("continue-on-error", False)
-            assert actual.get("if") == (f"matrix.suite == '{suite}'" if suite else None)
+            expected = "startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else (
+                f"matrix.suite == '{suite}'" if suite else None)
+            assert actual.get("if") == expected
     check_executable_coverage(jobs)
 
 
@@ -519,7 +589,7 @@ def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
 
 @pytest.mark.parametrize("name, old, new", [
     ("Run every eval harness test", "--junitxml", "--durations=10 --junitxml"),
-    ("CLI differential harness", "--row episode", "--row episode --row doctor"),
+    ("CLI differential harness", "--row episode", "--row episode --row audit"),
 ])
 def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     changed = copy.deepcopy(workflow())
@@ -561,11 +631,7 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
-    # Review of #678 (round 6): the W1-C rows pass through arrays.
-    ("CLI W1-C differential harness",
-     "'transfer', 'test_login', 'doctor', 'connect', 'maintainer', 'invite', 'pair', 'move', "
-     "'tunnel'", "'move'"),
-    ("CLI W1-C differential harness", "'invite', 'pair', ", "'invite', "),
+    ("CLI W1-C differential harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
     ("CLI W1-C differential harness", "python rust/cli_harness @golden",
      "# python rust/cli_harness @golden"),
     ("CLI W1-C differential harness", "@golden --golden", "@golden"),
@@ -672,3 +738,99 @@ def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
+
+
+def test_w1c_rows_run_once_on_parallel_suites():
+    jobs = workflow()["jobs"]
+    matrix = jobs["parity-checks"]["strategy"]["matrix"]
+    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
+    assert matrix["os"] == SYSTEMS
+    step = next(s for s in jobs["parity-checks"]["steps"]
+                if s.get("name") == "CLI W1-C differential harness")
+    assert step["if"] == "startsWith(matrix.suite, 'w1c-')"
+    assert jobs["parity"]["needs"] == ["rust", "candidate", "parity-checks"]
+    check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("row", W1C_ROWS)
+@pytest.mark.parametrize("mutation", ["drop", "duplicate"])
+def test_w1c_coverage_rejects_each_missing_or_duplicate_row(row, mutation):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    shards = jobs["parity-checks"]["strategy"]["matrix"]["include"]
+    shard = next(s for s in shards if f"'{row}'" in s["w1c_rows"])
+    rows = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
+    if mutation == "drop":
+        rows.remove(row)
+    else:
+        rows.append(row)
+    shard["w1c_rows"] = ", ".join(f"'{name}'" for name in rows)
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("suite", W1C_SUITES)
+def test_w1c_coverage_rejects_a_missing_suite(suite):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    jobs["parity-checks"]["strategy"]["matrix"]["suite"].remove(suite)
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("name, condition", [
+    ("CLI W1-C differential harness", "matrix.suite == 'cli'"),
+    ("Prepare disposable PostgreSQL for W1-C rows", "matrix.suite == 'cli'"),
+    ("Build the test_login container image", "runner.os == 'Linux'"),
+    ("Record the Linux test_login golden while it is absent", "runner.os == 'Linux'"),
+    ("Retain CLI harness summaries", "always() && matrix.suite == 'cli'"),
+])
+def test_w1c_coverage_rejects_changed_routing(name, condition):
+    jobs = copy.deepcopy(workflow()["jobs"])
+    step = next(s for s in jobs["parity-checks"]["steps"] if s.get("name") == name)
+    step["if"] = condition
+    with pytest.raises(AssertionError):
+        check_executable_coverage(jobs)
+
+
+@pytest.mark.parametrize("suite", W1C_SUITES)
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("golden_exists", [False, True])
+def test_w1c_powershell_passes_the_same_rows_live_and_golden(tmp_path, suite, windows, golden_exists):
+    import os
+    job = workflow()["jobs"]["parity-checks"]
+    shard = next(s for s in job["strategy"]["matrix"]["include"] if s["suite"] == suite)
+    step = next(s for s in job["steps"] if s.get("name") == "CLI W1-C differential harness")
+    script = step["run"].replace("${{ matrix.w1c_rows }}", shard["w1c_rows"])
+    script = script.replace("$IsWindows", "$fixtureWindows")
+    bootstrap = r'''
+$fixtureWindows = $env:PL_FIXTURE_WINDOWS -eq '1'
+$global:calls = @()
+function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
+function Test-Path { $env:PL_FIXTURE_GOLDEN -eq '1' }
+function python {
+    $global:calls += ,@($args)
+    $global:LASTEXITCODE = 0
+}
+'''
+    # Replace the step's final exit only to observe both standalone calls.
+    script = script.removesuffix("exit $LASTEXITCODE\n")
+    script += "ConvertTo-Json -InputObject $global:calls -Compress -Depth 5\n"
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_FIXTURE_WINDOWS=str(int(windows)),
+               PL_FIXTURE_GOLDEN=str(int(golden_exists)))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + script],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = json.loads(result.stdout)
+    rows = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
+    assert len(calls) == 2
+    for call, golden in zip(calls, (False, True)):
+        expected = [row for row in rows if not golden or row != "test_login" or golden_exists]
+        actual = [call[i + 1] for i, word in enumerate(call[:-1]) if word == "--row"]
+        assert actual == expected
+        assert ("--golden" in call) == golden
+        assert call[call.index("--candidate") + 1] == "fixture-candidate"
+
+
+def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
+    job = workflow()["jobs"]["parity-checks"]
+    assert job["timeout-minutes"] == (
+        "${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}")
