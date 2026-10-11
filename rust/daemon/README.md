@@ -97,8 +97,8 @@ are platform-specific because Python's MIME database and path resolution
 differ between Windows and Linux. The six `static-*` source mutants check
 redirects, CSP, containment, component boundaries, content types and exact JSON file bytes.
 Golden replay gets WebP/Markdown MIME/cache expectations from the local Python
-MIME database; headers and file bytes are still compared exactly. Rust also
-refuses a directory index linked outside the static root, a named divergence.
+MIME database; headers and file bytes are still compared exactly. Directory indexes
+and SPA fallbacks apply the same resolved-path containment check as direct requests.
 
 The existing `trust-bind` scenario requires a debug `--features mutants` binary.
 Its configured non-loopback host still passes through each daemon's original

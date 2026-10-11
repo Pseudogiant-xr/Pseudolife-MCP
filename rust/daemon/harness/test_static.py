@@ -43,3 +43,15 @@ def test_platform_golden_checks_mime_and_cache_without_changing_bytes(kind, cach
     assert response["headers"]["content-length"] == "5"
     wrong = {**response, "headers": {**response["headers"], "cache-control": "wrong"}}
     assert run.compare_case({**c, "name": "mapping", "method": "GET", "declared": None}, response, wrong)["diffs"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_directory_index_parity_compares_oracle_response():
+    c = next(c for c in run.StaticPaths().cases() if c["path"] == "/ui/linked-index")
+    py = {"status": 200, "bytes": "shell", "headers": {
+        "content-type": "text/html; charset=utf-8", "cache-control": "no-store"}}
+    rs = {"status": 403, "bytes": "forbidden", "headers": {
+        "content-type": "text/plain", "cache-control": "no-store"}}
+    row = run.compare_case(c, py, rs)
+    assert row["diffs"]
+    assert "substitution" not in row

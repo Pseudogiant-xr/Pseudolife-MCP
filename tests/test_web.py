@@ -581,6 +581,54 @@ def test_spa_fallback_without_index_is_not_found(tmp_path, monkeypatch):
     assert api._serve_static("/ui/unknown/route") == (404, b"not found", "text/plain")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+@pytest.mark.parametrize("path", ["/ui/d", "/ui/d/"])
+def test_directory_index_refuses_index_resolving_outside_root(tmp_path, monkeypatch, path):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    (root / "d").mkdir(parents=True)
+    outside = tmp_path / "index.html"
+    outside.write_bytes(b"marker")
+    (root / "d" / "index.html").symlink_to(outside)
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    direct = api._serve_static("/ui/d/index.html")
+    assert direct == (403, b"forbidden", "text/plain")
+    assert api._serve_static(path) == direct
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_directory_index_uses_resolved_file_and_type(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "notice.txt").write_bytes(b"notice")
+    (tmp_path / "d" / "index.html").symlink_to("../notice.txt")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/d") == (200, b"notice", "text/plain; charset=utf-8")
+
+
+def test_directory_without_index_uses_spa_fallback(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "index.html").write_bytes(b"shell")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/d") == (200, b"shell", "text/html; charset=utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_static_index_loop_matches_direct_error(svc, tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "index.html").symlink_to("index.html")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    app = _app(svc)
+    direct = call_with_headers(app, "GET", "/ui/")
+    assert direct[0] == 500 and direct[2] == b"static error"
+    assert call_with_headers(app, "GET", "/ui/unknown/route") == direct
+
+
 def test_asgi_root_redirects(svc):
     st, _ = call(_app(svc), "GET", "/")
     assert st == 307
