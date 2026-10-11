@@ -228,7 +228,7 @@ mod tests {
         for name in names {
             std::os::unix::fs::symlink(&directory, root.join(name)).unwrap();
         }
-        (root, directory)
+        (root, fs::canonicalize(directory).unwrap())
     }
 
     #[cfg(unix)]
