@@ -1208,6 +1208,28 @@ class StaticBuild(Scenario):
 
 class StaticPaths(StaticBuild):
     name = "static-paths"
+    golden_replay = True
+
+    def timeline(self, procs, holders):
+        yield from self.cases()
+        if type(self) is StaticPaths and os.name != "nt":
+            for d in procs.values():
+                index = d.cwd / "static" / "index.html"
+                index.unlink()
+                index.symlink_to(d.cwd / "outside" / "secret.txt")
+            for path in ("/ui/", "/ui/unknown/route"):
+                yield case("outside index " + path, "GET", path)
+            for d in procs.values():
+                index = d.cwd / "static" / "index.html"
+                index.unlink()
+                index.symlink_to("sub/index.html")
+            yield case("inside index fallback", "GET", "/ui/unknown/route")
+            for d in procs.values():
+                index = d.cwd / "static" / "index.html"
+                index.unlink()
+                index.symlink_to("index.html")
+            for path in ("/ui/", "/ui/unknown/route"):
+                yield case("index loop " + path, "GET", path)
 
     def prepare_home(self, home):
         root = home / "static"
@@ -1237,6 +1259,8 @@ class StaticPaths(StaticBuild):
             (root / "unreadable.txt").chmod(0)
             (root / "linked-index").mkdir()
             (root / "linked-index" / "index.html").symlink_to(outside / "secret.txt")
+            (root / "inside-index").mkdir()
+            (root / "inside-index" / "index.html").symlink_to("../notice.txt")
             (root / "unsearchable").mkdir()
             (root / "unsearchable" / "child.txt").write_bytes(b"hidden")
             (root / "unsearchable").chmod(0)
@@ -1260,7 +1284,8 @@ class StaticPaths(StaticBuild):
         paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
         if os.name != "nt":
             paths += ["/ui/notice.js", "/ui/loop-a", "/ui/unreadable.txt",
-                      "/ui/linked-index", "/ui/linked-index/index.html"]
+                      "/ui/linked-index", "/ui/linked-index/index.html",
+                      "/ui/linked-index/", "/ui/inside-index"]
             paths.append("/ui/unsearchable/child.txt")
         out = [case("path " + p, "GET", p) for p in paths]
         if os.name == "nt":
@@ -1271,10 +1296,6 @@ class StaticPaths(StaticBuild):
                     c["refusal_policy"] = "parent-space-refusal"
                 if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
                     c["refusal_policy"] = "parent-space-refusal"
-        else:
-            for c in out:
-                if c["path"] == "/ui/linked-index":
-                    c["refusal_policy"] = "directory-index-containment"
         return out
 
     def cleanup_home(self, home):
@@ -1495,7 +1516,7 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
-    if c.get("refusal_policy") in {"lexical-outside-root", "directory-index-containment", "parent-space-refusal"}:
+    if c.get("refusal_policy") in {"lexical-outside-root", "parent-space-refusal"}:
         sys.path.insert(0, str(REPO))
         from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
         headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}

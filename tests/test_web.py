@@ -9,6 +9,7 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -539,6 +540,92 @@ def test_asgi_static_index(svc):
 def test_asgi_static_traversal_blocked(svc):
     st, _ = call(_app(svc), "GET", "/ui/../../../etc/passwd")
     assert st == 403
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_spa_fallback_refuses_index_resolving_outside_root(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    root.mkdir()
+    outside = tmp_path / "index.html"
+    outside.write_bytes(b"marker")
+    (root / "index.html").symlink_to(outside)
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    direct = api._serve_static("/ui/")
+    assert direct == (403, b"forbidden", "text/plain")
+    assert api._serve_static("/ui/unknown/route") == direct
+
+
+@pytest.mark.parametrize("linked", [False, pytest.param(True, marks=pytest.mark.skipif(
+    os.name == "nt", reason="file-link fixtures run on POSIX"))])
+def test_spa_fallback_serves_index_within_root(tmp_path, monkeypatch, linked):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    root.mkdir()
+    if linked:
+        (root / "shell.html").write_bytes(b"shell")
+        (root / "index.html").symlink_to("shell.html")
+    else:
+        (root / "index.html").write_bytes(b"shell")
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    assert api._serve_static("/ui/unknown/route") == (
+        200, b"shell", "text/html; charset=utf-8")
+
+
+def test_spa_fallback_without_index_is_not_found(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/unknown/route") == (404, b"not found", "text/plain")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+@pytest.mark.parametrize("path", ["/ui/d", "/ui/d/"])
+def test_directory_index_refuses_index_resolving_outside_root(tmp_path, monkeypatch, path):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    (root / "d").mkdir(parents=True)
+    outside = tmp_path / "index.html"
+    outside.write_bytes(b"marker")
+    (root / "d" / "index.html").symlink_to(outside)
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    direct = api._serve_static("/ui/d/index.html")
+    assert direct == (403, b"forbidden", "text/plain")
+    assert api._serve_static(path) == direct
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_directory_index_uses_resolved_file_and_type(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "notice.txt").write_bytes(b"notice")
+    (tmp_path / "d" / "index.html").symlink_to("../notice.txt")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/d") == (200, b"notice", "text/plain; charset=utf-8")
+
+
+def test_directory_without_index_uses_spa_fallback(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "index.html").write_bytes(b"shell")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/d") == (200, b"shell", "text/html; charset=utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_static_index_loop_matches_direct_response(svc, tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    (tmp_path / "index.html").symlink_to("index.html")
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    app = _app(svc)
+    direct = call(app, "GET", "/ui/")
+    assert call(app, "GET", "/ui/unknown/route") == direct
 
 
 def test_asgi_root_redirects(svc):
