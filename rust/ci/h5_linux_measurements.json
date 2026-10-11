@@ -1,0 +1,231 @@
+{
+  "date": "2026-10-11",
+  "platform": "linux",
+  "candidate_base": "aaa652c6f570d02d9b2985acf1b3da5e1c45e92d",
+  "build": "debug, cargo -j 4; CPU-only offline fixtures",
+  "new_suites": {
+    "h5-audit": {
+      "seconds": 112.298,
+      "action_exits": [
+        0,
+        0,
+        0
+      ],
+      "live_cases": 110,
+      "golden_cases": 29
+    },
+    "h5-backup": {
+      "seconds": 34.147,
+      "action_exits": [
+        0,
+        0,
+        0
+      ],
+      "live_cases": 17,
+      "golden_cases": 17
+    },
+    "h5-w1a": {
+      "seconds": 434.556,
+      "action_exits": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "live_scenarios": 14,
+      "live_cases": 52,
+      "golden_scenarios": 8,
+      "golden_cases": 41,
+      "live_only_scenarios": 6
+    },
+    "h5-daemon-mutants": {
+      "seconds": 179.546,
+      "action_exits": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "caught": 16
+    },
+    "h5-graph-mutants": {
+      "seconds": 393.499,
+      "action_exits": [
+        0,
+        0
+      ],
+      "store_caught": 8,
+      "read_caught": 8,
+      "store_seconds": 134.863,
+      "read_seconds": 258.636
+    }
+  },
+  "source_loops": {
+    "audit": {
+      "seconds": 88.01,
+      "caught": 14,
+      "exit": 0,
+      "measurement": "selected shards; exceptions omitted"
+    },
+    "backup": {
+      "seconds": 49.652,
+      "caught": 9,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "mail": {
+      "seconds": 57.901,
+      "caught": 9,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "hook": {
+      "seconds": 51.905,
+      "caught": 8,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "episode": {
+      "seconds": 50.095,
+      "caught": 4,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "lease": {
+      "seconds": 41.166,
+      "caught": 7,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "transfer": {
+      "seconds": 136.072,
+      "caught": 23,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "test_login": {
+      "seconds": 158.183,
+      "caught": 20,
+      "exit": 0,
+      "measurement": "selected shards; exceptions omitted"
+    },
+    "doctor": {
+      "seconds": 249.987,
+      "caught": 30,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "connect": {
+      "seconds": 158.869,
+      "caught": 17,
+      "exit": 0,
+      "measurement": "selected shards; exceptions omitted"
+    },
+    "maintainer": {
+      "seconds": 105.279,
+      "caught": 15,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "invite": {
+      "seconds": 81.492,
+      "caught": 7,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "pair": {
+      "seconds": 54.9,
+      "caught": 8,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "move": {
+      "seconds": 48.942,
+      "caught": 12,
+      "exit": 0,
+      "measurement": "full platform loop"
+    },
+    "tunnel": {
+      "seconds": 114.481,
+      "caught": 20,
+      "exit": 0,
+      "measurement": "full platform loop"
+    }
+  },
+  "source_shard_bound": {
+    "controls": 8,
+    "slowest_warm_seconds": 81,
+    "cold_compile_seconds": 65,
+    "linux_timeout_minutes": 6,
+    "windows_timeout_minutes": 30,
+    "windows_measurement": "pending hosted CI"
+  },
+  "exceptions": {
+    "w1a": {
+      "tokens": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
+      "tokenless": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
+      "config": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
+      "seeded": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
+      "json-float-shortest-ties": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11."
+    },
+    "daemon_mutants": {
+      "del-unescaped": "Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.",
+      "serde-json-writer": "Survived the clean extractor witness on Linux 2026-10-11; JSON float witnesses have the named telemetry difference.",
+      "no-backoff": "Lease-held mutation did not complete recovery and produced a scenario error (Linux 2026-10-11); an error is not a caught source control.",
+      "static-json-whitespace": "Survived static-build on Linux 2026-10-11; no active source branch with this name remains in the current candidate.",
+      "route-405-as-404": "Survived the clean pair-budget and security-open witnesses on Linux 2026-10-11; tokens/tokenless witnesses have the named telemetry difference.",
+      "golden-float-token": "Its json-float-shortest-ties witness has the named retrieval telemetry bank-state difference; the control baseline is not clean."
+    },
+    "cli_mutants": {
+      "linux": {
+        "audit-drive-relative-admitted": "Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.",
+        "connect-config-not-private": "Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.",
+        "connect-remote-keeps-spawn": "Survived Linux 2026-10-11; the existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch.",
+        "tl-script-lf": "Survived Linux 2026-10-11 with its container witness; text_bytes already uses LF on POSIX."
+      },
+      "windows": {
+        "connect-remote-keeps-spawn": "The existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch (Linux survivor; platform-neutral fixture).",
+        "tl-container-db-ignored": "Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.",
+        "tl-script-lf": "Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.",
+        "tl-keep-staged-on-failure": "Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers."
+      }
+    },
+    "audit_golden": "Only the 29 stable cases in audit_golden_cases.json replay across processes; the remaining 81 cases carry fresh IDs, hashes or redaction state. All 110 run live (Linux 2026-10-11)."
+  }
+}

@@ -410,6 +410,7 @@ def _write_summary(out: Path | None, summary: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global GOLDENS
     parser = argparse.ArgumentParser(prog="cli_harness",
                                      description="Python CLI vs Rust CLI differential harness")
     parser.add_argument("--row", action="append", choices=sorted(rows.ROWS), required=True)
@@ -428,8 +429,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-bank", action="store_true",
                         help="skip cases that need real daemons on disposable banks")
     parser.add_argument("--out", type=Path, help="write a JSON summary")
+    parser.add_argument("--golden-dir", type=Path, help="record/replay goldens in this directory")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
+    if args.golden_dir:
+        GOLDENS = args.golden_dir.resolve()
+        GOLDENS.mkdir(parents=True, exist_ok=True)
     source = args.oracle_source.resolve()
 
     # Refuse an unbound recording before the oracle is importable here, and
@@ -463,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.mutants:
         from . import mutants  # noqa: PLC0415
         mutants.SKIP_BANK = args.skip_bank
-        return mutants.main(args.row, args.mutant, oracle, args.verbose)
+        return mutants.main(args.row, args.mutant, oracle, args.verbose, out=args.out)
     # Keyed by row name: two rows may share a PARITY ID (invite and pair).
     # Written after every row, so a later row's crash keeps the earlier ones;
     # ``complete`` turns true only once every selected row has finished.

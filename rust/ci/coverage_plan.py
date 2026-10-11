@@ -1,0 +1,90 @@
+"""Named selections for the H5 row/control CI shards (no product changes)."""
+
+import json
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text())
+# Linux 2026-10-11: the slowest eight-control selection took 81s;
+# the first cold compile added 65s. Keep that bound on each parallel job.
+SOURCE_SHARDS = {f'{row}-{index // 8}': (row, ids[index:index + 8])
+                 for row, ids in SOURCE_MUTANTS.items() for index in range(0, len(ids), 8)}
+AUDIT_GOLDEN_CASES = json.loads((HERE / 'audit_golden_cases.json').read_text())
+W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
+       'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
+       'json-float-shortest-ties', 'trust-bind', 'null-embedding',
+       'unconstrained-dims', 'db-lost', 'encodings', 'map-order', 'map-order-reversed')
+
+# These are observed differences, not comparator relaxations. Each omitted
+# selection remains named so the inventory cannot silently erase the gap.
+EXCEPTIONS = {
+    'w1a': {
+        'tokens': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+        'tokenless': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+        'config': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+        'seeded': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+        'json-float-shortest-ties': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+    },
+    'daemon_mutants': {
+        'del-unescaped': 'Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
+        'serde-json-writer': 'Survived the clean extractor witness on Linux 2026-10-11; JSON float witnesses have the named telemetry difference.',
+        'no-backoff': 'Lease-held mutation did not complete recovery and produced a scenario error (Linux 2026-10-11); an error is not a caught source control.',
+        'static-json-whitespace': 'Survived static-build on Linux 2026-10-11; no active source branch with this name remains in the current candidate.',
+        'route-405-as-404': 'Survived the clean pair-budget and security-open witnesses on Linux 2026-10-11; tokens/tokenless witnesses have the named telemetry difference.',
+        'golden-float-token': 'Its json-float-shortest-ties witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
+    },
+    'cli_mutants': {
+        'linux': {
+            'audit-drive-relative-admitted': 'Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.',
+            'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',
+            'connect-remote-keeps-spawn': 'Survived Linux 2026-10-11; the existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch.',
+            'tl-script-lf': 'Survived Linux 2026-10-11 with its container witness; text_bytes already uses LF on POSIX.',
+        },
+        'windows': {
+            'connect-remote-keeps-spawn': 'The existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch (Linux survivor; platform-neutral fixture).',
+            'tl-container-db-ignored': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
+            'tl-script-lf': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
+            'tl-keep-staged-on-failure': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
+        },
+    },
+    'audit_golden': 'Only the 29 stable cases in audit_golden_cases.json replay across processes; the remaining 81 cases carry fresh IDs, hashes or redaction state. All 110 run live (Linux 2026-10-11).',
+}
+
+DAEMON_CONTROLS = {
+    'auth-candidate-order': ['encodings'],
+    'skip-relation-seed': ['extractor'],
+    'skip-lease-epoch': ['extractor'],
+    'drop-alter-tail': ['extractor'],
+    'pair-ignores-origin': ['security-open'],
+    'health-omits-db': ['extractor'],
+    'body-limit-off': ['body-limits'],
+    'tokenless-maintainer-open': ['body-view-open'],
+    'static-redirect': ['static-build'],
+    'static-no-csp': ['static-build'],
+    'static-traversal-open': ['static-paths'],
+    'static-wrong-type': ['static-build'],
+    'static-string-prefix': ['static-paths'],
+    'body-limit-inclusive': ['body-limits'],
+    'text-limit-control': ['body-text-window'],
+    'agents-view-default': ['body-view-open'],
+}
+GRAPH_CONTROLS = {
+    'store': ['graph-confidence', 'graph-origin', 'graph-revive', 'graph-bless',
+              'graph-alias', 'graph-relink', 'graph-merge', 'graph-normalize'],
+    'read': ['graph-read-alias', 'graph-read-degree', 'graph-read-transitive',
+             'graph-read-inverse-closure', 'graph-read-provenance', 'graph-read-depth',
+             'graph-read-path-order', 'graph-read-suggestions'],
+}
+SUITES = {
+    'h5-audit': [dict(kind='cli', row='audit', mode=mode,
+                      cases=AUDIT_GOLDEN_CASES if mode != 'live' else [])
+                 for mode in ('live', 'record', 'golden')],
+    'h5-backup': [dict(kind='cli', row='backup', mode=mode, cases=[])
+                  for mode in ('live', 'record', 'golden')],
+    'h5-w1a': [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
+                for name in W1A if name not in EXCEPTIONS['w1a']
+                for mode in ('live', 'golden')],
+    'h5-daemon-mutants': [dict(kind='daemon', mutant=name, scenarios=scenarios, mode='mutants')
+                          for name, scenarios in DAEMON_CONTROLS.items()],
+    'h5-graph-mutants': [dict(kind='graph', mode='mutants', row=row) for row in GRAPH_CONTROLS],
+}
