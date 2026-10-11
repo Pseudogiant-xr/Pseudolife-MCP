@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-11 — recovery dependency audits)
+- Add the read-only `re_evidence(action="dependencies")` operation. Exact
+  project/build manifests track function, layout, corpus and tool hashes plus
+  transitive claim dependencies, returning a deterministic recheck queue when
+  inputs change or disappear. No schema migration or automatic claim promotion.
+
 ### Fixed (2026-10-07 — RE Evidence card ages)
 - Show relative ingestion and creation ages on collapsed artifact and claim
   cards, with the exact timestamp available on hover.
