@@ -932,6 +932,30 @@
     "x-content-type-options": "nosniff"
    },
    "json": {
+    "ok": true
+   },
+   "number_tokens": [],
+   "status": 200
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "ok": true
+   },
+   "number_tokens": [],
+   "status": 200
+  },
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
     "error": "pairing_refused"
    },
    "number_tokens": [],

@@ -85,7 +85,8 @@ def cases(case, auth):
     # writes. The native route must return invalid_json rather than success.
     for label, body in [("malformed", b'{'), ("whitespace", b' '),
                         ("array", b'[]'), ("null", b'null'),
-                        ("string", b'"session"'), ("number", b'1'), ("boolean", b'true')]:
+                        ("string", b'"session"'), ("number", b'1'), ("boolean", b'true'),
+                        ("NaN session", b'{"session_id": NaN}')]:
         for chunked in (False, True):
             item = case("end invalid " + label + (" chunked" if chunked else ""), "POST", end, a, body)
             item.update(session_end_invalid_json=True, chunked=chunked)
