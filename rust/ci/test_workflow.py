@@ -172,7 +172,7 @@ def check_w1c_shards(jobs):
                     ("--row", "test_login", "--record", "-v", "--out"))
     retained = steps["Retain the recorded Linux test_login golden"]
     assert retained["if"] == "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
-    assert retained["with"]["name"] == "test_login-linux-golden-${{ matrix.suite }}"
+    assert retained["with"]["name"] == "test_login-linux-golden"
     assert retained["with"]["path"].splitlines() == [
         "rust/cli_harness/goldens/test_login.linux.json",
         "${{ runner.temp }}/test-login-linux-record.json"]
