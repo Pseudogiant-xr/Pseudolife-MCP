@@ -1335,3 +1335,52 @@ def test_summary_keeps_rows_that_share_a_parity_id(tmp_path, monkeypatch):
     assert set(summary) == {"invite", "pair"}
     assert summary["invite"]["parity"] == summary["pair"]["parity"] == "CLI-PAIRING"
     assert list(summary["pair"]["results"]) == ["pair-case"]
+
+
+def _http_fixture(row):
+    from cli_harness.rows import doctor, move
+
+    if row == "doctor":
+        return doctor.FixtureDaemon(), "/health", 404
+    return move._Recorder(), "/health", 502
+
+
+@pytest.mark.parametrize("row", ["doctor", "move"])
+def test_fixture_replies_records_and_closes_with_bounded_polling(row, monkeypatch):
+    import http.client
+    import socket
+    import socketserver
+
+    intervals = []
+    selector = socketserver._ServerSelector
+
+    class RecordingSelector(selector):
+        def select(self, timeout=None):
+            intervals.append(timeout)
+            return super().select(timeout)
+
+    monkeypatch.setattr(socketserver, "_ServerSelector", RecordingSelector)
+
+    fixture, path, status = _http_fixture(row)
+    server = fixture._server if row == "move" else fixture.server
+    thread = fixture._thread if row == "move" else fixture.thread
+    port = server.server_address[1]
+    try:
+        client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            client.request("GET", path)
+            response = client.getresponse()
+            assert response.status == status
+            response.read()
+        finally:
+            client.close()
+        # The wire request remains observable before teardown.
+        assert fixture.requests()[0]["target"] == path
+    finally:
+        fixture.close()
+    thread.join(1)
+    assert not thread.is_alive()
+    with socket.socket() as probe:
+        assert probe.connect_ex(("127.0.0.1", port)) != 0
+    # Bound the actual idle wait without depending on thread scheduling.
+    assert intervals and all(0 < timeout <= 0.05 for timeout in intervals)
