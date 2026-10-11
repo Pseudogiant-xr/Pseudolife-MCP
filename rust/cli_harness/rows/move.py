@@ -78,7 +78,9 @@ class _Recorder:
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        # Linux W1-C, 2026-10-11: idle shutdown waited about 0.5 s per listener.
+        self._thread = threading.Thread(target=self._server.serve_forever,
+                                        kwargs={"poll_interval": 0.05}, daemon=True)
         self._thread.start()
 
     def requests(self) -> list[dict]:

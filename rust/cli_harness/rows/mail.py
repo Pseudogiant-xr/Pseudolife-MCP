@@ -63,15 +63,19 @@ _ARMED = re.compile(r"([0-9a-f]{64})\.([0-9a-f]{32})\.wait-armed")
 _LISTENER_CLOCK_ALLOWANCE = 1.0
 
 
-def listener_shape(arm, path: Path, timeout: float) -> str:
+def listener_shape(arm, path: Path, timeout: float, *, raw: bytes | None = None) -> str | None:
     """The waiter's own listener record (wake_liveness.WaitListener): named
     ``<key>.<token>.wait-armed``, holding the token and an expiry no later
-    than a minute past the renewal. Recorded as ``valid`` or the raw bytes."""
+    than a minute past the renewal. Recorded as ``valid`` or the raw bytes;
+    a transient replacement race is not an observation."""
     match = _ARMED.fullmatch(path.name)
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return "vanished"
+    if raw is None:
+        try:
+            raw = path.read_bytes()
+        except (PermissionError, FileNotFoundError):
+            return None
+        except OSError:
+            return "vanished"
     lines = raw.split(b"\n")
     observed = time.time()
     try:
@@ -97,10 +101,12 @@ def armed_then(action=None, timeout: float = 20.0):
             found = ([f for f in directory.iterdir() if _ARMED.fullmatch(f.name)]
                      if directory.is_dir() else [])
             if found:
-                arm.state["listener"] = listener_shape(arm, found[0], timeout)
-                if action:
-                    action(arm)
-                return
+                shape = listener_shape(arm, found[0], timeout)
+                if shape is not None:
+                    arm.state["listener"] = shape
+                    if action:
+                        action(arm)
+                    return
             time.sleep(0.01)
         arm.state["listener"] = "never-armed"
     return during
@@ -119,17 +125,23 @@ def renewed_listener(arm, proc):
             found = [f for f in directory.iterdir() if _ARMED.fullmatch(f.name)]
             if found:
                 path = found[0]
-                raw = path.read_bytes()
-                info = path.stat()
-                record = (raw, info.st_mtime_ns, info.st_ino)
-                if first is None:
-                    first = record
-                    samples.append(listener_shape(arm, path, 20.0))
-                elif record != first:
-                    samples.append(listener_shape(arm, path, 20.0))
-                    arm.state["listener"] = "valid" if samples == ["valid", "valid"] else samples
-                    p.write_ring(_paths(arm.home)["ring"], 7, "rung", "urgent")
-                    return
+                try:
+                    with path.open("rb") as stream:
+                        raw = stream.read()
+                        info = os.fstat(stream.fileno())
+                except (PermissionError, FileNotFoundError):
+                    pass  # Waiter replacement: retry next tick without a sample.
+                else:
+                    record = (raw, info.st_mtime_ns, info.st_ino)
+                    # Validate the bytes already read, without racing a second read.
+                    if first is None:
+                        first = record
+                        samples.append(listener_shape(arm, path, 20.0, raw=raw))
+                    elif record != first:
+                        samples.append(listener_shape(arm, path, 20.0, raw=raw))
+                        arm.state["listener"] = "valid" if samples == ["valid", "valid"] else samples
+                        p.write_ring(_paths(arm.home)["ring"], 7, "rung", "urgent")
+                        return
         time.sleep(0.01)
     arm.state["listener"] = samples + ["never-renewed"]
 
