@@ -40,9 +40,11 @@ with the exact static refusal body/headers, while both arms retain the oracle
 observation. These input forms are outside the shipped Console asset URLs.
 The oracle fixture changes only `STATIC_DIR`, leaving its serving code intact.
 Windows uses directory junctions; Linux also exercises file links, loops and
-read failures. Rust rechecks containment of the appended directory index;
-Python does not. The paired Linux linked-index case records the oracle's
-answer and requires the exact Rust 403 through `directory-index-containment`.
+read failures. Both implementations resolve and check directory indexes and
+SPA fallback indexes before serving them. Linked-index rows compare both
+arms directly without a refusal substitution. Looping index links match
+the direct request: 500 `static error` on Python 3.10–3.12 and Rust,
+404 `not found` on Python 3.13 and later.
 Windows file-link fixtures require unavailable symlink privileges on the
 author's host; its junction fixtures remain covered on both arms. This adds
 no filesystem race guarantee.
