@@ -362,6 +362,7 @@ fn timestamp() -> Option<String> {
 #[allow(unsafe_code)]
 fn timestamp() -> Option<String> {
     let now = seconds(SystemTime::now()).floor() as libc::time_t;
+    // SAFETY: Windows CRT tm contains integer fields, whose zero values are valid.
     let mut local: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: CRT reads this child's inherited TZ; both pointers are valid for the call.
     unsafe {

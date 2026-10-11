@@ -40,7 +40,7 @@ one of its archived children; a top-level child `Path.resolve()` would refuse
 run's new files against the platform clock: Python 3.11 reads the coarse
 system clock on Windows); directory reparse points that escape the source
 tree or form a traversal cycle; Windows names or link targets that Python's
-UTF-8/surrogateescape archive writer cannot encode; unexpected stat errors
+UTF-8/surrogateescape archive writer cannot round-trip; unexpected stat errors
 under `~/.pg0`; raw matching rotation names that cannot be printed through
 UTF-8 stdout; and on Windows an existing target with this second's timestamp.
 

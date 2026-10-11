@@ -54,11 +54,16 @@ fn encodable(name: &OsStr) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        char::decode_utf16(name.encode_wide()).all(|character| {
-            character.is_ok()
-                || character
-                    .is_err_and(|error| (0xdc80..=0xdcff).contains(&error.unpaired_surrogate()))
-        })
+        let points = char::decode_utf16(name.encode_wide())
+            .map(|character| match character {
+                Ok(character) => Some(u32::from(character)),
+                Err(error) if (0xdc80..=0xdcff).contains(&error.unpaired_surrogate()) => {
+                    Some(u32::from(error.unpaired_surrogate()))
+                }
+                Err(_) => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        points.is_some_and(|points| codepoints(&name_bytes(name)) == points)
     }
     #[cfg(unix)]
     {
@@ -159,6 +164,7 @@ fn reparse_tag(path: &Path) -> Option<u32> {
         .custom_flags(0x00200000 | 0x02000000)
         .open(path)
         .ok()?;
+    // SAFETY: the structure contains only integer fields, whose zero values are valid.
     let mut info: FILE_ATTRIBUTE_TAG_INFO = unsafe { std::mem::zeroed() };
     // SAFETY: the handle is open and the correctly sized output buffer is valid.
     let ok = unsafe {
@@ -328,6 +334,7 @@ fn identity(path: &Path, _meta: &Metadata) -> io::Result<((u64, u64), u64)> {
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
     let file = fs::File::open(path)?;
+    // SAFETY: the structure contains only integer fields, whose zero values are valid.
     let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
     // SAFETY: the open handle and output pointer remain valid for this call.
     if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
@@ -664,6 +671,20 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_must_encode_and_decode_to_the_same_codepoints() {
+        use std::os::windows::ffi::OsStringExt;
+        for (wide, expected) in [
+            (&[0xdcc2, 0xdca9][..], false),
+            (&[0xdcff][..], true),
+            (&[0xd800][..], false),
+            (&[0xd83d, 0xde80][..], true),
+        ] {
+            assert_eq!(encodable(&OsString::from_wide(wide)), expected, "{wide:?}");
+        }
+    }
 
     #[cfg(unix)]
     #[test]
