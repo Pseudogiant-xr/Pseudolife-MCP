@@ -500,6 +500,154 @@ def test_mail_renewal_can_rewrite_identical_expiry_bytes(tmp_path, monkeypatch):
     assert len(rings) == 1
 
 
+@pytest.mark.parametrize("invalid", [b"wrong-token\n128.0\n", b"a" * 32 + b"\n100.0\n"])
+def test_mail_renewal_does_not_mix_file_generations(tmp_path, monkeypatch, invalid):
+    import io
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    path.write_bytes(f"{token}\n128.0\n".encode())
+    original_open = Path.open
+    original_fstat = os.fstat
+    reads = 0
+    snapshots = {}
+    class Snapshot(io.BytesIO):
+        def fileno(self):
+            return -1
+        def read(self, *args):
+            nonlocal reads
+            raw = super().read(*args)
+            reads += 1
+            if reads == 2:
+                # Synthetic handles let this interleaving run on Windows,
+                # where a real open reader can block replacement itself.
+                replacement = tmp_path / "replacement"
+                replacement.write_bytes(invalid)
+                modified = snapshots[-1].st_mtime_ns + 100_000_000
+                os.utime(replacement, ns=(modified, modified))
+                replacement.replace(path)
+            return raw
+    def opening(candidate, mode="r", *args, **kwargs):
+        if candidate != path or mode != "rb":
+            return original_open(candidate, mode, *args, **kwargs)
+        with original_open(candidate, mode, *args, **kwargs) as stream:
+            raw = stream.read()
+            snapshots[-1] = original_fstat(stream.fileno())
+        return Snapshot(raw)
+    monkeypatch.setattr(Path, "open", opening)
+    monkeypatch.setattr(mail.os, "fstat", lambda fd: snapshots[fd] if fd == -1
+                        else original_fstat(fd))
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 20.0])
+    monkeypatch.setattr(mail, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), time=lambda: 108.0, sleep=lambda _seconds: None))
+    monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
+    monkeypatch.setattr(mail.p, "write_ring", lambda *args: None)
+    arm = SimpleNamespace(started=100.0, home=tmp_path, state={})
+    mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
+    assert arm.state["listener"] == ["valid", f"raw:{path.name}:{invalid!r}"]
+    assert reads == 3
+
+
+@pytest.mark.parametrize("error", [PermissionError, FileNotFoundError])
+def test_mail_armed_listener_retries_a_transient_read(tmp_path, monkeypatch, error):
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    path.write_bytes(f"{token}\n128.0\n".encode())
+    arm = SimpleNamespace(home=tmp_path, state={})
+    reads = []
+    original = Path.read_bytes
+    def read(candidate):
+        if candidate == path:
+            reads.append(candidate)
+            if len(reads) == 1:
+                raise error("waiter is replacing its record")
+        return original(candidate)
+    monkeypatch.setattr(Path, "read_bytes", read)
+    ticks = iter([0.0, 1.0, 2.0, 20.0])
+    actions = []
+    def sleep(_seconds):
+        assert arm.state == {}
+        assert actions == []
+    monkeypatch.setattr(mail, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), time=lambda: 108.0, sleep=sleep))
+    monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
+    mail.armed_then(lambda current: actions.append(current))(arm, SimpleNamespace(poll=lambda: None))
+    assert arm.state["listener"] == "valid"
+    assert reads == [path, path]
+    assert actions == [arm]
+
+
+@pytest.mark.parametrize("error", [PermissionError, FileNotFoundError])
+@pytest.mark.parametrize("operation", ["open", "read", "fstat"])
+@pytest.mark.parametrize("failed_tick", [0, 1])
+def test_mail_renewed_listener_retries_a_transient_record(
+        tmp_path, monkeypatch, error, operation, failed_tick):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from cli_harness.rows import mail
+    token = "a" * 32
+    path = tmp_path / f"{mail.KEY}.{token}.wait-armed"
+    path.write_bytes(f"{token}\n128.0\n".encode())
+    arm = SimpleNamespace(started=100.0, home=tmp_path, state={})
+    tick = 0
+    calls = []
+    original_open = Path.open
+    original_fstat = os.fstat
+    record_fd = None
+    def observe():
+        calls.append(tick)
+        if tick == failed_tick:
+            raise error("waiter is replacing its record")
+    @contextmanager
+    def opening(candidate, mode="r", *args, **kwargs):
+        nonlocal record_fd
+        record = candidate == path and mode == "rb"
+        if record and operation == "open":
+            observe()
+        with original_open(candidate, mode, *args, **kwargs) as stream:
+            if not record:
+                yield stream
+                return
+            def read():
+                if operation == "read":
+                    observe()
+                return stream.read()
+            record_fd = stream.fileno()
+            try:
+                yield SimpleNamespace(read=read, fileno=stream.fileno)
+            finally:
+                record_fd = None
+    def fstat(fd):
+        if fd == record_fd and operation == "fstat":
+            observe()
+        return original_fstat(fd)
+    monkeypatch.setattr(Path, "open", opening)
+    monkeypatch.setattr(mail.os, "fstat", fstat)
+    rings = []
+    def sleep(_seconds):
+        nonlocal tick
+        assert arm.state == {}
+        assert rings == []
+        tick += 1
+        # First successfully observed record stays unchanged through the
+        # failed tick; only the third tick contains an observed renewal.
+        if tick == 2:
+            path.write_bytes(f"{token}\n128.5\n".encode())
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 20.0])
+    monkeypatch.setattr(mail, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), time=lambda: 108.0, sleep=sleep))
+    monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
+    monkeypatch.setattr(mail.p, "write_ring", lambda *args: rings.append(args))
+    mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
+    assert arm.state["listener"] == "valid"
+    assert tick == 2
+    assert rings == [(mail._paths(tmp_path)["ring"], 7, "rung", "urgent")]
+    assert calls == [0, 1, 2]
+
+
 def test_episode_health_trickle_leaves_scheduler_headroom_without_a_total_deadline():
     from cli_harness.rows import episode
 
