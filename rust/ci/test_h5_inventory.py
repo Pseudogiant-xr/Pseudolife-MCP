@@ -28,7 +28,7 @@ def test_w1a_offline_fixture_preserves_scenario_configuration(tmp_path, monkeypa
     scenario.ci_fixture = True
     home = tmp_path / "home"
     (home / "data").mkdir(parents=True)
-    (home / "data/config.yaml").write_text(scenario.config_yaml)
+    (home / "data/config.yaml").write_text(scenario.config_yaml, encoding="utf-8")
     environment = scenario.prepare_home(home)
     configuration = yaml.safe_load((home / "data/config.yaml").read_text(encoding="utf-8"))
     assert created == [(home / "model", {"dimension": 1024})]
@@ -403,3 +403,17 @@ def test_windows_encodings_gap_keeps_linux_and_auth_control(monkeypatch, tmp_pat
     encodings = [a for a in invoked if a[a.index('--only') + 1] == 'encodings']
     assert len(encodings) == (0 if platform == 'windows' else 2)
     assert DAEMON_CONTROLS['auth-candidate-order'] == ['encodings']
+
+
+@pytest.mark.parametrize('job, name', [('parity-checks', 'Ported rows and daemon controls'),
+                                      ('source-mutants', 'CLI source mutants')])
+@pytest.mark.parametrize('suffix', ['; exit 0', '; python -c "raise SystemExit(0)"'])
+def test_inventory_rejects_failure_mask_on_invocation_line(job, name, suffix):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
+    lines = step['run'].splitlines()
+    lines[0] += suffix
+    step['run'] = '\n'.join(lines)
+    with pytest.raises(AssertionError, match='driver command'):
+        check(workflow)

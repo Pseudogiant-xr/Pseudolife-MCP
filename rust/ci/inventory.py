@@ -45,11 +45,12 @@ def exception_reasons(value):
         assert isinstance(value, str) and value.strip(), 'empty or invalid exception reason'
 
 
-def exit_propagation(step):
+def exit_propagation(step, invocation):
     lines = [line.strip() for line in step['run'].splitlines()
              if line.strip() and not line.lstrip().startswith('#')]
     assert step.get('shell') == 'pwsh' and len(lines) == 2 \
         and lines[1] == 'exit $LASTEXITCODE', 'H5 exit propagation changed'
+    assert lines[0] == invocation, 'H5 driver command or failure propagation changed'
 
 
 def check(workflow):
@@ -93,7 +94,8 @@ def check(workflow):
     assert ["python", "rust/ci/run_coverage.py", "--suite", "${{", "matrix.suite", "}}"] \
         == commands(step["run"])[0][:6]
     assert "--out-dir" in commands(step["run"])[0]
-    exit_propagation(step)
+    exit_propagation(step, "python rust/ci/run_coverage.py --suite ${{ matrix.suite }} "
+                     "--out-dir (Join-Path $env:RUNNER_TEMP 'h5') --keep-going")
     setup = next(s for s in parity["steps"] if s.get("name") == "Prepare disposable PostgreSQL for H5")
     assert setup["if"] == step["if"] and parity["steps"].index(setup) < parity["steps"].index(step)
 
@@ -121,7 +123,8 @@ def check(workflow):
     invocation = next(s for s in source["steps"] if s.get("name") == "CLI source mutants")
     assert not invocation.get("if") and not invocation.get("continue-on-error")
     assert commands(invocation["run"])[0][:6] == ["python", "rust/ci/run_coverage.py", "--source-shard", "${{", "matrix.shard", "}}"]
-    exit_propagation(invocation)
+    exit_propagation(invocation, "python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} "
+                     "--out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')")
     oracle = next(s for s in source['steps'] if s.get('name') == 'Bind the source-control Python oracle')
     assert source['steps'].index(oracle) < source['steps'].index(invocation)
     assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}'}
