@@ -727,6 +727,7 @@ fn matching_raw_rotation_names_defer_before_utf8_stdout_failure() {
 #[cfg(windows)]
 #[test]
 fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
+    use std::os::windows::ffi::OsStrExt;
     let home = Home::new("link-flags");
     let bank = home.path().join("bank");
     fs::create_dir(&bank).unwrap();
@@ -739,6 +740,18 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
     fs::remove_dir(&link).unwrap();
     fs::create_dir(bank.join("z-directory")).unwrap();
     std::os::windows::fs::symlink_dir("z-directory", &link).unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+    let mut long_target = home.path().join("long-target");
+    while long_target.as_os_str().encode_wide().count() < 280 {
+        long_target.push("directory-component");
+    }
+    fs::create_dir_all(&long_target).unwrap();
+    let long_target = fs::canonicalize(long_target).unwrap();
+    std::os::windows::fs::symlink_dir(&long_target, &link).unwrap();
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stderr, cli::native_text(DEFERRED));

@@ -295,6 +295,12 @@ fn is_directory(meta: &Metadata) -> bool {
     }
 }
 
+#[cfg(any(windows, test))]
+fn directory_link_target_supported(absolute: bool, wide_len: usize) -> bool {
+    // CPython's _check_dirW includes the terminator in its MAX_PATH buffer.
+    absolute && wide_len < 260
+}
+
 /// Directory reparse points are traversed by Python; keep that traversal in the tree.
 fn supported(
     path: &Path,
@@ -310,6 +316,7 @@ fn supported(
         }
         #[cfg(windows)]
         {
+            use std::os::windows::ffi::OsStrExt;
             // Python's extractor infers the directory flag from the target;
             // it does not store that flag in a symlink member.
             let directory = is_directory(meta);
@@ -318,7 +325,13 @@ fn supported(
                 Err(error) if error.kind() == io::ErrorKind::NotFound => false,
                 Err(_) => return None,
             };
-            if directory != target_directory || directory && !link.is_absolute() {
+            if directory != target_directory
+                || directory
+                    && !directory_link_target_supported(
+                        link.is_absolute(),
+                        link.as_os_str().encode_wide().count(),
+                    )
+            {
                 return None;
             }
         }
@@ -520,6 +533,14 @@ struct Member<'a> {
     link: Option<Vec<u8>>,
 }
 
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)] // libc's dev_t and major/minor widths vary across Unix.
+fn device_numbers(meta: &Metadata) -> (u32, u32) {
+    use std::os::unix::fs::MetadataExt;
+    let device = meta.rdev() as libc::dev_t;
+    (libc::major(device) as u32, libc::minor(device) as u32)
+}
+
 fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<()> {
     let size = if member.kind == EntryType::Regular {
         member.meta.len()
@@ -567,9 +588,9 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     header.set_size(size);
     #[cfg(unix)]
     if matches!(member.kind, EntryType::Char | EntryType::Block) {
-        use std::os::unix::fs::MetadataExt;
-        header.set_device_major(libc::major(member.meta.rdev()))?;
-        header.set_device_minor(libc::minor(member.meta.rdev()))?;
+        let (major, minor) = device_numbers(member.meta);
+        header.set_device_major(major)?;
+        header.set_device_minor(minor)?;
     }
     header.set_mtime(mtime.round_ties_even().max(0.0) as u64);
     header.set_cksum();
@@ -689,6 +710,13 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_link_target_must_fit_python_inference_buffer() {
+        assert!(directory_link_target_supported(true, 259));
+        assert!(!directory_link_target_supported(true, 260));
+        assert!(!directory_link_target_supported(false, 10));
+    }
 
     #[cfg(windows)]
     #[test]
